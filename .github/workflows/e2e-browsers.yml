@@ -1,0 +1,51 @@
+# The standard e2e profile (.github/workflows/ci.yml) runs every spec on
+# Chromium and only the @cross-browser specs on Firefox and WebKit. This job is
+# where the whole suite still meets all three engines. It is deliberately not a
+# pull-request gate: an engine difference in a spec that is not tagged
+# @cross-browser is a finding to triage, not a reason to block a merge. A
+# failure in a tagged spec does block, because those run in the standard
+# profile.
+name: E2E browsers
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  exhaustive:
+    runs-on: ubuntu-latest
+    env:
+      DTXWIKI_E2E_PROFILE: exhaustive
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          cache: npm
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run every spec on every engine
+        run: npm run test:e2e
+      # Same carrier, same 14-day retention as the standard profile in
+      # .github/workflows/ci.yml -- see the long note on that job's copy of
+      # this step for what `--dir` reaches and what it does not.
+      - name: Redact the Playwright report before publishing it
+        if: always()
+        run: |
+          if [ -d playwright-report ]; then
+            bash scripts/redact_evidence.sh --dir playwright-report
+          fi
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-exhaustive-${{ github.run_id }}
+          path: playwright-report
+          if-no-files-found: error
+          retention-days: 14

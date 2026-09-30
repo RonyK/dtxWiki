@@ -1,0 +1,33 @@
+# Fix-6 Task 3.11 (F5-9): pin generated client to LF so a Windows
+# checkout does not produce CRLF lines that make `verify-gen-client`
+# emit false-positive drift reports (Linux/CI regen outputs LF).
+.gitattributes text eol=lf
+frontend/src/shared/api/types.gen.ts text eol=lf
+
+# Sprint_5 Phase_0 Task 0.7 fix-round (XPLAT-1, XPLAT-6, XPLAT-7):
+# shell + IaC files MUST land with deterministic line endings regardless of
+# the platform that authored the commit. Linux deploy targets (systemd,
+# docker, bash) reject CRLF; PowerShell tolerates LF but Windows authors
+# prefer CRLF for editor parity.
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+*.service text eol=lf
+
+# Sprint_5 Phase_2 fix-round-4 (XPLAT-FR3-1): pin .md and .py to LF so a
+# future Windows author with ``core.autocrlf=true`` does not flip new MD or
+# Python files to CRLF. Deploy targets and CI run on Linux; consistency at
+# checkout time prevents redactor / diff / fixture comparisons from drifting
+# on line-ending alone.
+*.md text eol=lf
+*.py text eol=lf
+*.css text eol=lf
+backend/catalog/mcp_apps/icons/*.svg text eol=lf
+
+# Sprint_5 Phase_3 end-of-phase (XPLAT-P3-1): evidence logs are normalized at
+# capture time via scripts/redact_evidence.sh on Linux/Git Bash. Windows
+# working tree was flipping to CRLF on checkout because no eol rule covered
+# *.log — the redactor's normalization is preserved by pinning to LF.
+*.log text eol=lf

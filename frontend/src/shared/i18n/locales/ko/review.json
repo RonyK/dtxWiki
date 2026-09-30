@@ -1,0 +1,316 @@
+{
+  "breadcrumb": "리뷰",
+  "errors": {
+    "load": "리뷰를 불러오지 못했습니다",
+    "refresh": "리뷰를 새로고침하지 못했습니다",
+    "restore": "리뷰 상세를 복원하지 못했습니다",
+    "loadMore": "리뷰를 더 불러오지 못했습니다",
+    "bulkPreview": "일괄 승인 미리보기를 불러오지 못했습니다",
+    "bulkApprove": "리뷰를 일괄 승인하지 못했습니다",
+    "bulkDiscard": "화해 브랜치를 일괄 폐기하지 못했습니다",
+    "decide": "리뷰 결정을 저장하지 못했습니다",
+    "claim": "리뷰를 가져오지 못했습니다"
+  },
+  "header": {
+    "eyebrow": "리뷰 큐",
+    "scopedEyebrow": "리뷰 큐 · {{status}}",
+    "title": "리뷰"
+  },
+  "empty": {
+    "title": "대기 중인 리뷰가 없습니다",
+    "filteredTitle": "이 필터와 일치하는 리뷰가 없습니다",
+    "description": "승인된 변경, 닫힌 항목, 시스템 기록은 Activity에서 계속 확인할 수 있습니다."
+  },
+  "filters": {
+    "title": "필터",
+    "status": "상태",
+    "risk": "위험도",
+    "scope": "대상",
+    "lifecycleAriaLabel": "리뷰 생명주기",
+    "audienceAriaLabel": "리뷰 대상",
+    "countLabel": "{{count}}건",
+    "statusLocked": "이 대상에서는 변경 요청으로 고정됩니다",
+    "olderReconciliations": "오래된 조정 브랜치",
+    "showOlderReconciliations_one": "오래된 조정 브랜치 {{count}}개 표시",
+    "showOlderReconciliations_other": "오래된 조정 브랜치 {{count}}개 표시",
+    "scopeOptions": {
+      "to_me": "나에게",
+      "from_me": "내가 보낸",
+      "all": "전체"
+    },
+    "statusOptions": {
+      "pending": "대기 중",
+      "changes_requested": "변경 요청",
+      "resolved": "결정 완료",
+      "approved": "승인됨",
+      "rejected": "거절됨",
+      "all": "전체"
+    },
+    "riskOptions": {
+      "high": "높음",
+      "medium": "중간",
+      "low": "낮음",
+      "all": "전체"
+    }
+  },
+  "audience": {
+    "requester": "요청자에게",
+    "chat_owner": "채팅 소유자에게",
+    "workspace_editors": "편집자에게",
+    "claimed": "담당 지정됨"
+  },
+  "rail": {
+    "ariaLabel": "리뷰 큐",
+    "close": "리뷰 큐 닫기",
+    "hide": "리뷰 큐 숨기기",
+    "restore": "리뷰 큐 보이기",
+    "refresh": "리뷰 새로고침",
+    "empty": "검토할 항목이 없습니다",
+    "emptyForStatus_pending": "대기 중 항목 없음",
+    "emptyForStatus_changes_requested": "변경 요청 항목 없음",
+    "emptyForStatus_resolved": "결정 완료 항목 없음",
+    "pageDraftGroup_one": "{{title}} · 표시된 대기 초안 {{count}}건",
+    "pageDraftGroup_other": "{{title}} · 표시된 대기 초안 {{count}}건",
+    "pageDraftGroupTotal_one": "{{title}} · 대기 초안 {{count}}건",
+    "pageDraftGroupTotal_other": "{{title}} · 대기 초안 {{count}}건",
+    "showPending": "대기 중 항목 보기",
+    "clearFilters": "필터 초기화"
+  },
+  "overview": {
+    "eyebrow": "큐 개요",
+    "title": "리뷰 운영",
+    "description": "열린 리뷰 부하를 확인하고, 간단한 큐를 승인하며, 최근 결정을 검토합니다.",
+    "queueRiskAria": "{{status}} · {{risk}}: {{count}}건",
+    "recentDecisions": "최근 결정",
+    "noRecentDecisionsTitle": "아직 결정 없음",
+    "noRecentDecisionsBody": "승인·거절·변경 요청을 내리면 결정 이력이 여기에 표시됩니다.",
+    "untitledTarget": "제목 없는 리뷰",
+    "unknownActor": "알 수 없음",
+    "decisionType": {
+      "approve": "승인",
+      "request_changes": "변경 요청",
+      "reject": "거부",
+      "comment": "코멘트"
+    }
+  },
+  "decisionSummary": {
+    "context_draft_requires_review": "Context 초안을 리뷰해야 합니다",
+    "context_update_requires_review": "Context 수정 초안을 리뷰해야 합니다",
+    "context_update_workflow_sequence_incomplete": "워크플로 순서가 완료되지 않아 Context 수정 초안을 리뷰해야 합니다"
+  },
+  "policy": {
+    "title": "리뷰 위험도 정책",
+    "settingsLink": "설정 열기",
+    "enabledDescription": "자동 승인은 낮음과 중간 위험도에 각각 별도 대기 규칙을 사용합니다. 높음 위험도는 항상 수동 리뷰가 필요합니다.",
+    "disabledDescription": "자동 승인이 꺼져 있습니다. 리뷰 항목은 편집자가 결정할 때까지 큐에 남습니다.",
+    "preset": "프리셋",
+    "threshold": "자동 승인 최대 위험도",
+    "delay": "대기 시간",
+    "candidates": "지금 대상",
+    "autoApproveLabel": "자동 승인",
+    "manualLabel": "수동",
+    "openSettingsAria": "{{risk}} 위험도 자동 승인 설정 열기",
+    "highManualReason": "높음 위험도는 수동 리뷰로 고정됩니다",
+    "delayDays_one": "{{count}}일",
+    "delayDays_other": "{{count}}일",
+    "delayNotApplied": "자동 승인 대기 없음",
+    "presetValue": {
+      "conservative": "보수적",
+      "balanced": "균형",
+      "fast_moving": "빠른 진행",
+      "custom": "사용자 지정"
+    },
+    "riskValue": {
+      "high": "높음",
+      "medium": "중간",
+      "low": "낮음"
+    },
+    "columnRisk": "위험도",
+    "columnMode": "방식",
+    "columnDelay": "지연",
+    "columnEligible": "대상"
+  },
+  "bulk": {
+    "selected": "{{count}}개 선택됨",
+    "selectReview": "{{title}} 선택",
+    "approveSelected": "선택 항목 승인",
+    "confirmTitle": "리뷰 일괄 승인",
+    "confirmBody": "현재 필터 기준으로 승인 대상 리뷰가 {{count}}개입니다. 더 이상 승인할 수 없는 항목은 건너뛰며 결과에 표시됩니다.",
+    "confirmApproveCount": "{{count}}개 승인",
+    "approving": "승인 중",
+    "approvalImpact_one": "선택한 페이지 버전을 승인하면 대기 중인 이전 리뷰 {{count}}건도 함께 정리됩니다.",
+    "approvalImpact_other": "선택한 페이지 버전을 승인하면 대기 중인 이전 리뷰 {{count}}건도 함께 정리됩니다.",
+    "previewEligible": "{{count}}개 대상",
+    "previewSkipped": "{{count}}개 건너뜀",
+    "result": "리뷰 {{approved}}개 승인됨. {{skipped}}개 건너뜀.",
+    "couldNotApprove": "{{count}}개 항목을 승인할 수 없습니다",
+    "selectAllVisible": "표시된 {{count}}건 모두 선택",
+    "discardReconciliations": "선택 브랜치 폐기",
+    "discardTitle": "선택한 화해 브랜치를 폐기할까요?",
+    "discardBody": "서버가 폐기 가능하다고 명시한 브랜치만 폐기합니다. 권한 또는 상태가 맞지 않는 항목은 오류 코드와 함께 반환됩니다.",
+    "discardReason": "폐기 사유",
+    "discarding": "폐기 중",
+    "confirmDiscard": "선택 브랜치 폐기",
+    "discardResult": "브랜치 {{discarded}}개를 폐기했습니다. {{skipped}}개는 건너뛰었습니다.",
+    "cancel": "취소"
+  },
+  "routing": {
+    "title": "변경 요청",
+    "intro": "이 변경을 처리할 대상을 선택하세요.",
+    "legend": "이 변경을 처리할 대상",
+    "options": {
+      "chat_owner": "채팅 소유자",
+      "requester": "나",
+      "workspace_editors": "모든 편집자"
+    },
+    "optionHints": {
+      "chat_owner": "채팅 소유자와 AI에게 수정을 보냅니다.",
+      "requester": "나에게 직접 수정을 보냅니다.",
+      "workspace_editors": "모든 워크스페이스 편집자에게 보냅니다."
+    },
+    "chatOwnerUnavailable": "이 변경에는 확인 가능한 채팅 소유자가 없습니다.",
+    "chatOwnerUnresolvable": "이 변경에는 확인 가능한 채팅 소유자가 없습니다 — 나 또는 모든 편집자에게 보내세요.",
+    "reasonRequired": "변경 요청 전에 결정 사유를 입력하세요.",
+    "submit": "변경 요청",
+    "cancel": "취소"
+  },
+  "reject": {
+    "confirmTitle": "이 리뷰를 거절하시겠습니까?",
+    "confirmBody": "거절은 되돌릴 수 없으며 항목을 큐에서 제거합니다.",
+    "confirming": "거절 중",
+    "cancel": "취소"
+  },
+  "editDirectly": {
+    "action": "직접 편집",
+    "claiming": "담당 지정 중",
+    "noTarget": "이 변경에는 직접 편집할 수 있는 페이지 대상이 없습니다."
+  },
+  "pending": {
+    "title": "리뷰 결과",
+    "loadingMore": "불러오는 중",
+    "loadMore": "더 보기"
+  },
+  "detail": {
+    "reconciliationActionRequired": "이 브랜치는 조정하거나 명시적으로 폐기할 때까지 대기 상태로 남습니다. 일반 리뷰 결정은 사용할 수 없습니다.",
+    "openReconciliation": "화해 워크벤치 열기",
+    "reconciliationProvenance": "화해 출처 정보",
+    "reconciliationBase": "기준 v{{version}}",
+    "reconciliationHeadAdvances_one": "HEAD가 {{count}}번 전진",
+    "reconciliationHeadAdvances_other": "HEAD가 {{count}}번 전진",
+    "reconciliationConflicts_one": "충돌 {{count}}개",
+    "reconciliationConflicts_other": "충돌 {{count}}개",
+    "reconciliationActorWithName": "작성자: {{kind}} · {{name}}",
+    "reconciliationActorKind": "작성자: {{kind}}",
+    "openReconciliationConversation": "원본 대화 열기",
+    "openReconciliationConversationFor": "{{title}} 대화 열기",
+    "eyebrow": "리뷰 상세",
+    "actionsAriaLabel": "리뷰 작업",
+    "changeSet": "변경 세트",
+    "changeSetIdCopied": "변경 세트 ID가 복사되었습니다",
+    "changeSetIdCopyFailed": "변경 세트 ID를 복사하지 못했습니다",
+    "copyFullChangeSetId": "전체 변경 세트 ID 복사",
+    "updated": "업데이트",
+    "trigger": "트리거",
+    "citationCheck": "인용 확인",
+    "skipped": "건너뜀",
+    "passed": "통과",
+    "reasonLabel": "결정 사유",
+    "reasonPlaceholder": "결정 맥락을 추가하세요.",
+    "reasonHint": "변경 요청에는 필수이며 승인과 거절에는 선택 사항입니다.",
+    "actionBusy": "리뷰 작업을 제출하는 중입니다.",
+    "approvalImpact_one": "승인하면 이 버전이 게시됩니다. 함께 대기 중인 이전 리뷰 {{count}}건도 정리됩니다.",
+    "approvalImpact_other": "승인하면 이 버전이 게시됩니다. 함께 대기 중인 이전 리뷰 {{count}}건도 정리됩니다.",
+    "summary": "요약",
+    "whyRisk": "왜 이 위험도인가요?",
+    "policyVersion": "정책",
+    "decisionHistory": "결정 기록",
+    "previousDecision": "이전 결정",
+    "submitted": "제출됨",
+    "enteredQueue": "결정 큐에 진입"
+  },
+  "actions": {
+    "moreActivities": "활동 전체 보기",
+    "openAsk": "Ask 열기",
+    "cancel": "취소",
+    "approve": "승인",
+    "requestChanges": "변경 요청",
+    "reject": "거절",
+    "reasonPromptConfirm": "사유 추가"
+  },
+  "evidence": {
+    "title": "변경 근거",
+    "changeStatus": "변경 상태",
+    "reason": "사유",
+    "none": "없음"
+  },
+  "status": {
+    "changes_requested": "변경 요청"
+  },
+  "labels": {
+    "unset": "미설정",
+    "reviewType": {
+      "context_reconciliation": "Context 조정",
+      "context_page_publish": "Context 페이지 게시",
+      "context_update": "Context 업데이트",
+      "context_ingress_accept": "Context 수집 수락",
+      "agent_page_activation": "Agent 페이지 활성화",
+      "page_inline_comment": "페이지 인라인 코멘트",
+      "source_deleted_notice": "원본 삭제 알림"
+    },
+    "decisionType": {
+      "approve": "승인됨",
+      "request_changes": "변경 요청됨",
+      "reject": "거절됨",
+      "comment": "코멘트 작성됨",
+      "revision_submitted": "수정본 제출됨"
+    },
+    "actorType": {
+      "human": "사용자",
+      "system": "시스템"
+    },
+    "operation": {
+      "create_draft": "초안 생성",
+      "update_draft": "초안 수정",
+      "publish": "게시",
+      "rollback": "롤백",
+      "activate": "활성화",
+      "inline_comment": "인라인 코멘트",
+      "metadata_patch": "메타데이터 수정",
+      "preserve_alternative": "대체본 보존",
+      "source_deleted_notice": "원본 삭제 알림",
+      "tree_create": "트리 생성",
+      "tree_move": "트리 이동",
+      "tree_rename": "트리 이름 변경",
+      "tree_reorder": "트리 순서 변경",
+      "tree_delete": "트리 삭제",
+      "tree_place": "트리 배치"
+    },
+    "triggerType": {
+      "mcp_write_draft": "MCP 초안 작성",
+      "mcp_update_draft": "MCP 초안 수정",
+      "agent_page_draft": "Agent 페이지 초안",
+      "agent_page_activation": "Agent 페이지 활성화",
+      "manual_edit": "수동 편집",
+      "manual_stale_recovery": "수동 만료 복구",
+      "inline_comment": "인라인 코멘트",
+      "context_page_publish": "Context 페이지 게시",
+      "context_ingress_accept": "Context 수집 수락",
+      "tree_mutation": "트리 변경",
+      "library_registration": "Library 등록",
+      "source_deleted": "원본 삭제",
+      "schedule": "예약"
+    },
+    "changeSetStatus": {
+      "draft_created": "초안 생성됨",
+      "revision_pending": "수정 대기 중",
+      "applied": "적용됨",
+      "rejected": "거절됨"
+    },
+    "promotionState": {
+      "not_promoted": "미승격",
+      "proposed": "제안됨",
+      "accepted": "수락됨",
+      "rejected": "거절됨"
+    }
+  }
+}

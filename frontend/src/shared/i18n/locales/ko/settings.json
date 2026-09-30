@@ -1,0 +1,1790 @@
+{
+  "breadcrumb": "설정",
+  "loading": "설정 불러오는 중",
+  "loadRetry": "다시 시도",
+  "errors": {
+    "loadFailed": "설정을 불러오지 못했습니다.",
+    "requestFailed": "설정 요청을 처리하지 못했습니다. 다시 시도하세요.",
+    "workspaceUnavailable": "설정을 변경하려면 먼저 워크스페이스를 선택하세요.",
+    "accessKeyNameRequired": "액세스 키 이름을 입력하세요.",
+    "mcpClientIdMissing": "클라이언트 식별자가 없어 이 MCP 클라이언트를 관리할 수 없습니다."
+  },
+  "header": {
+    "eyebrow": "워크스페이스 설정",
+    "title": "설정",
+    "description": "워크스페이스 규칙, AI 동작, 외부 도구 접근을 관리합니다."
+  },
+  "navigationLabel": "설정 섹션",
+  "nav": {
+    "pickerTitle": "설정 섹션으로 이동",
+    "searchLabel": "설정 섹션 필터",
+    "searchPlaceholder": "섹션 필터",
+    "searchClear": "필터 지우기",
+    "noMatches": "일치하는 섹션이 없습니다",
+    "noMatchesHint": "필터를 지우면 모든 섹션이 표시됩니다.",
+    "discardDraftsConfirm": "저장하지 않은 변경사항이 있습니다. 저장하지 않고 이동할까요?",
+    "matchedTab": "{{tab}} 탭으로 이동"
+  },
+  "sectionGroups": {
+    "workspace": "이 워크스페이스",
+    "account": "내 계정",
+    "system": "시스템 관리",
+    "adminChip": "시스템 관리자",
+    "adminChipTitle": "이 워크스페이스가 아니라 서버 전체에 적용되는 설정으로, 서버 관리자에게만 보입니다."
+  },
+  "sections": {
+    "workspace": {
+      "label": "워크스페이스",
+      "description": "이름, 소유자, 언어, 공개 범위입니다."
+    },
+    "policies": {
+      "label": "콘텐츠 정책",
+      "description": "라이브러리 업로드, 인용, AI 지시문, 리뷰 라우팅, 린트입니다."
+    },
+    "library": {
+      "label": "라이브러리 정책",
+      "description": "업로드 한도, 형식, 처리 동작을 관리합니다."
+    },
+    "citationWrite": {
+      "label": "인용 및 작성 정책",
+      "description": "답변 인용과 페이지 게시 규칙입니다."
+    },
+    "agentInjection": {
+      "label": "에이전트 주입",
+      "description": "AI에 전달할 규칙과 에이전트 페이지입니다.",
+      "previewBadge": "미리 보기",
+      "previewDescription": "미리 보기: 이 영역은 아직 다듬는 중입니다."
+    },
+    "review": {
+      "label": "리뷰 정책",
+      "description": "위험도 산정과 등급별 자동 승인입니다."
+    },
+    "lint": {
+      "label": "린트",
+      "description": "이 워크스페이스에서 실행할 품질 검사를 고르세요."
+    },
+    "mcp": {
+      "label": "MCP 접근",
+      "description": "내 계정의 모든 연결과, 각 연결이 어떤 워크스페이스까지 닿는지입니다.",
+      "badgeTitle": "개인 연결 {{count}}개 (액세스 키 + OAuth 앱)"
+    },
+    "members": {
+      "label": "멤버 및 접근",
+      "description": "멤버, 역할, 대기 중인 가입 요청, 검색 노출, 공개 접근입니다."
+    },
+    "users": {
+      "label": "사용자 계정",
+      "description": "서버 전체의 계정을 검색하고 계정 복구를 시작합니다."
+    },
+    "jobs": {
+      "label": "작업",
+      "description": "백그라운드 작업 큐, 실패, 재시도입니다."
+    },
+    "attachments": {
+      "label": "첨부 파일",
+      "description": "페이지에 업로드된 파일과 미사용 업로드입니다."
+    },
+    "deployment": {
+      "label": "배포",
+      "description": "도메인·TLS·서비스 상태입니다. 변경은 dtxwiki CLI로 합니다."
+    }
+  },
+  "crossLinks": {
+    "toUsers": "이 워크스페이스에 접근할 수 있는 사람들입니다. 서버 전체에서 사람을 찾거나 계정 복구를 시작하려면 다음으로 이동하세요:",
+    "toMembers": "서버 전체의 계정을 조회합니다. 이 워크스페이스의 구성원이나 역할을 바꾸려면 다음으로 이동하세요:"
+  },
+  "workspaceMembers": {
+    "title": "멤버",
+    "description": "기존 활성 사용자를 추가하고 역할과 이 워크스페이스의 가입 요청을 관리합니다.",
+    "readOnlyDescription": "내 멤버십은 현재 워크스페이스 전체에 적용됩니다. 멤버 목록은 소유자가 관리합니다.",
+    "readOnlyRole": "내 역할은 {{role}}입니다. 워크스페이스 소유자만 멤버를 관리할 수 있습니다.",
+    "wholeWorkspaceNotice": "멤버십은 특정 폴더나 페이지가 아니라 워크스페이스 전체에 대한 접근을 부여합니다.",
+    "memberCount_one": "멤버 {{count}}명",
+    "memberCount_other": "멤버 {{count}}명",
+    "loadingWorkspace": "워크스페이스 접근 불러오는 중",
+    "workspaceUnavailable": "워크스페이스 접근 정보를 사용할 수 없습니다.",
+    "loadingMembers": "멤버 불러오는 중…",
+    "loadingMore": "불러오는 중…",
+    "loadMore": "더 보기",
+    "joined": "{{date}} 가입",
+    "personalAnchor": "개인 워크스페이스 소유자",
+    "you": "나",
+    "roleFor": "{{name}}의 역할",
+    "remove": "제거",
+    "roles": {
+      "all": "모든 역할",
+      "viewer": "뷰어",
+      "editor": "편집자",
+      "owner": "소유자"
+    },
+    "add": {
+      "email": "정확한 로그인 이메일",
+      "emailPlaceholder": "person@example.com",
+      "role": "초기 역할",
+      "action": "멤버 추가",
+      "adding": "추가 중…",
+      "fromSearchTitle": "정확한 로그인 이메일 추가",
+      "fromSearchReady": "{{email}} 사용자를 워크스페이스 멤버로 추가합니다.",
+      "fromSearchHint": "위 입력란에 기존 활성 사용자의 전체 로그인 이메일을 입력하세요."
+    },
+    "filters": {
+      "query": "멤버 찾기 또는 추가",
+      "queryPlaceholder": "이름 또는 정확한 로그인 이메일",
+      "queryHelp": "현재 멤버 목록을 검색합니다. 전체 로그인 이메일을 입력하면 같은 입력란에서 멤버를 추가할 수 있습니다.",
+      "role": "역할 필터",
+      "search": "검색",
+      "active": "표시 중: {{query}} · {{role}}",
+      "anyQuery": "모든 멤버"
+    },
+    "empty": {
+      "title": "일치하는 멤버가 없습니다",
+      "description": "검색어나 역할 필터를 바꿔 다시 시도하세요."
+    },
+    "notice": {
+      "added": "{{email}} 사용자를 이 워크스페이스에 추가했습니다.",
+      "alreadyMember": "{{email}} 사용자는 이미 멤버라 역할을 바꾸지 않았습니다.",
+      "roleChanged": "{{name}} 사용자의 역할을 {{role, josaEuRo}} 변경했습니다.",
+      "removed": "{{name}} 사용자를 이 워크스페이스에서 제거했습니다."
+    },
+    "error": {
+      "selfRemovalRefreshFailed": "접근 권한이 제거되었습니다. 대체 워크스페이스를 다시 불러오지 못했습니다. 워크스페이스 전환기에서 다시 시도하세요."
+    },
+    "leave": {
+      "action": "워크스페이스 나가기",
+      "title": "이 워크스페이스에서 나가시겠어요?",
+      "warning": "{{workspace}} 전체에 대한 접근 권한을 잃게 됩니다.",
+      "body": "워크스페이스가 가입 요청을 허용하면 나중에 다시 신청하거나, 소유자에게 다시 추가해 달라고 요청할 수 있습니다.",
+      "confirm": "워크스페이스 나가기"
+    },
+    "join": {
+      "title": "가입 요청",
+      "description": "승인하면 워크스페이스 전체에 대한 뷰어 접근 권한을 부여합니다.",
+      "count_one": "대기 {{count}}건",
+      "count_other": "대기 {{count}}건",
+      "loading": "가입 요청 불러오는 중…",
+      "requested": "{{date}} 요청 · {{attempt}}번째 시도",
+      "approve": "뷰어로 승인",
+      "reject": "거절",
+      "updating": "처리 중…",
+      "empty": {
+        "title": "대기 중인 요청이 없습니다",
+        "description": "가입 요청 정책을 허용하면 새 요청이 여기에 표시됩니다."
+      },
+      "notice": {
+        "approved": "{{name}} 사용자를 뷰어로 승인했습니다.",
+        "alreadyMember": "{{name}} 사용자는 이미 멤버라 역할을 바꾸지 않았습니다.",
+        "rejected": "{{name}} 사용자의 요청을 거절했습니다."
+      }
+    },
+    "dialog": {
+      "firstShareTitle": "워크스페이스 전체를 공유할까요?",
+      "firstShareWarning": "{{email}} 사용자를 추가하면 {{workspace}} 전체가 해당 멤버에게 공유됩니다.",
+      "firstShareScope": "페이지 단위 공유가 아닙니다. 선택한 역할이 워크스페이스 전체에 적용됩니다.",
+      "collaborativeRecommendation": "작업 일부만 공유하려면 새 협업용 워크스페이스를 만들고 해당 작업을 이동하거나 복사하세요.",
+      "renamePersonalRecommendation": "권장: 공유 목적이 분명하도록 개인 워크스페이스의 이름을 먼저 바꾸세요.",
+      "renameRecommendation": "권장: 공유 목적이 분명한 워크스페이스 이름을 사용하세요.",
+      "ownerTitle": "소유자 권한을 부여할까요?",
+      "ownerWarning": "{{name}} 사용자가 멤버, 공유, 정책, 다른 소유자를 관리할 수 있게 됩니다.",
+      "ownerBody": "소유자 권한은 워크스페이스 전체에 적용됩니다. 이 워크스페이스를 제어해야 하는 사람에게만 부여하세요.",
+      "removeTitle": "이 멤버를 제거할까요?",
+      "removeBody": "{{name}} 사용자가 {{workspace}} 전체에 대한 접근을 잃습니다. 시작 워크스페이스는 접근 가능한 다른 워크스페이스로 바뀌며, 남은 곳이 없으면 비워집니다.",
+      "selfDemoteTitle": "소유자 권한을 포기할까요?",
+      "selfDemoteWarning": "{{workspace}}에서 즉시 {{role}} 역할로 바뀌며 소유자 권한을 잃습니다.",
+      "selfDemoteBody": "소유자 권한을 되찾으려면 다른 소유자가 다시 승격해야 합니다 — 여기서는 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "updating": "처리 중…",
+      "confirmShare": "워크스페이스 전체 공유",
+      "confirmSelfDemote": "소유자 권한 포기",
+      "confirmOwner": "소유자 권한 부여",
+      "confirmRemove": "멤버 제거"
+    }
+  },
+  "workspaceAccess": {
+    "title": "검색 노출, 가입 및 웹 게시",
+    "description": "이 워크스페이스를 찾을 수 있는 대상과 로그인 사용자의 가입 방법을 설정합니다.",
+    "readOnlyDescription": "이 설정은 워크스페이스 전체에 적용됩니다. 워크스페이스 소유자만 변경할 수 있습니다.",
+    "readOnlyRole": "내 역할은 {{role}}입니다. 접근 설정은 읽기 전용입니다.",
+    "wholeWorkspaceNotice": "이 설정은 워크스페이스 경계를 제어하며 개별 페이지 접근 권한을 부여하지 않습니다.",
+    "loading": "접근 설정 불러오는 중…",
+    "unavailable": "접근 설정을 사용할 수 없습니다.",
+    "staleRefreshed": "다른 곳에서 접근 설정이 변경되었습니다. 최신 값을 불러왔으니 변경 내용을 다시 검토하세요.",
+    "separateControlsNotice": "공개 범위와 가입 정책은 서로 다른 제어이며 어느 것도 멤버십을 대신하지 않습니다.",
+    "reviewChange": "변경 검토",
+    "policyGuide": {
+      "title": "공개 접근 방식",
+      "description": "검색 노출, 멤버십, 웹 게시는 각각 독립된 접근 관문입니다.",
+      "publicWorkspace": {
+        "title": "공개 워크스페이스",
+        "description": "누구나 공개 프로필을 찾을 수 있지만 내부 페이지는 여전히 워크스페이스 멤버만 볼 수 있습니다."
+      },
+      "joinRequest": {
+        "title": "가입 요청",
+        "description": "로그인한 비멤버가 가입을 요청합니다. 소유자가 승인해야 뷰어 멤버십이 생성됩니다."
+      },
+      "publicPage": {
+        "title": "게시된 웹 페이지",
+        "description": "익명 방문자는 편집자가 별도로 웹에 게시한 Context 버전만 볼 수 있습니다."
+      }
+    },
+    "visibility": {
+      "title": "공개 범위",
+      "description": "워크스페이스를 찾을 수 있는 대상을 정합니다. 인증된 접근은 계속 멤버십으로 제어합니다.",
+      "options": {
+        "private": {
+          "label": "비공개",
+          "description": "멤버만 찾고 열 수 있습니다. 가입 요청은 비활성화됩니다."
+        },
+        "team": {
+          "label": "팀",
+          "description": "이 서버의 로그인 사용자가 찾을 수 있지만 들어가려면 멤버십이 필요합니다."
+        },
+        "public": {
+          "label": "공개",
+          "description": "누구나 공개 프로필을 찾을 수 있습니다. 내부 콘텐츠는 멤버십이 필요하고, 익명 방문자는 별도로 웹에 게시한 페이지만 볼 수 있습니다."
+        }
+      }
+    },
+    "joinPolicy": {
+      "title": "가입 정책",
+      "description": "로그인한 비멤버가 멤버십을 얻는 방법을 정합니다.",
+      "privateForcesInvite": "비공개 범위는 초대 전용을 강제하며 저장 시 대기 중인 가입 요청을 닫습니다.",
+      "options": {
+        "invite_only": {
+          "label": "초대 전용",
+          "description": "소유자가 정확한 이메일로 기존 활성 사용자를 추가합니다."
+        },
+        "request": {
+          "label": "가입 요청",
+          "description": "로그인한 비멤버가 가입을 요청합니다. 소유자가 승인하면 뷰어 멤버가 됩니다."
+        }
+      }
+    },
+    "counts": {
+      "publicPages": "현재 공개 표시된 페이지"
+    },
+    "notice": {
+      "saved": "접근 설정을 저장했습니다. 가입 요청 {{closed}}건을 닫고 공개 페이지 표시 {{cleared}}건을 해제했습니다."
+    },
+    "dialog": {
+      "title": "접근 변경 확인",
+      "workspace": "{{workspace}}의 접근 경계를 변경합니다.",
+      "closesRequests_one": "대기 중인 가입 요청 {{count}}건을 닫습니다.",
+      "closesRequests_other": "대기 중인 가입 요청 {{count}}건을 닫습니다.",
+      "keepsRequests_one": "대기 중인 가입 요청 {{count}}건을 유지합니다.",
+      "keepsRequests_other": "대기 중인 가입 요청 {{count}}건을 유지합니다.",
+      "clearsPages_one": "페이지 {{count}}건의 공개 표시를 해제해 익명 페이지·업로드·색인 노출을 중단합니다.",
+      "clearsPages_other": "페이지 {{count}}건의 공개 표시를 해제해 익명 페이지·업로드·색인 노출을 중단합니다.",
+      "keepsPages_one": "공개 페이지 표시 {{count}}건은 변경하지 않습니다.",
+      "keepsPages_other": "공개 페이지 표시 {{count}}건은 변경하지 않습니다.",
+      "forcesInviteOnly": "비공개 범위는 가입 정책을 초대 전용으로 강제합니다.",
+      "wholeWorkspaceWarning": "이 변경은 워크스페이스 전체에 적용되며 검색 노출이나 공개 접근을 즉시 줄일 수 있습니다.",
+      "cancel": "취소",
+      "saving": "저장 중…",
+      "confirm": "확인하고 저장"
+    }
+  },
+  "setup": {
+    "loading": "배포 상태 불러오는 중",
+    "loadError": "배포 상태를 불러오지 못했습니다",
+    "subtitle": "읽기 전용입니다. 값을 바꾸려면 서버 터미널에서 아래 명령을 실행하세요 — 앱은 /etc 를 직접 수정할 수 없습니다.",
+    "systemScopeNote": "이 설정은 dtxWiki 서버(인스턴스 전체, 모든 워크스페이스 공통) 설정으로, 이 워크스페이스에만 적용되는 것이 아닙니다. 서버 관리자만 볼 수 있습니다.",
+    "updateAvailable": "dtxWiki {{latest}} 사용 가능 (현재 {{current}}). 서버에서 'dtxwiki update' 를 실행해 업그레이드하세요.",
+    "tlsNotReady": "HTTPS가 설정되지 않았습니다. 공개 https:// URL을 지정하고 리버스 프록시가 인증서를 발급하도록 하세요 (DNS와 80/443 포트가 이 서버에 도달해야 합니다).",
+    "notConfigured": "설정 안 됨",
+    "commandsTitle": "설정 변경",
+    "commandsHint": "설정 원본: {{path}}",
+    "copy": "명령 복사",
+    "copyNamed": "{{title}} 명령 복사",
+    "copied": "복사됨",
+    "selected": "선택됨 - Ctrl+C로 복사하세요",
+    "copyUnavailable": "복사할 수 없습니다 - 명령 텍스트를 직접 선택하세요",
+    "enabled": "사용",
+    "disabled": "사용 안 함",
+    "days_one": "{{count}}일",
+    "days_other": "{{count}}일",
+    "seconds_one": "{{count}}초",
+    "seconds_other": "{{count}}초",
+    "source": {
+      "environment": "환경 변수 재정의",
+      "default": "기본값"
+    },
+    "fields": {
+      "oauthAccessLifetime": "OAuth 액세스 수명",
+      "oauthRefreshLifetime": "OAuth 새로고침 수명",
+      "oauthSliding": "사용 중 새로고침 세션 연장",
+      "publicUrl": "공개 URL",
+      "mcpUrl": "MCP 엔드포인트",
+      "mode": "모드",
+      "tls": "HTTPS / TLS",
+      "tlsMode": "TLS 모드",
+      "oauth": "MCP OAuth",
+      "oauthSelfRegistration": "OAuth 클라이언트 자동 등록",
+      "health": "상태"
+    },
+    "oauthUrlClientIdAvailable": "HTTPS URL 클라이언트 식별자를 사용하는 OAuth는 계속 사용할 수 있습니다.",
+    "signup": {
+      "group": "계정 및 접근",
+      "title": "셀프서비스 회원가입",
+      "description": "새 방문자의 계정 생성을 허용할지 정합니다. 기존 사용자와 워크스페이스 접근에는 영향이 없습니다.",
+      "allowed": "허용",
+      "blocked": "미허용",
+      "configured": "설정값",
+      "source": "설정 출처",
+      "explicit": "명시적 환경 변수",
+      "modeDefault": "모드 기본값",
+      "defaults": "모드별 기본값",
+      "defaultsValue": "solo_local: {{soloLocal}} · solo_remote: {{soloRemote}} · team: {{team}}",
+      "impact": "영향",
+      "impactValue": "서비스 재시작이 필요합니다. 신규 가입만 바뀌며 기존 세션과 멤버십은 유지됩니다.",
+      "showInstructions": "설정 방법 보기",
+      "hideInstructions": "설정 방법 숨기기",
+      "systemd": "Systemd 설치",
+      "compose": "Docker Compose 설치"
+    },
+    "recovery": {
+      "group": "계정 및 복구",
+      "title": "비밀번호 복구",
+      "description": "이 서버의 복구 제공 상태, 메일 전송, 공식 HTTPS URL, 발송 대기열 상태입니다.",
+      "method": "비밀번호 복구",
+      "mode": {
+        "email": "이메일",
+        "admin_assisted": "관리자 지원",
+        "disabled": "비활성"
+      },
+      "mailProvider": "메일 제공자",
+      "smtp": "SMTP",
+      "mailStatus": "메일 설정",
+      "mail": {
+        "configured": "설정됨",
+        "not_configured": "설정 안 됨",
+        "incomplete": "설정 미완료"
+      },
+      "lastObservedDelivery": "마지막으로 관찰된 메일 전달",
+      "deliveryObservation": {
+        "not_configured": "설정 안 됨",
+        "not_checked": "관찰된 전달 없음",
+        "succeeded": "마지막 전달 성공",
+        "failed": "마지막 전달 실패"
+      },
+      "noDeliveryAttempt": "기록된 전달 시도 없음",
+      "fromAddress": "발신 주소",
+      "smtpCredentials": "SMTP 자격 증명",
+      "credentialsConfigured": "설정됨 (값은 숨김)",
+      "publicUrl": "공식 공개 URL",
+      "adminSupport": "관리자 지원 링크",
+      "available": "사용 가능",
+      "unavailable": "사용 불가",
+      "outbox": "발송 대기열",
+      "outboxValue": "대기 {{queued}}건 · 실패 {{failed}}건",
+      "worker": "발송 워커",
+      "workerRequired": "필수",
+      "workerNotRequired": "필요 없음",
+      "failedDeliveries_one": "복구 메시지 {{count}}건이 실패했습니다. 워커와 메일 제공자를 확인하세요.",
+      "failedDeliveries_other": "복구 메시지 {{count}}건이 실패했습니다. 워커와 메일 제공자를 확인하세요.",
+      "showInstructions": "설정 방법 보기",
+      "hideInstructions": "설정 방법 숨기기",
+      "systemd": "Systemd 설치",
+      "compose": "Docker Compose 설치"
+    },
+    "health": {
+      "db": "데이터베이스",
+      "app_version": "앱 버전",
+      "mcp": "MCP 서비스",
+      "oauth_jwk": "OAuth 서명 키"
+    },
+    "healthStatus": {
+      "ok": "정상",
+      "n/a": "해당 없음",
+      "error": "오류",
+      "unsynced": "동기화 안 됨",
+      "drift": "불일치",
+      "manager_missing": "관리자 없음",
+      "ephemeral_unsafe": "임시 (안전하지 않음)",
+      "invalid": "유효하지 않음"
+    },
+    "pill": {
+      "ready": "준비됨",
+      "notReady": "준비 안 됨",
+      "degraded": "비정상",
+      "available": "사용 가능",
+      "unavailable": "사용 불가"
+    },
+    "blast": {
+      "reload": "프록시 reload",
+      "restart": "재시작 필요",
+      "session_invalidation": "전체 로그아웃됨",
+      "token_invalidation": "전체 클라이언트 재인증",
+      "data_migration": "데이터 먼저 이전"
+    }
+  },
+  "setupScreen": {
+    "breadcrumb": "서버 설치",
+    "loading": "서버 설치 정보를 불러오는 중",
+    "loadError": "서버 설치 정보를 불러오지 못했습니다",
+    "eyebrow": "워크스페이스 준비하기",
+    "title": "서버 설치",
+    "description": "AI가 답변에 사용할 소스, 페이지, 규칙을 추가하세요.",
+    "status": {
+      "ready": "3개 중 3개 · 준비 완료",
+      "pending": "3개 중 0개 · 대기",
+      "partial": "3개 중 {{count}}개 · 일부 완료"
+    },
+    "itemCount_one": "{{count}}개",
+    "itemCount_other": "{{count}}개",
+    "itemCountAtLeast": "최소 {{count}}개 로드됨",
+    "callout": {
+      "allSetTitle": "모두 준비됐습니다. 질문해 보세요.",
+      "allSetBody": "이 워크스페이스에는 소스, 지식 페이지, AI 규칙이 있습니다.",
+      "openAsk": "Ask 열기",
+      "emptyTitle": "라이브러리가 비어 있습니다. 소스를 추가해 시작하세요.",
+      "emptyBody": "PDF나 페이지 하나만 있어도 첫 질문을 할 수 있습니다.",
+      "addFirstSource": "첫 소스 추가",
+      "partialTitle": "계속 진행하세요.",
+      "partialFallback": "남은 설정 항목을 확인하세요."
+    },
+    "cards": {
+      "library": {
+        "title": "라이브러리",
+        "description": "참조 자료",
+        "ready": "인용 준비 완료",
+        "empty": "아직 없음 · 첫 소스를 추가하세요",
+        "openAction": "라이브러리 열기",
+        "emptyAction": "소스 추가",
+        "nextStep": "답변이 실제 근거를 인용할 수 있도록 소스 자료를 추가하세요."
+      },
+      "context": {
+        "title": "지식 페이지",
+        "description": "정리된 팀 지식",
+        "ready": "답변 준비 완료",
+        "empty": "아직 없음 · 지식 페이지를 만드세요",
+        "openAction": "Context 열기",
+        "emptyAction": "페이지 만들기",
+        "nextStep": "팀 컨텍스트를 정리할 지식 페이지를 만드세요."
+      },
+      "agent": {
+        "title": "AI 규칙",
+        "description": "AI 답변 방식",
+        "ready": "규칙 활성",
+        "empty": "아직 없음 · AI 규칙을 추가하세요",
+        "openAction": "Agent 열기",
+        "emptyAction": "규칙 추가",
+        "nextStep": "답변 작성 방식을 제어할 AI 규칙을 추가하세요."
+      }
+    },
+    "rules": {
+      "heading": "워크스페이스 규칙",
+      "review": "확인",
+      "open": "열기",
+      "workspaceTitle": "워크스페이스 기본",
+      "workspaceBody": "이름, 언어, 공개 범위입니다.",
+      "citationTitle": "인용 및 작성 정책",
+      "citationBody": "답변 인용과 페이지 리뷰 진행 방식입니다.",
+      "agentTitle": "에이전트 주입",
+      "agentBody": "AI에 전달할 워크스페이스 규칙과 Agent 페이지입니다.",
+      "mcpTitle": "외부 AI 도구 연결 (MCP)",
+      "mcpBody": "MCP 키를 만들고 설정 명령을 복사하세요."
+    }
+  },
+  "lint": {
+    "eyebrow": "린트 규칙",
+    "description": "이 워크스페이스에서 실행할 결정적 검사를 고르세요. External source 로 표시된 규칙은 외부 실행이 공급하며, 투명성을 위해 표시될 뿐 켜고 끌 수 없습니다.",
+    "requiredSafeguard": "필수 안전장치",
+    "externalSource": "외부 공급",
+    "loading": "린트 규칙을 불러오는 중…",
+    "loadError": "린트 규칙을 불러오지 못했습니다.",
+    "saveError": "규칙을 변경하지 못했습니다.",
+    "layer": {
+      "format": "포맷",
+      "knowledge": "지식",
+      "nav": "내비게이션",
+      "maintenance": "유지보수"
+    },
+    "autoFix": "저장 시 안전한 포맷 자동 수정",
+    "openQueue": "린트 큐 열기",
+    "autoFixHint": "페이지를 저장할 때 결정적 서식 정리만 적용됩니다 — 제목·목록 기호 간격, 줄 끝 공백, 연속 빈 줄, 표 정렬. 코드 블록과 문구·내용은 바뀌지 않습니다.",
+    "enabledOfTotal": "전환 가능 {{total}}개 중 {{enabled}}개 켜짐",
+    "toggleLayerAria": "{{layer}} 규칙 전체 전환",
+    "saved": "저장됨",
+    "empty": "린트 규칙 없음",
+    "emptyHint": "이 서버에는 린트 규칙이 없어서 페이지를 저장할 때 실행되는 검사가 없습니다."
+  },
+  "summary": {
+    "workspace": "이 워크스페이스의 이름, 소유자, 기본 언어입니다.",
+    "library": "라이브러리 업로드 한도, 형식, 안전한 처리 동작을 관리합니다.",
+    "citation": "답변이 근거 자료를 얼마나 엄격하게 인용해야 하는지입니다.",
+    "contextWrite": "지식 페이지를 초안으로 만들고 게시하는 규칙입니다.",
+    "agentInjection": "AI에 전달할 에이전트 페이지와 워크스페이스 규칙을 선택합니다.",
+    "review": "리뷰 위험도 산정, 수동 리뷰 기준, 위험도 규칙, 등급별 자동 승인 대기 시간을 제어합니다."
+  },
+  "policy": {
+    "cardTitles": {
+      "workspace": "워크스페이스 기본 설정",
+      "library": "라이브러리 업로드 정책",
+      "citation": "인용 정책",
+      "context_write": "Context 작성 정책",
+      "agent_injection": "Agent 주입 정책",
+      "review": "리뷰 위험 정책",
+      "lint": "Lint 규칙"
+    },
+    "workspace": {
+      "title": {
+        "label": "워크스페이스 제목",
+        "hint": "앱과 AI 답변에 표시됩니다."
+      },
+      "name": {
+        "label": "워크스페이스 제목",
+        "hint": "앱과 AI 답변에 표시됩니다."
+      },
+      "goal": {
+        "label": "목표",
+        "hint": "AI가 워크스페이스 목적을 이해하는 데 사용합니다."
+      },
+      "defaultLanguage": {
+        "label": "기본 언어",
+        "hint": "질문에 언어가 지정되지 않았을 때 사용합니다."
+      },
+      "owner": {
+        "label": "소유자",
+        "hint": "이 워크스페이스를 책임지는 사람 또는 팀입니다."
+      },
+      "decision": {
+        "label": "리뷰 결정",
+        "hint": "워크스페이스 정책 변경 처리 방식입니다."
+      },
+      "askRetrievalMode": {
+        "label": "Ask 검색 모드",
+        "hint": "자동은 이 서버가 제공할 수 있는 최선의 모드를 씁니다. 특정 모드를 고정하면 제공 불가일 때 안내와 함께 대체됩니다."
+      }
+    },
+    "library": {
+      "allowedSources": {
+        "label": "허용된 라이브러리 입력",
+        "hint": "AI 사서가 가져오기에서 받아들여야 할 소스 패턴입니다. 권고 사항이며 업로드 시점에 강제되지 않습니다.",
+        "empty": "허용 소스 없음"
+      },
+      "deniedSources": {
+        "label": "차단된 라이브러리 입력",
+        "hint": "AI 사서가 거부해야 할 패턴입니다. 허용 규칙보다 우선합니다. 권고 사항이며 업로드 시점에 강제되지 않습니다.",
+        "empty": "거부 소스 없음"
+      },
+      "maxUploadBytes": {
+        "label": "수동 업로드 한도",
+        "hint": "이보다 큰 파일은 가져오기 전에 거부됩니다."
+      },
+      "sourcePatterns": {
+        "label": "허용된 라이브러리 입력 패턴",
+        "hint": "워크스페이스에서 허용하는 URL 또는 커넥터 패턴입니다."
+      },
+      "trustLevel": {
+        "label": "신뢰 수준",
+        "hint": "새 자료의 기본 검토 수준입니다."
+      },
+      "decision": {
+        "label": "리뷰 결정",
+        "hint": "라이브러리 정책 변경 처리 방식입니다."
+      }
+    },
+    "libraryUpload": {
+      "title": "라이브러리 업로드 정책",
+      "description": "업로드 가능한 형식과 크기, 변환을 사용할 수 없을 때의 처리 방식을 관리합니다. 더 구체적인 개별 형식 또는 파일군 한도가 워크스페이스 기본값을 대체하며 서버 절대 한도는 계속 적용됩니다.",
+      "saved": "라이브러리 업로드 정책을 저장했습니다",
+      "capabilitiesLoadFailed": "현재 서버의 형식 처리 기능을 검증하지 못했습니다. 설정값은 표시하지만 정책을 다시 불러올 때까지 편집할 수 없습니다.",
+      "retryCapabilities": "처리 기능 다시 불러오기",
+      "invalidLimit": "워크스페이스 기본값은 1KB~50MB, 파일군 및 개별 형식 한도는 1KB~4GiB여야 합니다.",
+      "invalidPolicy": "워크스페이스 기본값은 1KB~50MB, 파일군 및 개별 형식 한도는 1KB~4GiB로 설정하고 중복 값을 해결하세요.",
+      "configured": "설정값: {{value}}",
+      "effective": "실제 한도: {{value}} · 제한 기준: {{source}}",
+      "outer": {
+        "title": "워크스페이스 업로드 한도",
+        "label": "수동 업로드 한도",
+        "hint": "더 구체적인 설정이 없는 형식에 적용되는 기본값입니다. 파일군 및 개별 형식 기본값은 이보다 높거나 낮을 수 있으며 서버의 절대 한도는 계속 적용됩니다."
+      },
+      "families": {
+        "title": "파일군",
+        "hint": "파일군은 선택적인 형식별 기본값입니다. 워크스페이스 기본값보다 높거나 낮게 설정할 수 있으며 파일군에 속하지 않은 형식은 워크스페이스 기본값을 사용합니다.",
+        "add": "파일군 추가",
+        "addTitle": "파일군 추가",
+        "editTitle": "파일군 편집",
+        "editorHint": "프리셋으로 시작하거나 워크스페이스 형식으로 파일군을 구성하세요.",
+        "startLabel": "시작 방식",
+        "startPreset": "프리셋",
+        "startCustom": "사용자 지정",
+        "presetLabel": "파일군 프리셋",
+        "presetInUse": "{{preset}} — 사용 중",
+        "presetModified": "프리셋에서 수정됨",
+        "restorePreset": "프리셋 기본값 복원",
+        "noPresets": "서버에서 확인된 파일군 프리셋이 없습니다.",
+        "presetUnavailable": "저장된 이 프리셋 스냅샷은 서버에서 더 이상 제공되지 않습니다. 계속 편집하거나 저장된 기준값으로 복원할 수 있습니다.",
+        "savedPresetSnapshot": "저장된 프리셋 스냅샷(리비전 {{revision}})",
+        "selectCurrentPreset": "현재 프리셋 선택",
+        "nameLabel": "형식 파일군 이름",
+        "extensionsLabel": "확장자",
+        "extensionsFor": "{{family}} 파일군의 확장자",
+        "extensionsPlaceholder": ".docx 또는 형식 이름 입력",
+        "aliasHint": "등록된 확장자는 기존 형식에 추가하고, 알 수 없는 확장자는 형식 등록으로 이어집니다.",
+        "addFormatsLabel": "형식 추가",
+        "addFormatsHint": "확장자, 형식 이름 또는 별칭을 입력하세요. 등록된 형식은 자동으로 재사용하고 알 수 없는 확장자는 여기서 등록할 수 있습니다.",
+        "findRegisteredLabel": "형식 추가",
+        "findRegisteredPlaceholder": "확장자 또는 형식 이름",
+        "findRegisteredHint": "등록된 확장자는 기존 형식에 추가하고, 알 수 없는 확장자는 형식 등록으로 이어집니다.",
+        "findRegisteredCustomOption": "'{{extension}}'을(를) 새 형식으로 등록…",
+        "blockedReason": "저장하기 전에 강조된 확장자 편집을 완료하세요.",
+        "revealBlockedReason": "확인 →",
+        "aliasGroupsLabel": "형식 별칭 그룹",
+        "aliasGroupsHint": "이 파일군에 추가한 모든 형식이 여기에 표시됩니다. 프리셋 구성원은 표시되며 사용자 정의 이름과 모든 확장자 별칭을 편집할 수 있습니다. 별칭 변경은 워크스페이스 전체에 적용됩니다.",
+        "removeFormat": "제거",
+        "removeFormatLabel": "이 파일군에서 {{format}} 제거",
+        "noFormats": "형식 추가에서 등록된 형식을 선택하거나 사용자 정의 형식을 등록하세요.",
+        "limitLabel": "업로드 한도",
+        "useWorkspaceLimit": "워크스페이스 업로드 한도 사용",
+        "workspaceLimitReference": "워크스페이스 업로드 한도: {{value}}",
+        "customLimitLabel": "파일군 업로드 한도",
+        "customLimitHint": "이 형식별 기본값은 워크스페이스 기본값보다 높거나 낮을 수 있습니다.",
+        "hardCapHint": "여기서 설정할 수 있는 최댓값은 {{value}}입니다 — 이 dtxWiki 서버는 이 형식들에 대해 이보다 큰 값을 허용하지 않습니다.",
+        "hardCapAdminLink": "배포 설정에서 늘리기 →",
+        "hardCapAdminNote": "서버 관리자가 서버의 배포 설정에서 이 값을 늘릴 수 있습니다.",
+        "workspaceDefault": "워크스페이스 기본 한도",
+        "limitSummary": "설정 {{configured}} · 실제 {{effective}} ({{source}})",
+        "presetBadge": "프리셋",
+        "customBadge": "사용자 지정",
+        "emptyTitle": "파일군 없음",
+        "empty": "파일군을 추가하지 않으면 지원되는 모든 형식이 워크스페이스 기본 한도를 사용합니다.",
+        "editLabel": "{{family}} 편집",
+        "removeLabel": "{{family}} 제거",
+        "update": "파일군 수정",
+        "customFormat": {
+          "register": "{{extension}}을(를) 사용자 정의 형식으로 등록",
+          "title": "사용자 정의 형식 등록",
+          "editTitle": "사용자 정의 형식 편집",
+          "hint": ".md와 .markdown처럼 같은 형식을 나타내는 확장자 별칭을 함께 등록하세요.",
+          "name": "형식 이름",
+          "extensions": "확장자 별칭",
+          "extensionsPlaceholder": ".foo, .bar (쉼표로 구분)",
+          "extensionsHint": "별칭을 1~{{count}}개 추가하세요. 각 확장자 뒤에 Enter 또는 쉼표를 누르세요.",
+          "managerTitle": "워크스페이스 사용자 정의 형식",
+          "managerHint": "워크스페이스 사용자 정의 형식을 찾아보고 편집·삭제하거나 이 파일군에 추가하세요.",
+          "addAction": "사용자 정의 형식 등록",
+          "manageAction": "사용자 정의 형식 관리 ({{count}})",
+          "integratedListLabel": "등록된 사용자 정의 형식",
+          "empty": "등록된 워크스페이스 사용자 정의 형식이 없습니다.",
+          "usedBy": "사용 중인 파일군: {{families}}",
+          "hasIndividualLimit": "삭제하려면 먼저 개별 형식 한도를 제거하세요.",
+          "selected": "이 파일군에 포함됨",
+          "addToFamily": "파일군에 추가",
+          "addToFamilyLabel": "{{format}}을(를) 이 파일군에 추가",
+          "editLabel": "{{format}} 편집",
+          "delete": "형식 삭제",
+          "deleteLabel": "{{format}} 삭제",
+          "newRequiresFamily": "새 사용자 정의 형식을 유지하려면 이 파일군과 함께 저장해야 합니다. 파일군을 추가하거나 수정하세요.",
+          "familyChangesRequireSave": "파일군 변경 사항도 대기 중입니다. 두 변경 사항을 함께 적용하려면 파일군을 추가하거나 수정하세요.",
+          "applyHint": "이 파일군을 추가하거나 수정하지 않고 형식의 편집 또는 삭제만 대기 중인 설정 변경에 적용합니다.",
+          "apply": "형식 변경 적용",
+          "orAddInBulk": "또는 여러 그룹을 한 번에 추가",
+          "rawSource": "원시 소스(추가 / 등록)",
+          "rawSourceHint": "등록된 별칭은 기존 형식을 추가하고 새로운 그룹은 워크스페이스 사용자 정의 형식으로 등록합니다(최대 {{count}}자).",
+          "bulkAdd": "그룹 추가 또는 등록",
+          "add": "형식 등록",
+          "update": "형식 수정",
+          "errors": {
+            "invalidName": "제어 문자가 없는 이름을 입력하세요.",
+            "invalidExtension": "올바르지 않은 확장자: {{extensions}}",
+            "extensionTooLong": "{{extension}}은(는) 너무 깁니다. 확장자는 앞의 점을 포함해 최대 {{count}}자까지 입력할 수 있습니다.",
+            "unsafeExtension": "차단된 확장자: {{extensions}}. 실행 파일, 활성 콘텐츠, 압축 파일 및 매크로 사용 별칭은 등록할 수 없습니다.",
+            "extensionConflict": "{{extension}}은(는) 이미 {{format}} 형식({{aliases}})에 속합니다.",
+            "stableOwnerTransfer": "{{extension}}은(는) {{format}}에서 사용 중입니다. 여기 할당 전에 해당 형식에서 먼저 제거하세요.",
+            "stableOwnerTransferDetail": "설정을 불러올 때 {{extension}}은(는) {{format}}에 속해 있었습니다. 먼저 제거를 저장한 다음 설정을 다시 열어 다른 사용자 정의 형식에 할당하세요.",
+            "nameConflict": "'{{format}}' 이름의 사용자 정의 형식이 이미 있습니다.",
+            "stableNameOwnerTransfer": "설정을 불러올 때 '{{name}}' 이름은 {{format}}에 속해 있었습니다. 먼저 해당 형식의 이름 변경 또는 삭제를 저장한 다음 설정을 다시 열어 다른 사용자 정의 형식에 할당하세요.",
+            "tooManyExtensions": "한 형식에는 확장자 별칭을 최대 {{count}}개까지 등록할 수 있습니다.",
+            "formatLimit": "이 워크스페이스에는 사용자 정의 형식을 최대 {{count}}개까지 등록할 수 있습니다."
+          }
+        },
+        "aliasGroup": {
+          "preset": "프리셋",
+          "presetHint": "선택한 파일군 프리셋에서 가져온 별칭 그룹입니다.",
+          "editName": "별칭 그룹 {{format}} 편집",
+          "editNameLabel": "별칭 그룹 이름 편집",
+          "extensionsLabel": "{{format}}의 확장자",
+          "extensionsHint": "확장자를 입력하고 Enter 또는 쉼표를 눌러 추가하세요.",
+          "extensionsPlaceholder": "+ 확장자 추가",
+          "extensionsLabelShort": "확장자",
+          "duplicateExtension": "{{extension}}은(는) 이미 이 그룹에 있습니다.",
+          "editExtension": "확장자 {{extension}} 편집",
+          "removeExtension": "확장자 {{extension}} 제거",
+          "lastExtensionHint": "별칭 그룹에는 확장자가 하나 이상 있어야 합니다.",
+          "stableOwnerTransfer": "이 대화상자를 열 때 {{extension}}은(는) {{format}}에 속해 있었습니다. 먼저 제거를 저장한 다음 설정을 다시 열어 여기에 할당하세요."
+        },
+        "inputErrors": {
+          "duplicate_extension": "{{value}}이(가) 두 번 이상 나타납니다. 각 확장자는 하나의 별칭 그룹에만 두세요.",
+          "duplicate_label": "{{value}} 이름이 둘 이상의 별칭 그룹에서 사용됩니다.",
+          "empty_input": "확장자를 하나 이상 입력하세요.",
+          "invalid_extension": "{{value}}은(는) 올바른 확장자가 아닙니다. 문자, 숫자, _, + 또는 -를 사용하세요.",
+          "invalid_label": "올바른 별칭 그룹 이름을 입력하세요.",
+          "invalid_syntax": "쉼표로 구분한 확장자 또는 [이름](.ext1,.ext2) 형식을 사용하세요.",
+          "too_many_extensions": "별칭 그룹 하나에는 확장자를 최대 {{count}}개까지 넣을 수 있습니다.",
+          "rawTooLong": "원시 소스는 최대 {{count}}자까지 입력할 수 있습니다.",
+          "unsafeExtension": "실행 파일, 활성 콘텐츠, 압축 파일 및 매크로 사용 별칭은 차단되므로 {{extensions}}을(를) 등록할 수 없습니다.",
+          "tooManyGroups": "이 소스는 새 그룹 {{count}}개를 등록하지만 워크스페이스 사용자 정의 형식 슬롯은 {{remaining}}개만 남아 있습니다.",
+          "ambiguousExtension": "{{extension}}이(가) 둘 이상의 등록된 형식({{formats}})과 일치합니다. 특정 제안을 선택하세요.",
+          "mixedOwners": "하나의 별칭 그룹에 있는 모든 확장자는 같은 형식에 속해야 합니다. 등록된 확장자와 새 확장자를 서로 다른 그룹으로 나누세요.",
+          "registeredName": "{{extensions}}은(는) 이미 {{format}}에 속합니다. {{label}} 대신 등록된 그룹 이름을 사용하세요."
+        },
+        "errors": {
+          "extensionConflict": "{{extension}} 확장자는 이미 '{{family}}' 파일군에 있습니다. 먼저 해당 파일군에서 제거하세요.",
+          "duplicateName": "'{{family}}' 이름의 파일군이 이미 있습니다.",
+          "conflictTitle": "저장하기 전에 중복 형식을 해결하세요",
+          "conflictFamily": "{{family}} 파일군에서 이미 사용 중",
+          "invalidLimit": "파일군 한도는 1KB 이상 4GiB 이하여야 합니다.",
+          "familyLimit": "MVP에서는 파일군을 최대 {{count}}개까지 지원합니다."
+        }
+      },
+      "familyPresets": {
+        "names": {
+          "text": "텍스트",
+          "document": "문서",
+          "image": "이미지",
+          "audio": "오디오",
+          "video": "비디오",
+          "data": "데이터"
+        }
+      },
+      "categories": {
+        "noExtensions": "등록된 확장자 없음",
+        "moreExtensions": "+{{count}}개 더",
+        "showExtraExtensions": "{{family}}의 확장자 {{count}}개 더 보기",
+        "hideExtraExtensions": "{{family}}의 추가 확장자 접기",
+        "hideExtensions": "간단히 보기"
+      },
+      "overrides": {
+        "label": "{{format}} 형식별 한도",
+        "add": "개별 한도 설정",
+        "change": "개별 한도 변경",
+        "remove": "상속된 기본값 사용"
+      },
+      "advanced": {
+        "title": "파일 형식별 한도",
+        "count": "설정 {{count}}개",
+        "hint": "개별 형식 한도는 파일군 및 워크스페이스 기본값보다 우선합니다. 사용 가능한 {{count}}개 형식을 검색해 추가하세요.",
+        "search": "파일 형식별 한도 추가",
+        "searchPlaceholder": "이름 또는 확장자로 검색",
+        "add": "추가",
+        "addLabel": "{{format}} 형식별 한도 추가",
+        "noSearchResults": "검색과 일치하는 파일 형식이 없습니다.",
+        "empty": "설정된 파일 형식별 한도가 없습니다.",
+        "inherited": "파일군 또는 워크스페이스 기본값",
+        "remove": "한도 제거",
+        "removeLabel": "{{format}} 형식별 한도 제거",
+        "loadMore": "형식 {{remaining}}개 더 보기"
+      },
+      "states": {
+        "ready": "준비됨",
+        "validator_unavailable": "검증기 미준비",
+        "denied": "차단됨",
+        "available": "사용 가능",
+        "available_after_validation": "검증 후 사용 가능",
+        "stored_unconverted": "원본만 저장",
+        "degraded": "제한적으로 사용 가능",
+        "unavailable": "사용 불가"
+      },
+      "reasons": {
+        "deployment_ingest_disabled": "이 배포 환경에서는 업로드를 일시적으로 사용할 수 없습니다.",
+        "validator_unavailable": "이 파일 형식에 사용할 안전한 검증기가 준비되지 않았습니다.",
+        "policy_disabled": "정책에서 이 파일 형식을 차단했습니다.",
+        "converter_unavailable": "원본은 저장할 수 있지만 문서 변환은 사용할 수 없습니다.",
+        "stored_without_converter": "문서 변환 없이 원본을 저장합니다.",
+        "unknown": "이 파일 형식은 현재 사용할 수 없습니다."
+      },
+      "behavior": {
+        "title": "처리 동작",
+        "hint": "이 선택은 형식 검증이나 변환기 안전 한도를 완화하지 않습니다.",
+        "storeWithoutConverter": "변환할 수 없어도 검증된 원본 저장",
+        "discoveryReview": "발견한 소스를 추가하기 전에 리뷰 요구"
+      },
+      "sources": {
+        "workspace": "워크스페이스 한도",
+        "family": "파일군 한도",
+        "format": "형식별 한도",
+        "instance": "배포 환경 한도"
+      },
+      "fields": {
+        "builtin_format_overrides": "기본 제공 형식 별칭",
+        "format_families": "파일군",
+        "custom_formats": "워크스페이스 사용자 정의 형식",
+        "max_upload_bytes": "워크스페이스 업로드 한도",
+        "format_overrides": "형식별 한도",
+        "allow_store_without_converter": "변환기 없이 저장"
+      }
+    },
+    "citation": {
+      "strictness": {
+        "label": "인용 엄격도",
+        "hint": "답변이 라이브러리 자료를 얼마나 강하게 인용해야 하는지입니다."
+      },
+      "acceptedCitationTypes": {
+        "label": "인용 가능한 라이브러리 입력 유형",
+        "hint": "답변에 나타날 수 있는 출처 유형입니다."
+      },
+      "decision": {
+        "label": "리뷰 결정",
+        "hint": "인용 정책 변경 처리 방식입니다."
+      }
+    },
+    "contextWrite": {
+      "draftOnly": {
+        "label": "초안만 허용",
+        "hint": "새 페이지가 바로 게시되지 않도록 합니다."
+      },
+      "publishRequiresReview": {
+        "label": "리뷰 필요",
+        "hint": "초안이 게시되기 전에 리뷰를 요구합니다."
+      },
+      "decision": {
+        "label": "리뷰 결정",
+        "hint": "페이지 게시 정책 변경 처리 방식입니다."
+      },
+      "title": "지식 페이지 발행 조건",
+      "lintTitle": "린트 오류가 있으면 검토로 넘어갑니다",
+      "lintBody": "닫히지 않은 코드 펜스나 frontmatter 블록이 있으면 바로 발행되지 않고 검토 대기열로 들어갑니다.",
+      "openLint": "린트 규칙 열기",
+      "reviewTitle": "나머지는 검토 정책이 결정합니다",
+      "reviewBody": "위험도 기준, 에이전트가 쓴 글을 항상 사람이 확인할지 여부, 위험도별 자동 승인 대기 시간을 정합니다.",
+      "openReview": "검토 정책 열기"
+    },
+    "agentInjection": {
+      "bundleTtlDefaultSeconds": {
+        "label": "참조 갱신 주기",
+        "hint": "AI 참조 세트를 다시 만들기 전에 재사용할 수 있는 시간입니다."
+      },
+      "bundleTtlMaxSeconds": {
+        "label": "최대 참조 재사용",
+        "hint": "갱신 주기와 같거나 더 길어야 합니다."
+      },
+      "agentGuide": {
+        "label": "에이전트 가이드 포함",
+        "hint": "에이전트 가이드 페이지(시스템 프롬프트·규칙·지시문)를 AI에 보내는 시점입니다."
+      },
+      "persona": {
+        "label": "페르소나 포함",
+        "hint": "페르소나 페이지가 포함되는 시점입니다."
+      },
+      "skill": {
+        "label": "스킬 포함",
+        "hint": "스킬 페이지가 포함되는 시점입니다."
+      },
+      "memory": {
+        "label": "메모리 포함",
+        "hint": "메모리 페이지가 포함되는 시점입니다."
+      },
+      "decision": {
+        "label": "리뷰 결정",
+        "hint": "AI 지시문 변경 처리 방식입니다."
+      }
+    },
+    "review": {
+      "preset": {
+        "label": "정책 프리셋",
+        "hint": "리뷰 라우팅의 기본 위험도 기준을 선택합니다."
+      },
+      "alwaysForAiAuthored": {
+        "label": "에이전트가 쓴 내용 리뷰",
+        "hint": "MCP·OAuth·토큰으로 들어온 모든 쓰기를 승인 전까지 보류합니다. 끄면 에이전트 쓰기도 사람이 쓴 것처럼 바로 게시되며, 허용한 정책은 그대로 기록됩니다."
+      },
+      "reconciliationReminder": {
+        "label": "조정 브랜치 알림",
+        "hint": "조정 브랜치가 이 시간 동안 해결되지 않으면 워크스페이스 소유자에게 알립니다."
+      },
+      "reconciliationAttention": {
+        "label": "조정 브랜치 주의 기간",
+        "hint": "조정 브랜치가 이 일수 동안 해결되지 않으면 삭제하지 않고 기본 리뷰 필터에서 접습니다."
+      },
+      "reviewFromRisk": {
+        "label": "수동 리뷰 시작 위험도",
+        "hint": "이 위험도 이상의 변경은 리뷰 큐에 들어갑니다. 자동 승인 규칙이 있으면 큐에 들어온 항목을 처리합니다."
+      },
+      "contextDraftCreate": {
+        "label": "새 Context 초안",
+        "hint": "새 Context 페이지 초안의 기본 위험도입니다."
+      },
+      "contextFullRewrite": {
+        "label": "Context 전체 재작성",
+        "hint": "Context 페이지 대부분을 교체하는 편집의 기본 위험도입니다."
+      },
+      "contextIngressReview": {
+        "label": "리뷰가 필요한 가져온 Context",
+        "hint": "리뷰가 필요한 가져오기 제안의 기본 위험도입니다."
+      },
+      "agentSensitiveDraft": {
+        "label": "민감한 Agent 초안",
+        "hint": "민감한 Agent 콘텐츠 초안의 기본 위험도입니다."
+      },
+      "treeMutation": {
+        "label": "트리 구조 변경",
+        "hint": "워크스페이스 트리 변경의 기본 위험도입니다."
+      },
+      "presetValue": {
+        "conservative": "보수적",
+        "balanced": "균형",
+        "fast_moving": "빠른 진행",
+        "custom": "사용자 지정"
+      },
+      "presetHint": {
+        "conservative": "더 많은 변경을 수동 리뷰로 보냅니다.",
+        "balanced": "일상 변경은 빠르게 처리하면서 위험한 변경을 보호합니다.",
+        "fast_moving": "신뢰된 워크플로에서 수동 리뷰 게이트를 줄입니다.",
+        "custom": "개별 위험도 필드가 preset과 다를 때 표시됩니다."
+      },
+      "riskValue": {
+        "low": "낮음",
+        "medium": "중간",
+        "high": "높음"
+      },
+      "riskRules": {
+        "title": "위험도 규칙",
+        "description": "상향 조건과 Force High 조건을 리뷰 정책의 구조화된 JSON으로 표시합니다.",
+        "show": "위험도 규칙 JSON 보기"
+      },
+      "autoApproveByRisk": {
+        "title": "위험도별 자동 승인",
+        "description": "이미 리뷰 큐에 있는 항목에만 적용됩니다. 자동 승인 전 대기 일수를 지정하세요(0 = 대기 없음).",
+        "highReason": "높음 위험 변경을 자동 승인하면 사람 검토를 건너뜁니다. 아래에서 위험을 확인해야 사용할 수 있습니다.",
+        "highDangerAck": "위험 확인됨 — 높음 위험 변경 자동 승인이 사람 검토를 건너뜀을 이해합니다.",
+        "rowHint": "자동 승인을 허용하고 실행 전 일 단위 대기 시간을 설정하세요.",
+        "fromRiskLocked": "{{risk}} 위험도를 자동 승인하려면 먼저 \"수동 리뷰 시작 위험도\"를 {{risk}} 이상으로 올리세요 (현재 {{fromRisk}}).",
+        "fromRiskConflict": "{{risk}} 자동 승인이 \"수동 리뷰 시작 위험도\"({{fromRisk}})를 초과합니다. 여기서 끄거나 수동 리뷰 기준을 먼저 올리세요.",
+        "delay": "대기 일수",
+        "allowed": "허용",
+        "saved": "자동 승인 규칙을 저장했습니다"
+      }
+    },
+    "duration": {
+      "hours": "시간",
+      "minutes": "분",
+      "seconds": "초",
+      "cap": "최대 {{hours}}시간(1년)입니다."
+    },
+    "byteSize": {
+      "amount": "값",
+      "unit": "단위",
+      "unitLabel": "{{label}} 단위"
+    },
+    "defaultPolicy": {
+      "label": "사용자 지정 값 없음",
+      "hint": "이 규칙 그룹은 서버 기본값을 그대로 사용하고 있습니다."
+    }
+  },
+  "userRecovery": {
+    "headerEyebrow": "시스템 설정",
+    "headerTitle": "사용자",
+    "headerDescription": "인스턴스 사용자를 검색하고 안전한 계정 복구 절차를 시작합니다.",
+    "serverAdminOnlyNotice": "사용자 검색과 계정 복구는 서버 관리자만 볼 수 있습니다.",
+    "eyebrow": "서버 관리",
+    "title": "계정 복구",
+    "description": "인스턴스 사용자를 찾아 일회용 복구 절차를 시작합니다. 관리자는 사용자의 새 비밀번호를 정하거나 볼 수 없습니다.",
+    "serverAdminOnly": "서버 관리자 전용",
+    "boundary": "재설정이 완료되면 사용자의 모든 브라우저 세션이 종료됩니다. PAT/MCP 토큰은 별도 자격 증명이며 아래에서 선택한 경우에만 폐기됩니다.",
+    "unlock": {
+      "title": "보호된 사용자 검색 잠금 해제",
+      "description": "인스턴스 사용자 디렉터리를 보기 전에 서버 관리자 비밀번호를 다시 입력하세요.",
+      "password": "내 현재 비밀번호",
+      "action": "사용자 검색 잠금 해제",
+      "unlocking": "확인 중…",
+      "unlocked": "{{date}}까지 보호된 사용자 검색을 사용할 수 있습니다.",
+      "shortTime": "짧은 확인 시간이 끝날 때",
+      "error": "비밀번호를 확인하지 못했습니다. 다시 시도하세요.",
+      "expired": "최근 본인 확인이 만료되었습니다. 사용자를 다시 검색하려면 비밀번호를 입력하세요."
+    },
+    "searchLabel": "사용자 검색",
+    "searchHint": "이메일, 표시 이름 또는 워크스페이스 이름",
+    "searchPlaceholder": "예: alex@example.com 또는 연구",
+    "searchAction": "검색",
+    "searching": "검색 중…",
+    "searchRequired": "이메일, 표시 이름 또는 워크스페이스를 입력하세요.",
+    "searchError": "사용자 검색에 실패했습니다. 다시 시도하세요.",
+    "resultCount_one": "사용자 {{count}}명 찾음",
+    "resultCount_other": "사용자 {{count}}명 찾음",
+    "noResults": "사용자를 찾지 못했습니다",
+    "noResultsHint": "검색어를 확인하고 다시 시도하세요.",
+    "pagination": {
+      "label": "사용자 검색 페이지",
+      "previous": "이전",
+      "next": "다음",
+      "position": "전체 {{total}}명 중 {{start}}–{{end}}"
+    },
+    "emailVerified": "이메일 검증됨",
+    "emailUnverified": "이메일 미검증",
+    "status": {
+      "active": "활성",
+      "inactive": "비활성"
+    },
+    "roles": {
+      "viewer": "뷰어",
+      "editor": "편집자",
+      "owner": "소유자"
+    },
+    "noWorkspaces": "워크스페이스 멤버십 없음",
+    "inactiveHint": "계정 복구는 활성 계정에서만 사용할 수 있습니다.",
+    "startAction": "복구 시작",
+    "emailAction": "복구 메일 보내기",
+    "linkAction": "일회용 링크 발급",
+    "emailUnverifiedActionHint": "이 주소가 검증되지 않아 이메일 전달을 사용할 수 없습니다.",
+    "mailUnavailableActionHint": "서버의 메일 복구 준비가 완료되지 않아 이메일 전달을 사용할 수 없습니다.",
+    "capabilityLoading": "서버 복구 가능 여부를 확인하는 중…",
+    "capabilityError": "복구 가능 여부를 확인하지 못했습니다. 재설정을 발급하기 전에 페이지를 새로고침하세요.",
+    "adminRecoveryUnavailable": "공식 HTTPS 공개 URL이 준비될 때까지 관리자 지원 복구를 사용할 수 없습니다.",
+    "emailQueued": "{{email}} 주소로 보낼 복구 메일을 대기열에 추가했습니다.",
+    "linkMissing": "서버가 복구 링크를 반환하지 않았습니다. 새 재설정을 발급하세요.",
+    "linkDismissed": "일회용 링크를 숨겼습니다. 다른 링크가 필요하면 새 재설정을 발급하세요.",
+    "dialog": {
+      "eyebrow": "권한 작업 확인",
+      "title": "비밀번호 재설정을 발급할까요?",
+      "description": "{{email}} 계정의 복구를 시작합니다. 새 비밀번호는 사용자가 직접 정하며 관리자는 볼 수 없습니다.",
+      "delivery": "전달 방법",
+      "email": "복구 메일 보내기",
+      "emailHint": "사용자의 검증된 이메일 주소로 메일을 발송 대기열에 추가합니다.",
+      "emailUnverifiedHint": "이 이메일이 검증되지 않아 사용할 수 없습니다.",
+      "link": "일회용 링크 표시",
+      "linkHint": "확인 후 한 번만 표시됩니다. 별도의 안전한 채널로 전달하세요.",
+      "mode": "복구 모드",
+      "ordinary": "일반 복구",
+      "ordinaryHint": "재설정 후 브라우저 세션은 폐기되며 PAT/MCP 토큰은 기본적으로 유지됩니다.",
+      "compromise": "계정 탈취 의심",
+      "compromiseHint": "사용자가 재설정을 완료할 때 모든 PAT/MCP 토큰을 폐기하도록 기본 설정합니다.",
+      "currentPassword": "내 현재 비밀번호",
+      "currentPasswordHint": "이 요청을 승인하려면 서버 관리자 비밀번호를 다시 입력하세요.",
+      "revokeTokens": "PAT/MCP 토큰도 모두 폐기",
+      "revokeTokensHint": "계정 탈취가 의심될 때 사용하세요. 브라우저 세션은 재설정 후 항상 모두 폐기됩니다.",
+      "cancel": "취소",
+      "issuing": "재설정 발급 중…",
+      "confirm": "비밀번호 재설정 발급"
+    },
+    "linkDialog": {
+      "eyebrow": "일회성 표시",
+      "title": "지금 복구 링크를 복사하세요",
+      "warning": "이 링크는 한 번만 표시됩니다. 이 창을 닫으면 영구적으로 숨겨지며 다시 열 수 없습니다.",
+      "recipient": "{{email}} 사용자에게 별도의 안전한 채널로 링크를 전달하세요.",
+      "linkLabel": "복구 링크",
+      "expires": "{{date}} 만료",
+      "tokensWillRevoke": "이 재설정이 완료되면 모든 PAT/MCP 토큰이 폐기됩니다.",
+      "copy": "링크 복사",
+      "copied": "복구 링크를 복사했습니다.",
+      "selected": "링크를 선택했습니다. Ctrl+C로 복사하세요.",
+      "copyUnavailable": "복사를 사용할 수 없습니다. 링크를 직접 선택하세요.",
+      "close": "닫고 링크 숨기기"
+    },
+    "errors": {
+      "reauthentication": "현재 비밀번호가 올바르지 않습니다. 다시 시도하세요.",
+      "unavailable": "이 전달 방법을 사용할 수 없습니다. 창을 닫고 사용 가능한 복구 작업을 명시적으로 선택하세요.",
+      "generic": "비밀번호 재설정을 발급하지 못했습니다. 다시 시도하세요."
+    }
+  },
+  "jobs": {
+    "serverAdminOnlyNotice": "백그라운드 작업 큐는 서버 관리자만 볼 수 있습니다.",
+    "eyebrow": "서버 관리",
+    "workspaceEyebrow": "이 워크스페이스",
+    "title": "작업",
+    "description": "백그라운드 작업 큐 상태, 영구 실패, 임대 시간을 초과한 작업입니다.",
+    "refresh": "새로고침",
+    "loadError": "작업을 불러오지 못했습니다.",
+    "summary": {
+      "queued": "대기 중",
+      "running": "실행 중",
+      "failed": "실패",
+      "leaseExpired": "임대 초과"
+    },
+    "problemsOnly": "실패 및 임대 초과 작업만 표시",
+    "loading": "작업을 불러오는 중…",
+    "empty": "작업 없음",
+    "emptyHint": "큐가 비어 있습니다.",
+    "emptyProblems": "문제 있는 작업 없음",
+    "emptyProblemsHint": "현재 실패했거나 임대를 초과한 작업이 없습니다.",
+    "status": {
+      "queued": "대기 중",
+      "running": "실행 중",
+      "completed": "완료",
+      "failed": "실패"
+    },
+    "meta": "재시도 {{retryCount}} · {{updated}} 갱신",
+    "incompleteWarning_one": "워크스페이스 {{count}}곳에 연결할 수 없어, 아래 합계와 목록에 해당 작업이 빠져 있을 수 있습니다.",
+    "incompleteWarning_other": "워크스페이스 {{count}}곳에 연결할 수 없어, 아래 합계와 목록에 해당 작업이 빠져 있을 수 있습니다.",
+    "retry": "재시도",
+    "retrying": "재시도 중…",
+    "retryUnsupported": "이 작업 유형은 실패 시 도메인 레코드도 함께 갱신되어 아직 여기서 재시도할 수 없습니다.",
+    "loadMore": "더 보기",
+    "loadingMore": "불러오는 중…",
+    "retryError": {
+      "generic": "재시도를 시작하지 못했습니다. 다시 시도하세요.",
+      "notFound": "이 작업은 더 이상 실패 상태가 아닙니다. 목록을 새로고침하세요."
+    }
+  },
+  "attachments": {
+    "serverEyebrow": "서버 관리",
+    "workspaceEyebrow": "이 워크스페이스",
+    "title": "첨부 파일",
+    "description": "이 워크스페이스의 페이지에 업로드된 이미지·오디오·동영상입니다.",
+    "listTitle": {
+      "all": "모든 첨부 파일",
+      "mine": "내가 올린 파일",
+      "orphans": "미사용 업로드"
+    },
+    "countText_one": "{{count}}개",
+    "countText_other": "{{count}}개",
+    "refresh": "새로고침",
+    "loading": "첨부 파일을 불러오는 중…",
+    "loadError": "첨부 파일을 불러오지 못했습니다.",
+    "serverAdminFallbackNotice": "이 워크스페이스의 구성원이 아니므로 미사용 업로드만 미리보기와 삭제 없이 표시됩니다. 첨부 파일을 관리하려면 워크스페이스에 참여하세요.",
+    "editorOnlyNotice": "첨부 파일 관리는 편집자와 소유자의 권한입니다. 읽을 수 있는 페이지에서는 그 페이지의 파일을 그대로 볼 수 있습니다.",
+    "retentionNotice": "미사용 업로드는 서버의 보존 기간이 지나면 자동으로 회수됩니다. 여기서 삭제하면 그 시점을 앞당길 뿐입니다.",
+    "allScopeNotice": "다른 사람이 저장하지 않은 초안에 올린 파일을 제외한 모든 첨부 파일입니다 — 열린 초안은 저장될 때까지 작성자에게만 보입니다.",
+    "mineScopeNotice": "내가 업로드한 첨부 파일입니다. 워크스페이스 소유자는 모든 구성원의 파일을 볼 수 있습니다.",
+    "fileMeta": "{{mediaType}} 파일 · {{size}}",
+    "mineBadge": "나",
+    "state": {
+      "inUse": "사용 중",
+      "historyOnly": "이전 버전에만",
+      "staging": "작업 중인 초안에만",
+      "unused": "미사용"
+    },
+    "stateHint": {
+      "inUse": "페이지의 현재 발행본에 표시됩니다.",
+      "historyOnly": "페이지의 이전 버전에서만 참조됩니다.",
+      "staging": "아직 저장되지 않은 편집에 업로드되어 보관 중입니다.",
+      "unused": "어느 버전도 참조하지 않으며, 보존 기간이 지나면 자동으로 회수됩니다."
+    },
+    "previewPrivate": "미리보기 없음: 미사용 업로드는 업로드한 본인만 열 수 있습니다.",
+    "previewNotAnImage": "이 파일 형식은 미리보기를 지원하지 않습니다.",
+    "filters": {
+      "label": "표시할 첨부 파일",
+      "all": "전체",
+      "mine": "내 파일",
+      "orphans": "미사용"
+    },
+    "search": {
+      "label": "파일 이름으로 첨부 파일 검색",
+      "placeholder": "파일 이름",
+      "clear": "검색어 지우기",
+      "submit": "검색"
+    },
+    "size": {
+      "bytes": "{{value}}바이트",
+      "kilobytes": "{{value}}KB",
+      "megabytes": "{{value}}MB"
+    },
+    "associationState": {
+      "pending_install": "설치 대기 중",
+      "tombstoned": "제거됨"
+    },
+    "facts": {
+      "uploadedBy": "업로드한 사람",
+      "page": "페이지",
+      "uploadedAt": "업로드 시각"
+    },
+    "actions": {
+      "delete": "삭제",
+      "deleting": "삭제 중…",
+      "loadMore": "더 보기",
+      "loadingMore": "불러오는 중…"
+    },
+    "confirmDelete": {
+      "body": "{{filename}} 파일을 영구히 삭제할까요? 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "첨부 파일 삭제"
+    },
+    "errors": {
+      "changed": "목록을 열어둔 사이에 다른 사람이 이 파일을 참조하거나 변경했습니다. 새로고침 후 다시 시도하세요.",
+      "inUse": "현재 사용 중인 첨부 파일이라 삭제할 수 없습니다.",
+      "delete": "첨부 파일을 삭제하지 못했습니다. 다시 시도하세요."
+    },
+    "empty": {
+      "all": "아직 첨부 파일이 없습니다",
+      "mine": "아직 업로드한 파일이 없습니다",
+      "orphans": "정리할 항목 없음",
+      "search": "그 이름과 일치하는 첨부 파일이 없습니다"
+    },
+    "emptyHint": {
+      "all": "이 워크스페이스의 페이지에 추가한 이미지가 여기에 표시됩니다.",
+      "mine": "편집 중인 페이지에 넣은 이미지가 업로드되면 여기에 표시됩니다.",
+      "orphans": "이 워크스페이스의 모든 업로드 파일은 발행되었거나, 초안에 포함되어 있거나, 업로드가 진행 중입니다.",
+      "search": "검색어를 지우면 모든 첨부 파일이 다시 표시됩니다."
+    },
+    "expandPreview": "{{filename}} 크게 보기",
+    "previewViewerTitle": "{{filename}} 미리보기",
+    "closePreview": "미리보기 닫기"
+  },
+  "deployment": {
+    "serverAdminOnlyNotice": "이 설정은 dtxWiki 서버(시스템) 설정으로 서버 관리자만 볼 수 있습니다. 서버 관리자에게 요청하거나 `dtxwiki admin grant` 로 권한을 부여하세요.",
+    "headerEyebrow": "시스템 설정",
+    "headerTitle": "배포",
+    "headerDescription": "dtxWiki 서버 설정 — 모든 워크스페이스에 적용됩니다. 여기서는 읽기 전용이며 dtxwiki CLI 로 변경하세요."
+  },
+  "mcp": {
+    "tokenRenamed": "\"{{requested}}\" 이름이 이미 사용 중이어서 이 키를 \"{{saved}}\"{{saved, josaEuRoOnly}} 저장했습니다.",
+    "approvedApps": "승인된 앱",
+    "connectedClients": "연결된 MCP 클라이언트",
+    "accessKeys": "액세스 키",
+    "appsUnit_one": "개 앱",
+    "appsUnit_other": "개 앱",
+    "clientsUnit_one": "개 클라이언트",
+    "clientsUnit_other": "개 클라이언트",
+    "keysUnit_one": "개 키",
+    "keysUnit_other": "개 키"
+  },
+  "mcpClients": {
+    "filterLabel": "MCP 클라이언트 상태",
+    "filter": {
+      "active": "활성",
+      "disabled": "비활성",
+      "all": "전체"
+    },
+    "loading": "MCP 클라이언트 불러오는 중…",
+    "searchLabel": "MCP 클라이언트 검색",
+    "searchPlaceholder": "클라이언트 이름 또는 유형 검색",
+    "searchSubmit": "검색",
+    "searchClear": "클라이언트 검색 지우기",
+    "retry": "MCP 클라이언트 목록 다시 시도",
+    "disableConfirm": {
+      "title": "MCP 클라이언트 비활성화",
+      "body": "{{client, josaIGa}} 즉시 호출 수신을 중단합니다. 언제든 다시 활성화할 수 있습니다.",
+      "cancel": "취소",
+      "confirm": "클라이언트 비활성화",
+      "busy": "비활성화 중…"
+    },
+    "deleteConfirm": {
+      "title": "비활성 MCP 클라이언트 삭제",
+      "body": "목록에서 {{client}}을(를) 삭제할까요? 과거 내역은 유지되지만 이 연결은 다시 활성화할 수 없습니다. 다시 연결하려면 새 승인 또는 액세스 키가 필요합니다.",
+      "cancel": "취소",
+      "confirm": "클라이언트 삭제",
+      "busy": "삭제 중…"
+    }
+  },
+  "accessKeys": {
+    "filterLabel": "액세스 키 상태",
+    "filter": {
+      "active": "활성",
+      "inactive": "비활성",
+      "all": "전체"
+    },
+    "loading": "액세스 키 불러오는 중…",
+    "loadFailed": "액세스 키를 불러올 수 없습니다.",
+    "noneForFilter": "이 상태에 해당하는 액세스 키가 없습니다.",
+    "searchLabel": "액세스 키 검색",
+    "searchPlaceholder": "키 이름 검색",
+    "searchSubmit": "검색",
+    "searchClear": "액세스 키 검색 지우기",
+    "retry": "액세스 키 목록 다시 시도"
+  },
+  "pagination": {
+    "previous": "이전",
+    "next": "다음",
+    "range": "전체 {{total}}개 중 {{start}}–{{end}}",
+    "cursorReset": "목록이 변경되어 첫 페이지를 표시합니다."
+  },
+  "connections": {
+    "filterLabel": "연결 상태",
+    "oauthFilterLabel": "OAuth 앱 상태",
+    "loadFailed": "MCP 클라이언트를 불러올 수 없습니다.",
+    "filter": {
+      "active": "활성",
+      "expired": "만료됨",
+      "all": "전체"
+    },
+    "hidden_one": "만료되었거나 취소된 연결 숨김",
+    "hidden_other": "만료되었거나 취소된 연결 숨김",
+    "cleanup": "만료되었거나 취소된 연결 정리",
+    "identityExplanation": "승인된 앱은 OAuth 등록과 동의이며, MCP 클라이언트는 실제로 도구를 호출하는 ID입니다.",
+    "noneForFilter": "이 상태에 해당하는 연결이 없습니다.",
+    "groupSummary": "{{client}} · 등록 {{registrations}}개 · 활성 {{active}}개",
+    "loadMore": "더 보기",
+    "loadingMore": "불러오는 중…",
+    "cleanupTitle": "오래된 연결 정리",
+    "cleanupBody": "만료되었거나 취소된 동의 기록 {{count}}개를 제거할까요? MCP 클라이언트 ID와 추적 기록은 내역에 유지됩니다.",
+    "cleanupConfirm": "정리",
+    "cleaning": "정리 중…"
+  },
+  "language": {
+    "en": "영어",
+    "ko": "한국어"
+  },
+  "actions": {
+    "cancel": "취소",
+    "discard": "되돌리기",
+    "edit": "편집",
+    "remove": "제거",
+    "save": "변경사항 저장",
+    "saving": "저장 중…",
+    "showRaw": "원시 값 보기"
+  },
+  "saveTitle": {
+    "busy": "설정을 저장하는 중입니다.",
+    "invalid": "저장하려면 먼저 오류를 수정하세요.",
+    "clean": "저장하려면 정책을 변경하세요.",
+    "ready": "정책 변경사항을 저장합니다."
+  },
+  "validation": {
+    "reuseBelowRefresh": "최대 재사용 기간은 갱신 주기 이상이어야 합니다.",
+    "uploadWholeBytes": "최대 업로드 크기는 정수 바이트로 계산되어야 합니다.",
+    "uploadMin": "최대 업로드 크기는 1KB(1,000바이트) 이상이어야 합니다.",
+    "uploadMax": "최대 업로드 크기는 50MB(50,000,000바이트) 이하여야 합니다.",
+    "durationWholeSeconds": "기간은 정수 초로 계산되어야 합니다.",
+    "durationNegative": "기간은 음수일 수 없습니다.",
+    "durationMax": "기간은 {{hours}}시간({{seconds}}초) 이하여야 합니다.",
+    "autoApproveWholeHours": "자동 승인 대기 시간은 정수 시간으로 계산되어야 합니다.",
+    "autoApproveMin": "자동 승인 대기 시간은 최소 1시간이어야 합니다.",
+    "autoApproveMax": "자동 승인 대기 시간은 {{days}}일 이하여야 합니다.",
+    "reconciliationReminderMin": "조정 브랜치 알림 대기 시간은 최소 1시간이어야 합니다.",
+    "reconciliationReminderMax": "조정 브랜치 알림 대기 시간은 30일 이하여야 합니다.",
+    "reconciliationAttentionMin": "조정 브랜치 주의 기간은 최소 1일이어야 합니다.",
+    "reconciliationAttentionMax": "조정 브랜치 주의 기간은 365일 이하여야 합니다.",
+    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다."
+  },
+  "state": {
+    "unsaved": "저장 안 됨 {{count}}개",
+    "reviewSave": "변경사항을 확인한 뒤 함께 저장합니다.",
+    "managed": "워크스페이스 기본값 또는 서버 정책으로 관리됩니다",
+    "ownerOnly": "소유자 전용",
+    "saving": "저장 중…",
+    "unsavedChanges": "저장되지 않은 변경사항",
+    "pending": "변경 예정",
+    "current": "현재",
+    "value": "값",
+    "limit": "한도",
+    "interval": "주기",
+    "maximum": "최대값",
+    "delay": "대기 시간",
+    "enabled": "활성화",
+    "disabled": "비활성화",
+    "notSet": "설정 안 됨",
+    "updating": "업데이트 중…",
+    "fieldSaved": "{{label}} 저장됨",
+    "cardSaved": "{{label}} 저장됨",
+    "readOnly": "읽기 전용",
+    "partiallyEditable": "일부 편집 가능",
+    "editable": "편집 가능"
+  },
+  "workspaceDefault": {
+    "title": "기본 워크스페이스",
+    "description": "로그인 후 이 워크스페이스를 먼저 열지 여부입니다.",
+    "badge": "현재",
+    "currentDefault": "현재 기본값: {{title}}",
+    "none": "아직 기본 워크스페이스가 설정되지 않았습니다.",
+    "confirmPrefix": "다음 워크스페이스를",
+    "confirmSuffix": "기본 워크스페이스로 설정할까요?",
+    "confirmReplace": "현재 기본값({{title}})은 해제됩니다.",
+    "thisWorkspace": "이 워크스페이스",
+    "setAsDefault": "기본값으로 설정",
+    "setAsDefaultWorkspace": "기본 워크스페이스로 설정",
+    "statusChanged": "{{title, josaIGa}} 기본 워크스페이스로 설정되었습니다."
+  },
+  "scopes": {
+    "read": {
+      "label": "읽기 - 소스와 페이지 보기",
+      "hint": "도구가 허용한 워크스페이스의 소스와 페이지를 볼 수 있습니다."
+    },
+    "write": {
+      "label": "쓰기 - 소스와 페이지 추가·편집",
+      "hint": "도구가 새 소스를 추가하고 페이지를 편집할 수 있습니다."
+    },
+    "agent": {
+      "label": "AI 실행 - 질문하고 답변받기",
+      "hint": "도구가 허용한 워크스페이스의 AI로 질문에 답할 수 있습니다."
+    }
+  },
+  "workspaceScopeRole": {
+    "owner": "소유자",
+    "editor": "편집자",
+    "viewer": "뷰어"
+  },
+  "access": {
+    "sessionSettings": "세션 설정",
+    "sessionSettingsFor": "{{client}} 세션 설정",
+    "sessionLength": "세션 길이",
+    "sessionLengthFor": "{{client}} 세션 길이",
+    "sessionDays_one": "{{count}}일",
+    "sessionDays_other": "{{count}}일",
+    "sessionConfiguredOption": "{{duration}} · 현재 설정",
+    "sessionMaximumOption": "{{duration}} · 서버 최댓값",
+    "extendWhileInUse": "사용 중 연장",
+    "extendWhileInUseFor": "{{client}} 세션을 사용 중 연장",
+    "approvedAppsAccountScope": "승인한 앱 전체가 표시되며, 현재 워크스페이스({{workspace}})에 접근하는 앱만 보이는 것이 아닙니다. 앱마다 허용된 워크스페이스를 따로 가집니다.",
+    "accessKeysAccountScope": "계정의 액세스 키 전체가 표시되며, 현재 워크스페이스({{workspace}})에 접근하는 키만 보이는 것이 아닙니다. 키마다 허용된 워크스페이스를 따로 가집니다.",
+    "connectedClientsWorkspaceScope": "{{workspace}}에서 호출하는 MCP 클라이언트 신원입니다. 위 카드와 달리 이 카드는 이 워크스페이스 기준입니다.",
+    "editWorkspaces": "워크스페이스 편집",
+    "editWorkspacesFor": "{{client}}의 워크스페이스 편집",
+    "retryConsents": "OAuth 앱 목록 다시 불러오기",
+    "workspaceScope": {
+      "createLabel": "이 키가 접근할 워크스페이스",
+      "createHint": "필수입니다. 이 화면은 현재 워크스페이스({{workspace}})에 한정되지 않습니다 — 이 키가 접근할 워크스페이스를 모두 고르세요.",
+      "currentWorkspaceUnknown": "현재 워크스페이스",
+      "requiredError": "이 액세스 키가 접근할 워크스페이스를 하나 이상 선택하세요.",
+      "listLabel": "허용된 워크스페이스",
+      "popoverLabel": "허용된 워크스페이스",
+      "searchAria": "워크스페이스 검색",
+      "searchClear": "워크스페이스 검색 지우기",
+      "searchPlaceholder": "워크스페이스 이름 또는 슬러그",
+      "selectAllShown": "표시된 항목 모두 선택",
+      "clearAll": "모두 해제",
+      "selectedCount": "선택",
+      "toggleAllAria": "표시된 워크스페이스 전체 선택 또는 해제",
+      "defaultBadge": "기본",
+      "membershipMissing": "멤버십 없음",
+      "noMatches": "검색과 일치하는 워크스페이스가 없습니다.",
+      "noWorkspaces": "워크스페이스 없음",
+      "emptySelection": "선택된 워크스페이스가 없으면 이 연결은 아무 워크스페이스에도 접근할 수 없습니다.",
+      "moreChips": "+{{count}}개",
+      "showAll": "허용된 워크스페이스 전체 보기",
+      "grantedScopes": "부여된 범위",
+      "syncPending": "동기화 중",
+      "syncFailed": "동기화 실패",
+      "syncFailedHint": "이 워크스페이스 요청은 거부됨, 자동 재시도 중",
+      "editTitle": "{{subject}}의 워크스페이스",
+      "editIntro": "이 연결은 아래에서 체크한 워크스페이스에만 접근합니다. 워크스페이스를 추가하면 기존 자격 증명이 재인증 없이 그 워크스페이스에 도달합니다.",
+      "diffNone": "아직 변경 없음.",
+      "diffAddedOnly": "추가 {{added}}개 · 제거 0개.",
+      "diffWithRemovals": "추가 {{added}}개 · 제거 {{removed}}개({{names}} — 즉시 접근 불가). 진행 중인 편집본은 보존됩니다.",
+      "save": "워크스페이스 저장",
+      "saving": "저장 중…"
+    },
+    "savingSessionSettings": "세션 설정 저장 중…",
+    "sessionSettingsSaved": "세션 설정 저장됨",
+    "sessionSettingsHint": "변경 사항은 이 앱이 다음에 세션을 새로고침할 때 적용됩니다.",
+    "oauthApps": "OAuth 앱",
+    "oauthCounts": "{{apps}} · {{clients}}",
+    "oauthAppsIntro": "OAuth 지원 MCP 클라이언트에 권장합니다. 브라우저 승인을 사용하면 액세스 키를 로컬 환경 파일에 두지 않아도 됩니다.",
+    "oauthAppsIntroUrlClientId": "HTTPS URL 클라이언트 식별자가 설정된 MCP 클라이언트는 OAuth를 사용할 수 있습니다. 이 서버에서는 클라이언트 자동 등록이 비활성화되어 있습니다.",
+    "oauthAppsIntroUnavailable": "보통 OAuth 지원 MCP 클라이언트가 여기로 연결하지만, 이 서버에서는 사용할 수 없습니다(위 참고). 대신 액세스 키를 사용하세요.",
+    "oauthDetailsToggle": "OAuth 상세 보기 (이 서버에서는 사용 불가)",
+    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다). 아래의 액세스 키를 대신 사용하세요.",
+    "pill": {
+      "recommended": "권장",
+      "unavailable": "설정 필요",
+      "advancedFallback": "고급 대체",
+      "recommendedFallback": "권장 대체 수단",
+      "urlClientIdOnly": "URL 클라이언트 ID 전용",
+      "unknown": "상태 확인 불가"
+    },
+    "setupPreferredWhenNoOauth": "이 서버에서는 OAuth를 사용할 수 없으므로, 액세스 키가 MCP 클라이언트를 연결하는 방법입니다.",
+    "signIn": "로그인",
+    "connectWithOauth": "OAuth로 연결",
+    "oauthGuideIntro": "다른 OAuth MCP 클라이언트를 인증하려면 해당 클라이언트에서 dtxWiki를 추가하고 브라우저 동의 페이지를 승인하세요. 승인된 클라이언트는 여기에 자동으로 표시됩니다.",
+    "oauthGuideUrlClientId": "MCP 클라이언트에 HTTPS URL 클라이언트 식별자를 설정하세요. 자동 등록이 비활성화되어 있어 이를 요구하는 설정 명령은 여기에서 제공하지 않습니다.",
+    "codexAddCommand": "Codex CLI 추가 명령",
+    "codexLoginCommand": "Codex CLI 로그인 명령",
+    "codexReauth": "Codex는 추가 후 OAuth를 시작합니다. 나중에 다시 인증하려면:",
+    "claudeAddCommand": "Claude Code 추가 명령",
+    "claudeCodeRunPrefix": "그런 다음 ",
+    "claudeCodeRunSuffix": "를 Claude Code에서 실행하고 인증하세요.",
+    "copyNamedCommand": "{{label}} 복사",
+    "selectNamedCommand": "{{label}} 선택",
+    "bearerFallbackPrefix": "클라이언트가 베어러 토큰만 지원한다면 아래의 ",
+    "bearerFallbackLink": "액세스 키",
+    "bearerFallbackSuffix": " 를 사용하세요.",
+    "approvedAppsBody": "브라우저 로그인으로 승인한 앱입니다.",
+    "loadingConsents": "OAuth 동의 불러오는 중…",
+    "consentsError": "OAuth 동의를 불러올 수 없습니다",
+    "noOauthApps": "아직 인증된 OAuth 앱이 없습니다.",
+    "noOauthAppsHint": "대부분의 사용자에게 권장합니다. MCP 클라이언트에서 dtxWiki를 인증하세요. 액세스 키나 환경 변수 설정이 필요 없습니다.",
+    "noOauthAppsHintUrlClientId": "HTTPS URL 클라이언트 식별자가 설정된 클라이언트는 OAuth를 사용할 수 있습니다. 자동 등록이 필요한 클라이언트는 대신 액세스 키를 사용해야 합니다.",
+    "noOauthAppsHintUnavailable": "이 서버에서는 OAuth를 사용할 수 없어 앱을 승인할 수 없습니다. 액세스 키를 사용하세요.",
+    "consentGrantedMeta": "부여 {{granted}}",
+    "revoke": "해지",
+    "consentRevoked": "OAuth 동의를 취소했습니다. 앱 1개를 업데이트했습니다.",
+    "consentAlreadyRevoked": "OAuth 동의가 이미 취소되어 목록을 새로 고쳤습니다.",
+    "revokeAllAria": "{{client}}의 모든 동의 취소",
+    "connectedClientsBody": "OAuth 또는 PAT 액세스 키로 인증된 MCP 클라이언트가 표시됩니다. 자격 증명 이력을 유지하면서 이후 호출을 차단하려면 클라이언트를 비활성화하세요.",
+    "noConnectedTools": "연결된 도구 없음",
+    "systemClientsNote": "시스템 관리 MCP 클라이언트는 내부용이며 사용자 연결 제어에서 숨겨집니다.",
+    "setupTitle": "액세스 키 설정",
+    "setupIntro": "MCP 클라이언트가 OAuth를 사용할 수 없을 때만 이 대체 수단을 사용하세요. 직접 저장하고 신중하게 교체해야 하는 베어러 키를 생성합니다.",
+    "setupIntroNoDcr": "MCP 클라이언트가 OAuth 자동 등록을 요구하거나 HTTPS URL 클라이언트 식별자를 사용할 수 없다면 액세스 키를 사용하세요. 키는 비밀번호처럼 보관하고 주기적으로 교체하세요.",
+    "setupIntroPrimary": "베어러 액세스 키를 만들어 설정 명령을 MCP 클라이언트에 붙여 넣으세요. 키는 비밀번호처럼 보관하고 주기적으로 교체하세요.",
+    "localUrlWarning": "이 명령은 로컬 MCP URL을 사용합니다. 이 컴퓨터에서는 작동하지만, 다른 PC에서 연결할 때는 공개 HTTPS 서버 URL을 사용하세요.",
+    "stepKeyIssued": "키 발급됨",
+    "stepCreateKey": "MCP 액세스 키 만들기",
+    "issuedMeta": "클라이언트: {{client}} · 범위: {{scopes}}",
+    "keyGeneratedTitle": "API 키 (한 번만 표시됨)",
+    "keyGeneratedBodyPrefix": "이 액세스 키는 한 번만 표시되며 설정 명령에 포함됩니다. 비밀번호처럼 다루세요. 나중에 이 키를 식별할 수 있도록 액세스 키 목록에는 ",
+    "keyGeneratedBodySuffix": "{{preview, josaIGaOnly}} 표시됩니다.",
+    "copyGeneratedKey": "API 키 복사",
+    "generateAnotherKey": "키 추가 생성",
+    "generateAnotherKeyHint": "한 번만 표시되는 화면은 닫히지만 현재 키는 계속 활성 상태로 유지됩니다.",
+    "clientLabel": "클라이언트",
+    "customAppLabel": "AI 앱 표시 이름",
+    "customAppLabelPlaceholder": "예: Grok Desktop",
+    "customAppLabelHint": "이 키의 표시용 스냅샷으로만 저장되며 앱을 식별하거나 권한을 부여하는 데 사용되지 않습니다.",
+    "customAppLabelRequired": "이 액세스 키를 사용할 AI 앱 이름을 입력하세요.",
+    "customAppLabelTooLong": "{{max}}자 이하로 입력하세요.",
+    "keyName": "키 이름",
+    "keyNamePlaceholder": "예: 내 노트북의 AI 앱",
+    "scopesGroupLabel": "액세스 키 범위",
+    "generating": "생성 중…",
+    "generateKey": "액세스 키 생성",
+    "copyAndRun": "PC에서 복사하여 실행",
+    "commandShell": "명령 셸",
+    "shellMac": "macOS/Linux",
+    "shellWindows": "Windows",
+    "shellZsh": "Zsh",
+    "registerCommand": "등록 명령",
+    "copyCommand": "명령 복사",
+    "selectCommand": "명령 선택",
+    "registerHelp": "이 설정은 로컬 MCP 클라이언트가 이 서버를 등록하도록 합니다. dtxWiki 자체를 PC에 설치할 필요는 없습니다.",
+    "registerHelpPending": "1단계에서 클라이언트를 선택하고 액세스 키를 생성하세요. 복사 가능한 설정 명령이 여기에 표시됩니다.",
+    "manualConfig": "수동 토큰 구성",
+    "manualConfigHelp": "고급. MCP 클라이언트가 위 명령을 지원하지 않을 때만 이 일반 HTTP 구성을 복사하세요.",
+    "manualConfigHelpPending": "고급. 이 템플릿은 예상 구성 형태를 보여줍니다. 사용하기 전에 키를 생성하세요.",
+    "connectionSettings": "MCP 연결 설정",
+    "connectionTemplate": "MCP 연결 템플릿",
+    "copySettings": "설정 복사",
+    "copyTemplate": "템플릿 복사",
+    "selectSettings": "설정 선택",
+    "selectTextAction": "텍스트 선택",
+    "accessKeysBody": "MCP 클라이언트가 OAuth를 사용할 수 없을 때만 액세스 키를 사용하세요. 토큰 처리와 로컬 환경 설정이 필요합니다.",
+    "accessKeysBodyNoDcr": "OAuth 자동 등록을 요구하거나 HTTPS URL 클라이언트 식별자를 사용할 수 없는 클라이언트에는 액세스 키를 사용하세요.",
+    "accessKeysBodyOnlyOption": "이 서버에서 MCP 클라이언트를 연결하는 유일한 방법이 액세스 키입니다. 각 키는 생성 시 한 번만 표시되며, 키를 취소하면 해당 클라이언트의 접근이 끊깁니다.",
+    "noAccessKeys": "아직 액세스 키가 없습니다",
+    "noAccessKeysHint": "베어러 토큰 설정을 위해 위에서 하나 생성하세요.",
+    "accessKeyCopied": "액세스 키 복사됨",
+    "commandCopied": "명령 복사됨",
+    "settingsCopied": "설정 복사됨",
+    "templateCopied": "템플릿 복사됨 - 사용 전에 자리표시자 토큰을 교체하세요",
+    "labels": {
+      "accessKey": "액세스 키",
+      "command": "명령",
+      "settings": "설정",
+      "template": "템플릿"
+    },
+    "setupCommandPlaceholder": "키를 만들면 설정 명령이 여기에 나타납니다.",
+    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하거나 아래의 액세스 키를 사용하세요.",
+    "oauthCapabilityRetry": "다시 시도"
+  },
+  "clipboard": {
+    "copied": "{{label}} 복사됨",
+    "selected": "{{label}} 선택됨",
+    "unavailable": "복사를 사용할 수 없습니다 - {{label}} 텍스트를 직접 선택하세요",
+    "failed": "복사 실패 - {{label}} 텍스트를 직접 선택하세요"
+  },
+  "keyRow": {
+    "keyName": "키 이름",
+    "renameAria": "{{name}} 이름 변경",
+    "saveName": "이름 저장",
+    "cancel": "취소",
+    "previewTitle": "{{prefix, josaEuRo}} 시작합니다. 생성 시 복사한 액세스 키와 일치시키세요.",
+    "prefixNotSaved": "접두사 저장 안 됨",
+    "prefixNotSavedTitle": "이 키는 접두사 미리보기가 저장되기 전에 생성되었습니다.",
+    "created": "생성 {{date}}",
+    "lastUsed": "마지막 사용 {{date}}",
+    "expires": "만료 {{date}}",
+    "never": "없음",
+    "client": "클라이언트 {{client}}",
+    "uuid": "UUID {{id}}",
+    "uuidTitle": "내부 토큰 UUID: {{id}}",
+    "rename": "이름 변경",
+    "editWorkspaces": "워크스페이스 편집",
+    "editWorkspacesNamed": "{{name}} 키의 워크스페이스 편집",
+    "disableKey": "키 비활성화",
+    "revoke": "해지",
+    "revokeNamed": "{{name}} 키 취소",
+    "delete": "삭제",
+    "deleteKey": "키 삭제",
+    "deleteNamed": "{{name}} 키 삭제"
+  },
+  "clientRow": {
+    "scopes": "{{type}} · 범위 {{scopes}}",
+    "lastUsed": "마지막 사용 {{date}}",
+    "never": "없음",
+    "viewDetails": "세부 정보 보기",
+    "clientId": "클라이언트 ID",
+    "notSet": "설정 안 됨",
+    "systemClient": "시스템 클라이언트",
+    "noScopes": "없음",
+    "status": "상태",
+    "lifecycle": "관리 수명 주기",
+    "connectionHealth": "연결 상태",
+    "scopesLabel": "범위",
+    "updating": "업데이트 중…",
+    "disable": "비활성화",
+    "disableNamed": "{{name}} 비활성화",
+    "enable": "활성화",
+    "reactivate": "다시 활성화",
+    "reactivateNamed": "{{name}} 다시 활성화",
+    "delete": "클라이언트 삭제",
+    "deleteNamed": "{{name}} 클라이언트 삭제",
+    "cleanup": "정리",
+    "connectionTiming": "마지막 사용 {{lastUsed}} · 다음 만료 {{nextExpiry}}",
+    "noLiveExpiry": "유효한 토큰 없음",
+    "state": {
+      "active": "활성",
+      "expired": "만료됨",
+      "revoked": "해지됨",
+      "disabled": "비활성"
+    }
+  },
+  "dangerZone": {
+    "title": "위험 구역",
+    "intro": "워크스페이스 식별자 변경과 삭제 같은 위험한 작업이 여기에 있습니다.",
+    "slugNote": "슬러그를 변경하면 저장된 링크, API 호출, 통합이 끊길 수 있습니다.",
+    "changeSlugTitle": "워크스페이스 슬러그 변경",
+    "changeSlugBody": "URL에 노출되는 워크스페이스 식별자를 변경합니다.",
+    "workspaceSlug": "워크스페이스 슬러그",
+    "updating": "변경 중…",
+    "changeSlug": "슬러그 변경",
+    "slugUpdated": "워크스페이스 슬러그를 변경했습니다",
+    "deleteTitle": "워크스페이스 삭제",
+    "deleteBody": "이 워크스페이스를 영구 삭제합니다. 콘텐츠나 운영 기록이 남아 있으면 어떤 것인지 보여주며, 함께 삭제할지 확인할 수 있습니다.",
+    "deleteSeparateNote": "보존되는 감사 기록은 삭제하지 않고 워크스페이스 연결만 해제합니다.",
+    "deleteAction": "워크스페이스 삭제…",
+    "loadingWorkspace": "워크스페이스를 아직 불러오는 중입니다.",
+    "unavailableUntilLoaded": "워크스페이스 목록을 불러올 때까지 삭제할 수 없습니다.",
+    "disabled": {
+      "not_owner": "워크스페이스는 소유자만 삭제할 수 있습니다."
+    }
+  },
+  "modals": {
+    "deleteWorkspace": {
+      "title": "워크스페이스를 삭제할까요?",
+      "bodyPrefix": "",
+      "bodySuffix": "을(를) 영구 삭제합니다. 워크스페이스에 남아 있는 콘텐츠나 운영 기록이 있으면 먼저 여기에 표시되므로 함께 삭제할지 확인할 수 있으며, 보존되는 감사 기록은 삭제하지 않고 연결만 해제합니다.",
+      "blockedSummary": "보존 중인 워크스페이스 데이터가 삭제를 차단하고 있습니다:",
+      "grantExpired": "확인이 만료되었습니다. 다시 시도하세요.",
+      "purgeHint": "아직 아무것도 삭제되지 않았습니다. 아래에서 확인하면 이 기록들도 워크스페이스와 함께 삭제합니다.",
+      "purgeRetryHint": "삭제를 완료하지 못했습니다. 다시 시도하기 전에 아래의 보존 중인 기록을 확인하세요.",
+      "purgeAcknowledge": "이 {{count}}건의 기록도 영구 삭제합니다. 되돌릴 수 없습니다.",
+      "blockers": {
+        "agent_bundles": "Agent 입력 번들: {{count}}개",
+        "ask_sessions": "Ask 세션: {{count}}개",
+        "changes": "변경 세트: {{count}}개",
+        "context_ingress": "Context 수집 제안: {{count}}개",
+        "context_pages": "Context 페이지: {{count}}개",
+        "custom_agent_pages": "사용자 정의 Agent 페이지: {{count}}개",
+        "feedback": "피드백 항목: {{count}}개",
+        "jobs": "백그라운드 작업: {{count}}개",
+        "library": "Library 항목: {{count}}개",
+        "library_discovery_candidates": "Library 탐색 후보: {{count}}개",
+        "library_discovery_runs": "Library 탐색 실행: {{count}}개",
+        "library_sync_runs": "Library 동기화 실행: {{count}}개",
+        "lint_runs": "Lint 실행: {{count}}개",
+        "mcp_chats": "MCP 채팅: {{count}}개",
+        "mcp_tool_calls": "MCP 도구 호출: {{count}}개",
+        "oauth_codes": "OAuth 인증 코드: {{count}}개",
+        "oauth_consents": "OAuth 동의: {{count}}개",
+        "oauth_refresh_tokens": "OAuth 새로고침 토큰: {{count}}개",
+        "reviews": "검토 항목: {{count}}개",
+        "unknown": "기타 보존 기록: {{count}}개"
+      },
+      "confirmLabel": "확인하려면 \"{{expected}}\"{{expected, josaEulReulOnly}} 입력하세요",
+      "cancel": "취소",
+      "deleting": "삭제 중…",
+      "confirm": "워크스페이스 영구 삭제",
+      "confirmWithPurge": "워크스페이스와 모든 데이터 삭제"
+    },
+    "revoke": {
+      "title": "OAuth 동의 취소",
+      "bodyPrefix": "",
+      "bodySuffix": "의 모든 동의와 활성 새로고침 토큰을 취소합니다. 클라이언트는 API를 다시 호출하기 전에 재인증해야 합니다.",
+      "cancel": "취소",
+      "revoking": "동의 취소 중…",
+      "confirm": "동의 취소"
+    },
+    "disableToken": {
+      "title": "액세스 키 취소",
+      "bodyPrefix": "",
+      "bodySuffix": "{{name, josaEulReulOnly}} 취소합니다. 이 키를 사용하는 기존 도구는 새 키를 생성하고 등록할 때까지 연결이 중단됩니다.",
+      "cancel": "취소",
+      "disabling": "취소 중…",
+      "confirm": "키 취소"
+    },
+    "deleteToken": {
+      "title": "비활성 액세스 키 삭제",
+      "bodyPrefix": "",
+      "bodySuffix": "{{name, josaEulReulOnly}} 액세스 키 목록에서 제거합니다. 이 키는 이미 취소되었거나 만료되어 연결에 사용할 수 없습니다.",
+      "cancel": "취소",
+      "deleting": "삭제 중…",
+      "confirm": "키 삭제"
+    }
+  },
+  "appHub": {
+    "eyebrow": "AI 앱 연결",
+    "title": "AI 앱 연결",
+    "description": "앱을 선택하면 dtxWiki가 지원하는 연결 방식과 설정 단계를 안내합니다.",
+    "connect": "AI 앱 연결",
+    "loading": "지원 앱을 불러오는 중…",
+    "catalogLoadError": "AI 앱 카탈로그를 불러오지 못했습니다.",
+    "retryCatalog": "앱 카탈로그 다시 시도",
+    "quickConnect": "빠른 연결",
+    "noFeaturedApps": "추천 앱을 사용할 수 없습니다. 전체 카탈로그를 확인하세요.",
+    "browseAppsHint": "전체 앱 카탈로그 열기",
+    "oauthAvailable": "OAuth를 사용할 수 있습니다. 액세스 키는 고급 대안으로 제공됩니다.",
+    "oauthUnavailable": "이 서버에서는 OAuth를 사용할 수 없습니다. 액세스 키를 사용하세요.",
+    "pickerEyebrow": "MCP 앱 카탈로그",
+    "pickerTitle": "AI 앱 선택",
+    "close": "앱 선택기 닫기",
+    "back": "모든 앱",
+    "chooseMethod": "이 앱의 인증 방식을 선택하세요. 가능한 경우 OAuth를 권장합니다.",
+    "searchLabel": "AI 앱 검색",
+    "searchPlaceholder": "이름, 제공사 또는 별칭 검색",
+    "noResults": "검색 결과가 없습니다.",
+    "resultCount_one": "카탈로그 앱 {{count}}개",
+    "resultCount_other": "카탈로그 앱 {{count}}개",
+    "genericFallback": "일치하는 카탈로그 앱이 없습니다. 일반 설정을 사용하려면 기타 MCP 클라이언트를 선택하세요.",
+    "generic": "일반 설정",
+    "available": "사용 가능",
+    "unavailable": "사용 불가",
+    "requiredMethodUnavailable": "이 앱은 필요한 연결 방식을 지원하지 않습니다.",
+    "unavailableReasons": {
+      "catalogAppUnavailable": "이 카탈로그 앱은 사용할 수 없습니다.",
+      "appVersionRequired": "이 연결 방식을 확인하려면 앱 버전을 입력하세요.",
+      "appVersionTooOld": "이 연결 방식을 사용하려면 앱을 업데이트하세요.",
+      "endpointUnreachable": "이 연결 방식으로는 서버 URL에 접근할 수 없습니다.",
+      "platformRequired": "이 연결 방식을 확인하려면 플랫폼을 선택하세요.",
+      "platformUnsupported": "이 플랫폼은 지원되지 않습니다.",
+      "serverOauthUnavailable": "이 서버에서는 OAuth를 사용할 수 없습니다.",
+      "shellRequired": "이 연결 방식을 확인하려면 셸을 선택하세요.",
+      "shellUnsupported": "이 셸은 지원되지 않습니다.",
+      "transportUnavailable": "이 MCP 전송 방식은 지원되지 않습니다.",
+      "unknown": "현재 설정에서는 이 연결 방식을 사용할 수 없습니다."
+    },
+    "oauth": "OAuth",
+    "accessKey": "액세스 키",
+    "oauthDescription": "브라우저에서 승인하며 장기 키를 붙여 넣지 않습니다.",
+    "accessKeyDescription": "고급: bearer 키를 생성해 로컬에 보관합니다.",
+    "recommended": "권장",
+    "preparing": "설정 준비 중…",
+    "preparingShell": "이 셸의 설정 레시피를 준비하는 중…",
+    "shellPlanLoadError": "이 셸의 레시피를 불러오지 못했습니다. 이전 셸 선택을 유지합니다.",
+    "useClient": "이 클라이언트 사용",
+    "retrySetup": "설정 다시 시도",
+    "keyRequired": "설정 절차를 보려면 액세스 키를 생성하세요.",
+    "planLoadError": "현재 설정을 생성할 수 없습니다.",
+    "recipeInvalid": "이 설정 절차를 안전하게 표시할 수 없습니다.",
+    "setupSteps": "설정 단계",
+    "copied": "복사됨",
+    "selected": "선택됨",
+    "copyFailed": "복사 실패",
+    "copy": "복사",
+    "copyArtifact": "{{label}} 복사",
+    "copyCommandForShell": "{{shell}}용 {{label}} 복사",
+    "selectArtifact": "{{label}} 선택",
+    "selectCommandForShell": "{{shell}}용 {{label}} 선택",
+    "select": "텍스트 선택",
+    "recipeVersion": "절차 {{recipe}} v{{version}} · 카탈로그 {{revision}}",
+    "chooseAppFirst": "액세스 키를 생성하기 전에 AI 앱을 선택하세요.",
+    "unknownApp": "AI 앱",
+    "chooseOauthApp": "OAuth로 연결할 앱 선택",
+    "chooseApp": "AI 앱 선택",
+    "browseApps": "모든 AI 앱 보기",
+    "chooseAppForRecipe": "설정 절차를 불러올 AI 앱을 선택하세요.",
+    "stepPosition": "{{total}}단계 중 {{index}}단계",
+    "stepRegister": "서버 등록",
+    "stepAuthenticate": "OAuth 로그인",
+    "labelRegisterCommand": "등록 명령",
+    "labelLoginCommand": "로그인 명령",
+    "labelInAppLoginCommand": "앱 내 로그인 명령",
+    "labelInAppCommand": "앱 내 명령",
+    "labelInstruction": "안내",
+    "typeInApp": "{{app}}에서 입력",
+    "thisApp": "이 앱",
+    "copyCommandForApp": "{{app}}에 입력할 {{label}} 복사",
+    "selectCommandForApp": "{{app}}에 입력할 {{label}} 선택"
+  },
+  "commandBlock": {
+    "copyFallback": "{{label}} 복사"
+  }
+}

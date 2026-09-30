@@ -1,0 +1,26 @@
+# Lints the public Markdown set only. Design and review documents are private
+# and gitignored, so they are not listed here.
+config:
+  default: true
+  # Long lines: prose and tables are not hard-wrapped, so a width limit is noise.
+  MD013: false
+  # Ordered lists: the docs number lists explicitly, across code blocks.
+  MD029: false
+  # First-line heading: the pull request template is pasted into a PR body and
+  # starts at level 2 on purpose.
+  MD041: false
+globs:
+  - README.md
+  - DEPLOYMENT.md
+  - DEVELOPMENT.md
+  - CONTRIBUTING.md
+  - CHANGELOG.md
+  - CLA.md
+  - .github/*.md
+  - npm/dtxwiki/README.md
+ignores:
+  - node_modules/**
+  - frontend/dist/**
+  - backend/static/**
+  - dist/**
+  - build/**

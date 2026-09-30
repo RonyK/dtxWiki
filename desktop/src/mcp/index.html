@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dtxWiki MCP 연결</title>
+    <link rel="stylesheet" href="wizard.css" />
+    <script src="policy.js" defer></script>
+    <script src="wizard.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">MCP CONNECTION WIZARD</p>
+        <h1>AI 도구에 dtxWiki 연결</h1>
+        <p>저장된 서버와 AI 클라이언트를 선택하세요. 기존 설정은 변경 전에 백업됩니다.</p>
+      </header>
+
+      <form id="wizard-form">
+        <fieldset>
+          <legend><span>1</span> 연결할 서버</legend>
+          <div id="server-list" class="option-list"></div>
+          <p id="no-servers" class="hint" hidden>저장된 서버가 없습니다. 연결 관리에서 먼저 추가하세요.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend><span>2</span> AI 클라이언트</legend>
+          <div id="client-list" class="option-list"></div>
+          <p class="hint">설치가 감지된 클라이언트는 자동 선택됩니다. dtxWiki는 인증된 Streamable HTTP MCP 연결만 등록합니다.</p>
+        </fieldset>
+
+        <fieldset id="auth-section">
+          <legend><span>3</span> 서버 인증</legend>
+          <label class="option compact">
+            <input type="radio" name="auth" value="oauth" checked />
+            <span><strong>OAuth (권장)</strong><small>AI 도구에서 서버 로그인 화면을 통해 승인</small></span>
+          </label>
+          <label class="option compact">
+            <input type="radio" name="auth" value="pat" />
+            <span><strong>Personal Access Token</strong><small>한 서버만 선택했을 때 사용 가능</small></span>
+          </label>
+          <label id="token-row" hidden>
+            <span>Access token</span>
+            <input id="access-token" type="password" autocomplete="off" spellcheck="false" />
+          </label>
+          <p id="auth-policy" class="hint" aria-live="polite" hidden></p>
+          <p class="warning">토큰은 dtxWiki Desktop에 저장되지 않습니다. 일부 AI 클라이언트 설정에는 토큰 또는 환경 변수 참조가 기록될 수 있습니다.</p>
+        </fieldset>
+
+        <p id="error" class="error" role="alert" hidden></p>
+        <section id="result" class="result" aria-live="polite" hidden></section>
+        <div class="actions">
+          <button type="button" id="cancel">닫기</button>
+          <button type="submit" class="primary">선택한 항목 등록</button>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

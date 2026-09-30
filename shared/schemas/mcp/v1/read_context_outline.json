@@ -1,0 +1,949 @@
+{
+  "input": {
+    "$defs": {
+      "AnchorAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_text": {
+            "deprecated": true,
+            "minLength": 1,
+            "title": "Anchor Text",
+            "type": "string"
+          },
+          "by": {
+            "const": "anchor",
+            "deprecated": true,
+            "title": "By",
+            "type": "string"
+          },
+          "char_offset_hint": {
+            "deprecated": true,
+            "minimum": 0,
+            "title": "Char Offset Hint",
+            "type": "integer"
+          },
+          "context_after": {
+            "default": "",
+            "deprecated": true,
+            "title": "Context After",
+            "type": "string"
+          },
+          "context_before": {
+            "default": "",
+            "deprecated": true,
+            "title": "Context Before",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "anchor_text",
+          "char_offset_hint"
+        ],
+        "title": "AnchorAddress",
+        "type": "object"
+      },
+      "ContextOutlineTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page Id"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id"
+          }
+        },
+        "title": "ContextOutlineTarget",
+        "type": "object"
+      },
+      "HeadingPathAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "const": "heading_path",
+            "title": "By",
+            "type": "string"
+          },
+          "heading_path": {
+            "description": "Every enclosing heading from the top of the page down to the target, as written -- the page's # title included, not just the last heading: [\"Guide\", \"Install\", \"Linux\"]. read_context_outline lists each section's path.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Heading Path",
+            "type": "array"
+          },
+          "occurrence": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Occurrence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "by",
+          "heading_path"
+        ],
+        "title": "HeadingPathAddress",
+        "type": "object"
+      },
+      "SectionAddress": {
+        "discriminator": {
+          "mapping": {
+            "anchor": "#/$defs/AnchorAddress",
+            "heading_path": "#/$defs/HeadingPathAddress",
+            "section_id": "#/$defs/SectionIdAddress"
+          },
+          "propertyName": "by"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SectionIdAddress"
+          },
+          {
+            "$ref": "#/$defs/HeadingPathAddress"
+          },
+          {
+            "$ref": "#/$defs/AnchorAddress"
+          }
+        ]
+      },
+      "SectionIdAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "const": "section_id",
+            "title": "By",
+            "type": "string"
+          },
+          "section_id": {
+            "minLength": 1,
+            "title": "Section Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "section_id"
+        ],
+        "title": "SectionIdAddress",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "conversation_token": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
+        "title": "Conversation Token"
+      },
+      "cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cursor"
+      },
+      "max_chars": {
+        "default": 8000,
+        "maximum": 40000,
+        "minimum": 1,
+        "title": "Max Chars",
+        "type": "integer"
+      },
+      "max_depth": {
+        "default": 6,
+        "maximum": 6,
+        "minimum": 1,
+        "title": "Max Depth",
+        "type": "integer"
+      },
+      "max_sections": {
+        "default": 200,
+        "description": "Maximum outline entries per page. The heading list is bounded by this and by a wire-byte budget, whichever binds first.",
+        "maximum": 2000,
+        "minimum": 1,
+        "title": "Max Sections",
+        "type": "integer"
+      },
+      "outline_cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Resume token for the heading list. Independent of `cursor`, which pages the selected section's body and requires `select`.",
+        "title": "Outline Cursor"
+      },
+      "select": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SectionAddress"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "target": {
+        "$ref": "#/$defs/ContextOutlineTarget"
+      },
+      "version": {
+        "default": "visible",
+        "description": "Which version to read: 'visible' (default; what this caller sees), 'draft', 'published', or 'my_edit' -- your own open editing row, the exact body patch_context_edit edits (not_found when you have none; it never opens one). An explicit target.version_id overrides this.",
+        "enum": [
+          "visible",
+          "draft",
+          "published",
+          "my_edit"
+        ],
+        "title": "Version",
+        "type": "string"
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "title": "Workspace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_id",
+      "target"
+    ],
+    "title": "ReadContextOutlineInput",
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "ContextOutlineDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "body_raw_sha256": {
+            "description": "SHA-256 of the exact raw Markdown indexed by outline offsets.",
+            "title": "Body Raw Sha256",
+            "type": "string"
+          },
+          "char_count": {
+            "title": "Char Count",
+            "type": "integer"
+          },
+          "content_hash": {
+            "description": "Hash of canonicalized Markdown. This normalized hash is not an offset-cache key; use body_raw_sha256 for raw outline offsets.",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "section_count": {
+            "title": "Section Count",
+            "type": "integer"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "title": "Version Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "version_id",
+          "version_status",
+          "content_hash",
+          "body_raw_sha256",
+          "char_count",
+          "section_count"
+        ],
+        "title": "ContextOutlineDocument",
+        "type": "object"
+      },
+      "ContextOutlineEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "char_count": {
+            "title": "Char Count",
+            "type": "integer"
+          },
+          "heading_path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Heading Path",
+            "type": "array"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "line_end": {
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "occurrence": {
+            "title": "Occurrence",
+            "type": "integer"
+          },
+          "section_hash": {
+            "description": "Normalized content_hash of the exact raw Markdown slice for this section subtree.",
+            "title": "Section Hash",
+            "type": "string"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_id",
+          "level",
+          "title",
+          "heading_path",
+          "occurrence",
+          "line_start",
+          "line_end",
+          "char_count",
+          "section_hash"
+        ],
+        "title": "ContextOutlineEntry",
+        "type": "object"
+      },
+      "ContextOutlineSection": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_status": {
+            "enum": [
+              "exact",
+              "fuzzy",
+              "fuzzy_distant"
+            ],
+            "title": "Anchor Status",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Cursor"
+          },
+          "section_hash": {
+            "description": "Normalized content_hash of the complete raw selected-section slice, including content beyond this page when truncated.",
+            "title": "Section Hash",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content",
+          "section_hash",
+          "anchor_status",
+          "truncated"
+        ],
+        "title": "ContextOutlineSection",
+        "type": "object"
+      },
+      "EnvelopeWarning": {
+        "additionalProperties": false,
+        "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
+        "properties": {
+          "code": {
+            "description": "Stable warning code; must be drawn from WARNING_CODES.",
+            "enum": [
+              "stale",
+              "permission_limited",
+              "citation_missing",
+              "citation_weak",
+              "citation_stale",
+              "token_budget",
+              "workflow_sequence_incomplete",
+              "draft_not_injectable",
+              "expired_context",
+              "archived",
+              "unsupported_retrieval_mode_fallback",
+              "deprecated_tool",
+              "conversation_token_not_supplied",
+              "unresolved_diverged_branch",
+              "conversation_read_stale",
+              "lint_publish_blocked",
+              "published_with_findings",
+              "draft_unpublished",
+              "text_occurrence_mismatch",
+              "text_not_found",
+              "unsupported_filter_tag",
+              "unsupported_filter_date",
+              "disambiguation_required",
+              "semantic_fallback_used",
+              "keyword_lane_unavailable",
+              "coverage_gap_recorded",
+              "evidence_not_citable",
+              "mrtr_preview_unavailable",
+              "borrowed_rerank_applied",
+              "borrowed_query_rewrite_applied",
+              "llm_provider_unavailable",
+              "llm_composer_failed",
+              "job_fanout_incomplete"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "MCPActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "mcp_client",
+              "agent",
+              "system"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPErrorDetail": {
+        "additionalProperties": false,
+        "description": "One actionable defect in a rejected tool call.\n\nShaped for a caller that has to repair its own request: `field` locates the\nproblem, `message` states it, and `fix` says what to send instead. Never\necho the offending value here \u2014 a rejected `body_markdown` can be a\nmegabyte, and reflecting client input back into a response (and into the\nstored trace) is both wasteful and an injection vector.",
+        "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextMatchCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidates"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fix"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_index": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Index"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPResultEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ref": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Activity Ref"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MCPActor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human",
+                  "mcp_client",
+                  "agent",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Kind"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audit Event Id"
+          },
+          "client_self_reported": {
+            "default": false,
+            "title": "Client Self Reported",
+            "type": "boolean"
+          },
+          "conversation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Opaque MCP conversation token. Echo this value on the next tool call to append to the same dtxWiki MCP chat.",
+            "title": "Conversation Token"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_details": {
+            "items": {
+              "$ref": "#/$defs/MCPErrorDetail"
+            },
+            "title": "Error Details",
+            "type": "array"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Meta"
+          },
+          "model_id": {
+            "default": "unknown",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Version"
+          },
+          "params_summary": {
+            "additionalProperties": true,
+            "title": "Params Summary",
+            "type": "object"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result_status": {
+            "enum": [
+              "accepted",
+              "succeeded",
+              "failed",
+              "partial",
+              "rejected_by_policy",
+              "needs_review",
+              "conflict"
+            ],
+            "title": "Result Status",
+            "type": "string"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retryable"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "schema_version": {
+            "const": "llmwiki.mcp.v1",
+            "default": "llmwiki.mcp.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "result_status"
+        ],
+        "title": "MCPResultEnvelope",
+        "type": "object"
+      },
+      "TextMatchCandidate": {
+        "additionalProperties": false,
+        "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
+        "properties": {
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Block Id"
+          },
+          "line_end": {
+            "minimum": 1,
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "minimum": 1,
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "match_kind": {
+            "enum": [
+              "exact",
+              "normalized",
+              "fuzzy"
+            ],
+            "title": "Match Kind",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "line_start",
+          "line_end",
+          "similarity",
+          "match_kind"
+        ],
+        "title": "TextMatchCandidate",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "content_trust": {
+        "const": "untrusted_user_content",
+        "default": "untrusted_user_content",
+        "title": "Content Trust",
+        "type": "string"
+      },
+      "document": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextOutlineDocument"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "envelope": {
+        "$ref": "#/$defs/MCPResultEnvelope"
+      },
+      "outline": {
+        "description": "One page of the heading list, in document order. Never the whole document unless outline_next_cursor is null.",
+        "items": {
+          "$ref": "#/$defs/ContextOutlineEntry"
+        },
+        "maxItems": 2000,
+        "title": "Outline",
+        "type": "array"
+      },
+      "outline_next_cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Outline Next Cursor"
+      },
+      "outline_omitted_count": {
+        "default": 0,
+        "description": "outline_total minus the entries on this page.",
+        "title": "Outline Omitted Count",
+        "type": "integer"
+      },
+      "outline_total": {
+        "default": 0,
+        "description": "Headings passing max_depth across the WHOLE document -- the full population of this projection. document.section_count is a different number: every heading at every level.",
+        "title": "Outline Total",
+        "type": "integer"
+      },
+      "section": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextOutlineSection"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "envelope"
+    ],
+    "title": "ReadContextOutlineOutput",
+    "type": "object"
+  }
+}

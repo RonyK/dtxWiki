@@ -1,0 +1,379 @@
+"""Bitemporal reads: publish timeline, as_of, what_changed (C2-T8/T9)."""
+
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy import event, func, select
+
+from backend.mcp.router import dispatch
+from backend.models.change import ChangeSet
+from backend.models.context import ContextPage
+from backend.models.workspace import Workspace
+from backend.schemas.context_write import (
+    ReviewDecisionRequest,
+    WriteDraftRequest,
+)
+from backend.services.context_write_service import ContextWriteService
+from backend.services.review_service import ReviewService
+from backend.services.temporal_read import resolve_version_as_of, what_changed
+
+pytestmark = pytest.mark.integration
+
+
+def _workspace_id(session):
+    return session.scalar(select(Workspace.id).where(Workspace.slug == "default"))
+
+
+def _now():
+    return datetime.now(UTC)
+
+
+def _write_and_publish(session, workspace_id, title, body, *, page_id=None):
+    """MCP draft -> human approval, which publishes the latest draft."""
+    write = ContextWriteService()
+    # write_draft resolves the page by slugified title, so the same title
+    # creates a fresh draft on the same page (the re-publish shape).
+    created = write.write_draft(
+        session=session,
+        workspace_id=workspace_id,
+        request=WriteDraftRequest(
+            title=title,
+            page_type="concept",
+            body_markdown=body,
+            reason=f"publish {title}" if page_id else f"seed {title}",
+        ),
+        actor_kind="human",
+        actor_id="tester",
+        actor_role="owner",
+    )
+    page_id = created.page_id
+    version_id = created.draft_version_id
+    review_id = created.review_item_id
+    if review_id is not None:
+        ReviewService().apply_decision(
+            session=session,
+            workspace_id=workspace_id,
+            review_item_id=review_id,
+            request=ReviewDecisionRequest(decision_type="approve"),
+            actor_kind="human",
+            actor_id="tester",
+            actor_role="owner",
+            actor_provenance="browser_session",
+        )
+
+    return page_id, version_id
+
+
+def test_as_of_resolves_superseded_version(session_factory):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        before_any = _now()
+        page_id, v1 = _write_and_publish(
+            session, workspace_id, "Temporal Page", "# Temporal\n\nVersion one."
+        )
+    between = _now()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        _write_and_publish(
+            session,
+            workspace_id,
+            "Temporal Page",
+            "# Temporal\n\nVersion two.",
+            page_id=page_id,
+        )
+
+    with session_factory() as session:
+        page = session.get(ContextPage, page_id)
+        # between the two publishes -> v1 (superseded included)
+        resolved = resolve_version_as_of(session, page, between)
+        assert resolved is not None and resolved.id == v1
+        # before the first publish -> nothing
+        assert resolve_version_as_of(session, page, before_any) is None
+        # now -> v2 (the live head)
+        head = resolve_version_as_of(session, page, _now())
+        assert head is not None and head.id == page.current_published_version_id
+
+
+def test_as_of_uses_publish_instant_not_version_created_at(session_factory):
+    """THE pin: a draft created early but published late must resolve by its
+    PUBLISH time (version.created_at would wrongly resolve it earlier)."""
+
+    write = ContextWriteService()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        created = write.write_draft(
+            session=session,
+            workspace_id=workspace_id,
+            request=WriteDraftRequest(
+                title="Late Publish",
+                page_type="concept",
+                body_markdown="# Late\n\nDraft body.",
+                reason="draft early",
+            ),
+            actor_kind="human",
+            actor_id="tester",
+            actor_role="owner",
+        )
+    draft_created_at = _now()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        if created.review_item_id is not None:
+            ReviewService().apply_decision(
+                session=session,
+                workspace_id=workspace_id,
+                review_item_id=created.review_item_id,
+                request=ReviewDecisionRequest(decision_type="approve"),
+                actor_kind="human",
+                actor_id="tester",
+                actor_role="owner",
+                actor_provenance="browser_session",
+            )
+
+    with session_factory() as session:
+        page = session.get(ContextPage, created.page_id)
+        # at draft_created_at (after draft creation, before publish) the page
+        # was NOT published — version.created_at reasoning would say it was
+        assert resolve_version_as_of(session, page, draft_created_at) is None
+        assert resolve_version_as_of(session, page, _now()) is not None
+
+
+def test_what_changed_delta_flow(session_factory, page_service):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        page_a, _ = _write_and_publish(
+            session, workspace_id, "Delta A", "# A\n\nInitial."
+        )
+    # DB-anchored boundary (see test_what_changed_first_publish_...): the max
+    # published change-set so far is page_a's; the transaction below is strictly
+    # newer, so `created_at > capture_point` is collision-proof under load.
+    with session_factory() as session:
+        capture_point = session.scalar(
+            select(func.max(ChangeSet.created_at)).where(
+                ChangeSet.workspace_id == _workspace_id(session)
+            )
+        )
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        page_b, _ = _write_and_publish(
+            session, workspace_id, "Delta B", "# B\n\nNew page."
+        )
+        _write_and_publish(
+            session, workspace_id, "Delta A", "# A\n\nRevised.", page_id=page_a
+        )
+
+    with session_factory() as session:
+        workspace_id = _workspace_id(session)
+        entries, has_more = what_changed(
+            session, workspace_id, since=capture_point, actor=None
+        )
+    by_page = {entry.page_id: entry for entry in entries}
+    assert by_page[page_b].change_kind == "created"
+    assert by_page[page_a].change_kind == "updated"
+    assert by_page[page_a].reason == "approved through Context review"
+    assert not has_more
+
+
+def test_what_changed_first_publish_ignores_earlier_draft_create(session_factory):
+    write = ContextWriteService()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        created = write.write_draft(
+            session=session,
+            workspace_id=workspace_id,
+            request=WriteDraftRequest(
+                title="First Publish After Since",
+                page_type="concept",
+                body_markdown="# First Publish\n\nDraft first.",
+                reason="draft before delta window",
+            ),
+            actor_kind="human",
+            actor_id="tester",
+            actor_role="owner",
+        )
+    # Anchor `since` to the draft change-set's own commit instant (read back from
+    # the DB), not a wall-clock _now(): ChangeSet.created_at is stamped by
+    # utc_now(), so under load the later publish's utc_now() can collide with a
+    # wall-clock `since` at clock resolution and the strict `created_at > since`
+    # window would drop the publication. The publish below runs in a later
+    # transaction, so its change-set is strictly newer than this max.
+    with session_factory() as session:
+        since = session.scalar(
+            select(func.max(ChangeSet.created_at)).where(
+                ChangeSet.workspace_id == _workspace_id(session)
+            )
+        )
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        ReviewService().apply_decision(
+            session=session,
+            workspace_id=workspace_id,
+            review_item_id=created.review_item_id,
+            request=ReviewDecisionRequest(decision_type="approve"),
+            actor_kind="human",
+            actor_id="tester",
+            actor_role="owner",
+            actor_provenance="browser_session",
+        )
+
+    with session_factory() as session:
+        workspace_id = _workspace_id(session)
+        entries, _ = what_changed(session, workspace_id, since=since, actor=None)
+
+    assert [(entry.page_id, entry.change_kind) for entry in entries] == [
+        (created.page_id, "created")
+    ]
+
+
+def test_what_changed_uses_one_stable_since_bounded_query(
+    session_factory,
+):
+    """The since-window is materialized by ONE ordered query bounded by
+    created_at > since — no OFFSET re-scan per batch (which was not
+    snapshot-stable under a concurrent publish)."""
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        since = _now()
+        for index in range(3):
+            _write_and_publish(
+                session,
+                workspace_id,
+                f"Bounded Delta {index}",
+                f"# Bounded {index}\n\nBody.",
+            )
+
+    statements: list[str] = []
+    with session_factory() as session:
+        workspace_id = _workspace_id(session)
+        engine = session.get_bind()
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            what_changed(session, workspace_id, since=since, actor=None, limit=1)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    timeline_queries = [
+        statement
+        for statement in statements
+        if "JOIN change_set" in statement
+        and "JOIN context_page" in statement
+        and "ORDER BY change_set.created_at" in statement
+    ]
+    assert len(timeline_queries) == 1
+    assert "OFFSET" not in timeline_queries[0].upper()
+    assert "change_set.created_at >" in timeline_queries[0]
+
+
+def test_what_changed_mcp_tool_cursor_roundtrip(
+    page_service,
+    session_factory,
+    mcp_default_actor,
+):
+
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        since = _now()
+        for i in range(3):
+            _write_and_publish(session, workspace_id, f"Cursor {i}", f"# C{i}\n\nBody.")
+
+    actor = mcp_default_actor(
+        actor_id="temporal-cursor-pat",
+        scopes=("mcp:read",),
+    )
+    first = dispatch(
+        "what_changed",
+        {
+            "workspace_id": str(workspace_id),
+            "since": since.isoformat(),
+            "limit": 2,
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert first.envelope.result_status == "succeeded"
+    assert len(first.entries) == 2
+    assert first.has_more and first.next_cursor
+    second = dispatch(
+        "what_changed",
+        {
+            "workspace_id": str(workspace_id),
+            "since": since.isoformat(),
+            "limit": 2,
+            "cursor": first.next_cursor,
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert second.envelope.result_status == "succeeded"
+    assert len(second.entries) == 1
+    assert not second.has_more
+
+
+def test_what_changed_rejects_negative_cursor(
+    page_service,
+    session_factory,
+    mcp_default_actor,
+):
+    import base64
+
+    with session_factory() as session:
+        workspace_id = _workspace_id(session)
+    actor = mcp_default_actor(
+        actor_id="temporal-invalid-cursor-pat",
+        scopes=("mcp:read",),
+    )
+    result = dispatch(
+        "what_changed",
+        {
+            "workspace_id": str(workspace_id),
+            "since": _now().isoformat(),
+            "cursor": base64.urlsafe_b64encode(b"-1").decode(),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+
+    assert result.envelope.result_status == "failed"
+    assert result.envelope.error_code == "validation_failed"
+
+
+def test_archive_surfaces_as_archived_delta(session_factory, page_service):
+    from backend.models.tree import WorkspaceTreeNode
+    from backend.services.tree_service import TreeService
+
+    payload = page_service.write_page(
+        workspace_slug="default",
+        slug="delta-archived",
+        title="Delta Archived",
+        body_md="# DA\n\nBody.",
+        actor_kind="human",
+        actor_id="tester",
+        actor_provenance="browser_session",
+    )
+    since = _now()
+    tree = TreeService()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        node = session.scalar(
+            select(WorkspaceTreeNode).where(
+                WorkspaceTreeNode.target_kind == "context_page",
+                WorkspaceTreeNode.target_id == payload.id,
+            )
+        )
+        tree.archive_node(
+            session=session,
+            workspace_id=workspace_id,
+            node_id=node.id,
+            actor_kind="human",
+            actor_id="tester",
+        )
+
+    with session_factory() as session:
+        workspace_id = _workspace_id(session)
+        entries, _ = what_changed(session, workspace_id, since=since, actor=None)
+    archived = [e for e in entries if e.page_id == payload.id]
+    assert len(archived) == 1
+    assert archived[0].change_kind == "archived"

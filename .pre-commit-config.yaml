@@ -1,0 +1,12 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: core-leak-denylist
+        name: core private-name leak denylist
+        entry: python tests/static/test_leak_denylist.py
+        language: python
+        pass_filenames: false

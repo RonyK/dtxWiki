@@ -1,0 +1,1265 @@
+@media (max-width: 640px) {
+  .mcp-key-step-actions,
+  .mcp-key-setup-action {
+    width: 100%;
+  }
+
+  /* M-F: reader tabs with a trailing action need a second row at phone widths. */
+  .reader-tabs-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Context can expose five body tabs when the selected page has children.
+     Let that tablist form real rows at phone width so every 44px target stays
+     reachable without turning the tablist (or one of its ancestors) into a
+     horizontal scroller. */
+  .context-reader .reader-tabs-row,
+  .context-reader .reader-tabs,
+  .settings-policy-tabs .reader-tabs-row,
+  .settings-policy-tabs .reader-tabs {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  /* A breadcrumb crumb is a link, and on a phone it measured 43x18 -- less
+     than half the 44px minimum every other control on this screen honours.
+     Padding rather than min-height, so the row keeps its height and only the
+     hit area grows; the negative inline margin keeps the first crumb aligned
+     with the h1 below it. */
+  .breadcrumb-item a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 6px;
+  }
+
+  .breadcrumbs {
+    margin-inline: -6px;
+  }
+
+  /* Settings exposes the same five-tab problem: "Library policy" through
+     "Lint" do not fit 340px on one line, and .reader-tabs is nowrap with no
+     overflow. Wrapping beats a horizontal scroller -- which is the affordance
+     just removed from the section nav for being unreadable. */
+  .context-reader .reader-tabs,
+  .settings-policy-tabs .reader-tabs {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    inline-size: 100%;
+    /* `.reader-tabs` sets a single `gap: 24px`, which is column-only while the
+       list is nowrap. Turning wrapping on above made that 24px a ROW gap too:
+       the five tabs sat in two bands 68px apart, with the active tab's
+       underline stranded above the gap and the group's border-bottom under the
+       far row, so one tablist read as two unrelated controls. Rows of tabs
+       belong directly under one another. */
+    row-gap: 0;
+  }
+
+  .reader-tabs-trailing {
+    margin-left: auto;
+  }
+
+  /* Keep the switcher inside the phone viewport regardless of where the
+     compact top-bar trigger lands. Anchoring its right edge to a trigger near
+     the left side makes a 340px panel start at a negative x coordinate. */
+  .workspace-popover {
+    position: fixed;
+    top: var(--topbar-h);
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - var(--topbar-h) - 12px);
+    overflow-y: auto;
+  }
+
+  .dashboard-welcome-workspaces,
+  .dashboard-welcome-workspaces > .icon-button {
+    width: 100%;
+  }
+
+  .dashboard-welcome-workspaces > .icon-button {
+    justify-content: center;
+  }
+
+  .workspace-directory-search > div {
+    grid-template-columns: 18px minmax(0, 1fr);
+    padding: 9px 10px;
+  }
+
+  .workspace-directory-search button {
+    grid-column: 1 / -1;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .workspace-directory-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-directory-card {
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .workspace-directory-card-actions > button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  /* A54: stack the auto-approve risk row so the delay label/input stay inside the
+     card instead of overflowing the 3-column grid at mobile width. */
+  .review-auto-approve-setting-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcp-chat-filters {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .mcp-chat-filters-group {
+    width: 100%;
+  }
+
+  .mcp-chat-filters-group.is-find,
+  .mcp-chat-filters-group.is-view {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mcp-chat-filters-group.is-view .segmented-control {
+    width: 100%;
+  }
+
+  .mcp-chat-filters-group.is-flags {
+    flex-wrap: wrap;
+  }
+
+  .mcp-chat-title-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .mcp-title-edit-row {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .mcp-title-edit-row input {
+    flex-basis: 100%;
+  }
+
+  /* H-3 (260908 UI audit): WorkspaceLayout.tsx stamps every screen with
+     data-mobile-action-reserve, and .workspace-screen[data-mobile-action-
+     reserve="true"] .feature-main (07-settings-policy.css) reserves 180px at
+     (0,3,0) specificity -- it was silently winning over a plain
+     `.ask-screen .feature-main` rule here (0,2,0) no matter what padding this
+     block set, which is why raising the padding-bottom above did nothing.
+     Matching that selector's specificity (two classes here + the descendant
+     .feature-main = three) lets this rule win on source order instead, scoped
+     to Ask only -- every other screen using that shared reservation is
+     untouched. The sticky composer's stuck position moves UP by exactly
+     whatever padding-bottom is set here (it sticks to the padding edge, not
+     the border edge), so the 180px "reservation" was pushing the composer up
+     just as much and never closing the gap: measured overlap between
+     .ask-composer and the last .turn-card plateaus at a constant 13.75px for
+     any value from 48px to 180px, while 0px measured an 18px clearance
+     instead. Only the safe-area inset is genuinely needed (notch clearance),
+     matching every other bare env() use in this file. */
+  .workspace-screen.ask-screen .feature-main {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* The only remaining mobile action is the Details control; keep it above the
+     in-flow sticky composer when a session exposes an inspector. */
+  .ask-screen .workspace-mobile-actions {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-2);
+  }
+
+  /* A-3: let segmented-control labels (e.g. "Yesterday") wrap instead of
+     overflowing their button on narrow screens, keeping a 44px touch target. */
+  .segmented-control button {
+    min-width: 44px;
+    min-height: 44px;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .review-queue-grid,
+  .lint-finding-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-queue-card__risks {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ask-screen .ask-composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 60;
+    margin: 0 -24px -32px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    isolation: isolate;
+    box-shadow: 0 -8px 20px rgb(15 23 42 / 8%);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  /* Empty-state composer remains in flow after the first-use checklist. */
+  .ask-screen .feature-main.ask-empty {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .ask-screen .feature-main.ask-empty .ask-composer {
+    position: static;
+    margin-top: 14px;
+    box-shadow: none;
+  }
+}
+
+/* Keep the empty Ask composer in normal tablet flow; the generic responsive
+   form cascade otherwise moves Send onto an unnecessary second row. */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .ask-screen .feature-main.ask-empty {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .ask-screen .feature-main.ask-empty .ask-composer {
+    position: static;
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-top: 14px;
+    box-shadow: none;
+  }
+
+  .ask-screen .feature-main.ask-empty .ask-composer > :is(input, button) {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 390px) {
+  .page-workspace .editor-panel {
+    padding: 12px;
+  }
+
+  .page-workspace .editor-header,
+  .page-workspace .editor-page-header,
+  .page-workspace .editor-command-bar {
+    margin-bottom: 8px;
+  }
+
+  /* Keep the baseline new-page editor's full 50dvh region inside the first
+     390x844 viewport across sub-pixel browser layout differences. */
+  .page-workspace .editor-page-header {
+    margin-bottom: 4px;
+  }
+
+  .page-workspace .editor-header .meta-line {
+    display: none;
+  }
+
+  /* The mobile Context toggle already identifies the current surface. Remove
+     the otherwise-empty lead column so publication controls and the persistent
+     ActionBar both fit ahead of the baseline 50dvh editor region. */
+  .page-workspace .editor-header-lead {
+    display: none;
+  }
+
+  .page-workspace .editor-header .sync-pill {
+    flex: 0 1 auto;
+    inline-size: auto;
+    max-inline-size: 100%;
+  }
+
+  /* Tags move into the Properties drawer at this breakpoint, so the title can
+     share one compact row with Format and Properties. The <=1024px wrap rule
+     otherwise gives the textarea its intrinsic flex basis and pushes both
+     controls onto a second 44px row. */
+  .page-workspace .editor-title-row {
+    align-items: flex-start;
+    flex-wrap: nowrap;
+  }
+
+  .page-workspace .editor-title-input {
+    flex: 1 1 0;
+    min-inline-size: 0;
+  }
+
+  .page-workspace .editor-command-bar {
+    /* This is a flex child of the full-height editor panel. Without an explicit
+       no-shrink contract its wrapped ActionBar overflows the 36px parent and is
+       painted underneath the editor grid even though it remains accessible. */
+    flex: 0 0 auto;
+    gap: 8px;
+  }
+
+  .page-workspace .editor-action-bar-shell,
+  .page-workspace .editor-action-bar {
+    width: 100%;
+  }
+
+  .page-workspace .editor-action-bar {
+    justify-content: space-between;
+  }
+
+  .page-workspace .editor-grid {
+    flex: 0 0 auto;
+    min-height: 50dvh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Public published-page reader (T16). Minimal standalone chrome — no app
+   sidebar/rails/inspector — for the unauthenticated /w/:slug/pages/:slug route. */
+.public-frame {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.public-frame-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: var(--topbar-h);
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.public-frame-brand {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.public-reader {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+.public-reader-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  text-align: center;
+}
+
+.public-reader-header {
+  margin-bottom: 20px;
+}
+
+.public-reader-header h1 {
+  margin: 0 0 6px;
+}
+
+.public-reader-updated {
+  color: var(--ink-muted);
+  font-size: 0.88rem;
+}
+
+/* Publish visibility control in the in-app page reader (T16). */
+.publish-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.publish-control-url {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.publish-control-url code {
+  max-width: 100%;
+  overflow: auto;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 2px 6px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.publish-control-disabled-reason {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  max-width: 42rem;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--info) 32%, var(--border));
+  border-radius: var(--radius-card);
+  background: var(--info-soft);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.publish-control-disabled-reason svg {
+  margin-top: 1px;
+  color: var(--info);
+}
+
+/* Settings > Setup (read-only deployment status + reconfigure commands) */
+.deployment-status-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 20px;
+}
+
+.deployment-status-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.deployment-status-row dt {
+  font-weight: 700;
+  color: var(--ink-muted, var(--ink));
+}
+
+.deployment-status-row dd {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  /* anywhere (not break-all) so prose like the OAuth-unavailable reason wraps at
+     word boundaries; only long unbreakable tokens (URLs) break mid-string. */
+  overflow-wrap: anywhere;
+}
+
+/* M-E: per-component readiness sub-rows shown under the Health summary when a
+   probe is degraded. Indents under the parent status list and tightens the row
+   chrome so the db/app_version/mcp/oauth_jwk breakdown reads as a sub-group. */
+.deployment-health-components {
+  display: grid;
+  gap: 6px;
+  margin: -8px 0 20px 16px;
+}
+
+.deployment-health-components .deployment-status-row {
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  padding: 6px 10px;
+  background: var(--surface-subtle);
+}
+
+.deployment-configuration-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--surface-subtle) 70%, var(--surface));
+  box-shadow: var(--shadow-1);
+  padding: 14px;
+}
+
+.deployment-configuration-head {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.deployment-configuration-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.deployment-configuration-head .meta-line,
+.deployment-command .meta-line {
+  margin: 0;
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+.deployment-commands {
+  display: grid;
+  gap: 10px;
+}
+
+.deployment-command {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.deployment-command-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.deployment-command .command-block {
+  gap: 6px;
+}
+
+.deployment-command .command-block-header {
+  justify-content: flex-end;
+}
+
+.deployment-command .command-block-header > span {
+  display: none;
+}
+
+.deployment-command .command-block-header .icon-button {
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+.deployment-command .command-block .policy-snippet {
+  max-height: 112px;
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+
+/* Settings > Users: protected Server Admin account-recovery surface. */
+.admin-user-recovery {
+  display: grid;
+  gap: 16px;
+}
+
+/* One head for every Settings pane. This was three class names --
+   .admin-jobs-head, .attachments-head, .admin-user-recovery-head -- carrying
+   byte-identical declarations plus three identical `flex-direction: column`
+   overrides in the narrow query below. */
+.settings-pane-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.settings-pane-head h2,
+.admin-recovery-modal h2 {
+  margin: 0;
+}
+
+/* A heading that panes move focus to after a destructive action. The focus is
+   programmatic, so the ring is the only thing that tells a sighted keyboard
+   user where they landed; without this the browser draws nothing for a
+   tabindex="-1" target. */
+.settings-pane-head h2:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* One loading row, replacing four of the five presentations Settings had
+   (.meta-line, .field-hint, .lint-loading, and a loading message rendered
+   inside .empty-state), with role="status" on the component so every list
+   announces the wait instead of one of ten doing it.
+
+   RouteLoading stays, with a rule: a whole pane that has nothing to show yet
+   uses RouteLoading; one list inside a pane that is otherwise rendered uses
+   this. */
+.settings-loading-row {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.admin-recovery-notice {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-user-reauth {
+  display: grid;
+  grid-template-columns: minmax(0, 440px) auto;
+  gap: 12px;
+  align-items: end;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  padding: 14px;
+}
+
+.admin-user-reauth > div,
+.admin-user-reauth > .status-banner {
+  grid-column: 1 / -1;
+}
+
+.admin-user-reauth p,
+.admin-user-reauth .field-stack {
+  margin: 0;
+}
+
+.admin-user-search {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-user-search .field-stack {
+  margin: 0;
+}
+
+.admin-user-search-action {
+  min-height: 42px;
+}
+
+.admin-user-search-results {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-user-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.admin-user-card-main,
+.admin-user-identity {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.admin-user-identity span,
+.admin-user-workspaces {
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.admin-user-pagination {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.admin-user-statuses {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-user-workspaces {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+.admin-user-recovery-action {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.admin-user-recovery-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  width: min(100%, 390px);
+}
+
+.admin-user-recovery-actions .admin-user-recovery-action {
+  justify-self: stretch;
+  justify-content: center;
+}
+
+.admin-user-recovery-actions .meta-line {
+  grid-column: 1 / -1;
+  margin: 0;
+  max-width: 390px;
+}
+
+.admin-recovery-modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.admin-recovery-mode {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.admin-recovery-mode legend {
+  margin-bottom: 7px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.admin-recovery-mode label,
+.admin-recovery-token-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  padding: 10px;
+}
+
+.admin-recovery-mode input,
+.admin-recovery-token-option input {
+  margin-top: 3px;
+}
+
+.admin-recovery-mode span,
+.admin-recovery-token-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-recovery-mode small,
+.admin-recovery-token-option small {
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+
+.admin-recovery-mode strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.admin-recovery-selected-delivery {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid var(--info);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  padding: 10px;
+}
+
+.admin-recovery-selected-delivery > svg {
+  margin-top: 2px;
+}
+
+.admin-recovery-selected-delivery span {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-recovery-selected-delivery small {
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+
+.admin-recovery-modal .field-stack {
+  margin: 0;
+}
+
+.admin-recovery-modal .field-stack input {
+  width: 100%;
+}
+
+/* Settings > Jobs: Server Admin background-job queue surface. */
+.admin-jobs {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-jobs-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.admin-jobs-summary-stat {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.admin-jobs-summary-stat dt {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.admin-jobs-summary-stat dd {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.admin-jobs-summary-stat[data-tone="warn"] {
+  border-color: var(--warning);
+}
+
+.admin-jobs-filter-toggle {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-job-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-job-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.admin-job-card-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.admin-job-identity {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-job-identity strong {
+  text-transform: capitalize;
+}
+
+.admin-job-identity span {
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.admin-job-statuses {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-job-error {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.admin-job-actions {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  width: min(100%, 220px);
+}
+
+.admin-job-actions .meta-line {
+  margin: 0;
+  text-align: end;
+}
+
+/* Settings > Attachments: every uploaded file in the workspace, with the
+   unused ones as one filter rather than the whole screen. Mirrors .admin-job*
+   above -- same card shape -- plus a thumbnail column and a per-card delete
+   confirmation, neither of which the orphan-only ancestor needed. */
+.attachments {
+  display: grid;
+  gap: 16px;
+}
+
+.attachments-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachments-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 14px;
+}
+
+/* The server-admin fallback rows carry no thumbnail at all, so the card must
+   collapse to one column rather than leave an empty 92px gutter. */
+.attachments-card:not(:has(.attachments-preview)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Same box as the page-level media manager's thumbnail, so an attachment looks
+   the same wherever it is listed. */
+.attachments-preview {
+  width: 92px;
+  height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  object-fit: contain;
+}
+
+/* Audio and video have no still to show; a glyph beats the broken-image icon,
+   which reads as "this file is corrupt". */
+/* The thumbnail opens the enlargement, so it is a button -- but a bare one.
+   .icon-button would wrap it in a bordered 34px padding box and pull it into
+   the 44px touch floor, which is for controls you tap, not for the image
+   itself. */
+.attachments-preview-trigger {
+  display: block;
+  align-self: start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.attachments-preview-trigger:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.attachments-preview-kind {
+  display: grid;
+  place-items: center;
+  color: var(--ink-muted);
+  font-size: 24px;
+}
+
+.attachments-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.attachments-actions,
+.attachments-confirm-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.attachments-confirm {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 10px;
+}
+
+.attachments-load-more {
+  justify-self: start;
+}
+
+.attachments-card-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attachments-identity {
+  display: grid;
+  gap: 3px;
+}
+
+.attachments-identity > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+/* The type/size line and the state pill share a row: the pill was claiming a
+   full row of its own for one 20px chip. */
+.attachments-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The global .meta-line carries margin: 6px 0 0 (03-editor.css). Inside a flex
+   row that is dead space, so it is neutralised here rather than on the shared
+   class. */
+.attachments-meta-row .meta-line {
+  margin: 0;
+}
+
+.attachments-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* One line, not a 2x2 grid. The <dt> labels stay in the DOM for assistive
+   tech and are clipped visually (see .visually-hidden), so the separator has to
+   be drawn rather than read: a "Page: x  Uploaded by: y" line would be twice as
+   long as the values it carries. */
+.attachments-facts {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.attachments-facts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attachments-facts > div + div::before {
+  color: var(--ink-soft);
+  content: "\00b7";
+}
+
+.attachments-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+}
+
+/* The linked page is the one thing on this line worth pointing at, so it gets
+   the affordance Ask gives its backlinks -- bordered, unadorned, accent on
+   hover -- at chip scale instead of .page-backlink-item's 10px/12px block,
+   which would add back the row this change removes. */
+.attachments-page-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 1px 7px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.attachments-page-link:hover {
+  border-color: var(--accent);
+  background: var(--surface-subtle);
+}
+
+.attachments-page-link:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .admin-user-reauth,
+  .admin-user-search,
+  .admin-user-card,
+  .admin-job-card {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-jobs-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-pane-head {
+    flex-direction: column;
+  }
+
+  .admin-job-actions {
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .attachments-preview {
+    width: 64px;
+    height: 56px;
+  }
+
+  .admin-user-reauth .icon-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .deployment-status-row,
+  .deployment-health-components .deployment-status-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .deployment-health-components {
+    margin-left: 0;
+  }
+
+  .admin-user-pagination {
+    justify-content: space-between;
+  }
+
+  .admin-user-recovery-action {
+    width: 100%;
+    justify-content: center;
+    justify-self: stretch;
+  }
+
+  .admin-user-recovery-actions {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .admin-user-recovery-actions .meta-line {
+    grid-column: 1;
+  }
+
+  .admin-recovery-modal .modal-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-recovery-modal .modal-actions .icon-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* Live mobile-audit regressions. These overrides stay in the final stylesheet
+   so they can constrain intrinsic control widths established by earlier
+   feature partials without changing the corresponding desktop layouts. */
+@media (max-width: 640px) {
+  /* Activity's compact segmented controls contributed their max-content width
+     to the surrounding grid. The document still reported 390px, but the period
+     choices ended around x=436 and were clipped rather than scrollable. */
+  .activity-filter-shell,
+  .activity-filter-toggle,
+  .activity-filters,
+  .activity-filter-group {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .activity-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activity-filter-heading {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  .activity-filter-heading .segmented-control,
+  .activity-subtype-row .segmented-control {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .activity-filter-heading .segmented-control button,
+  .activity-subtype-row .segmented-control button {
+    flex: 1 1 auto;
+  }
+
+  /* Keep the Workspace identity on its own shrinkable row. Previously the
+     badges/default action consumed almost the whole compact flex row and left
+     the current Workspace title with a measured width below one pixel. */
+  .workspace-access-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .workspace-access-row > svg {
+    flex: 0 0 auto;
+    margin-top: 2px;
+  }
+
+  .workspace-access-row > div:first-of-type {
+    flex: 1 1 calc(100% - 28px);
+    min-width: 0;
+  }
+
+  .workspace-access-row > div:first-of-type strong {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .workspace-access-row-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding-inline-start: 26px;
+  }
+}

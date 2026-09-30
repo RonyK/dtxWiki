@@ -1,0 +1,291 @@
+{
+  "upload": {
+    "partialFailure": "Failed to upload {{failedCount}} of {{totalCount}} files. {{details}}",
+    "action": "Upload",
+    "uploading": "Uploading",
+    "title": "Upload Library file",
+    "ariaMobile": "Upload Library file from mobile action",
+    "ariaMobileBusy": "Uploading Library file from mobile action",
+    "drop": "Drop files to upload",
+    "queue": "Upload queue",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "retryAfter": "Try again in {{seconds}} seconds.",
+    "openPolicySettings": "Open Library policy settings",
+    "failedFallback": "Failed to upload Library item",
+    "reloadCapabilities": "Reload policy",
+    "refreshFailed": "File upload succeeded, but Library could not be refreshed. Reload to see the latest item.",
+    "retryAriaLabel": "Retry upload for {{name}}",
+    "status": {
+      "queued": "Queued",
+      "uploading": "Uploading",
+      "cancelling": "Checking cancellation",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "outcome-unknown": "Result unknown — retry to reconcile"
+    },
+    "errors": {
+      "batchLimit": "Select no more than {{count}} files at once.",
+      "unsupportedFormat": "This file format is not enabled for this workspace.",
+      "tooLarge": "This file exceeds the {{maxSize}} limit for its format.",
+      "capabilitiesUnavailable": "Upload is temporarily unavailable because the server format policy could not be verified. Reload to try again."
+    }
+  },
+  "errors": {
+    "load": "The Library could not be loaded. Try again.",
+    "loadDetail": "The Library item could not be loaded. Try again.",
+    "moveTreeNode": "The Library item could not be moved. Try again.",
+    "reorderTreeNode": "The Library item could not be reordered. Try again.",
+    "upload": "The Library file could not be uploaded. Try again.",
+    "itemUnavailable": "That Library item is no longer available. It was removed from the list."
+  },
+  "history": {
+    "sourceVersion": "Source fetch version",
+    "selectedVersion": "Selected Library version"
+  },
+  "overview": {
+    "eyebrow": "Reference store",
+    "title": "Library",
+    "empty": "No Library items yet",
+    "emptyDescription": "Library stores trusted source material that Context pages and Ask answers should cite.",
+    "addFirst": "Add first Library item",
+    "openContext": "Open Context",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…"
+  },
+  "panel": {
+    "recentHeading": "Recent updates",
+    "itemsHeading": "Items",
+    "items_one": "item",
+    "items_other": "items"
+  },
+  "labels": {
+    "unset": "unset",
+    "connectorType": {
+      "manual_upload": "Manual upload",
+      "upload": "Upload",
+      "web": "Web",
+      "file": "File"
+    },
+    "format": {
+      "markdown": "Markdown",
+      "text": "Plain text",
+      "csv": "CSV",
+      "json": "JSON",
+      "yaml": "YAML",
+      "pdf": "PDF",
+      "html": "HTML",
+      "unknown": "Unknown"
+    },
+    "artifactType": {
+      "extracted_text": "Extracted text",
+      "extracted_markdown": "Extracted markdown",
+      "text": "Text"
+    },
+    "trustLevel": {
+      "unknown": "Unknown",
+      "trusted": "Trusted",
+      "restricted": "Restricted"
+    },
+    "lifecycleStatus": {
+      "registered": "Registered",
+      "active": "Active",
+      "archived": "Archived",
+      "published": "Published",
+      "draft": "Draft",
+      "ready": "Ready",
+      "ready_partial": "Ready with limits",
+      "stored_unconverted": "Original stored",
+      "failed": "Failed",
+      "timed_out": "Timed out",
+      "extract_pending": "Extraction pending",
+      "extract_failed": "Extraction failed"
+    },
+    "processingStatus": {
+      "pending": "Pending",
+      "queued": "Queued",
+      "converting": "Converting",
+      "projecting": "Preparing search",
+      "ready": "Ready",
+      "ready_partial": "Ready with limits",
+      "stored_unconverted": "Original stored",
+      "completed": "Completed",
+      "failed": "Failed",
+      "timed_out": "Timed out"
+    }
+  },
+  "deleteDialog": {
+    "eyebrow": "Delete item",
+    "title": "Delete {{title}}",
+    "close": "Close",
+    "closeDialog": "Close delete dialog",
+    "checking": "Checking references…",
+    "referenced_one": "1 page cites this item. Deleting it leaves a deleted-item marker on that page and notifies reviewers.",
+    "referenced_other": "{{count}} pages cite this item. Deleting it leaves deleted-item markers on those pages and notifies reviewers.",
+    "unreferenced": "This permanently deletes the item and all its versions. This cannot be undone.",
+    "cancel": "Cancel",
+    "deleting": "Deleting",
+    "deletePermanently": "Delete permanently",
+    "errors": {
+      "loadReferences": "Failed to load references",
+      "delete": "Failed to delete item"
+    }
+  },
+  "loading": "Loading Library",
+  "libraryName": "Library",
+  "reader": {
+    "updated": "Updated {{value}}",
+    "ariaLabel": "Library reader views",
+    "tabs": {
+      "view": "View",
+      "history": "History",
+      "activity": "Activity",
+      "unavailable": "Not available yet"
+    },
+    "delete": "Delete",
+    "edit": "Edit Markdown",
+    "addVersion": "Upload new version",
+    "addingVersion": "Uploading new version…",
+    "downloadOriginal": "Download original file",
+    "potentiallyActiveOriginalDownloadWarning": "dtxWiki does not execute this file during preview, but the original may contain active content that another application can run after download. Download only if you trust the file.",
+    "downloadingOriginal": "Downloading original file…",
+    "downloadFailed": "The original file could not be downloaded. Please try again.",
+    "retryConversion": "Retry conversion",
+    "retryingConversion": "Retrying conversion…",
+    "retryConversionFailed": "Document conversion could not be retried.",
+    "editor": {
+      "title": "Edit semantic Markdown",
+      "loading": "Loading editable Markdown…",
+      "unavailable": "This version no longer has editable semantic Markdown.",
+      "loadFailed": "Editable Markdown could not be loaded.",
+      "retry": "Try again",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "cancel": "Cancel",
+      "stale": "This Markdown changed after you opened it. Reload the latest version before saving again.",
+      "staleStatus": "Newer version available",
+      "reloadLatest": "Reload latest",
+      "saveFailed": "Markdown could not be saved. Your edits are still here.",
+      "unsaved": "Not saved",
+      "unsavedChanges": "Unsaved changes",
+      "noChanges": "No unsaved changes",
+      "controlsAria": "Editor controls",
+      "modeAria": "Editor mode",
+      "sourceMode": "Source",
+      "sourceModeTitle": "Source mode",
+      "readingMode": "Reading",
+      "readingModeTitle": "Reading mode",
+      "splitMode": "Split",
+      "splitModeTitle": "Split mode",
+      "bodyAria": "Markdown body",
+      "bodyPlaceholder": "Start typing…",
+      "actionBar": {
+        "more": "More editor actions",
+        "moreMenu": "More editor actions",
+        "moreShort": "More",
+        "readingDisabled": "Editing commands are unavailable in Reading mode.",
+        "toolbar": "Editor actions"
+      }
+    },
+    "history": {
+      "conversionFailed": "Document conversion failed. The original file remains stored.",
+      "conversionTimedOut": "Document conversion timed out. The original file remains stored.",
+      "originalStored": "Original file stored without a searchable conversion.",
+      "conversionInProgress": "Document conversion is in progress.",
+      "conversionReadyPartial": "Document conversion completed with limitations.",
+      "conversionReady": "Document conversion completed.",
+      "sourceVersion": "Original file version.",
+      "downloadVersion": "Download this version",
+      "downloadingVersion": "Downloading this version…",
+      "sourceUnavailable": "The original file is no longer retained."
+    },
+    "noExtractedView": "No extracted view",
+    "jsonPreview": "JSON source preview",
+    "pdfUnavailable": "PDF preview unavailable",
+    "pdfNoUrl": "This PDF Library item does not expose a browser-readable document URL yet.",
+    "preview": {
+      "fileSavedConverting": "File saved. Creating a document preview…",
+      "fileSavedConversionFailed": "File saved, but document conversion failed.",
+      "fileSavedConversionTimedOut": "File saved, but document conversion timed out. You can still download the original.",
+      "originalSavedNoConverter": "Original saved. Searchable document preview is not available.",
+      "previewPendingSourceSaved": "Preview is still being prepared. The original file is safely stored.",
+      "previewGenerationFailedSourceSaved": "Preview generation failed. The original file is safely stored.",
+      "previewUnavailableSourceSaved": "No inline preview is available. The original file is safely stored.",
+      "mediaAuthUnavailable": "Inline media preview is unavailable with the current sign-in method. The original file is safely stored.",
+      "mediaCodecUnsupported": "This browser cannot play this media format. The original file is safely stored.",
+      "mediaRuntimeFailed": "The media preview could not be played. The original file is safely stored.",
+      "loading": "Loading preview…",
+      "loadError": "Preview could not be loaded.",
+      "retry": "Retry preview",
+      "previousVersion": "Showing a preview from the previous available version.",
+      "rendererLoading": "Loading preview renderer…",
+      "generating": "Preview is being generated.",
+      "generationFailed": "Preview generation failed. The original file may still be downloaded.",
+      "unavailable": "No supported preview is available for this file.",
+      "truncated": "This preview is truncated.",
+      "metadataAria": "File metadata preview",
+      "downloadUnsupported": "This file does not have a supported inline preview.",
+      "downloading": "Downloading file…",
+      "download": "Download file",
+      "downloadFailed": "Download failed. Please try again.",
+      "audioAria": "Audio preview for {{title}}",
+      "videoAria": "Video preview for {{title}}"
+    },
+    "rendition": {
+      "label": "Rendition",
+      "original": "Original",
+      "converted": "Converted",
+      "goOriginal": "View original →",
+      "goConverted": "View converted →",
+      "derivedNote": "Shown from a sanitized copy of the original.",
+      "showingOriginalFallback": "No converted rendition exists for this version; showing the original.",
+      "showingConvertedFallback": "No original rendition exists for this version; showing the converted output.",
+      "format": {
+        "markdown": "Markdown",
+        "table": "Table",
+        "text": "Text",
+        "pdf": "PDF",
+        "image": "Image",
+        "audio": "Audio",
+        "video": "Video",
+        "metadata": "Metadata"
+      }
+    },
+    "pdf": {
+      "previewFor": "PDF preview for {{title}}",
+      "previousAria": "Previous PDF page",
+      "previous": "Previous",
+      "pageWithTotal": "Page {{current}} / {{total}}",
+      "pageCurrent": "Page {{current}}",
+      "nextAria": "Next PDF page",
+      "next": "Next",
+      "zoomOutAria": "Zoom out of the PDF page",
+      "zoomInAria": "Zoom in on the PDF page",
+      "zoomLevelAria": "PDF zoom level",
+      "loading": "Loading PDF preview…",
+      "loadingViewer": "Loading PDF viewer…",
+      "extractedText": "Extracted text",
+      "fallback": "Open the source file or use the extracted text below."
+    },
+    "noActivity": "No per-source activity stream yet. Uploads and revisions are under History, and the workspace feed lives on the Activity page."
+  },
+  "inspector": {
+    "emptyTitle": "Library detail",
+    "emptyBody": "Select a Library item to inspect trust, versions, and artifacts.",
+    "trust": "TRUST",
+    "versions": "VERSIONS",
+    "current": "Current",
+    "none": "none",
+    "status": "Status",
+    "updated": "Updated",
+    "artifacts": "ARTIFACTS",
+    "noArtifacts": "No extracted artifacts"
+  },
+  "treeEmpty": "No Library tree nodes",
+  "layout": {
+    "details": "Details",
+    "explorer": "Explorer"
+  }
+}

@@ -1,0 +1,34 @@
+include README.md
+include LICENSE
+include LICENSE-AGPL-3.0
+include LICENSE-ELv2
+include NOTICE
+include DEPLOYMENT.md
+include backend/alembic.ini
+recursive-include backend/migrations *
+recursive-include backend/catalog/mcp_apps *.json *.md *.svg *.png
+recursive-include backend/catalog/library_family_presets *.json
+recursive-include backend/static *
+recursive-include infra/prod *
+include tests/packaging/production_smoke.sh
+include tests/packaging/production_smoke.ps1
+global-exclude __pycache__/*
+global-exclude *.py[cod]
+# A filled-in env file (infra/prod/.env next to docker-compose.yml, or a copy of
+# /etc/dtxwiki/dtxwiki.env) holds live secrets and must never ship in an sdist,
+# and neither may a local database or an operator backup. Only the committed
+# templates are re-added after the excludes.
+global-exclude .env .env.* *.env
+global-exclude *.sqlite *.sqlite-*
+prune infra/prod/backups
+include infra/prod/.env.example
+include infra/prod/.env.docker.example
+# Operator audit + internal/private docs + temp scratch — never ship in the
+# release wheel. `doc`, `docs` and `review` are the three private document roots
+# (see AGENTS.md "Design Sources"); the comment named them before the prunes did.
+prune internal
+prune doc
+prune docs
+prune review
+prune tests/fixtures
+prune .ci-evidence

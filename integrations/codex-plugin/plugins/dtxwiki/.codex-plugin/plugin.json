@@ -1,0 +1,29 @@
+{
+  "name": "dtxwiki",
+  "version": "0.1.1",
+  "description": "Use dtxWiki MCP with grounded retrieval, draft authoring, human review, and staged maintenance workflows.",
+  "author": {
+    "name": "dtxSuite"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "dtxwiki-conventions",
+    "dtxwiki-retrieval",
+    "dtxwiki-authoring-review",
+    "dtxwiki-maintenance",
+    "wiki-capture"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "dtxWiki",
+    "shortDescription": "Retrieve and draft reviewed dtxWiki knowledge",
+    "longDescription": "Use dtxWiki MCP through conversation-safe retrieval, cited Context drafts, human review boundaries, and staged maintenance rounds.",
+    "developerName": "dtxSuite",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": "Capture this discussion as a grounded dtxWiki draft for human review."
+  }
+}

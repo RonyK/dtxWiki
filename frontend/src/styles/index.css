@@ -1,0 +1,18 @@
+/* App styles — split from a single 10k-line file into contiguous,
+   cascade-ordered partials. ORDER IS SIGNIFICANT: later files override
+   earlier ones; the base reset + design tokens must stay first (01-base).
+   Vite/PostCSS inlines these @imports, so the bundled output is identical
+   to the original file. Keep new rules in the partial that owns the area. */
+
+@import "./01-base.css"; /* base reset, design tokens, pill/dot/card primitives, global element styles */
+@import "./02-shell.css"; /* App shell, topbar, sidebar, workspace switcher, main surface */
+@import "./03-editor.css"; /* Focus mode, page editor panel/grid/header, inspector tabs, preview panes */
+@import "./04-knowledge.css"; /* Citations, empty states, tree rails, command block, agent cards, recency */
+@import "./05-review-activity-search.css"; /* Review rails, activity filters, search, chats list */
+@import "./06-chats-review-queue.css"; /* Chat cards/detail, timeline, review queue cards */
+@import "./07-settings-policy.css"; /* Recent decisions, policy cards, settings subnav, MCP/OAuth, snippets */
+@import "./08-responsive-deployment.css"; /* Mobile (<=640px) overrides, deployment configuration card */
+@import "./09-context-audit-fixes.css"; /* Context History, Activity, pagination, sharing, and reader audit fixes */
+@import "./09-lint-findings-fixes.css"; /* Lint finding cards, actions, filters, and numeric pagination */
+@import "./10-library-policy-fixes.css"; /* Typed Library policy and effective-limit presentation */
+@import "./11-chats-filter-fixes.css"; /* Compact Chats filter disclosure */

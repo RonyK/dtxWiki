@@ -1,0 +1,540 @@
+/* Lint findings intentionally use their own card geometry. Shared
+   .review-row/.operations-row selectors serve other routes and previously
+   produced a bordered card nested inside another bordered card here. */
+.lint-finding-card {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+/* Severity rides in a labelled pill, not in the card surface. Tinting whole
+   cards (or hanging an accent bar off their edge) turned the queue into a wall
+   of coloured panels; the card stays neutral and only the pill carries hue. */
+.lint-finding-card[data-severity="error"] {
+  --finding-tone: var(--danger);
+}
+
+.lint-finding-card[data-severity="warning"] {
+  --finding-tone: var(--warning);
+}
+
+.lint-finding-card[data-severity="info"] {
+  --finding-tone: var(--info);
+}
+
+/* The card is the post-mutation focus target -- it is the only element every
+   finding has, now that the details disclosure is gone -- so focus landing on
+   it has to be visible. */
+.lint-finding-card:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.lint-finding-card.is-linked-target {
+  border-color: var(--info);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 20%, transparent);
+}
+
+.lint-finding-card.is-busy {
+  opacity: 0.72;
+}
+
+.lint-finding-card__main {
+  display: grid;
+  grid-template-areas: "select body actions";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.lint-finding-card .lint-row-selector {
+  grid-area: select;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.lint-finding-card .lint-row-checkbox,
+.lint-bulk-label > input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--context);
+  cursor: pointer;
+}
+
+.lint-finding-card .lint-row-checkbox:disabled,
+.lint-bulk-label > input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.lint-finding-body {
+  grid-area: body;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-block: 6px;
+}
+
+/* The finding message leads the card. The severity glyph hangs on its first
+   line instead of owning a grid track, and the severity word is read-only for
+   assistive tech -- it used to paint a raw lowercase `warning` token stacked
+   under the icon, because the badge computed to `display: block`. */
+.lint-finding-message {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.lint-finding-card .lint-severity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--finding-tone) 15%, var(--surface));
+  color: color-mix(in srgb, var(--finding-tone) 60%, var(--ink));
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lint-severity-badge__label {
+  line-height: 1;
+}
+
+.lint-finding-card .lint-severity-badge > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.lint-finding-detail {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* The chip row is a distinct component, not a continuation of the message
+   sentence above it, so it gets more air than the message-to-detail gap
+   (matches .activity-row__chips in the Activity feed). */
+.lint-finding-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 4px 0 0;
+}
+
+/* Rule and target live in ONE bordered box divided by a hairline. As two
+   separate chips they never agreed: 24px/999px against 28px/6px, and the
+   touch-target floor below stretched only the target to 44px. The wrapper owns
+   the border and radius so the two segments cannot drift apart again. */
+.lint-source-chip {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  /* Clips each segment's background to the rounded corners. */
+  overflow: hidden;
+}
+
+.lint-rule-chip {
+  display: inline-flex;
+  align-items: center;
+  /* Shrinks before the target does, but only as a last resort: the rule name
+     is the shorter and more repetitive of the two. */
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 14px;
+  overflow: hidden;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The related page is the second segment, and the whole segment is the
+   anchor. It used to be an 18px-tall monospace metadata line inherited from
+   .meta-line, which read as a technical identifier. */
+.lint-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 14px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--context);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.lint-target-chip > svg {
+  flex: none;
+}
+
+.lint-target-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A finding whose target was deleted keeps the segment but must not look or
+   behave like a link. */
+.lint-target-chip.is-static {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  a.lint-target-chip:hover {
+    background: color-mix(in srgb, var(--context) 10%, var(--surface));
+  }
+}
+
+/* Drawn inside the segment: the wrapper clips overflow, so a positive offset
+   would cut the ring off. */
+a.lint-target-chip:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: -2px;
+}
+
+/* LintScreen's severity glyphs ask for these three classes, but nothing ever
+   defined them, so error/warning/info all rendered in the inherited
+   currentColor — the icon carried no severity signal at all. */
+.color-danger {
+  color: var(--danger);
+}
+
+.color-warning {
+  color: var(--warning);
+}
+
+.color-info {
+  color: var(--info);
+}
+
+.lint-finding-card__main > .action-menu {
+  grid-area: actions;
+}
+
+/* Structured (AI/maintenance) suggestions only. `--border-subtle` is not
+   defined anywhere in the stylesheet, so the old `border-top` shorthand was
+   invalid at computed-value time and this panel rendered with no rule at all. */
+.lint-finding-card .lint-finding-details-panel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  overflow-wrap: anywhere;
+}
+
+.lint-finding-card .lint-finding-details-panel > strong {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.lint-bulk-toolbar {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.lint-bulk-label {
+  min-height: 44px;
+}
+
+/* The filter panel collapses at every width now, not just below 640px: four
+   bordered boxes pushed the findings themselves 170px down the page. */
+.lint-filter-disclosure {
+  display: grid;
+  gap: 8px;
+  margin-block: 4px 10px;
+}
+
+.lint-filter-disclosure-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lint-filter-toggle {
+  min-height: 38px;
+}
+
+.lint-active-filter-summary {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* .lint-filter-grid carries an 18px band margin for its old always-open
+   layout; inside the disclosure the grid gap owns that rhythm. */
+.lint-filter-grid {
+  margin: 0;
+}
+
+.lint-filter-toggle svg {
+  transition: transform 140ms ease;
+}
+
+.lint-filter-toggle svg[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+/* Reusable action-menu primitive. */
+.action-menu {
+  position: relative;
+  display: inline-flex;
+  justify-self: end;
+}
+
+.action-menu__trigger {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.action-menu__panel {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 210px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.action-menu__item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.action-menu__item:hover,
+.action-menu__item:focus-visible {
+  background: var(--surface-hover);
+  outline: none;
+}
+
+.action-menu__item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--info);
+}
+
+.action-menu__item.is-danger {
+  color: var(--danger);
+}
+
+.action-menu__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Exact board-style pagination replaces cursor-based "Load more". */
+.numeric-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.numeric-pagination__range {
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.numeric-pagination__pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.numeric-pagination__page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.numeric-pagination__page:hover,
+.numeric-pagination__page:focus-visible {
+  border-color: var(--context);
+  color: var(--context);
+}
+
+.numeric-pagination__page:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.numeric-pagination__page.is-current {
+  border-color: var(--context);
+  background: var(--context);
+  color: white;
+  font-weight: 700;
+}
+
+.numeric-pagination__gap {
+  min-width: 20px;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.numeric-pagination__size {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Sizing alone left this as a bare native dropdown. NumericPagination is a
+   shared component, so the gap would follow it to every future adopter. */
+.numeric-pagination__size select {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 0 10px;
+}
+
+.numeric-pagination__size select:hover {
+  border-color: var(--border-strong);
+}
+
+/* Side by side, a phone leaves the target segment about four characters wide
+   ("Re..."), which is worth nothing. Stack the two segments inside the same
+   box instead: still one unit, both halves readable, divider turns horizontal. */
+@media (max-width: 640px) {
+  .lint-source-chip {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .lint-target-chip {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* The card grid needs no narrow-screen override: the three tracks are
+   checkbox / body / menu, and the body simply narrows while the chips wrap.
+   The old six-track grid had to reflow into a chrome strip above the finding,
+   which is what buried the message on phones. */
+@media (max-width: 760px) {
+  .numeric-pagination {
+    align-items: stretch;
+  }
+
+  .numeric-pagination__range,
+  .numeric-pagination__pages {
+    flex-basis: 100%;
+  }
+
+  .numeric-pagination__pages {
+    margin-left: 0;
+  }
+
+  .numeric-pagination__size {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .numeric-pagination__page,
+  .numeric-pagination__size select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .lint-filter-toggle {
+    min-height: 44px;
+  }
+
+  /* Both segments, never just the anchor: lifting the target alone left the
+     rule segment 20px short and tore the joined box apart on tablets. */
+  .lint-rule-chip,
+  .lint-target-chip {
+    min-height: 44px;
+  }
+}

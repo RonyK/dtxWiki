@@ -1,0 +1,443 @@
+{
+  "home": { "eyebrow": "Context home" },
+  "children": {
+    "title": "Children",
+    "eyebrow": "Direct index",
+    "description": "Open a direct child page or folder from this page's index.",
+    "count_one": "{{count}} child",
+    "count_other": "{{count}} children",
+    "folderChildCount_one": "{{count}} direct child",
+    "folderChildCount_other": "{{count}} direct children",
+    "showingRange": "Showing {{start}}–{{end}} of {{total}}",
+    "paginationLabel": "Children pagination",
+    "previous": "Previous",
+    "pageLabel": "Page {{page}}",
+    "next": "Next"
+  },
+  "loading": "Loading Context",
+  "errors": {
+    "load": "Failed to load Context",
+    "workspaceNotFound": "Workspace not found",
+    "refreshTree": "Could not refresh the Context tree. Try again.",
+    "moveTreeNode": "Could not move the Context item. Try again.",
+    "reorderTreeNode": "Could not reorder the Context item. Try again.",
+    "loadDetail": "Could not load the Context page. Try again.",
+    "itemUnavailable": "That Context page is no longer available. It was removed from the list."
+  },
+  "layout": {
+    "details": "Details",
+    "explorer": "Explorer"
+  },
+  "actions": {
+    "createItem": "Create Context item",
+    "edit": "Edit",
+    "linkCopied": "Link copied",
+    "linkSelected": "Link selected - press Ctrl+C",
+    "linkCopyUnavailable": "Copy unavailable",
+    "linkCopyReasons": {
+      "permission": "Browser permission blocked copying. Select the link and press Ctrl+C.",
+      "insecure": "Automatic copy requires HTTPS. Select the link and press Ctrl+C.",
+      "unsupported": "This browser cannot copy automatically. Select the link and press Ctrl+C.",
+      "selection": "The link could not be selected. Focus the link and copy it manually."
+    },
+    "morePageActions": "More page actions",
+    "new": "New"
+  },
+  "share": {
+    "action": "Share",
+    "eyebrow": "Readonly sharing",
+    "title": "Share {{title}}",
+    "close": "Close",
+    "closeDialog": "Close dialog",
+    "ready": "Ready",
+    "required": "Required",
+    "workspaceUnavailable": "Workspace link information is unavailable. Refresh and try again.",
+    "publishVersionFirst": "Publish a page version before publishing this page to the web.",
+    "workspaceLink": {
+      "title": "Workspace link",
+      "description": "This link opens the Context page inside dtxWiki. Only signed-in workspace members with access can use it.",
+      "copy": "Copy workspace link"
+    },
+    "web": {
+      "title": "Publish to web",
+      "description": "Create a separate readonly URL for anonymous visitors. Internal workspace pages and drafts remain private.",
+      "exposureScope": "Anonymous exposure",
+      "indexedScope": "Public and discoverable",
+      "unlistedScope": "Unlisted direct link",
+      "publishedVersion": "A published page version exists",
+      "draftNote": "Visitors continue to see the current published version. Your unpublished draft is not exposed.",
+      "editorOnly": "Only workspace editors and owners can change web publishing.",
+      "ownerOnlyUnlisted": "Only a workspace owner can start anonymous sharing while the Workspace is not Public."
+    },
+    "copy": {
+      "copied": "Workspace link copied",
+      "selected": "Link selected - press Ctrl+C",
+      "unavailable": "Copy unavailable - select the link text",
+      "reasons": {
+        "permission": "Browser permission blocked copying. Select the link and press Ctrl+C.",
+        "insecure": "Automatic copy requires HTTPS. Select the link and press Ctrl+C.",
+        "unsupported": "This browser cannot copy automatically. Select the link and press Ctrl+C.",
+        "selection": "The link could not be selected. Focus the link and copy it manually."
+      }
+    }
+  },
+  "rail": {
+    "home": "Context home",
+    "title": "Context",
+    "empty": "No Context tree nodes"
+  },
+  "breadcrumb": {
+    "root": "Context"
+  },
+  "header": {
+    "eyebrow": "Knowledge base",
+    "title": "Context",
+    "newPage": "New Context page",
+    "subtitle": "Durable pages the team and the AI both read. Drafts stay out of answers until they are published."
+  },
+  "publishArrival": {
+    "published": "Published.",
+    "published_with_findings": "Published, but a formatting issue was found.",
+    "review_completed": "Published and completed the review request.",
+    "review_failed": "Published, but review completion failed: {{error}}",
+    "review_superseded": "Published. This edit superseded the review request."
+  },
+  "empty": {
+    "title": "No Context pages yet",
+    "description": "Context pages are durable knowledge that Ask and Agent workflows can cite.",
+    "writeFirst": "Write first Context page",
+    "openLibrary": "Open Library"
+  },
+  "folder": {
+    "systemPrefix": "System-managed ",
+    "childCount": "{{count}} children",
+    "pageFolderCount": "{{pages}} · {{folders}}",
+    "pageCount_one": "{{count}} page",
+    "pageCount_other": "{{count}} pages",
+    "folderCount_one": "{{count}} folder",
+    "folderCount_other": "{{count}} folders",
+    "empty": "This folder is empty.",
+    "description": "Select a child page or folder from this explorer section.",
+    "childPageCount": "{{count}} child pages"
+  },
+  "units": {
+    "page_one": "page",
+    "page_other": "pages",
+    "item_one": "item",
+    "item_other": "items"
+  },
+  "panel": {
+    "recentHeading": "Recent updates"
+  },
+  "list": {
+    "draftIndicator": "Unpublished draft",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…"
+  },
+  "filters": {
+    "draftState": "Draft state",
+    "draftOptions": {
+      "all": "All pages",
+      "with": "Has unpublished draft",
+      "without": "No unpublished draft"
+    }
+  },
+  "labels": {
+    "unset": "unset",
+    "pageType": {
+      "overview": "Overview",
+      "source": "Source",
+      "entity": "Entity",
+      "concept": "Concept",
+      "synthesis": "Synthesis",
+      "comparison": "Comparison",
+      "decision": "Decision",
+      "decision_log": "Decision log",
+      "contradiction": "Contradiction",
+      "query": "Query",
+      "guide": "Guide"
+    },
+    "nodeKind": {
+      "folder": "Folder",
+      "page_ref": "Page",
+      "saved_view": "Saved view",
+      "context_page": "Context page"
+    }
+  },
+  "reader": {
+    "ariaLabel": "Context reader views",
+    "readersSeeThis": "Readers see this",
+    "viewingDraft": "Editing draft",
+    "notVisible": "Not visible yet",
+    "readersSeeVersion": "Readers see v{{version}}",
+    "readersSeeVersionAction": "Readers see v{{version}}; open this version in History",
+    "readersSeeVersionTip": "This is the published snapshot readers receive. Open it in History.",
+    "tagTip": "TAG TIP",
+    "readersSeeNone": "Not published yet",
+    "draftPending": "Draft pending",
+    "noBody": "No body",
+    "deletedSource": "{{title}} (deleted - {{detail}})",
+    "deletedSourceShort": "{{title}} (deleted)",
+    "tabs": {
+      "view": "View",
+      "history": "History",
+      "graph": "Graph",
+      "bundle": "Bundle",
+      "activity": "Activity",
+      "children": "Children",
+      "unavailable": "Not available yet"
+    },
+    "selectPagePrompt": "Select a Context page from the tree or page list.",
+    "bundleUnavailable": "Bundle preview is not available yet. Bundles are assembled from Agent pages; MCP clients can call build_agent_input_bundle to see what a request would include.",
+    "activityLoading": "Loading activity",
+    "activityEmpty": "Nothing has happened to this page yet.",
+    "activityLoadError": "Could not load this page's activity.",
+    "activityLoadMoreError": "Could not load older page activity.",
+    "activityListLabel": "Page activity",
+    "activityUnknownDate": "Date unavailable",
+    "activityYou": "You",
+    "activityUnknownActor": "Unknown actor",
+    "activityLoadingOlder": "Loading older activity",
+    "activityLoadOlder": "Load older activity"
+  },
+  "history": {
+    "clearSelection": "Clear selection",
+    "closeDiff": "Close diff",
+    "closeDiffForVersion": "Close comparison for v{{version}}",
+    "compare": "Compare",
+    "compareVersionPair": "Compare v{{version}} with v{{previous}}",
+    "compareWithPrevious": "Compare v{{version}} with the previous version",
+    "compareUnavailable": "Comparison unavailable",
+    "compareTwo": "Compare two versions",
+    "compareTwoUnavailable": "At least two versions are needed for a two-version comparison.",
+    "compareTitle": "Compare v{{version}} with current",
+    "currentPublished": "Current published",
+    "crossLineageWarning": "These versions are on different lineages. This diff compares snapshots across a branch, not a single progression.",
+    "currentUnavailable": "Current Context version is unavailable.",
+    "describe": {
+      "active": "Active reader version",
+      "alternative": "Alternative branch",
+      "draft": "Draft - not yet published",
+      "published": "Published snapshot",
+      "superseded": "Superseded by newer version"
+    },
+    "failedDiff": "Failed to load diff",
+    "failedDiscard": "Failed to discard alternative",
+    "failedRestore": "Failed to restore Context version",
+    "loadOlderFailed": "Could not load older versions.",
+    "firstVersionNoComparison": "The first version has no previous version to compare.",
+    "previousVersionUnavailable": "The previous version is not available.",
+    "firstVersion": "First version",
+    "parentHidden": "Previous version is not visible",
+    "parentMissing": "Previous version is unavailable",
+    "parentOlder": "Continues from an older version",
+    "branchedFrom": "Branched from v{{version}}",
+    "continuesFrom": "Continues from v{{version}}",
+    "event": "Event",
+    "help": "Versions and page events share one newest-first timeline. Select a version to inspect, compare, or restore it.",
+    "earlierEndpoint": "Earlier version",
+    "laterEndpoint": "Later version",
+    "loadingDiff": "Loading diff",
+    "loadingOlder": "Loading older versions",
+    "loadOlder": "Load older versions",
+    "latestDraft": "Latest draft",
+    "noEarlierEndpoint": "Empty baseline",
+    "restore": "Restore this version",
+    "restoreConfirm": "Restore v{{version}} as a new draft? The published version stays unchanged.",
+    "restored": "Context v{{version}} was restored as draft v{{draft}}.",
+    "restoring": "Restoring",
+    "readerVisibleVersion": "Readers see this version",
+    "reviewLabel": "Review",
+    "discard": "Discard",
+    "discardConfirm": "Discard alternative v{{version}}? This cannot be undone.",
+    "discardReason": "Discard reason",
+    "cancelDiscard": "Cancel",
+    "confirmDiscard": "Discard branch permanently",
+    "discarded": "Alternative v{{version}} was discarded.",
+    "discarding": "Discarding",
+    "selectVersion": "Select version",
+    "selectorHelp": "A version cannot be compared with itself. The pair is ordered oldest-first automatically.",
+    "versionDisabledEarlier": "v{{version}} — unavailable: already selected as the earlier version",
+    "versionDisabledLater": "v{{version}} — unavailable: already selected as the later version",
+    "versionSelectors": "Versions to compare",
+    "visibleHead": "Visible head",
+    "states": {
+      "state_inconsistent": {
+        "label": "State review required",
+        "description": "Operator repair is required"
+      },
+      "current_editing": {
+        "label": "Currently editing",
+        "description": "A private, unsubmitted edit in progress. Visible only to its author until submitted for review."
+      },
+      "current_draft": {
+        "label": "Current draft",
+        "description": "The current edit is not published yet. Readers still see the published version."
+      },
+      "published_snapshot": {
+        "label": "Current published snapshot",
+        "description": "The version readers see."
+      },
+      "alternative_draft": {
+        "label": "Alternative draft",
+        "description": "Preserved outside the current editing path."
+      },
+      "discarded_draft": {
+        "label": "Discarded draft",
+        "description": "Removed from the active alternatives."
+      },
+      "superseded_snapshot": {
+        "label": "Superseded snapshot",
+        "description": "Replaced by a newer published version."
+      },
+      "superseded_draft": {
+        "label": "Superseded draft",
+        "description": "Replaced by a newer version."
+      }
+    }
+  },
+  "inspector": {
+    "ariaLabel": "Context detail",
+    "emptyTitle": "Context detail",
+    "emptyDescription": "Select a Context page to inspect its details and citations.",
+    "summary": "Summary",
+    "properties": "Properties",
+    "backlinks": "Backlinks",
+    "history": "History",
+    "citationHealth": "CITATION HEALTH",
+    "ok": "OK",
+    "warnings": "Warnings",
+    "noWarnings": "No warnings",
+    "warningCount": "{{count}} warnings",
+    "contextProperties": "Context properties",
+    "type": "Type",
+    "slug": "Slug",
+    "status": "Status",
+    "version": "Version",
+    "none": "none",
+    "graph": "Graph",
+    "backlinksAndRefs": "BACKLINKS & REFS",
+    "childPages": "Child pages",
+    "noBacklinks": "No pages link here yet.",
+    "historyHeading": "HISTORY",
+    "versions": "Versions",
+    "feedback": "Feedback",
+    "changeSets": "Change sets",
+    "noVersionHistory": "No version history yet."
+  },
+  "neighbors": {
+    "backlinksHeading": "BACKLINKS",
+    "citationsHeading": "CITATIONS",
+    "emptyBacklinks": "No visible pages link here yet.",
+    "emptyCitations": "No visible citations yet.",
+    "coAccessHeading": "OFTEN READ TOGETHER",
+    "emptyCoAccess": "No co-access trail has been compiled yet.",
+    "graphLoading": "Loading graph…",
+    "graphEmpty": "No graph relationships to show.",
+    "graphLoadError": "Graph could not be loaded.",
+    "relationshipList": "Graph relationships",
+    "relationshipListDescription": "Use this list to open the same relationships shown in the diagram.",
+    "loadError": "Neighbor details could not be loaded. Try again later.",
+    "unavailable": "Neighbor list unavailable.",
+    "outbound": "Outbound links"
+  },
+  "reconciliation": {
+    "eyebrow": "Branch reconciliation",
+    "title": "Reconcile branch",
+    "open": "Reconcile",
+    "close": "Close",
+    "loading": "Loading reconciliation",
+    "loadError": "Could not load reconciliation details.",
+    "submitError": "Could not reconcile this branch.",
+    "discardError": "Could not discard this branch.",
+    "pendingCount_one": "{{count}} branch requires reconciliation before it can rejoin HEAD.",
+    "pendingCount_other": "{{count}} branches require reconciliation before they can rejoin HEAD.",
+    "pendingCountAtLeast": "At least {{count}} branches require reconciliation before they can rejoin HEAD.",
+    "refresh": "Refresh conflicts",
+    "headAdvanced": "The page HEAD advanced. Refresh before choosing resolutions; selections were not reapplied automatically.",
+    "baseToHead": "Base v{{base}} → HEAD v{{head}}",
+    "branchVersion": "Branch v{{version}}",
+    "branchActorWithName": "Branch author: {{kind}} · {{name}}",
+    "branchActorKind": "Branch author: {{kind}}",
+    "headAdvanceCount_one": "HEAD advanced {{count}} time",
+    "headAdvanceCount_other": "HEAD advanced {{count}} times",
+    "blockStrip": "Reconciliation blocks",
+    "tableRow": "Table row {{row}}",
+    "progress": "{{resolved}} of {{total}} conflicts resolved",
+    "head": "Current HEAD",
+    "yours": "Your branch",
+    "headGapEffect": "Current blocks in this insertion gap",
+    "branchInsertEffect": "Complete branch insertion",
+    "emptyInsertionGap": "No blocks currently occupy this insertion gap.",
+    "base": "Show common base",
+    "choose": "Choose a resolution",
+    "keepHead": "Keep HEAD",
+    "restoreYours": "Restore your branch",
+    "custom": "Write a new block",
+    "customLabel": "Block Markdown",
+    "startFromHead": "Start from HEAD",
+    "startFromYours": "Start from your branch",
+    "retiredIdentity": "This block identity was retired. A restored or custom choice will create a new block operation.",
+    "deleted": "Deleted in this version",
+    "noBlocks": "No blocks to reconcile.",
+    "reason": "Reconciliation reason",
+    "reasonPlaceholder": "Explain why these resolutions preserve the intended change.",
+    "zeroConflictReason": "Merge branch after verifying that no conflicts remain.",
+    "preview": "Preview merged draft",
+    "previewing": "Previewing",
+    "previewTitle": "Server preview",
+    "previewHint": "This preview came from the same server validation path used to create the draft.",
+    "submit": "Create reconciled draft",
+    "submitting": "Creating draft",
+    "discardTitle": "Discard branch",
+    "discardReason": "Discard reason",
+    "discard": "Discard branch",
+    "discarding": "Discarding",
+    "cancelDiscard": "Cancel",
+    "confirmDiscard": "Discard branch permanently",
+    "cleanChangesTitle": "Branch-only changes",
+    "cleanChangesHint": "These changes are included by default. Clear a change to leave it out of the reconciled draft.",
+    "includeCleanChange": "Include {{label}}",
+    "blockStates": {
+      "same": "Same",
+      "head_only": "HEAD only",
+      "branch_only": "Branch only",
+      "conflict": "Conflict"
+    },
+    "blockDescriptions": {
+      "same": "This block is unchanged on both sides.",
+      "head_only": "This block exists only on HEAD and remains included.",
+      "branch_only": "This branch-only block is included in the reconciled draft by default.",
+      "conflict": "This block needs a manual resolution."
+    }
+  },
+  "pendingReview": {
+    "label": "Draft pending review",
+    "countLoading": "Checking pending reviews",
+    "countUnavailable": "Pending review count unavailable",
+    "pagePendingCount_one": "{{count}} pending review for this page",
+    "pagePendingCount_other": "{{count}} pending reviews for this page",
+    "changesRequested": "Draft has changes requested",
+    "risk": "risk {{risk}}",
+    "viewChanges": "View changes",
+    "approve": "Approve",
+    "requestChanges": "Request changes",
+    "reasonPlaceholder": "What should change before this is approved?",
+    "submitChanges": "Send request",
+    "error": "Could not record the decision.",
+    "warnings_one": "{{count}} lint warning",
+    "warnings_other": "{{count}} lint warnings",
+    "approveImpact_one": "Approving will publish this version. {{count}} earlier pending review will be settled with it.",
+    "approveImpact_other": "Approving will publish this version. {{count}} earlier pending reviews will be settled with it.",
+    "reconciliationPublishWarning_one": "{{count}} branch is still waiting for reconciliation. Publish this version anyway?",
+    "reconciliationPublishWarning_other": "{{count}} branches are still waiting for reconciliation. Publish this version anyway?",
+    "viewPageReviews_one": "View the pending review in the queue",
+    "viewPageReviews_other": "View all {{count}} pending reviews in the queue",
+    "openQueue": "Open Review queue",
+    "impactLoadError": "Could not load what approval will settle. Open the Review queue to decide safely.",
+    "approveSuccess": "Version published.",
+    "approveSuccessSettled_one": "Version published. {{count}} earlier pending review was settled with it.",
+    "approveSuccessSettled_other": "Version published. {{count}} earlier pending reviews were settled with it.",
+    "approveError": "Could not approve and publish this version. Earlier pending reviews were not settled."
+  }
+}

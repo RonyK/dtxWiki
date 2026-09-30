@@ -1,0 +1,22 @@
+[
+  {
+    "query": "Gate Exact Guide",
+    "expected": ["/context/gate-exact-guide.md"],
+    "lane": "entity"
+  },
+  {
+    "query": "Gate Deploymnt Checklis",
+    "expected": ["/context/gate-deployment-checklist.md"],
+    "lane": "trigram"
+  },
+  {
+    "query": "photon calibration",
+    "expected": ["/context/gate-body-source.md"],
+    "lane": "bm25"
+  },
+  {
+    "query": "Gate Associative Source",
+    "expected": ["/context/gate-associative-related.md"],
+    "lane": "associative"
+  }
+]

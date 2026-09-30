@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dtxWiki 연결</title>
+    <link rel="stylesheet" href="welcome.css" />
+    <script src="welcome.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true">dtx</div>
+        <div>
+          <p class="eyebrow">WELCOME TO DTXWIKI</p>
+          <h1>어디에서 시작할까요?</h1>
+          <p class="lede">내 컴퓨터에서 독립적으로 사용하거나, 팀의 dtxWiki 서버에 연결하세요.</p>
+        </div>
+      </header>
+
+      <section class="choices" aria-label="연결 방식">
+        <button class="choice local" id="use-local" type="button">
+          <span class="choice-icon" aria-hidden="true">⌂</span>
+          <span class="choice-copy">
+            <strong>내 컴퓨터에서 시작</strong>
+            <span>로컬 엔진과 SQLite를 자동으로 실행합니다. 인터넷 없이도 사용할 수 있습니다.</span>
+          </span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </button>
+
+        <form class="choice remote" id="remote-form">
+          <span class="choice-icon" aria-hidden="true">↗</span>
+          <span class="choice-copy">
+            <strong>원격 서버에 연결</strong>
+            <span>회사나 팀에서 운영하는 dtxWiki 주소를 입력하세요.</span>
+            <label>
+              <span>표시 이름 <small>(선택)</small></span>
+              <input id="server-name" name="name" maxlength="80" placeholder="회사 팀 위키" />
+            </label>
+            <label>
+              <span>서버 URL</span>
+              <input
+                id="server-url"
+                name="url"
+                type="url"
+                inputmode="url"
+                autocomplete="url"
+                required
+                placeholder="https://wiki.example.com"
+              />
+            </label>
+            <button class="primary" type="submit">서버에 연결</button>
+          </span>
+        </form>
+      </section>
+
+      <section id="saved-section" class="saved" hidden>
+        <h2>저장된 서버</h2>
+        <ul id="saved-servers"></ul>
+      </section>
+      <p id="error" class="error" role="alert" hidden></p>
+      <p class="footnote">연결 방식은 앱의 <b>연결</b> 메뉴에서 언제든지 바꿀 수 있습니다.</p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,163 @@
+# Desktop installers are not part of release 0.1.1, so a `v*` tag no longer
+# starts this workflow: the tag publishes the Python package and creates the
+# GitHub Release through release.yml alone. Before any release ships
+# installers, the signing and notarization secrets must exist and the macOS
+# packages must carry the Electron license notices; only then should this
+# workflow be dispatched on that release's tag, where publish-release adds the
+# installers to the GitHub Release that release.yml created.
+name: release-desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-installers:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-latest
+            platform: windows
+            arch: x64
+            update_channel: latest
+            csc_link_secret: WIN_CSC_LINK
+            csc_password_secret: WIN_CSC_KEY_PASSWORD
+            builder_args: --win nsis --x64
+            artifact: dtxwiki-desktop-windows-x64
+            artifact_glob: |
+              desktop/release/*.exe
+              desktop/release/*.exe.blockmap
+              desktop/release/latest.yml
+          - name: macOS Apple Silicon
+            runner: macos-15
+            platform: mac
+            arch: arm64
+            update_channel: latest-arm64
+            csc_link_secret: MAC_CSC_LINK
+            csc_password_secret: MAC_CSC_KEY_PASSWORD
+            builder_args: --mac dmg zip --arm64
+            artifact: dtxwiki-desktop-macos-arm64
+            artifact_glob: |
+              desktop/release/*.dmg
+              desktop/release/*.zip
+              desktop/release/*.blockmap
+              desktop/release/latest-arm64-mac.yml
+          - name: macOS Intel
+            runner: macos-15-intel
+            platform: mac
+            arch: x64
+            update_channel: latest-x64
+            csc_link_secret: MAC_CSC_LINK
+            csc_password_secret: MAC_CSC_KEY_PASSWORD
+            builder_args: --mac dmg zip --x64
+            artifact: dtxwiki-desktop-macos-x64
+            artifact_glob: |
+              desktop/release/*.dmg
+              desktop/release/*.zip
+              desktop/release/*.blockmap
+              desktop/release/latest-x64-mac.yml
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          cache: npm
+      - name: Install dependencies
+        run: |
+          uv sync --locked --extra desktop
+          npm ci
+      - name: Verify tag and package versions match
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $TagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          $PythonVersion = uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          $DesktopVersion = node -p "require('./desktop/package.json').version"
+          if ($TagVersion -ne $PythonVersion -or $TagVersion -ne $DesktopVersion) {
+            throw "Tag v$TagVersion, Python $PythonVersion, and desktop $DesktopVersion must match."
+          }
+      - name: Require Windows signing credentials for a tagged release
+        if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.WIN_CSC_LINK }}
+          SIGNING_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if (-not $env:SIGNING_CERTIFICATE -or -not $env:SIGNING_PASSWORD) {
+            throw "WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD are required for a tagged release."
+          }
+      - name: Require macOS signing and notarization credentials for a tagged release
+        if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'mac'
+        shell: pwsh
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.MAC_CSC_LINK }}
+          SIGNING_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          $Missing = @(
+            'SIGNING_CERTIFICATE',
+            'SIGNING_PASSWORD',
+            'APPLE_ID',
+            'APPLE_PASSWORD',
+            'APPLE_TEAM_ID'
+          ) | Where-Object { -not (Get-Item "env:$_" -ErrorAction SilentlyContinue).Value }
+          if ($Missing.Count -gt 0) {
+            throw "Missing macOS release credentials: $($Missing -join ', ')"
+          }
+      - name: Build bundled frontend
+        run: npm --workspace frontend run build
+      - name: Stage bundled frontend
+        run: uv run --extra desktop python scripts/deploy_static_bundle.py deploy --fresh frontend/dist backend/static
+      - name: Build native local engine
+        run: uv run --extra desktop python desktop/scripts/build_engine.py
+      - name: Smoke-test native local engine
+        run: uv run python desktop/scripts/smoke_engine.py
+      - name: Test desktop shell
+        run: npm run desktop:test
+      - name: Build installer
+        working-directory: desktop
+        env:
+          CSC_LINK: ${{ secrets[matrix.csc_link_secret] }}
+          CSC_KEY_PASSWORD: ${{ secrets[matrix.csc_password_secret] }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DTXWIKI_UPDATE_CHANNEL: ${{ matrix.update_channel }}
+        run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-installers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dtxwiki-desktop-*
+          path: release
+          merge-multiple: true
+      - name: Create SHA-256 checksums
+        working-directory: release
+        run: sha256sum -- *.exe *.dmg *.zip > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          fail_on_unmatched_files: true

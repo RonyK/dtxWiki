@@ -1,0 +1,184 @@
+/* Chats list filter disclosure. This module is imported by ChatsListScreen so
+   it can override the earlier shared filter rules without changing other
+   Review/Activity filter layouts. */
+.mcp-chat-filter-disclosure {
+  display: grid;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.mcp-chat-filter-disclosure-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mcp-chat-filter-search {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.mcp-chat-filter-disclosure-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mcp-chat-filter-disclosure-tools:not(.has-active-filters) {
+  display: none;
+}
+
+.mcp-chat-filter-disclosure-toggle {
+  display: none;
+}
+
+.mcp-chat-filter-active-summary {
+  max-width: min(34vw, 360px);
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-chat-filter-active-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--surface-active);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mcp-chat-filter-disclosure .mcp-chat-filters-reset {
+  flex: 0 0 auto;
+  margin-left: 0;
+}
+
+.mcp-chat-filter-disclosure-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 16px;
+  min-width: 0;
+}
+
+.mcp-chat-filter-disclosure-panel[hidden] {
+  display: none !important;
+}
+
+.mcp-chat-filter-disclosure-panel > .is-client {
+  flex: 0 1 var(--chats-filter-right-col);
+  min-width: 220px;
+}
+
+.mcp-chat-filter-disclosure-panel > .is-client,
+.mcp-chat-filter-disclosure-panel > .is-client .mcp-chat-filter-stack,
+.mcp-chat-filter-disclosure-panel > .is-client .select-field,
+.mcp-chat-filter-disclosure-panel > .is-client select {
+  width: 100%;
+}
+
+.mcp-chat-filter-disclosure-panel > .is-view {
+  flex: 1 1 560px;
+}
+
+@media (max-width: 1024px) {
+  .mcp-chat-filter-disclosure
+    :is(
+      .search-field,
+      .select-field select,
+      .segmented-control button,
+      .filter-chip,
+      .mcp-chat-filters-reset
+    ) {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .mcp-chat-filter-disclosure {
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .mcp-chat-filter-disclosure-head {
+    display: grid;
+    gap: 8px;
+  }
+
+  .mcp-chat-filter-disclosure-tools,
+  .mcp-chat-filter-disclosure-tools:not(.has-active-filters) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .mcp-chat-filter-disclosure-toggle {
+    display: inline-flex;
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+
+  .mcp-chat-filter-disclosure-toggle svg {
+    transition: transform 120ms ease;
+  }
+
+  .mcp-chat-filter-disclosure-toggle[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+  }
+
+  .mcp-chat-filter-active-summary {
+    max-width: none;
+    min-width: 0;
+  }
+
+  .mcp-chat-filter-disclosure .mcp-chat-filters-reset {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .mcp-chat-filter-disclosure-panel {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mcp-chat-filter-disclosure-panel > .is-client,
+  .mcp-chat-filter-disclosure-panel > .is-view {
+    display: grid;
+    flex: none;
+    gap: 10px;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .mcp-chat-filter-disclosure-panel .mcp-chat-filters-group.is-view {
+    gap: 10px;
+  }
+
+  .mcp-chat-filter-disclosure-panel .mcp-chat-filter-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .mcp-chat-filter-disclosure-panel .filter-chip {
+    justify-content: center;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcp-chat-filter-disclosure-toggle svg {
+    transition: none;
+  }
+}

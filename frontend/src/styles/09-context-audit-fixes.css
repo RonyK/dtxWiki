@@ -1,0 +1,1043 @@
+/* Context-specific audit fixes. Shared Agent/Library cards intentionally keep
+   their existing behavior; these rules are scoped to Context markup only. */
+
+/* 260912 design feedback: centered under the folder card's index preview and
+   item list, instead of left-hugging the card's edge -- see the status
+   paragraph's text-align and the nav's justify-content below. */
+.context-children-pagination {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.context-children-pagination-status {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.context-children-pagination-status:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--context);
+  outline-offset: 3px;
+}
+
+.context-children-pagination nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.context-children-pagination nav button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 6px);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-children-pagination nav button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.context-children-pagination nav button[aria-current="page"] {
+  border-color: var(--context);
+  background: var(--context-soft);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.context-children-pagination nav button:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+.context-children-pagination nav span {
+  min-width: 18px;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.context-version-tag-tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.context-version-tag-tip {
+  min-height: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--context) 34%, var(--border));
+  background: color-mix(in srgb, var(--context-soft) 72%, var(--surface));
+  text-decoration: none;
+}
+
+.context-version-tag-tip:hover,
+.context-version-tag-tip:focus-visible {
+  border-color: var(--context);
+  background: var(--context-soft);
+}
+
+.context-version-tag-tip-label {
+  padding-left: 6px;
+  border-left: 1px solid color-mix(in srgb, var(--context) 30%, var(--border));
+  color: var(--context);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.context-share-dialog .publish-control,
+.context-share-dialog .context-share-workspace-section {
+  margin: 0;
+}
+
+.dialog-panel.context-share-dialog {
+  gap: 0;
+}
+
+/* Dialog owns a scroll wrapper around feature content. Spacing the outer
+   panel only separates that wrapper from the empty overlay portal and leaves
+   the visible Share sections touching, so the content wrapper owns the gap. */
+.dialog-panel.context-share-dialog > .dialog-scroll-region {
+  display: grid;
+  gap: 16px;
+}
+
+.context-reader [role="tabpanel"] > .context-children-index {
+  margin-top: 0;
+  padding-top: 18px;
+}
+
+.folder-summary-footer {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.context-version-tag-tip-popup {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 30;
+  display: none;
+  width: min(320px, calc(100vw - 40px));
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control, 6px);
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow-2);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.context-version-tag-tip-wrap:hover .context-version-tag-tip-popup,
+.context-version-tag-tip-wrap:focus-within .context-version-tag-tip-popup {
+  display: block;
+}
+
+.context-activity-days {
+  display: grid;
+  gap: 20px;
+}
+
+.context-activity-days section {
+  display: grid;
+  gap: 8px;
+}
+
+.context-activity-days h3 {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.context-activity-card-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 260912 design feedback: matches the card language used everywhere else in
+   the app for a neutral list of like items -- .activity-row
+   (05-review-activity-search.css), .lint-finding-card
+   (09-lint-findings-fixes.css), .review-queue-card
+   (06-chats-review-queue.css): a uniform 1px border, no accent, on
+   `--surface`. The 3px `--context`-tinted border-left this used to carry
+   was purely decorative section-branding -- every card got the identical
+   bar regardless of activity kind, so nothing it conveyed is lost by
+   dropping it. */
+.context-activity-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.context-activity-card-copy {
+  min-width: 0;
+}
+
+.context-activity-card-copy strong {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.context-activity-card-copy p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.context-activity-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.context-activity-load-more button {
+  min-height: 40px;
+}
+
+.history-graph-list {
+  padding-left: 0;
+
+  /* Lane colours, cycled by lane index (ContextScreen's historyLaneTint).
+     Same convention every git graph viewer uses: the lane owns the colour and
+     its dot, line, and curves all wear it, so a branch is followed by eye.
+     Lane 0 is the trunk and defers to the section accent, so Context, Agent,
+     and Library each keep their own identity for the main line; the rest are
+     drawn from this app's own token hues rather than a generic web palette,
+     ordered so neighbouring lanes never land on adjacent hues. */
+  --history-lane-color-0: var(--reader-accent, var(--context));
+  --history-lane-color-1: var(--ok);
+  --history-lane-color-2: var(--review);
+  --history-lane-color-3: var(--agent);
+  --history-lane-color-4: #0d9488;
+  --history-lane-color-5: #db2777;
+  --history-lane-color-6: #65a30d;
+  --history-lane-color-7: #dc2626;
+
+  /* Second round: the same eight hues darkened. Deriving them instead of
+     hand-picking eight more keeps lane 8 recognisably "the purple one, again"
+     rather than an unrelated colour, and lane 0's accent stays the source of
+     lane 8 so a themed section still themes both. These are only reached by a
+     page holding more than eight lanes at once; the 58% mix is deep enough to
+     separate from the base even after the 60% border tint the lines apply. */
+  --history-lane-color-8: color-mix(
+    in srgb,
+    var(--history-lane-color-0) 58%,
+    #000
+  );
+  --history-lane-color-9: color-mix(
+    in srgb,
+    var(--history-lane-color-1) 58%,
+    #000
+  );
+  --history-lane-color-10: color-mix(
+    in srgb,
+    var(--history-lane-color-2) 58%,
+    #000
+  );
+  --history-lane-color-11: color-mix(
+    in srgb,
+    var(--history-lane-color-3) 58%,
+    #000
+  );
+  --history-lane-color-12: color-mix(
+    in srgb,
+    var(--history-lane-color-4) 58%,
+    #000
+  );
+  --history-lane-color-13: color-mix(
+    in srgb,
+    var(--history-lane-color-5) 58%,
+    #000
+  );
+  --history-lane-color-14: color-mix(
+    in srgb,
+    var(--history-lane-color-6) 58%,
+    #000
+  );
+  --history-lane-color-15: color-mix(
+    in srgb,
+    var(--history-lane-color-7) 58%,
+    #000
+  );
+}
+
+.history-graph-list::before,
+.history-graph-row::before {
+  content: none;
+}
+
+/* Pitch, dot size, and gutter width are computed together per page
+   (historyLaneMetrics) so the widest lane always lands inside the gutter, and
+   the SVG curve coordinates agree with these boxes. --history-lane-pad is the
+   one value both sides hardcode. */
+.history-graph-list {
+  --history-lane-pad: 7px;
+  /* Vertical anchors derived from the dot, so a shrunken dot keeps its lines
+     meeting it exactly: the node sits at top 16px, so its centre and the point
+     just below it both move with the dot's size. At the 12px default these
+     resolve to the 22px/27px the layout was originally written against. */
+  --history-lane-node-centre: calc(16px + var(--history-lane-dot, 12px) / 2);
+  --history-lane-line-top: calc(16px + var(--history-lane-dot, 12px) - 1px);
+}
+
+/* 260913 design feedback: putting the card border on this row (the `<li>`'s
+   grid) left 22px of unpaintable gap between rows -- row padding + border +
+   `.history-graph-list` gap + the next row's border + padding -- and the
+   fork/merge lines that cross several rows read as three disconnected
+   segments instead of one continuous edge. The card now lives one column
+   over, on `.history-graph-card-content` below; this row goes back to being
+   a bare grid with zero gap, so the lane graph in the left gutter is
+   continuous from the first row to the last. `border: 0` is explicit because
+   the shared `.history-card` (07-settings-policy.css) still gives every root
+   `<li>` a dashed `border-bottom`, which would otherwise repaint the same
+   22px-style gap one border-width at a time. */
+.history-graph-row {
+  display: grid;
+  grid-template-columns:
+    var(--history-lane-gutter, 36px)
+    minmax(0, 1fr);
+  gap: 0;
+  row-gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.history-graph-visual {
+  position: relative;
+  min-height: 74px;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+.history-graph-node,
+.history-graph-line,
+.history-graph-pass-line,
+.history-graph-incoming-line {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+/* One tint per lane feeds every mark on it. The fallback keeps a lane-less
+   caller (or a future graph surface that sets no tint) on the old accent
+   rather than on an unstyled colour. */
+.history-graph-node {
+  z-index: 2;
+  top: 16px;
+  left: calc(
+    var(--history-lane) * var(--history-lane-pitch, 18px) +
+      var(--history-lane-pad)
+  );
+  width: var(--history-lane-dot, 12px);
+  height: var(--history-lane-dot, 12px);
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: var(--history-lane-tint, var(--reader-accent, var(--context)));
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.history-graph-line {
+  top: var(--history-lane-line-top);
+  bottom: -1px;
+  left: calc(
+    var(--history-lane) * var(--history-lane-pitch, 18px) +
+      var(--history-lane-pad) + var(--history-lane-dot, 12px) / 2 - 1px
+  );
+  width: 2px;
+  background: color-mix(
+    in srgb,
+    var(--history-lane-tint, var(--reader-accent, var(--context))) 60%,
+    var(--border)
+  );
+}
+
+/* Edges may cross more than one newest-first row. Continue the parent's lane
+   through every intervening row and join it to the parent node from above;
+   otherwise a real branch looks like disconnected per-row decoration. */
+.history-graph-pass-line,
+.history-graph-incoming-line {
+  left: calc(
+    var(--history-segment-lane) * var(--history-lane-pitch, 18px) +
+      var(--history-lane-pad) + var(--history-lane-dot, 12px) / 2 - 1px
+  );
+  width: 2px;
+  background: color-mix(
+    in srgb,
+    var(--history-lane-tint, var(--reader-accent, var(--context))) 60%,
+    var(--border)
+  );
+}
+
+.history-graph-pass-line {
+  top: -1px;
+  bottom: -1px;
+}
+
+.history-graph-incoming-line {
+  top: -1px;
+  height: calc(var(--history-lane-node-centre) + 1px);
+}
+
+.history-graph-curve {
+  position: absolute;
+  top: var(--history-lane-line-top);
+  right: 0;
+  left: 0;
+  /* An <svg> is a replaced element: with a viewBox but no explicit
+     width/height, "top + bottom + height:auto" does NOT stretch it between
+     those insets the way it would a plain div -- the UA instead derives
+     height from the viewBox's intrinsic aspect ratio, which produced a
+     ~47px-tall curve regardless of the row's real (often 150px+) height and
+     left the branch line dangling in empty space. An explicit height forces
+     the box itself to fill the row -- its own top, plus the row's -1px
+     overshoot at the bottom, matching .history-graph-line above;
+     preserveAspectRatio="none" then stretches the path to match. */
+  height: calc(100% + 1px - var(--history-lane-line-top));
+  display: block;
+  width: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.history-graph-curve path {
+  fill: none;
+  stroke: color-mix(
+    in srgb,
+    var(--history-lane-tint, var(--reader-accent, var(--context))) 60%,
+    var(--border)
+  );
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The reconcile merge edge (git-merge second parent) shares the curve slot
+   with the branch-out curve -- a merge version's row carries both at once --
+   and needs no colour rule of its own: the element carries the tint of the
+   lane it lands on, so the whole merged branch (its dot, its line, the curve
+   that opened it, and this one that closes it) reads as one colour. Its
+   landing stub and pass-through segments are the same shapes a lineage edge
+   uses, so they are plain .history-graph-incoming-line/-pass-line. */
+
+.history-graph-row[data-parent-relation="hidden"] .history-graph-line,
+.history-graph-row[data-parent-relation="missing"] .history-graph-line,
+.history-graph-row[data-parent-relation="older"] .history-graph-line {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--border-strong) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+/* Scoped off the merge curve: these relations describe whether THIS row's own
+   parent is resolvable, which says nothing about a merge edge that happens to
+   share the row -- and they would otherwise outrank the merge stroke above. */
+.history-graph-row[data-parent-relation="hidden"]
+  .history-graph-curve:not(.history-graph-merge-curve) path,
+.history-graph-row[data-parent-relation="missing"]
+  .history-graph-curve:not(.history-graph-merge-curve) path,
+.history-graph-row[data-parent-relation="older"]
+  .history-graph-curve:not(.history-graph-merge-curve) path {
+  stroke: var(--border-strong);
+  stroke-dasharray: 4 4;
+}
+
+/* No touch override for .context-version-tag-tip here. It used to force the
+   pill to `height: 44px`, which is twice the 22px of the plain `.reader-chip`
+   spans it shares `.reader-meta-row` with — beside them it read as a layout
+   fault, not as a bigger target. The pill now keeps the shared chip height at
+   every width and the 44px touch target comes from the transparent
+   `.reader-chip-action::after` overlay in 07-settings-policy.css, which adds
+   no layout box. Two rules used to raise this one control, so both had to go:
+   the other lived in that same partial's 44px floor list. */
+
+/* This is the card now -- not `.history-graph-row` above. Because grid track
+   sizing uses the item's margin box and this item has no `align-items`
+   override (so it `stretch`es), `.history-graph-visual` in the left gutter
+   still stretches across the full track height including this margin --
+   the lane lines pass through the 8px gap between cards, so the fork/merge
+   edge reads as continuous even though the cards themselves are visually
+   separated. Do not give the gap to `.history-graph-row` as padding instead;
+   that shrinks the grid area itself and reopens the unpaintable strip this
+   replaces. */
+.history-graph-card-content {
+  min-width: 0;
+  /* Symmetric, matching every other card in the app
+     (.context-activity-card, .review-queue-card, .lint-finding-card: all
+     12px). The left side used to be 4px -- a leftover from when a tone
+     rail lived flush against this edge -- which read as noticeably
+     thinner than the other three sides once that rail was removed. */
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  margin-bottom: 8px;
+}
+
+.history-graph-row:last-child .history-graph-card-content {
+  margin-bottom: 0;
+}
+
+.history-parent-relation,
+.history-compare-unavailable {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* 260913: this used to live in the actions row as a stand-in for the Compare
+   button it replaces there. Moved beside the parent-relation text it
+   explains -- both answer "what can I compare this to" -- so the actions
+   row holds only buttons now. */
+.history-compare-unavailable {
+  display: block;
+}
+
+/* Card internals (260913 design feedback): one emphasized row, two split
+   rows, never a flat button list. Scoped entirely under
+   `.history-graph-card-content` -- `.history-card-title`,
+   `.history-card-author` and `.history-card-actions` are shared with
+   Agent/Library's own flat `.history-card` lists, which keep their current
+   look untouched. */
+.history-graph-card-content .history-card-title {
+  gap: 8px;
+  font-family: inherit;
+}
+
+.context-history-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.context-history-delta {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.context-history-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-top: 4px;
+}
+
+.context-history-card-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.history-graph-card-content .history-card-author {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  /* A grid item's default min-width is `auto`, not 0 -- it refuses to
+     shrink below its content's natural size regardless of the track's
+     own width. AvatarWithTimestamp can wrap internally
+     (.avatar-with-timestamp-main has flex-wrap: wrap) but never got the
+     chance to, because this item itself would not shrink far enough to
+     force it. Found as a real Firefox-only horizontal-overflow failure
+     at 390px, not a hypothetical. */
+  min-width: 0;
+}
+
+.context-history-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-history-review-label {
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Scoped to this card rather than touching the shared `.avatar-with-
+   timestamp-name` rule (03-editor.css): a long, space-free display name
+   (a long email-style handle, a generated identifier) has no normal word
+   boundary to wrap on. Elsewhere in the app the avatar row sits in a wide
+   flat context where that never mattered; here it now shares a
+   `minmax(0, 1fr)` column with the description, which is exactly the
+   width this failed to shrink into on Firefox at 390px -- a real
+   horizontal-overflow failure, not a hypothetical. */
+.history-graph-card-content .avatar-with-timestamp-name {
+  overflow-wrap: anywhere;
+}
+
+/* Ends never touch by accident: the discard action anchors the left edge
+   (`order: -1` plus the auto margin after it), Compare anchors the right
+   (`order: 1`), and whatever restore/reconcile buttons exist land between
+   them in source order. `:empty` covers the row with nothing to show (the
+   current head with no prior version to compare against). */
+.history-graph-card-content .history-card-actions {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.history-graph-card-content .history-card-actions:empty {
+  display: none;
+}
+
+.history-graph-card-content .history-card-actions .danger-action {
+  order: -1;
+  margin-inline-end: auto;
+}
+
+.history-graph-card-content
+  .history-card-actions
+  .context-history-compare-action {
+  order: 1;
+}
+
+@media (max-width: 720px) {
+  .context-children-pagination nav {
+    gap: 4px;
+  }
+
+  .context-children-pagination nav button,
+  .context-activity-load-more button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .context-children-pagination nav button:first-child,
+  .context-children-pagination nav button:last-child {
+    flex: 1 1 96px;
+  }
+
+  .context-version-tag-tip-popup {
+    position: fixed;
+    top: auto;
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    width: auto;
+  }
+
+  .context-activity-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .history-graph-card-content {
+    padding: 8px 10px 10px;
+    margin-bottom: 6px;
+  }
+
+  /* 260913: the two-column body doesn't have room for both the summary
+     text and the author block's fixed-width content (avatar + name +
+     timestamp, which does not wrap) below ~390px -- found as a real
+     Firefox-only horizontal-overflow failure, not a hypothetical. Stack
+     instead of sharing the row once there is no room to share. */
+  .context-history-card-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* `align-items: flex-end` (the base rule) disables stretch, so the
+     avatar block sizes to its own unwrapped natural width and ignores the
+     column's actual width -- `stretch` gives it a real box to wrap
+     inside (`.avatar-with-timestamp-main` already carries `flex-wrap:
+     wrap`, it just never got a width to wrap against). */
+  .history-graph-card-content .history-card-author {
+    align-items: stretch;
+  }
+}
+
+/* Reconciliation is intentionally a server-driven workbench: the strip is a
+   compact map of server-owned block states and the panels never infer blocks
+   from a client-side Markdown diff. */
+.dialog-panel.context-reconciliation-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, calc(100vw - 32px));
+  max-width: 1180px;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+}
+
+.dialog-panel.context-reconciliation-dialog > .dialog-scroll-region {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.dialog-panel.context-reconciliation-dialog > .dialog-footer {
+  flex: 0 0 auto;
+}
+
+.context-reconciliation-header,
+.context-reconciliation-footer,
+.context-reconciliation-summary,
+.context-reconciliation-block-strip,
+.context-reconciliation-choice,
+.review-bulk-actions {
+  display: flex;
+  align-items: center;
+}
+
+.context-reconciliation-header,
+.context-reconciliation-footer {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.context-reconciliation-body {
+  display: grid;
+  gap: 18px;
+  padding-top: 12px;
+}
+
+.context-reconciliation-summary {
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.context-reconciliation-summary span {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.context-reconciliation-workspace {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.context-reconciliation-rail,
+.context-reconciliation-selection {
+  min-width: 0;
+}
+
+.context-reconciliation-block-strip {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  margin: 0;
+  max-height: min(62dvh, 680px);
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  overscroll-behavior-block: contain;
+}
+
+.context-reconciliation-block-item {
+  min-width: 0;
+}
+
+.context-reconciliation-block {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.context-reconciliation-block span:last-child {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.context-reconciliation-block[data-state="conflict"] {
+  border-color: var(--danger);
+}
+
+.context-reconciliation-block[data-state="branch_only"] {
+  border-color: var(--context);
+}
+
+.context-reconciliation-block[aria-current="true"] {
+  box-shadow: 0 0 0 2px var(--focus-ring, var(--info));
+}
+
+.context-reconciliation-conflict,
+.context-reconciliation-clean-change,
+.context-reconciliation-clean-changes,
+.context-reconciliation-preview,
+.context-reconciliation-discard {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised, var(--surface));
+}
+
+.context-reconciliation-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.context-reconciliation-side {
+  min-width: 0;
+}
+
+.context-reconciliation-side-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-reconciliation-side-actor-kind {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle, var(--surface));
+  font-size: 11px;
+}
+
+.context-reconciliation-side pre {
+  min-height: 96px;
+  max-height: 300px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle, var(--surface));
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.context-reconciliation-base {
+  margin-top: 12px;
+}
+
+.context-reconciliation-base summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.context-reconciliation-choices {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 0;
+  border: 0;
+}
+
+.context-reconciliation-choice {
+  gap: 8px;
+  min-height: 36px;
+}
+
+.context-reconciliation-clean-change-list {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-reconciliation-clean-change-list li {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.context-reconciliation-clean-change-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.context-reconciliation-clean-change-list pre {
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-sunken, var(--surface));
+}
+
+.context-reconciliation-custom,
+.context-reconciliation-reason,
+.context-reconciliation-discard label {
+  display: grid;
+  gap: 6px;
+}
+
+.context-reconciliation-custom-prefill {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.context-reconciliation-custom textarea,
+.context-reconciliation-reason textarea,
+.context-reconciliation-discard textarea,
+.context-history-discard-dialog textarea,
+.review-bulk-dialog textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+}
+
+.context-reconciliation-preview .markdown-body {
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.context-reconciliation-footer {
+  width: 100%;
+}
+
+.context-reconciliation-footer button {
+  min-height: 44px;
+}
+
+.review-bulk-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-reconciliation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-reconciliation-meta > span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.review-reconciliation-actor {
+  color: var(--ink) !important;
+  font-weight: 650;
+}
+
+.review-reconciliation-chat-link {
+  justify-self: start;
+  margin: -4px 12px 4px;
+}
+
+.review-reconciliation-provenance {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised, var(--surface));
+}
+
+.review-reconciliation-provenance h3 {
+  margin: 0;
+}
+
+.review-reconciliation-provenance .text-button {
+  justify-self: start;
+}
+
+@media (max-width: 720px) {
+  .dialog-backdrop:has(.context-reconciliation-dialog) {
+    padding: 0;
+  }
+
+  .dialog-panel.context-reconciliation-dialog {
+    width: 100vw;
+    max-width: none;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .context-reconciliation-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-reconciliation-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-reconciliation-block-strip {
+    display: flex;
+    max-height: none;
+    padding: 4px 0 10px;
+    overflow-x: auto;
+    overflow-y: visible;
+    overscroll-behavior-inline: contain;
+  }
+
+  .context-reconciliation-block-item {
+    flex: 0 0 min(164px, 42vw);
+  }
+
+  .context-reconciliation-header,
+  .context-reconciliation-footer {
+    align-items: stretch;
+  }
+
+  .context-reconciliation-footer {
+    flex-direction: column;
+  }
+
+  .context-reconciliation-footer .dialog-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-reconciliation-block {
+    min-height: 44px;
+  }
+}

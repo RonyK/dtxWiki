@@ -1,0 +1,125 @@
+{
+  "breadcrumb": "Dashboard",
+  "editorRequiredBanner": "Editor access is required to create or edit content in this workspace.",
+  "errors": {
+    "load": "Failed to load Dashboard"
+  },
+  "header": {
+    "eyebrow": "Workspace now",
+    "title": "Workspace Operations",
+    "subtitle": "Know what readers and AI will see before anything changes.",
+    "activityUnit": {
+      "today_one": "event today",
+      "today_other": "events today",
+      "week_one": "event this week",
+      "week_other": "events this week",
+      "month_one": "event this month",
+      "month_other": "events this month",
+      "all_one": "total event",
+      "all_other": "total events"
+    }
+  },
+  "lanes": {
+    "pending": "Pending",
+    "advisory": "Advisory",
+    "history": "History",
+    "pendingHint": "Needs review",
+    "advisoryHint": "Needs attention",
+    "historyHint": "Completed changes"
+  },
+  "period": {
+    "label": "Dashboard activity period",
+    "options": {
+      "today": "today",
+      "week": "week",
+      "month": "month",
+      "all": "all"
+    },
+    "filterOptions": {
+      "today": "Today",
+      "week": "Week",
+      "month": "Month",
+      "all": "All time"
+    }
+  },
+  "spaces": {
+    "title": "Spaces",
+    "library": "Library",
+    "context": "Context",
+    "agent": "Agent",
+    "agentDescription": "Agent injection policy",
+    "libraryPurpose": "Source material to cite",
+    "contextPurpose": "Durable team knowledge",
+    "agentPurpose": "Instructions, skills, and memory"
+  },
+  "recent": {
+    "title": "Recent activity",
+    "unit_one": "event",
+    "unit_other": "events",
+    "emptyTitle": "No workspace activity for {{period}}",
+    "viewSystemEvents": "View system events in Activity",
+    "systemEventsHint": "System events are hidden from Dashboard",
+    "emptyDescription": "Page, source, review, and Ask changes appear here. System sign-in events stay in Activity so the dashboard remains focused.",
+    "action": {
+      "restored": "Restored",
+      "published": "Published",
+      "created": "Created",
+      "edited": "Edited",
+      "failed": "Failed",
+      "logged": "Logged"
+    },
+    "viewAll": "View all activity"
+  },
+  "firstUse": {
+    "title": "Workspace setup sequence",
+    "status": {
+      "done": "Done",
+      "next": "Next",
+      "prep": "Prep",
+      "later": "Later"
+    },
+    "steps": {
+      "library": {
+        "label": "Add source material",
+        "description": "Collect source material that answers can cite.",
+        "action": "Add first source"
+      },
+      "context": {
+        "label": "Write Context page",
+        "description": "Turn important knowledge into durable workspace pages.",
+        "action": "Write first Context page"
+      },
+      "ask": {
+        "label": "Ask a question",
+        "description": "Ask a question after the workspace has usable evidence.",
+        "action": "Ask a question"
+      },
+      "review": {
+        "label": "Save or review",
+        "description": "Promote useful answers only after checking placement.",
+        "action": "Open Review queue"
+      }
+    }
+  },
+  "setup": {
+    "label": "Workspace setup",
+    "eyebrow": "Setup",
+    "title": "Start your first workspace",
+    "next": "Next: {{label}}",
+    "progress": "{{count}} of 4 setup steps complete.",
+    "description": "Add trusted materials, organize durable pages, ask context-aware questions, then review changes before the wiki is updated.",
+    "progressLabel": "Workspace setup progress",
+    "personalWorkspaceTitle": "Make your Personal Workspace yours",
+    "personalWorkspaceDescription": "You can rename your Personal Workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
+    "renamePersonalAction": "Rename Personal",
+    "findWorkspaceTitle": "Looking for a shared workspace?",
+    "findWorkspaceDescription": "Browse discoverable workspaces without changing your current selection.",
+    "findWorkspaceAction": "Find workspaces",
+    "ask": "Ask",
+    "review": "Review",
+    "libraryDescription": "Collect source material that answers should cite.",
+    "contextDescription": "Keep reviewed pages where the team can read and edit them.",
+    "askDescription": "Ask questions, promote useful answers, and review changes.",
+    "reviewDescription": "Approve, reject, or request changes before updates become durable."
+  }
+}

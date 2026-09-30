@@ -1,0 +1,979 @@
+/* Keep a compact initials-only workspace switcher in collapsed desktop mode so
+   PC users can still see and switch the active workspace (it used to be hidden
+   entirely). Mobile keeps the full switcher via the max-width:1024px block. */
+.app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
+  grid-template-columns: 22px 14px;
+  min-width: 0;
+  max-width: none;
+}
+
+.app-shell[data-sidebar-collapsed="true"] .workspace-switcher-label {
+  display: none;
+}
+
+.topbar-brand,
+.topbar-actions,
+.reader-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reader-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* No border-right: the cell is sized by the workspace title, so a rule here
+   read as the sidebar's edge continuing upward while sitting up to 145px away
+   from it. The top bar is one surface instead. */
+.topbar-brand {
+  height: 100%;
+  padding: 0 16px;
+}
+
+/* Wraps the glyph + "dtxWiki" as one link to the dashboard. It replaces
+   `.topbar-brand`'s own `gap: 10px` between them, now that both sit inside
+   this one flex child instead of being two of `.topbar-brand`'s direct
+   children -- otherwise they would touch. */
+.topbar-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.topbar-actions {
+  justify-self: end;
+  justify-content: flex-end;
+  min-width: max-content;
+  padding: 0 16px;
+}
+
+.topbar-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  justify-self: stretch;
+  min-height: 34px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.topbar-search::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 2px;
+  transform: scaleX(0);
+  transform-origin: center;
+  border-radius: 999px;
+  background: var(--prism-gradient);
+  content: "";
+  transition: transform 140ms ease;
+}
+
+.topbar-search:hover,
+.topbar-search:focus-within {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.topbar-search:focus-within::after {
+  transform: scaleX(1);
+}
+
+.topbar-search input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+}
+
+.topbar-search input::placeholder {
+  color: var(--ink-soft);
+}
+
+.topbar-search input::-webkit-search-decoration,
+.topbar-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.topbar-search span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-search kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+}
+
+/* The signed-out topbar's middle child carries `.topbar-search` so it
+   inherits the two-track mobile rule and the <1024px hide (Shell.tsx). But
+   `.topbar-search` above also paints a border, a surface background and
+   `pointer-events: auto` with a `:hover` state -- so at >=1024px, where the
+   hide rule does not apply, this placeholder rendered as a live-looking
+   907x34px search box with 0 children and 0 text (260912 review, measured on
+   /login at 1280x800; screenshot signed-out-topbar-1280.png). All three
+   declarations here are load-bearing: `border-color`, not `border: 0`, keeps
+   the box metrics identical to the real search box so nothing else in the
+   grid reflows; `pointer-events: none` is what actually silences `:hover`
+   (its higher specificity would otherwise still win). */
+.topbar-search--placeholder {
+  border-color: transparent;
+  background: none;
+  pointer-events: none;
+}
+
+.command-dropdown,
+.create-menu-panel,
+.workspace-popover {
+  position: absolute;
+  /* Shell menus are navigation overlays, not feature-local popovers. Keep
+     them above sticky Explorer/actions while preserving Dialog as the ceiling. */
+  z-index: var(--z-navigation-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.command-dropdown {
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 4px;
+  max-height: min(420px, calc(100vh - 90px));
+  overflow: auto;
+  padding: 8px;
+}
+
+.command-section-label {
+  padding: 4px 7px 2px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.command-item,
+.create-menu-item,
+.workspace-menu-item {
+  display: grid;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  text-align: left;
+}
+
+.command-item {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px;
+}
+
+.command-item span,
+.create-menu-item span,
+.workspace-menu-item span {
+  min-width: 0;
+}
+
+.command-item small,
+.workspace-menu-item small {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-default-mini-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  color: var(--ink-muted);
+}
+
+.command-preview-item {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: flex-start;
+}
+
+.command-preview-item strong,
+.command-preview-item small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-preview-item strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.command-empty {
+  border-radius: 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding: 8px;
+}
+
+.command-item:hover,
+.command-item.active,
+.create-menu-item:hover,
+.workspace-menu-item:hover,
+.workspace-menu-item.active {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.create-menu {
+  position: relative;
+}
+
+.create-menu-panel {
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 4px;
+  width: 230px;
+  padding: 8px;
+}
+
+.create-menu-item {
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px;
+}
+
+/* The real dtx mark, replacing the CSS gradient placeholder the brand README
+   flagged for promotion. The file is a self-contained dock icon: it carries
+   its own purple ground, its own corner radius (58/256, which lands at ~5px
+   at this size -- the radius the placeholder hard-coded) and its own hairline
+   inner stroke, so no border-radius or inset shadow is applied over it.
+
+   Referenced through url() rather than inlined into the component because the
+   SVG uses internal mask ids, which would collide between the two places the
+   glyph renders (top bar and mobile drawer).
+
+   It lives in src/assets/ rather than src/assets/brand/ because that brand
+   folder is gitignored: a shipped asset kept there would resolve on the
+   author's machine and break every other build, since Vite hard-fails an
+   unresolved url(). brand/ stays the design-exploration master. */
+.prism-glyph {
+  width: 22px;
+  height: 22px;
+  background: url("../assets/dtx-dock-icon.svg") center / contain no-repeat;
+}
+
+.brand-name {
+  font-weight: 700;
+}
+
+.workspace-controls {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-switcher-button {
+  display: inline-grid;
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 7px;
+  max-width: 250px;
+  min-width: 184px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  padding: 4px 8px 4px 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-switcher-button:hover,
+.workspace-switcher-button[aria-expanded="true"] {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.workspace-initials {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--surface-active);
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+/* No width cap of its own: the button's `minmax(0, 1fr)` middle track already
+   bounds this, and a second, unconditional 200px ceiling meant the label kept
+   clipping at 200px however wide the button was allowed to grow -- which is
+   what made raising the tablet ceiling alone do nothing. */
+.workspace-switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  /* A <button> centres its text by default. At the old 184-210px widths that
+     put ~10px either side and read as padding; once the tablet ceiling rose to
+     340px it left the name stranded 76px from the badge that labels it. */
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keep the command search fluid across tablet-width desktop windows. The
+   navigation actions remain an intrinsic trailing column, so Settings, Account
+   and language controls never sit underneath a fixed-width search field. */
+@media (min-width: 1025px) and (max-width: 1240px) {
+  .topbar {
+    grid-template-columns: minmax(260px, max-content) minmax(120px, 1fr) auto;
+    column-gap: 8px;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .topbar {
+    grid-template-columns: minmax(220px, max-content) minmax(120px, 1fr) auto;
+  }
+
+  .topbar-brand,
+  .workspace-controls,
+  .topbar-search {
+    min-width: 0;
+  }
+
+  .topbar-brand,
+  .topbar-actions {
+    padding-inline: 12px;
+  }
+
+  .workspace-switcher-button {
+    min-width: 144px;
+    max-width: 220px;
+  }
+
+  .topbar-search kbd,
+  .topbar-actions .language-toggle span,
+  .topbar-actions .create-menu .text-button span {
+    display: none;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+  }
+}
+
+.workspace-popover {
+  top: calc(100% + 8px);
+  left: 0;
+  display: grid;
+  gap: 10px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px;
+}
+
+.workspace-current {
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding-bottom: 10px;
+}
+
+.workspace-current strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.workspace-filter-input {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.workspace-filter-input:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+
+.workspace-menu-empty {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+/* Workspace load/create error shown when the popover is closed — floats below
+   the switcher like the popover, so it never blocks as a stuck-open panel. */
+.workspace-control-error-standalone {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: var(--z-navigation-overlay);
+  max-width: min(340px, calc(100vw - 32px));
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.workspace-menu-list {
+  display: grid;
+  gap: 8px;
+  /* dvh, matching the phone popover rule in 08-responsive-deployment.css. With
+     vh the list reserved space for a mobile browser's retracting chrome that
+     the popover above it had already stopped reserving. */
+  max-height: min(320px, calc(100dvh - 300px));
+  overflow: auto;
+}
+
+.workspace-menu-group {
+  display: grid;
+  gap: 3px;
+}
+
+.workspace-menu-group > [role="list"] {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace-menu-group + .workspace-menu-group {
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+}
+
+.workspace-menu-group-label {
+  padding: 2px 7px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.workspace-menu-item {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px;
+  text-align: left;
+}
+
+.workspace-menu-row {
+  display: grid;
+  gap: 3px;
+}
+
+.workspace-menu-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 7px 5px 40px;
+}
+
+.workspace-menu-item-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 5px;
+  color: var(--ink-soft);
+  padding: 3px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.workspace-menu-item-actions a:hover,
+.workspace-menu-item-actions a:focus-visible {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.workspace-menu-pending-group {
+  max-height: 132px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.workspace-pending-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  border-radius: 7px;
+  color: var(--ink);
+  padding: 7px;
+  text-decoration: none;
+}
+
+.workspace-pending-item:hover,
+.workspace-pending-item:focus-visible {
+  background: var(--surface-hover);
+}
+
+.workspace-pending-item small {
+  color: var(--warning, var(--ink-muted));
+}
+
+.workspace-menu-item strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-menu-item-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.workspace-menu-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+.workspace-mini-badge,
+.workspace-default-mini-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-muted);
+}
+
+.workspace-mini-badge {
+  color: var(--context);
+}
+
+.workspace-menu-meta .workspace-default-mini-badge {
+  margin-left: 0;
+}
+
+.workspace-menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.workspace-create-form {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-control-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.mobile-search-link,
+.mobile-nav-toggle {
+  display: none;
+}
+
+.desktop-sidebar-toggle {
+  display: inline-flex;
+}
+
+.mobile-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-navigation-overlay);
+  background: rgb(15 23 42 / 34%);
+}
+
+.mobile-nav-scrim {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.mobile-nav-drawer {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(320px, calc(100vw - 42px));
+  height: 100%;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  padding: 12px;
+}
+
+.mobile-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.compact-brand {
+  border-right: 0;
+  padding: 0;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.sidebar[data-collapsed="true"] {
+  align-items: center;
+  padding: 12px 8px;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-nav {
+  width: 100%;
+  gap: 12px;
+}
+
+.sidebar[data-collapsed="true"] .nav-group-label,
+.sidebar[data-collapsed="true"] .nav-item-label,
+.sidebar[data-collapsed="true"] .nav-preview-badge,
+.sidebar[data-collapsed="true"] .sidebar-toggle-label {
+  display: none;
+}
+
+.sidebar[data-collapsed="true"] .nav-item {
+  justify-content: center;
+  padding: 8px;
+}
+
+/* M-3 (260908 UI audit): this mobile override used to live in
+   07-settings-policy.css, a Settings-owned stylesheet, alongside every other
+   shell selector it hides -- .topbar-search and .sidebar are both defined
+   above, in this file. */
+@media (max-width: 1024px) {
+  .topbar-search,
+  .sidebar {
+    display: none;
+  }
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 18px;
+}
+
+.nav-item,
+.icon-button,
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-item {
+  position: relative;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+.nav-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 17px;
+  border: 1px solid color-mix(in srgb, var(--ink-muted) 26%, transparent);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 2px 5px;
+  text-transform: uppercase;
+}
+
+/* UI-04: gate hover-only backgrounds to devices that truly hover (mouse/
+   trackpad). On touch, :hover sticks after a tap and reads as a second
+   active/selected state, so it is suppressed there. */
+@media (hover: hover) and (pointer: fine) {
+  .nav-item:hover {
+    background: var(--surface-hover);
+    color: var(--ink);
+  }
+}
+
+.nav-item.active::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--prism-gradient);
+  content: "";
+}
+
+/* A hybrid laptop can expose a coarse pointer at desktop widths, so the shell
+   cannot rely on the narrow-layout rules for touch geometry. Keep the compact
+   typography/icon paint while giving every shell action an equal 44px box. */
+/* A touch target is 44px tall, so 12px type inside it reads as a chip that
+   happens to be padded rather than a primary control. The initials badge is
+   deliberately left at 22px: its grid track is a fixed `22px` in three
+   separate rules (including the desktop collapsed variant pinned by
+   tests/static/test_frontend_quality_contract.py), so growing the badge
+   without growing every track just overflows it. */
+@media (any-pointer: coarse) {
+  .app-shell .workspace-switcher-button {
+    font-size: 13px;
+  }
+
+  .app-shell .workspace-switcher-button,
+  .app-shell .topbar-search,
+  .app-shell .topbar-search input,
+  .app-shell .topbar-actions .icon-button,
+  .app-shell .sidebar .icon-button,
+  .app-shell .nav-item,
+  .app-shell .command-item,
+  .app-shell .create-menu-item,
+  .app-shell .workspace-menu-item,
+  .app-shell .workspace-pending-item,
+  .app-shell .workspace-menu-item-actions > a,
+  .app-shell .workspace-menu-actions > :is(a, button),
+  .app-shell .workspace-create-form > .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-footer .desktop-sidebar-toggle {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-footer .desktop-sidebar-toggle {
+  justify-content: center;
+}
+
+.main-surface {
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  /* Two declarations on purpose -- do NOT dedupe or reorder them; see the
+     matching comment on `.app-shell` in 01-base.css for the full reasoning.
+     `hidden` is a scroll container: a browser-preserved scrollLeft survives a
+     viewport resize by being CLAMPED to `scrollWidth - clientWidth` rather
+     than zeroed, so any overflow here turns into a permanent left shift the
+     moment a Galaxy Fold (or any wide-then-narrow transition) folds down
+     (260911 Fold report). `clip` cannot carry a scrollLeft at all. The
+     `hidden` line before it is the pre-Safari-16 fallback: without it, a
+     browser that does not know `clip` drops the declaration and `overflow`
+     reverts to `visible`, un-clipping this whole surface.
+
+     No independent vertical scroll is needed here, so single-axis `clip` is
+     safe; the real scroller is one level down, on `.feature-main`, which
+     keeps `overflow-y: auto` and relies on the JS guard instead (Shell.tsx's
+     useScrollLeftGuardRef, which covers this element too).
+
+     `clip`'s loss of programmatic scrolling costs nothing here: this is a
+     grid area, not a vh-sized box, so it never has the off-screen band that
+     makes that trade-off worth weighing on `.app-shell`. */
+  overflow: hidden;
+  overflow: clip;
+}
+
+.main-surface--account-notice {
+  display: grid;
+  /* Declaring rows but no columns leaves the single implicit column at `auto`
+     (min-content..max-content), so one wide child sizes the track and stretches
+     every sibling — the notice *and* the whole route screen — past the
+     viewport, where .main-surface's overflow: clip clips it with no scrollbar.
+     Every other grid in the shell chain pins minmax(0, 1fr); so does this one. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.shell-account-notice {
+  padding: 8px 16px 0;
+}
+
+.workspace-resolution-card {
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  margin: 16px auto;
+  padding: clamp(20px, 4vw, 36px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.workspace-resolution-card h1 {
+  margin: 4px 0 10px;
+}
+
+.workspace-resolution-card > p:not(.eyebrow) {
+  max-width: 60ch;
+  color: var(--ink-muted);
+}
+
+.workspace-resolution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.workspace-resolution-list {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-resolution-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.workspace-resolution-option:hover,
+.workspace-resolution-option:focus-visible {
+  border-color: var(--context);
+  background: var(--surface-hover);
+}
+
+.workspace-resolution-option > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspace-resolution-option strong,
+.workspace-resolution-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-resolution-option small {
+  color: var(--ink-muted);
+}
+
+.route-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+}
+
+.route-loading-icon {
+  animation: dtx-spin 900ms linear infinite;
+}
+
+@keyframes dtx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.page-workspace {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.page-workspace.focus-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.page-workspace.focus-mode .editor-panel {
+  width: min(96vw, 1440px);
+  justify-self: center;
+}

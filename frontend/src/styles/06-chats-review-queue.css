@@ -1,0 +1,1899 @@
+/* ---- Chats list: ChatCard ---- */
+.mcp-chat-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.mcp-chat-card-header > .mcp-client-chip {
+  flex: 0 0 auto;
+}
+
+.mcp-chat-card-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mcp-chat-card-title > strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-card,
+.mcp-chat-card-body {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-chat-card-subline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.mcp-chat-card-chevron {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--ink-muted);
+}
+
+.mcp-chat-card-summary {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* The sentence after this label is the agent's, not the reader's. Without the
+   attribution a stated reason reads like something the user typed, which is
+   the one thing MCP can never deliver. */
+.mcp-chat-intent-source {
+  margin-inline-end: 6px;
+  color: var(--ink-faint, var(--ink-soft));
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.mcp-chat-detail-summary {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.mcp-chat-record-notice {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.45;
+}
+
+.mcp-chat-record-region {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-chat-record-notice > strong,
+.mcp-chat-record-notice > span {
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.mcp-chat-card-artifacts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  min-width: 0;
+  color: var(--ink-soft);
+}
+
+/* text-overflow is inert on the inline-flex container, so the label text owns the
+   overflow: the icon stays a fixed flex item and the span ellipsizes at the
+   grapheme boundary instead of clipping a Korean glyph mid-character. */
+.mcp-chat-card-artifacts > .artifact-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.mcp-chat-card-artifacts svg {
+  flex: 0 0 auto;
+  color: var(--context);
+}
+
+.mcp-chat-card-archived {
+  margin-left: auto;
+  color: var(--ink-muted);
+}
+
+/* ---- Chats list: conversation groups ---- */
+.mcp-chat-conversation {
+  display: grid;
+  gap: 8px;
+}
+
+.mcp-chat-conversation-toggle {
+  width: 100%;
+  appearance: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.mcp-chat-conversation-icon {
+  color: var(--context);
+  margin-top: 1px;
+}
+
+.mcp-chat-conversation-toggle .mcp-chat-card-chevron {
+  transition: transform 120ms ease;
+}
+
+.mcp-chat-conversation-toggle[aria-expanded="true"] .mcp-chat-card-chevron {
+  transform: rotate(90deg);
+}
+
+.mcp-chat-conversation-items {
+  padding-inline-start: 28px;
+}
+
+/* ---- Chat detail: header ---- */
+/* The header carries `.feature-header` too, which is `display: flex`. Declaring
+   `display: grid` here silently won on source order alone. Keep one layout: the
+   title row is the header. */
+.mcp-chat-detail-header {
+  gap: 12px;
+}
+
+.mcp-chat-title-bar {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  /* Asymmetric on purpose: 16px between the title and the action cluster on the
+     first line, 6px down to the wrapped copy line so the sentence still reads
+     as part of the heading block. */
+  gap: 6px 16px;
+  width: 100%;
+}
+
+/* Title and its state read as one unit. */
+.mcp-chat-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-chat-title-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-chat-title-main > .mcp-client-chip {
+  flex: 0 0 auto;
+}
+
+.mcp-chat-title-block {
+  min-width: 0;
+}
+
+.mcp-chat-title-block h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-title-block p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+}
+
+.mcp-title-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 780px);
+  flex-wrap: nowrap;
+}
+
+.mcp-title-edit-row input {
+  flex: 1 1 320px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.mcp-chat-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-chat-meta-item {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-chat-meta-item--client {
+  grid-column: span 2;
+  min-width: 280px;
+}
+
+.mcp-chat-meta-item > span {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.mcp-client-identity-detail dt {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.mcp-chat-meta-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.mcp-client-identity {
+  min-width: 0;
+  max-width: 100%;
+  font-weight: 400;
+}
+
+.mcp-client-identity > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+.mcp-client-identity > summary::marker {
+  content: "";
+}
+
+.mcp-client-identity > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcp-client-identity > summary:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.mcp-client-identity-summary-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mcp-client-identity-preview {
+  display: -webkit-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 700;
+  text-transform: none;
+  unicode-bidi: plaintext;
+}
+
+.mcp-client-identity-scope-summary {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-client-identity-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: none;
+  white-space: normal;
+}
+
+.mcp-client-identity[open] .mcp-client-identity-toggle {
+  transform: rotate(180deg);
+}
+
+.mcp-client-identity-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.mcp-client-identity-detail dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.mcp-client-permissions {
+  grid-column: 1 / -1;
+}
+
+.mcp-client-identifier {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mcp-client-identifier > code {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.mcp-client-copy-feedback {
+  flex-basis: 100%;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.mcp-client-identity-detail > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-client-identity-detail strong,
+.mcp-client-identity-detail code,
+.mcp-client-identity-detail li > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.mcp-client-identity-detail strong {
+  unicode-bidi: plaintext;
+}
+
+.mcp-client-identity-detail ul {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcp-client-identity-detail li {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-client-identity-detail li > code,
+.mcp-client-identity-detail li > span {
+  overflow-wrap: anywhere;
+}
+
+/* Same chip language as a lint finding's target link (09-lint-findings-fixes.css
+   .lint-target-chip): a bordered, icon-led box instead of a bare underlined
+   hyperlink, so every "this points at a real page" affordance reads the same
+   way across the product. Defined here, ahead of the shared touch-target
+   media query below, so that query's min-height: 44px actually wins the
+   cascade on narrow/coarse pointers instead of losing to this rule's own
+   unconditional min-height: 30px by finishing earlier in the stylesheet. */
+.mcp-chat-dl-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--context);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.mcp-chat-dl-link > svg {
+  flex: none;
+}
+
+.mcp-chat-dl-link > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .mcp-chat-dl-link:hover {
+    background: color-mix(in srgb, var(--context) 10%, var(--surface));
+  }
+}
+
+.mcp-chat-dl-link:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .mcp-client-identifier > .compact-icon-button {
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .mcp-chat-dl-link {
+    min-height: 44px;
+  }
+}
+
+.mcp-artifact-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mcp-artifact-chip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  max-width: min(100%, 360px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: inherit;
+  padding: 10px 12px;
+  text-decoration: none;
+}
+
+.mcp-artifact-chip:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.mcp-artifact-chip-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+}
+
+.mcp-artifact-chip[data-kind="context_page"] .mcp-artifact-chip-icon {
+  color: var(--context);
+}
+
+.mcp-artifact-chip[data-kind="agent_page"] .mcp-artifact-chip-icon {
+  color: var(--agent);
+}
+
+.mcp-artifact-chip[data-kind="library_item"] .mcp-artifact-chip-icon {
+  color: var(--library);
+}
+
+.mcp-artifact-chip-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mcp-artifact-chip-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mcp-artifact-chip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-artifact-chip small {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* ---- Chat detail: flow (rail + pinned panel) ----
+   Both panes size to the remaining height of .feature-main (already a
+   definite-height, overflow-y:auto scrollport -- see 04-knowledge.css) and
+   scroll independently, so picking a rail item deep in a long list never
+   renders its panel above the reader's current scroll position. Below
+   1024px there isn't room for two panes side by side, so the layout drops
+   to a single-column accordion instead (see the media query at the bottom
+   of this section). */
+.mcp-chat-flow-section {
+  min-width: 0;
+}
+
+.mcp-chat-flow-layout {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  /* height: 100% silently falls back to content-height here: this element's
+     containing block (.mcp-chat-flow-section, an ordinary auto-height block)
+     has no definite height of its own, and CSS only resolves a percentage
+     height against a definite one. .feature-main itself measures out to
+     exactly 100vh - topbar-h (confirmed empirically -- it has no other
+     padding/chrome deducted), so that's sized directly off the viewport
+     instead; once stuck, this element's own prior siblings no longer count
+     against it. Content can still exceed this (min-height is the floor, not
+     a cap), which is fine -- the outer page just needs one extra scroll
+     tick to reach the bottom of an unusually tall panel. */
+  height: calc(100vh - var(--topbar-h));
+  min-height: 360px;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 4px;
+}
+
+.mcp-chat-flow-rail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mcp-chat-flow-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 0 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint, var(--ink-soft));
+}
+
+.mcp-chat-flow-rail-head em {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink-soft);
+}
+
+.mcp-chat-flow-jump {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--context);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: var(--surface);
+}
+
+.mcp-chat-flow-jump:hover {
+  background: var(--context-soft);
+}
+
+.mcp-chat-flow-rail-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 2px 6px 2px 0;
+}
+
+.mcp-chat-flow-spine {
+  position: absolute;
+  left: 23px;
+  top: 22px;
+  bottom: 22px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.mcp-chat-flow-spine > b {
+  display: block;
+  width: 100%;
+  border-radius: 2px;
+  background: var(--context);
+  transition: height 180ms ease;
+}
+
+.mcp-chat-flow-row + .mcp-chat-flow-row {
+  margin-top: 2px;
+}
+
+.mcp-chat-flow-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 10px 8px 0;
+  text-align: left;
+  scroll-margin: 14px;
+}
+
+.mcp-chat-flow-node:hover {
+  background: var(--surface-hover);
+}
+
+.mcp-chat-flow-node[aria-selected="true"] {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-2);
+}
+
+.mcp-chat-flow-node-dot {
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 2px solid var(--context);
+  background: var(--context);
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mcp-chat-flow-node.is-error .mcp-chat-flow-node-dot {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.mcp-chat-flow-node[aria-selected="true"] .mcp-chat-flow-node-dot {
+  box-shadow: 0 0 0 4px var(--context-soft);
+}
+
+.mcp-chat-flow-node.is-error[aria-selected="true"] .mcp-chat-flow-node-dot {
+  box-shadow: 0 0 0 4px var(--danger-soft);
+}
+
+.mcp-chat-flow-node-body {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.mcp-chat-flow-node-kind,
+.mcp-chat-flow-chip {
+  font-weight: 700;
+}
+
+.mcp-chat-flow-node-kind {
+  font-size: 10.5px;
+}
+
+.mcp-chat-flow-node-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-chat-flow-node-meta {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-chat-flow-node-check {
+  justify-self: end;
+  color: var(--context);
+}
+
+.mcp-chat-flow-node.is-error .mcp-chat-flow-node-check {
+  color: var(--danger);
+}
+
+/* Phase color tokens, shared by the rail node's kind label and the panel's
+   phase chip. */
+.mcp-chat-flow-phase-find {
+  color: var(--context);
+}
+
+.mcp-chat-flow-phase-read {
+  color: var(--review);
+}
+
+.mcp-chat-flow-phase-write {
+  color: var(--library-text);
+}
+
+.mcp-chat-flow-phase-other {
+  color: var(--ink-faint, var(--ink-soft));
+}
+
+.mcp-chat-flow-panel {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 16px 18px 18px;
+}
+
+.mcp-chat-flow-panel--inline {
+  height: auto;
+  overflow: visible;
+  margin: 8px 0 14px;
+}
+
+.mcp-chat-flow-panel-head {
+  position: sticky;
+  top: -16px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -16px -18px 14px;
+  padding: 14px 18px 11px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.mcp-chat-flow-panel--inline .mcp-chat-flow-panel-head {
+  position: static;
+  margin: 0 0 12px;
+  padding: 0 0 10px;
+}
+
+.mcp-chat-flow-chip {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.mcp-chat-flow-chip.mcp-chat-flow-phase-find {
+  background: var(--context-soft);
+}
+
+.mcp-chat-flow-chip.mcp-chat-flow-phase-read {
+  background: var(--info-soft);
+}
+
+.mcp-chat-flow-chip.mcp-chat-flow-phase-write {
+  background: var(--library-soft);
+}
+
+.mcp-chat-flow-chip.mcp-chat-flow-phase-other {
+  background: var(--surface-hover);
+}
+
+.mcp-chat-flow-panel-head strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mcp-chat-flow-panel-calls {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--ink-faint, var(--ink-soft));
+}
+
+.mcp-chat-flow-call {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-chat-flow-call + .mcp-chat-flow-call {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.mcp-chat-flow-call-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+
+.mcp-chat-flow-call-headline {
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-flow-call-latency,
+.mcp-chat-flow-call-time {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.mcp-chat-flow-query {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle, var(--surface));
+  padding: 9px 13px;
+  margin-bottom: 9px;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-flow-query svg {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+}
+
+.mcp-chat-flow-call-failure {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 9px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  padding: 9px 12px;
+  color: color-mix(in srgb, var(--danger) 65%, black);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-flow-call-failure > p {
+  margin: 0;
+}
+
+.mcp-chat-flow-call-failure-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.mcp-chat-flow-call-failure-head > strong {
+  min-width: 0;
+  font-weight: 700;
+}
+
+/* Neutral, not red: it reports the one reassuring fact on a failure card. */
+.mcp-chat-flow-unchanged {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 1px 8px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mcp-chat-flow-call-guidance {
+  color: var(--ink);
+}
+
+/* The server's own wording, verbatim. Set apart from the localized guidance
+   above it so the two are not read as one sentence. */
+.mcp-chat-flow-call-message {
+  color: var(--ink-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* What a write call changed (ChatEditCard), between the call head and its
+   tabs. A step often holds many writes, so it stays tight: one summary line,
+   then a short before/after preview per operation. */
+.mcp-chat-edit-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 9px 12px;
+  font-size: 12.5px;
+}
+
+.mcp-chat-edit-card > p {
+  margin: 0;
+}
+
+.mcp-chat-edit-summary {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-edit-ops {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcp-chat-edit-op {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mcp-chat-edit-op-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-edit-op-head > code {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.mcp-chat-edit-match {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 0 8px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mcp-chat-edit-match.is-fuzzy {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+  color: var(--ink);
+}
+
+.mcp-chat-edit-preview {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.mcp-chat-edit-line {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  margin: 0;
+  padding: 3px 8px 3px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mcp-chat-edit-line.is-before {
+  background: var(--danger-soft);
+}
+
+.mcp-chat-edit-line.is-after {
+  background: var(--ok-soft);
+}
+
+.mcp-chat-edit-marker {
+  color: var(--ink-muted);
+  text-align: center;
+  user-select: none;
+}
+
+/* A preview is at most ~300 characters, but a table or list can spend them
+   on many short lines; past about seven it scrolls inside the card. */
+.mcp-chat-edit-text {
+  min-width: 0;
+  max-height: 10.5em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-edit-note {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.mcp-chat-edit-diff {
+  justify-self: start;
+}
+
+.mcp-tool-inputs-note {
+  margin-bottom: 8px;
+}
+
+/* Each call carries its own tabs, always visible, and one step often holds
+   many calls -- so the row drops the full-width reader header's 16px trailing
+   margin and 24px tab gap. Tab height is left alone: the touch floor in
+   07-settings-policy.css raises .reader-tab to 44px, and a (0,2,0) override
+   here would beat it.
+   ReaderTabs is intentionally a single row; if translated labels cannot fit,
+   keep that overflow inside this scroller instead of widening the call card
+   (min-width: 0 is required for a flex/grid descendant to actually shrink
+   below its content size and let overflow-x: auto do anything at all). */
+.mcp-chat-flow-call .reader-tabs-row {
+  min-width: 0;
+  max-width: 100%;
+  margin: 10px 0 0;
+  overflow-x: auto;
+}
+
+.mcp-chat-flow-call .reader-tabs {
+  gap: 18px;
+}
+
+.mcp-chat-flow-bootstrap-note {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin-top: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface-subtle, var(--surface));
+  padding: 9px 13px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.mcp-chat-flow-bootstrap-note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+/* <=1024px: no room for a pinned side panel. The rail becomes a plain
+   single-column list, and the selected step's panel is inserted right after
+   its own node (an accordion) instead of living beside it. */
+@media (max-width: 1024px) {
+  .mcp-chat-flow-layout {
+    position: static;
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+
+  .mcp-chat-flow-rail {
+    height: auto;
+  }
+
+  .mcp-chat-flow-rail-body {
+    overflow: visible;
+  }
+
+  /* The spine spans the rail body's full height to connect the node dots.
+     Once an inline panel is inserted between two nodes (the accordion), that
+     same span runs straight through the panel's content instead of stopping
+     at the dots either side of it -- drop it rather than track panel height. */
+  .mcp-chat-flow-spine {
+    display: none;
+  }
+
+  .mcp-chat-flow-node {
+    margin-bottom: 8px;
+  }
+}
+
+.mcp-tool-result p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+}
+
+.mcp-tool-result {
+  display: grid;
+  gap: 10px;
+}
+
+.mcp-tool-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mcp-tool-result-meta {
+  display: grid;
+  /* 120px could not hold even the "Body markdown" label. Long values now render
+     outside this grid (ToolInputValue), so the remaining cells are short. */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 14px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.mcp-tool-panel-card > .mcp-tool-result-meta {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.mcp-tool-result-meta > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mcp-tool-result-meta dt {
+  margin: 0;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.mcp-tool-result-meta dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  /* Backstop: a value that slips past the long-value split must not stretch
+     the grid row to thousands of pixels. */
+  max-height: 7.5em;
+  overflow: hidden;
+}
+
+.mcp-tool-display-items {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.mcp-tool-display-items > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.32fr) minmax(0, 1fr);
+  gap: 8px 14px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.mcp-tool-display-items > div:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mcp-tool-display-items dt {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mcp-tool-display-items dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The raw arguments, shown directly under the display items rather than
+   behind a second disclosure inside the tab. A hairline and a small label
+   separate the two. */
+.mcp-tool-technical-inputs {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-tool-display-items + .mcp-tool-technical-inputs {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.mcp-tool-technical-inputs > h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.mcp-tool-technical-inputs > .mcp-tool-result-meta {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+/* A long tool argument (body_markdown, reason, a JSON blob) rendered as its own
+   full-width block instead of a grid cell. */
+.mcp-tool-longvalue {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  min-width: 0;
+}
+
+.mcp-tool-longvalue-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mcp-tool-longvalue-head h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.mcp-tool-longvalue-meta {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-inline-end: auto;
+}
+
+.mcp-tool-longvalue-body {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mcp-tool-longvalue-body[data-expanded="true"] {
+  max-height: 60vh;
+}
+
+/* The technical-inputs grid already spaces its children. */
+.mcp-tool-technical-inputs > .mcp-tool-longvalue {
+  margin-top: 0;
+}
+
+.mcp-tool-result-meta dd code.uuid {
+  /* Override the shared .uuid `white-space: nowrap` so a long id can break
+     inside the metadata grid instead of overflowing. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mcp-tool-linked {
+  display: grid;
+  gap: 8px;
+}
+
+.mcp-tool-linked-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.mcp-tool-linked .mcp-chat-row-pills {
+  justify-content: flex-start;
+}
+
+.mcp-tool-tab-panel {
+  margin-top: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcp-tool-tab-panel .markdown-code-block {
+  margin: 0;
+}
+
+.mcp-tool-tab-panel pre {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mcp-tool-panel-card {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 10px 12px;
+}
+
+.mcp-tool-panel-card > :first-child {
+  margin-top: 0;
+}
+
+.mcp-tool-panel-card > :last-child {
+  margin-bottom: 0;
+}
+
+.mcp-tool-result-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mcp-strip-toggle {
+  align-self: flex-start;
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--reader-accent, var(--context));
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 0;
+}
+
+.mcp-strip-toggle:hover {
+  text-decoration: underline;
+}
+
+.mcp-strip-toggle:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.mcp-provenance-list {
+  display: grid;
+  gap: 6px;
+}
+
+.mcp-provenance-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mcp-provenance-link span {
+  min-width: 0;
+}
+
+.mcp-provenance-link time {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  /* Two 180px minimum tracks plus their gap cannot fit inside the 342px
+     content band at a 390px viewport. Preserve the denser desktop grid while
+     giving phone layouts one genuinely shrinkable metadata track. */
+  .mcp-tool-result-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcp-tool-display-items > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .mcp-chat-meta-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcp-chat-meta-item--client {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .mcp-client-identity-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcp-client-permissions {
+    grid-column: auto;
+  }
+
+  /* ReaderTabs is intentionally a single row. If translated labels cannot fit,
+     keep that overflow inside the call's tab scroller instead of widening the
+     call card. */
+  .mcp-chat-flow-call .reader-tabs {
+    min-width: max-content;
+  }
+
+  .mcp-chat-flow-node {
+    grid-template-columns: 40px minmax(0, 1fr) 18px;
+  }
+
+  .mcp-chat-flow-panel {
+    padding: 14px 13px;
+  }
+
+  .mcp-chat-flow-panel-head {
+    margin: -14px -13px 12px;
+    padding: 12px 13px 9px;
+  }
+}
+
+.review-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.review-page-group {
+  border-inline-start: 2px solid var(--context);
+  padding-inline-start: 8px;
+}
+
+.review-page-group > .review-date-divider {
+  color: var(--ink);
+}
+
+.review-row-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The checkbox used to occupy its own column outside the card, so a selectable
+   row's card started 24px right of the rail header, filters and empty state.
+   It sits inside the card's own padding instead, and the card stays flush. */
+.review-row-shell.has-bulk-select {
+  position: relative;
+}
+
+.review-row-shell.has-bulk-select .review-row {
+  padding-inline-start: 40px;
+}
+
+.review-row-select {
+  position: absolute;
+  inset-inline-start: 8px;
+  top: 11px;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+
+.review-row-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--review);
+}
+
+.review-row-main p {
+  display: grid;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.review-row-main p > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-row-type {
+  font-weight: 700;
+}
+
+/* The type label never wraps; the slug beside it already truncates, so that is
+   where the row's shrink pressure belongs. */
+.review-row-target-meta > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.review-row-target-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin-top: 5px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.review-row-target-meta svg {
+  flex: none;
+}
+
+.review-row-target-meta code {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-version-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: var(--surface-muted, var(--surface-hover));
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.selectable-row {
+  appearance: none;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.selectable-row.active {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+/* UI-04: gate the row hover background to true hover devices (see note above). */
+@media (hover: hover) and (pointer: fine) {
+  .selectable-row:hover,
+  .folder-child-row:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-hover);
+  }
+}
+
+.selectable-row.active {
+  box-shadow: inset 3px 0 0 var(--context);
+}
+
+.review-row.selectable-row.active {
+  box-shadow: inset 3px 0 0 var(--review);
+}
+
+.review-overview {
+  display: grid;
+  gap: 18px;
+}
+
+/* Grid gaps do not collapse with margins, so the shared header/section
+   bottom margins stacked on top of the gap and produced 34px between some
+   bands and 16px between others. The grid owns the rhythm here. */
+.review-overview > .feature-header,
+.review-overview > .feature-section {
+  margin-bottom: 0;
+}
+
+/* CSS-2B: risk distribution is a distinct group from the lifecycle status cards;
+   a labelled wrapper separates the two sets instead of one flat grid. */
+/* RO-1: per-status queue cards, each with clickable High/Medium/Low risk chips
+   (the standalone Risk distribution block was folded in here). */
+.review-queue-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.review-queue-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.review-queue-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  border-radius: 6px;
+}
+
+.review-queue-card__label {
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.review-queue-card__value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.review-queue-card__header:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+}
+
+.review-queue-card__risks {
+  display: flex;
+  gap: 6px;
+}
+
+.review-queue-risk-chip {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.review-queue-risk-chip strong {
+  font-size: 14px;
+}
+
+.review-queue-risk-chip--high {
+  background: var(--danger-soft);
+  color: #be123c;
+}
+
+.review-queue-risk-chip--medium {
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface));
+  color: #92400e;
+}
+
+.review-queue-risk-chip--low {
+  background: var(--ok-soft);
+  color: #166534;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .review-queue-risk-chip:hover {
+    border-color: currentColor;
+  }
+
+  /* The label + total is a button that jumps to its lifecycle tab; without a
+     hover response it reads as static card text, unlike the risk chips below
+     it in the same card. */
+  .review-queue-card__header:hover .review-queue-card__label {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+}
+
+.review-queue-risk-chip:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+/* R8: per-reason breakdown of skipped items in the bulk-approve result banner. */
+.review-bulk-skip-reasons {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.review-bulk-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* R7: compact loading indicator shown while the rail auto-loads the next page. */
+.review-rail-loading-more {
+  display: block;
+  padding: 8px 0;
+  text-align: center;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.review-operations-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.review-operations-card p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+}
+
+.review-policy-card {
+  display: grid;
+  gap: 12px;
+}
+
+.review-policy-card p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+/* Pairs with .panel-header on the two page-section headers. Both cards lay
+   their children out with a gap that already spaces the header from its body,
+   so the shared 12px bottom margin would double it. */
+.review-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+/* The caps + 12px + muted treatment is the section label's, not the trailing
+   action's: inherited, it would uppercase the link, shrink it, and drop its
+   border (currentColor) to meta-grey, unlike every other .inline-action. These
+   three declarations restore the body defaults the link renders with elsewhere. */
+.review-recent-header > .inline-action {
+  color: var(--ink);
+  font-size: 14px;
+  text-transform: none;
+}
+
+/* UI-01: the recent-decisions card stacks its header above the decision list
+   instead of inheriting the row layout, which previously pushed a single
+   decision card to the far-right edge and left a large dead gap. */
+.review-recent-card {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.review-recent-card .review-recent-header {
+  width: 100%;
+}
+
+/* Summary and record notice belong to the page, not to the client avatar they
+   used to sit beside — that hung them 30px in from every other block. The
+   100% basis forces a wrap so the copy owns a full-width second line under the
+   title/action row, starting at the same left edge as every block below it;
+   without it the sentence sits inline beside a 22px h1. */
+.mcp-chat-title-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex-basis: 100%;
+}
+
+/* Cards without a risk breakdown sized to their own content instead of
+   stretching to a sibling's height and leaving a blank lower half. */
+.review-queue-grid > .review-queue-card {
+  align-self: start;
+}

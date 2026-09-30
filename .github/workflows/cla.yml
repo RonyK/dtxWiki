@@ -1,0 +1,269 @@
+name: CLA
+
+# CLA.md section 8 sets the acceptance rules; CONTRIBUTING.md describes this
+# check, the current acceptance process. Signatures are stored in the private
+# repository dtxSuite/dtxwiki-cla-signatures, never in this public repository,
+# so the record stays private and main's rewritten release history never
+# carries it.
+#
+# No `closed` trigger: it exists only to lock a pull request after merge, and
+# lock-pullrequest-aftermerge is false below, so it would just re-run the check
+# with write permissions on every merged or abandoned pull request. `reopened`
+# starts a fresh check when there is no failed run for `recheck` to re-run.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+# This repository's token only reads code, comments on pull requests and
+# re-runs the last failed pull_request_target run of this workflow (a signing
+# comment turns the required check green that way). The action never calls the
+# commit status API, so there is no statuses: write. The signature repository
+# is written with a separate GitHub App token, minted below.
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  cla:
+    name: Contributor License Agreement
+    runs-on: ubuntu-latest
+    # Bounds a hung or hostile step while the App key is in this job's memory.
+    timeout-minutes: 5
+    # CLA_APP_PRIVATE_KEY is an environment secret, not a repository secret, so
+    # a workflow pushed to another branch cannot read it. The environment has
+    # one rule: deployment branches = main (pull_request_target and
+    # issue_comment both resolve to the default branch). No reviewers and no
+    # wait timer: either would stall every pull request.
+    environment: cla-signatures
+    # Runs for one pull request go one at a time, so a burst of `recheck`
+    # comments cannot write the signature repository in parallel or use up
+    # this repository's 1,000 requests per hour. Nothing is cancelled while it
+    # runs; every run re-reads the whole pull request, so queued runs lose
+    # nothing. queue: max keeps up to 100 pending runs in order.
+    concurrency:
+      group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+      queue: max
+    # A comment on a plain issue carries no CLA state. On a pull request,
+    # contains() only picks the comments worth a run: GitHub keeps a trailing
+    # newline on some comment bodies, which an == comparison would skip. The
+    # action then accepts a signature only when the trimmed comment equals
+    # custom-pr-sign-comment, ignoring letter case.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+       (contains(github.event.comment.body, 'recheck') ||
+        contains(github.event.comment.body, 'I have read the dtxWiki CLA Version 1 and I hereby sign it')))
+    steps:
+      - name: Refuse pull requests the CLA check cannot fully read
+        # The pinned action reads only the first 100 commits, and for a commit
+        # whose author email is linked to no GitHub account it falls back to the
+        # committer or to the free-text author name, which anyone can set. Such
+        # a pull request cannot show who must accept the CLA, so it fails here.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          commits=$(gh api "repos/$REPO/pulls/$PR" --jq .commits)
+          if [ "$commits" -gt 100 ]; then
+            echo "::error::$commits commits: the CLA check reads only 100. Squash or split the pull request."
+            exit 1
+          fi
+          unlinked=$(gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[] | select(.author == null) | .sha')
+          if [ -n "$unlinked" ]; then
+            echo "::error::Commit authors not linked to a GitHub account: $(echo $unlinked). Add the email to your GitHub account or re-author the commits."
+            exit 1
+          fi
+      - name: Mint a token for the signature repository
+        id: signature-token
+        # A GitHub App installed only on the signature repository, with
+        # contents read and write and nothing else. The token is scoped to that
+        # one repository and revoked when the job ends. Pinned to the commit
+        # v3.2.0 points at.
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.CLA_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLA_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: dtxwiki-cla-signatures
+          permission-contents: write
+      - name: Check signatures
+        # Pinned to the commit v2.6.1 points at, not the movable tag: this
+        # step runs on pull_request_target with write-scoped tokens.
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The action calls this a personal access token and uses it only to
+          # read and write the signature file; it is the App token above.
+          PERSONAL_ACCESS_TOKEN: ${{ steps.signature-token.outputs.token }}
+        with:
+          # CLA Version 1 at its protected tag, not the moving main/CLA.md:
+          # public main is rewritten at every release.
+          path-to-document: https://github.com/${{ github.repository }}/blob/cla-v1/CLA.md
+          remote-organization-name: ${{ github.repository_owner }}
+          remote-repository-name: dtxwiki-cla-signatures
+          branch: main
+          path-to-signatures: signatures/version1/cla.json
+          # The version-bound acceptance statement from CONTRIBUTING.md. A new
+          # CLA version means a new statement, a new cla-vN tag, a new
+          # signatures/versionN directory and new copies of CLA.md and
+          # CONTRIBUTING.md.
+          custom-pr-sign-comment: I have read the dtxWiki CLA Version 1 and I hereby sign it
+          # The maintainer does not sign their own CLA. This entry matches a
+          # commit author's account login, and any email GitHub links to that
+          # account makes a commit match, so it exempts commits, never a pull
+          # request: the step "Require the pull request author's acceptance"
+          # still needs the author of the pull request itself, and exempts only
+          # the maintainer's own pull requests. No bot names.
+          allowlist: RonyK
+          lock-pullrequest-aftermerge: false
+      - name: Require the pull request author's acceptance
+        # The action examines commit authors only, and a commit author is
+        # whatever email the committer chose: the maintainer's public email or
+        # a signed contributor's makes GitHub link the commit to that account.
+        # CLA.md section 1 binds the individual who Submits, the account that
+        # opened this pull request, and no commit metadata can fake that. The
+        # login comes from the event, never from a commit.
+        env:
+          SIG_TOKEN: ${{ steps.signature-token.outputs.token }}
+          SIG_REPO: ${{ github.repository_owner }}/dtxwiki-cla-signatures
+          EXEMPT: RonyK
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, subprocess, sys, time
+
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8"))
+          author = (event.get("pull_request") or event["issue"])["user"]
+          if author["login"].lower() in {name.strip().lower() for name in os.environ["EXEMPT"].split(",")}:
+              sys.exit(0)
+          for attempt in range(3):
+              out = subprocess.run(
+                  ["gh", "api", f"repos/{os.environ['SIG_REPO']}/contents/signatures/version1/cla.json?ref=main"],
+                  check=True, capture_output=True, text=True, env=dict(os.environ, GH_TOKEN=os.environ["SIG_TOKEN"]),
+              ).stdout
+              signed = json.loads(base64.b64decode(json.loads(out)["content"]))["signedContributors"]
+              if any(entry.get("id") == author["id"] for entry in signed):
+                  sys.exit(0)
+              time.sleep(2)
+          print(f"::error::{author['login']} opened this pull request but has not accepted CLA Version 1. The author of the pull request must post the acceptance statement.")
+          sys.exit(1)
+          PY
+      - name: Keep the evidence of each recorded acceptance
+        # Works from the record, after the action, on every event: for each
+        # entry of this pull request in cla.json without an evidence file it
+        # stores the comment, the pull request description and the SHA-256 of
+        # the CLA text. A comment the action rejected (another whitespace rule,
+        # a commenter who is no author) therefore gets no file, and a recorded
+        # acceptance cannot be left without one by a retry or a recheck. The
+        # event's own copy is used when the event is that comment's creation;
+        # otherwise the comment is fetched now. Runs even when the action fails
+        # for another author, so a signature is snapshotted before its comment
+        # can be edited or deleted.
+        if: ${{ !cancelled() && steps.signature-token.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIG_TOKEN: ${{ steps.signature-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          SIG_REPO: ${{ github.repository_owner }}/dtxwiki-cla-signatures
+          STATEMENT: I have read the dtxWiki CLA Version 1 and I hereby sign it
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, datetime, hashlib, json, os, subprocess, sys, time
+
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8"))
+          repo, sig_repo = os.environ["REPO"], os.environ["SIG_REPO"]
+          public, private = os.environ["GH_TOKEN"], os.environ["SIG_TOKEN"]
+          number = (event.get("pull_request") or event["issue"])["number"]
+
+          def api(token, *args, payload=None):
+              return subprocess.run(
+                  ["gh", "api", *args], input=payload, text=True, check=True,
+                  capture_output=True, env=dict(os.environ, GH_TOKEN=token),
+              ).stdout
+
+          def get(token, repository, path, ref):
+              return json.loads(api(token, f"repos/{repository}/contents/{path}?ref={ref}"))
+
+          def text(token, repository, path, ref):
+              return base64.b64decode(get(token, repository, path, ref)["content"])
+
+          def absent(error):
+              return "HTTP 404" in (error.stderr or "")
+
+          signed = json.loads(text(private, sig_repo, "signatures/version1/cla.json", "main"))["signedContributors"]
+          todo = []
+          for entry in signed:
+              if entry.get("pullRequestNo") != number or entry.get("repoId") != event["repository"]["id"]:
+                  continue
+              path = f"signatures/version1/evidence/{entry['comment_id']}.json"
+              try:
+                  get(private, sig_repo, path, "main")
+              except subprocess.CalledProcessError as error:
+                  if not absent(error):
+                      raise
+                  todo.append((entry, path))
+          if not todo:
+              sys.exit(0)
+
+          cla = hashlib.sha256(text(public, repo, "CLA.md", "cla-v1")).hexdigest()
+          sums = text(private, sig_repo, "signatures/version1/SHA256SUMS", "main").decode()
+          frozen = dict(line.split()[::-1] for line in sums.splitlines() if line.strip())
+          if frozen.get("CLA.md") != cla:
+              print("::error::CLA.md at cla-v1 differs from the frozen copy in the signature repository.")
+              sys.exit(1)
+          process = hashlib.sha256(text(public, repo, "CONTRIBUTING.md", event["repository"]["default_branch"])).hexdigest()
+          now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+          for entry, path in todo:
+              live = event.get("comment") if (event.get("comment") or {}).get("id") == entry["comment_id"] else None
+              comment, pull = live, event.get("pull_request") or event["issue"]
+              if live is None:
+                  pull = json.loads(api(public, f"repos/{repo}/pulls/{number}"))
+                  try:
+                      comment = json.loads(api(public, f"repos/{repo}/issues/comments/{entry['comment_id']}"))
+                  except subprocess.CalledProcessError as error:
+                      if not absent(error):
+                          raise
+              record = {
+                  "cla_version": 1,
+                  "statement": os.environ["STATEMENT"],
+                  "cla_tag": "cla-v1",
+                  "cla_sha256": cla,
+                  "contributing_sha256": process,
+                  "repository": repo,
+                  "repository_id": event["repository"]["id"],
+                  "pull_request": number,
+                  "pull_request_description": pull.get("body"),
+                  "captured": "from the event that created the comment" if live else "later, from the API (the comment and description may have changed)",
+                  "comment": {key: comment.get(key) for key in ("id", "body", "created_at", "updated_at", "html_url")} if comment else None,
+                  "recorded_entry": entry,
+                  "run_id": os.environ["GITHUB_RUN_ID"],
+                  "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "recorded_at": now,
+              }
+              body = json.dumps(record, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+              payload = json.dumps({
+                  "message": f"Evidence of comment {entry['comment_id']} on {repo}#{number}",
+                  "branch": "main",
+                  "content": base64.b64encode(body).decode(),
+              })
+              for attempt in range(3):
+                  try:
+                      api(private, "-X", "PUT", f"repos/{sig_repo}/contents/{path}", "--input", "-", payload=payload)
+                      print(f"stored {path}")
+                      break
+                  except subprocess.CalledProcessError:
+                      try:
+                          get(private, sig_repo, path, "main")
+                          print(f"{path} was stored by another run")
+                          break
+                      except subprocess.CalledProcessError:
+                          if attempt == 2:
+                              raise
+                          time.sleep(2 * (attempt + 1))
+          PY

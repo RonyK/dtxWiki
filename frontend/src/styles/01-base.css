@@ -1,0 +1,478 @@
+/* Base reset — replaces Tailwind Preflight. dtxWiki styles its UI with semantic
+   CSS (styles/02-08), not utility-first classes, so Tailwind was removed; these
+   rules reproduce the Preflight behavior the semantic CSS was written against:
+   border-box, neutralized heading sizes, zeroed block margins, list reset,
+   block-level media, a bare-button chrome reset, and a hardened [hidden]
+   rule. */
+*,
+::before,
+::after {
+  box-sizing: border-box;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+p,
+figure,
+blockquote,
+dl,
+dd,
+pre {
+  margin: 0;
+}
+
+ol,
+ul,
+menu {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+img,
+svg,
+video,
+canvas,
+audio,
+iframe,
+embed,
+object {
+  display: block;
+  vertical-align: middle;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+button {
+  background-color: transparent;
+  background-image: none;
+  border: 0;
+}
+
+/* Preflight also raises the [hidden] UA rule's priority so an element's own
+   `display` declaration can't override it; without this, any authored
+   `display` on a `hidden`-attributed element (e.g. a grid list) silently
+   wins the cascade and the element stays visible. */
+[hidden] {
+  display: none !important;
+}
+
+/* Status pill + lifecycle dot + card primitives (previously Tailwind @apply;
+   now plain CSS over the design tokens in :root below). Kept even though no
+   current call site uses .pill/.pill-* directly: tests/static/
+   test_frontend_quality_contract.py pins these as part of the semantic
+   palette contract (reserved for future/direct use, independent of today's
+   TSX call sites) -- do not remove them again on a "dead code" pass without
+   first checking that gate. */
+.pill,
+.pill-ok,
+.pill-warn,
+.pill-danger,
+.pill-muted,
+.pill-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.pill-ok {
+  background-color: color-mix(in oklch, var(--status-ok) 10%, transparent);
+  color: var(--status-ok);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--status-ok) 30%, transparent);
+}
+
+.pill-warn {
+  background-color: color-mix(in oklch, var(--status-warn) 10%, transparent);
+  color: var(--status-warn);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--status-warn) 30%, transparent);
+}
+
+.pill-danger {
+  background-color: color-mix(in oklch, var(--status-danger) 10%, transparent);
+  color: var(--status-danger);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--status-danger) 30%, transparent);
+}
+
+.pill-muted {
+  background-color: color-mix(in oklch, var(--ink-5) 30%, transparent);
+  color: var(--ink-3);
+  box-shadow: 0 0 0 1px var(--ink-5);
+}
+
+.pill-info {
+  background-color: color-mix(in oklch, var(--status-info) 10%, transparent);
+  color: var(--status-info);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--status-info) 30%, transparent);
+}
+
+.lc-dot,
+.lc-dot-library,
+.lc-dot-context,
+.lc-dot-agent {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+}
+
+.lc-dot-library {
+  background-color: var(--lifecycle-library);
+}
+
+.lc-dot-context {
+  background-color: var(--lifecycle-context);
+}
+
+.lc-dot-agent {
+  background-color: var(--lifecycle-agent);
+}
+
+.card {
+  border-radius: 6px;
+  border: 1px solid var(--ink-5);
+  background-color: var(--paper);
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+:root {
+  /* Global overlay order: feature-local popovers/drawers/inspectors stay at or
+     below 80, shell navigation covers them, and a portaled modal covers both. */
+  --z-navigation-overlay: 90;
+  --z-dialog: 100;
+  --z-skip-link: 200;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-subtle: #fbfcfe;
+  --surface-hover: #f1f5f9;
+  --surface-active: #eef2f7;
+  --border: #e5e7eb;
+  --border-strong: #d7dce3;
+  --ink: #0f172a;
+  --ink-muted: #475569;
+  /* 5.35:1 against --surface-hover; remains readable at the 11-12px metadata
+     sizes used across cards, badges, and timestamps. */
+  --ink-soft: #56667b;
+  --ink-faint: #5a6b82;
+  --context: #7c3aed;
+  --context-soft: #f5f0ff;
+  --accent-context: #7c3aed;
+  --accent: var(--context);
+  --accent-soft: var(--context-soft);
+  --surface-raised: var(--surface);
+  --radius-md: var(--radius-card);
+  --color-text-secondary: var(--ink-muted);
+  --agent: #d97706;
+  --agent-soft: #fff7ed;
+  --agent-text: #b45309;
+  --ask: var(--context);
+  --review: #2563eb;
+  --library: #0f9f8f;
+  --library-soft: #e7fbf7;
+  --library-text: #0f766e;
+  --ok: #16a34a;
+  --ok-soft: #f0fdf4;
+  /* Readable green for text on a light surface (the same ink `.status-pill-ok`
+     uses). Several rules already referenced it and silently fell back to a
+     neutral, so the "saved" / "ready" signals had no color at all. */
+  --ok-strong: #166534;
+  --danger: #dc2626;
+  --danger-soft: #fff1f2;
+  --danger-surface: #fff7f7;
+  --danger-border: #fecaca;
+  --danger-border-strong: #fca5a5;
+  --warning: #f59e0b;
+  --warning-soft: #fff8eb;
+  --info: #3b82f6;
+  --info-soft: #eff6ff;
+  --prism-gradient: linear-gradient(135deg, #14b8a6 0%, #3b82f6 32%, #7c3aed 62%, #f59e0b 100%);
+  --shadow-1: 0 1px 2px rgb(15 23 42 / 6%);
+  --shadow-2: 0 12px 30px rgb(15 23 42 / 10%);
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --tracking-caps: 0.08em;
+  --topbar-h: 56px;
+  --sidebar-w: 232px;
+  --sidebar-collapsed-w: 64px;
+
+  /* Pill/dot/card primitive tokens (ported from the removed tailwind.config.ts
+     theme so the pill, dot, and card primitives keep their exact colors). */
+  --status-ok: oklch(0.72 0.15 145);
+  --status-warn: oklch(0.78 0.16 70);
+  --status-danger: oklch(0.66 0.2 25);
+  --status-info: oklch(0.7 0.13 240);
+  --ink-3: oklch(0.55 0.02 250);
+  --ink-5: oklch(0.85 0.02 250);
+  --lifecycle-library: #0f9f8f;
+  --lifecycle-context: #7c3aed;
+  --lifecycle-agent: #d97706;
+  --paper: oklch(0.99 0.005 80);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 5%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  /* L-13 (260908 UI audit): `font` is a shorthand that already covers
+     font-weight, but <select> and <textarea> still rendered visibly bolder
+     than a sibling <input> (e.g. Settings' Goal textarea and Default
+     language select next to the Workspace title input) -- an explicit
+     longhand wins over whatever was overriding the shorthand's weight. */
+  font-weight: 400;
+}
+
+/* M-1 (260908 UI audit): a bare <select> with no ancestor wrapper (Search
+   scope, Agent create dialog, Settings language, ...) rendered as the raw OS
+   dropdown -- no border, no radius, a mismatched native arrow -- next to
+   custom-styled siblings. A more specific rule (`.select-field select`,
+   `.field-stack select`, ...) still wins on specificity and keeps its own
+   sizing; this only supplies the border/radius/chevron a bare select had
+   none of, and swaps every select's native arrow for one matching the app's
+   own icon set so the two never show side by side. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 16px;
+  color: var(--ink);
+  padding: 8px 30px 8px 10px;
+}
+
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Brand every check control from the base layer. Per-wrapper rules kept
+   re-deriving this and kept missing sites (Settings > Lint, workspace access
+   radios, admin recovery, the OAuth sliding toggle, portaled dialogs), so the
+   accent lived in four places and was absent from a dozen more. An element
+   selector loses to any class, so surfaces that need their own hue —
+   .review-row-select input { accent-color: var(--review) } — still win. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--context);
+}
+
+button {
+  cursor: pointer;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.spinner-glyph {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-rotate 720ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner-glyph {
+    animation-duration: 0s;
+  }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: var(--z-skip-link);
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--info);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 800;
+
+  /* No shadow while tucked off-screen: the translated link's bottom edge sits
+     just above the viewport, so a persistent drop shadow would bleed in as a
+     gray smudge at the top-left of every page. */
+  box-shadow: none;
+  transform: translateY(-140%);
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-2);
+  transform: translateY(0);
+}
+
+:is(a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main";
+  /* On mobile browsers 100vh resolves to the *large* viewport (URL bar hidden),
+     so while the bar is showing the bottom 60-110px of the shell sits off
+     screen. The dynamic-viewport rule below tracks the visible viewport; this
+     line remains the fallback for older browsers. */
+  height: 100vh;
+  /* `hidden` is the fallback for a browser that cannot safely use `clip`.
+
+     `hidden` makes this element a SCROLL CONTAINER: it can carry a scrollLeft
+     even with no visible scrollbar, and a browser preserves that offset
+     across a viewport-size change (focus, scrollIntoView, or its own
+     keep-the-same-point-visible logic). Fold a wide-then-narrow device
+     (Galaxy Fold: 690px unfolded -> 344px folded) and any scrollLeft the
+     browser wrote gets CLAMPED to `scrollWidth - clientWidth` rather than
+     zeroed -- so if anything inside was even 1px wider than the folded width,
+     that many pixels of scrollLeft survive, every child renders shifted that
+     far left, and there is no scrollbar to drag it back. Permanent until
+     reload. Measured and reproduced on /lint (260911 Fold report): a sr-only
+     live region overflowed .feature-main by 24px, and 24px of scrollLeft was
+     exactly what stuck after a fold. `clip` paints identically but is not a
+     scroll container, so it cannot hold an offset at all.
+
+     `clip` forbids programmatic scrolling, where `hidden` lets the browser
+     reveal a focused control. Keep `hidden` until dynamic viewport units are
+     available: Chrome/Edge 90-107 know `clip` but not `dvh`, so clipping there
+     would combine the oversized 100vh shell with no way to reveal its bottom
+     controls. Shell.tsx's useScrollLeftGuardRef protects this fallback from a
+     residual horizontal offset. */
+  overflow: hidden;
+  background: var(--bg);
+}
+
+@supports (height: 100dvh) {
+  .app-shell {
+    height: 100dvh;
+    overflow: clip;
+  }
+}
+
+.app-shell-public {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "topbar"
+    "main";
+}
+
+.app-shell-public .topbar {
+  grid-template-columns: minmax(180px, var(--sidebar-w)) minmax(0, 1fr) auto;
+}
+
+.app-shell-public .topbar-brand {
+  border-right: 0;
+}
+
+.topbar {
+  grid-area: topbar;
+  display: grid;
+  grid-template-columns: minmax(var(--sidebar-w), max-content) minmax(280px, 620px) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  height: var(--topbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-shell[data-sidebar-collapsed="true"] {
+  grid-template-columns: var(--sidebar-collapsed-w) minmax(0, 1fr);
+}
+
+.app-shell[data-sidebar-collapsed="true"] .topbar {
+  grid-template-columns:
+    minmax(var(--sidebar-collapsed-w), max-content) minmax(240px, 620px)
+    minmax(0, 1fr);
+}
+
+.app-shell[data-sidebar-collapsed="true"] .topbar-brand {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.app-shell[data-sidebar-collapsed="true"] .brand-name {
+  display: none;
+}

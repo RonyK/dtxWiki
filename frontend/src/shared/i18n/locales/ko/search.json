@@ -1,0 +1,118 @@
+{
+  "ask": {
+    "loading": "질문 불러오는 중"
+  },
+  "breadcrumb": "검색",
+  "errors": {
+    "load": "검색에 실패했습니다",
+    "loadMore": "결과를 더 불러오지 못했습니다",
+    "capabilities": "검색 기능 정보를 불러오지 못했습니다",
+    "indexUnavailable": "이 빌드에서는 검색 인덱스를 사용할 수 없습니다. 라이브러리, 컨텍스트, 에이전트 탐색을 사용하세요."
+  },
+  "header": {
+    "eyebrow": "워크스페이스 검색",
+    "title": "검색",
+    "subtitle": "컨텍스트 페이지, 라이브러리 소스, 에이전트 페이지, 변경 이력을 함께 검색합니다."
+  },
+  "form": {
+    "query": "검색어",
+    "clear": "검색 지우기",
+    "queryPlaceholder": "컨텍스트, 라이브러리, 에이전트 페이지, 변경 검색",
+    "scope": "범위",
+    "mode": "모드",
+    "submit": "검색"
+  },
+  "scopes": {
+    "all": "전체",
+    "context_page": "컨텍스트",
+    "library_item": "라이브러리",
+    "library_artifact": "자료",
+    "agent_page": "에이전트",
+    "change": "변경"
+  },
+  "modes": {
+    "keyword": "키워드 검색",
+    "semantic": "시맨틱 검색",
+    "hybrid": "하이브리드 검색"
+  },
+  "units": {
+    "results_one": "결과",
+    "results_other": "결과"
+  },
+  "labels": {
+    "unset": "없음",
+    "types": {
+      "context_page": "컨텍스트",
+      "context_claim": "클레임",
+      "library_item": "라이브러리",
+      "library_artifact": "자료",
+      "agent_page": "에이전트",
+      "feedback": "피드백",
+      "change_set": "변경",
+      "change": "변경",
+      "source": "라이브러리"
+    }
+  },
+  "results": {
+    "loading": "검색 결과 불러오는 중",
+    "loadingLabel": "결과 불러오는 중",
+    "count_one": "{{count}}개 결과",
+    "count_other": "{{count}}개 결과",
+    "countPlus": "{{count}}개 이상 결과",
+    "open": "{{title}} 열기",
+    "openContext": "컨텍스트 열기",
+    "openLibrary": "라이브러리 열기",
+    "openAgent": "에이전트 열기",
+    "openReview": "리뷰 열기",
+    "openUnavailable": "열 수 없음",
+    "noCitation": "인용 없음",
+    "cannotOpen": "{{title, josaEunNeun}} 아직 검색에서 열 수 없습니다",
+    "serverOrder": "결과",
+    "disambiguation": "동일한 이름의 문서",
+    "warningSummary": "{{warnings}}",
+    "matchedName": "일치한 이름: {{name}}"
+  },
+  "examples": {
+    "label": "검색 예시",
+    "prompt": "예시:",
+    "embeddingPolicy": "임베딩 정책",
+    "reviewGuideline": "리뷰 가이드라인",
+    "sourceTrustLevel": "출처 신뢰 수준"
+  },
+  "empty": {
+    "unavailableTitle": "검색을 사용할 수 없습니다",
+    "unavailableDescription": "검색 인덱스가 오프라인이거나 이 빌드에 배포되지 않았을 때는 라이브러리, 컨텍스트, 에이전트 탐색을 사용하세요.",
+    "initialTitle": "워크스페이스 검색",
+    "initialDescription": "범위를 좁혀 검색하거나 아래 예시로 시작하세요.",
+    "openLibrary": "라이브러리 열기",
+    "noResultsTitle": "결과 없음",
+    "noResultsDescription": "범위를 넓히거나 라이브러리 또는 컨텍스트 페이지의 용어로 다시 검색하세요.",
+    "coverageGap": "컨텍스트 페이지 작성",
+    "tryExample": "예시로 검색",
+    "addLibrarySource": "라이브러리 소스 추가"
+  },
+  "loadMore": "더 보기",
+  "loadingMore": "불러오는 중…",
+  "matchReasons": {
+    "exact_id": "ID 일치",
+    "exact_slug": "슬러그 일치",
+    "exact_title": "제목 일치",
+    "exact_alias": "별칭 일치",
+    "trigram": "유사 이름",
+    "keyword": "키워드",
+    "semantic": "시맨틱",
+    "hybrid": "하이브리드",
+    "associative": "연관 문서"
+  },
+  "warningCodes": {
+    "permission_limited": "현재 권한으로 볼 수 없는 제한된 라이브러리 항목과 자료는 검색 결과에서 제외되었습니다",
+    "unsupported_filter_tag": "태그 필터는 아직 적용되지 않습니다",
+    "unsupported_filter_date": "날짜 필터는 아직 적용되지 않습니다",
+    "disambiguation_required": "동일한 이름의 문서가 여러 개입니다 — 후보를 선택하세요",
+    "semantic_fallback_used": "시맨틱 폴백 결과입니다",
+    "keyword_lane_unavailable": "이 데이터베이스에서는 로컬 FTS5 검색을 사용할 수 없습니다. 정확 일치와 직접 조회는 계속 동작합니다",
+    "coverage_gap_recorded": "근거를 찾지 못해 커버리지 갭이 기록되었습니다",
+    "llm_provider_unavailable": "답변 모델을 사용할 수 없어 근거 요약으로 답했습니다. 관리자에게 서버 LLM 설정 확인을 요청하세요.",
+    "llm_composer_failed": "답변 모델이 응답하지 않아 근거 요약으로 답했습니다. 다시 시도하면 작성된 답변을 받을 수 있습니다."
+  }
+}

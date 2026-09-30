@@ -1,0 +1,234 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  leak-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The MIT-licensed gitleaks CLI, not gitleaks-action: the action needs a
+      # GITLEAKS_LICENSE secret on an organization repository and exits 1
+      # without one. The image is pinned by digest as well as by tag, so a
+      # re-pushed tag cannot change what runs here. `git` mode with no
+      # --log-opts scans `git log --all`, i.e. every ref the full-depth
+      # checkout fetched; --redact keeps any finding's value out of the log.
+      - name: Scan the full history with gitleaks
+        run: >-
+          docker run --rm -v "$PWD:/repo"
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git --redact --no-banner --verbose /repo
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # tests/static runs node (the i18n coverage gate always; the e2e helper
+      # self-runners when node_modules is present, which it is not here), so
+      # the job pins the same node as every other job instead of taking
+      # whatever the runner image ships.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Lint backend and tests
+        run: .venv/bin/ruff check backend tests scripts
+      - name: Run backend and static tests
+        run: |
+          VENV=.venv make test-backend
+          VENV=.venv make test-static
+
+  postgres-migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dtxwiki_migration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dtxwiki_migration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL: >-
+        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_migration
+      DTXWIKI_POSTGRES_TEST_DATABASE_URL: >-
+        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_test
+      # The join concurrency suite creates and drops its own tables, so it gets
+      # a separate database: the migration suite asserts its database starts
+      # empty, and sharing one would couple the two by execution order.
+      DTXWIKI_POSTGRES_CONCURRENCY_TEST_DATABASE_URL: >-
+        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_concurrency
+      DTXWIKI_REQUIRE_POSTGRES_CONCURRENCY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Create isolated PostgreSQL test databases
+        run: |
+          .venv/bin/python - <<'PY'
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(
+              "postgresql+pg8000://postgres:postgres@127.0.0.1:5432/postgres"
+          )
+          with engine.connect().execution_options(
+              isolation_level="AUTOCOMMIT"
+          ) as connection:
+              for database in ("dtxwiki_test", "dtxwiki_concurrency"):
+                  connection.execute(text(f"DROP DATABASE IF EXISTS {database}"))
+                  connection.execute(text(f"CREATE DATABASE {database}"))
+          PY
+      - name: Execute all PostgreSQL suites through xdist loadgroup
+        # Selection by marker covers every shared-database case and proves the
+        # postgres group stays on one worker. Configured URLs turn missing or
+        # unreachable databases into failures instead of collection skips.
+        run: >-
+          .venv/bin/python -m pytest backend/tests -q -n 4 --dist loadgroup
+          -m xdist_group --tb=short
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # The release-gate validator tests start node (the gate script's i18n
+      # coverage check), so pin it rather than inherit the runner's.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Run packaging and acceptance tests with log capture
+        run: |
+          mkdir -p .ci-evidence
+          set +e
+          .venv/bin/python -m pytest tests/packaging -v --tb=short \
+            2>&1 | tee .ci-evidence/packaging.log
+          packaging_rc=${PIPESTATUS[0]}
+          .venv/bin/python -m pytest tests/acceptance -v --tb=short \
+            2>&1 | tee .ci-evidence/acceptance.log
+          acceptance_rc=${PIPESTATUS[0]}
+          exit $((packaging_rc | acceptance_rc))
+      - name: Run release-gate validator tests
+        run: VENV=.venv make test-release-gate
+      - name: Redact captured logs
+        if: always()
+        run: |
+          for f in .ci-evidence/*.log; do
+            bash scripts/redact_evidence.sh < "$f" > "${f%.log}.redacted.log" || true
+          done
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ github.run_id }}
+          path: .ci-evidence/*.redacted.log
+          retention-days: 90
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          # Pinned, not the floating major. The "Run e2e helper self-runners"
+          # step below imports tests/e2e/*.ts and is only correct on a node
+          # that strips TypeScript types without a flag -- which lands in
+          # 22.18. A bare `22` resolved to whatever the runner had, and this is
+          # the only job in which those 21 behavioural cases execute at all
+          # (the `backend` job that runs `make test-static` has no
+          # node_modules, so both tests/static wrappers skip there).
+          node-version: "22.18"
+          cache: npm
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Verify generated schemas and client
+        run: VENV=.venv make verify-generated-schemas
+      - name: Typecheck frontend
+        run: npm --workspace frontend run typecheck
+      - name: Lint frontend
+        run: npm --workspace frontend run lint
+      - name: Check i18n locale coverage
+        run: npm run check:i18n
+      - name: Run frontend tests
+        run: npm --workspace frontend run test -- --run
+      - name: Run desktop shell tests
+        run: npm run desktop:test
+      - name: Run e2e helper self-runners
+        # These import tests/e2e/*.ts, so they need node >= 22.18 for
+        # unflagged type stripping AND the root node_modules for
+        # @playwright/test. The `backend` job that runs `make test-static` has
+        # no node_modules, so both tests/static wrappers skip there and their
+        # cases would never execute in CI. This job has both.
+        run: |
+          node tests/e2e/network_retry.test.mjs
+          node tests/e2e/redact-network.test.mjs
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          cache: npm
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      # Standard profile: every spec on Chromium, @cross-browser specs on all
+      # three. The whole suite meets all three engines weekly, in
+      # .github/workflows/e2e-browsers.yml.
+      - name: Run Playwright e2e
+        run: npm run test:e2e
+      # The suite drives `/reset-password?token=<one-time token>`, and the HTML
+      # reporter base64-inlines every step title into index.html on EVERY run,
+      # green ones included -- so the upload below publishes the token for 14
+      # days even when nothing fails and tracing is off. `--dir` decodes that
+      # payload, plus the trace zips and the text attachments under data/, and
+      # redacts them in place. It cannot reach a screenshot; it names what it
+      # skipped in the job log.
+      #
+      # Deliberately NOT `|| true` (unlike the `packaging` job's per-file
+      # pipe): the only non-zero exit is the break-glass hard-fail on a
+      # production secret env name or a PEM private key, and by then the bytes
+      # have already been scrubbed in place. The upload is `if: always()`, so
+      # that combination turns the job red AND still publishes a safe report.
+      - name: Redact the Playwright report before publishing it
+        if: always()
+        run: |
+          if [ -d playwright-report ]; then
+            bash scripts/redact_evidence.sh --dir playwright-report
+          fi
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-standard-${{ github.run_id }}
+          path: playwright-report
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,632 @@
+{
+  "input": {
+    "$defs": {
+      "ContextImageMediaType": {
+        "enum": [
+          "image/png",
+          "image/jpeg",
+          "image/gif",
+          "image/webp"
+        ],
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "alt_text": {
+        "anyOf": [
+          {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Alt Text"
+      },
+      "content_base64": {
+        "maxLength": 13981016,
+        "minLength": 1,
+        "title": "Content Base64",
+        "type": "string"
+      },
+      "conversation_token": {
+        "description": "Required opaque MCP conversation token. Echo one from an earlier envelope or pass the literal 'new'.",
+        "maxLength": 160,
+        "minLength": 1,
+        "title": "Conversation Token",
+        "type": "string"
+      },
+      "editing_version_id": {
+        "description": "The caller's own currently-open editing version for this page. The image is registered against it; uploading requires an open editing session, not merely page access.",
+        "format": "uuid",
+        "title": "Editing Version Id",
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Filename",
+        "type": "string"
+      },
+      "marker_uuid": {
+        "format": "uuid",
+        "title": "Marker Uuid",
+        "type": "string"
+      },
+      "mime_type": {
+        "$ref": "#/$defs/ContextImageMediaType"
+      },
+      "page_id": {
+        "format": "uuid",
+        "title": "Page Id",
+        "type": "string"
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "title": "Workspace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_id",
+      "filename",
+      "mime_type",
+      "content_base64",
+      "marker_uuid",
+      "page_id",
+      "editing_version_id",
+      "conversation_token"
+    ],
+    "title": "UploadImageInput",
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "ContextImageMediaType": {
+        "enum": [
+          "image/png",
+          "image/jpeg",
+          "image/gif",
+          "image/webp"
+        ],
+        "type": "string"
+      },
+      "EnvelopeWarning": {
+        "additionalProperties": false,
+        "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
+        "properties": {
+          "code": {
+            "description": "Stable warning code; must be drawn from WARNING_CODES.",
+            "enum": [
+              "stale",
+              "permission_limited",
+              "citation_missing",
+              "citation_weak",
+              "citation_stale",
+              "token_budget",
+              "workflow_sequence_incomplete",
+              "draft_not_injectable",
+              "expired_context",
+              "archived",
+              "unsupported_retrieval_mode_fallback",
+              "deprecated_tool",
+              "conversation_token_not_supplied",
+              "unresolved_diverged_branch",
+              "conversation_read_stale",
+              "lint_publish_blocked",
+              "published_with_findings",
+              "draft_unpublished",
+              "text_occurrence_mismatch",
+              "text_not_found",
+              "unsupported_filter_tag",
+              "unsupported_filter_date",
+              "disambiguation_required",
+              "semantic_fallback_used",
+              "keyword_lane_unavailable",
+              "coverage_gap_recorded",
+              "evidence_not_citable",
+              "mrtr_preview_unavailable",
+              "borrowed_rerank_applied",
+              "borrowed_query_rewrite_applied",
+              "llm_provider_unavailable",
+              "llm_composer_failed",
+              "job_fanout_incomplete"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "MCPActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "mcp_client",
+              "agent",
+              "system"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPErrorDetail": {
+        "additionalProperties": false,
+        "description": "One actionable defect in a rejected tool call.\n\nShaped for a caller that has to repair its own request: `field` locates the\nproblem, `message` states it, and `fix` says what to send instead. Never\necho the offending value here \u2014 a rejected `body_markdown` can be a\nmegabyte, and reflecting client input back into a response (and into the\nstored trace) is both wasteful and an injection vector.",
+        "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextMatchCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidates"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fix"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_index": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Index"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPResultEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ref": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Activity Ref"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MCPActor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human",
+                  "mcp_client",
+                  "agent",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Kind"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audit Event Id"
+          },
+          "client_self_reported": {
+            "default": false,
+            "title": "Client Self Reported",
+            "type": "boolean"
+          },
+          "conversation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Opaque MCP conversation token. Echo this value on the next tool call to append to the same dtxWiki MCP chat.",
+            "title": "Conversation Token"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_details": {
+            "items": {
+              "$ref": "#/$defs/MCPErrorDetail"
+            },
+            "title": "Error Details",
+            "type": "array"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Meta"
+          },
+          "model_id": {
+            "default": "unknown",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Version"
+          },
+          "params_summary": {
+            "additionalProperties": true,
+            "title": "Params Summary",
+            "type": "object"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result_status": {
+            "enum": [
+              "accepted",
+              "succeeded",
+              "failed",
+              "partial",
+              "rejected_by_policy",
+              "needs_review",
+              "conflict"
+            ],
+            "title": "Result Status",
+            "type": "string"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retryable"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "schema_version": {
+            "const": "llmwiki.mcp.v1",
+            "default": "llmwiki.mcp.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "result_status"
+        ],
+        "title": "MCPResultEnvelope",
+        "type": "object"
+      },
+      "TextMatchCandidate": {
+        "additionalProperties": false,
+        "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
+        "properties": {
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Block Id"
+          },
+          "line_end": {
+            "minimum": 1,
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "minimum": 1,
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "match_kind": {
+            "enum": [
+              "exact",
+              "normalized",
+              "fuzzy"
+            ],
+            "title": "Match Kind",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "line_start",
+          "line_end",
+          "similarity",
+          "match_kind"
+        ],
+        "title": "TextMatchCandidate",
+        "type": "object"
+      },
+      "UploadImageResult": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "bytes": {
+            "maximum": 10485760,
+            "minimum": 1,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "content_url": {
+            "pattern": "^/api/v1/workspaces/[0-9a-f-]+/context/pages/[0-9a-f-]+/versions/[0-9a-f-]+/media/[0-9a-f-]+/content$",
+            "title": "Content Url",
+            "type": "string"
+          },
+          "logical_ref": {
+            "pattern": "^dtx-media://asset/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Logical Ref",
+            "type": "string"
+          },
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "marker_uuid": {
+            "format": "uuid",
+            "title": "Marker Uuid",
+            "type": "string"
+          },
+          "mime_type": {
+            "$ref": "#/$defs/ContextImageMediaType"
+          },
+          "reused": {
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "logical_ref",
+          "content_url",
+          "markdown",
+          "mime_type",
+          "bytes",
+          "sha256",
+          "marker_uuid",
+          "reused"
+        ],
+        "title": "UploadImageResult",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "data": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/UploadImageResult"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "envelope": {
+        "$ref": "#/$defs/MCPResultEnvelope"
+      }
+    },
+    "required": [
+      "envelope"
+    ],
+    "title": "UploadImageToolOutput",
+    "type": "object"
+  }
+}

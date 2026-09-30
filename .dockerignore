@@ -1,0 +1,42 @@
+.git
+.agents
+.claude
+.codex
+.cursor
+.pytest_cache
+.ruff_cache
+.venv
+**/__pycache__
+**/*.py[cod]
+
+# Local secrets never enter the build context: the image would keep them, and a
+# pushed image would publish them. The committed templates stay.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+Makefile.local
+# Operator backups and local databases.
+infra/prod/backups
+**/*.sqlite*
+
+# Private document roots (see AGENTS.md "Design Sources").
+doc
+docs
+review
+
+dist
+*.egg-info
+**/*.egg-info
+**/node_modules
+frontend/dist
+backend/static
+test-results
+
+shared
+tests/e2e
+tests/static
+tests/acceptance
+backend/tests
+
+**/*.log

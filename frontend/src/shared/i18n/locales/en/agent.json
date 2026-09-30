@@ -1,0 +1,218 @@
+{
+  "loading": "Loading Agent",
+  "title": "Agent",
+  "dialog": {
+    "advancedSlug": "Advanced slug",
+    "agentPage": "Agent page",
+    "body": "Body",
+    "cancel": "Cancel",
+    "category": "Category",
+    "closeAria": "Close agent dialog",
+    "createDraft": "Create draft",
+    "createTitle": "Create Agent draft",
+    "creating": "Creating…",
+    "defaultCreateReason": "Create Agent page draft",
+    "defaultCreateReasonWithTitle": "Create {{title}} draft",
+    "defaultPersona": "Default persona",
+    "defaultUpdateReason": "Update Agent page draft",
+    "defaultUpdateReasonWithTitle": "Update {{title}} draft",
+    "editTitle": "Edit Agent draft",
+    "existingPage": "Existing Agent page",
+    "failedCreate": "Failed to create Agent page",
+    "failedUpdate": "Failed to update Agent page",
+    "loadingDraft": "Loading the latest pending draft…",
+    "loadingDraftTitle": "Loading pending draft",
+    "metadata": "Metadata",
+    "newPage": "New Agent page",
+    "reason": "Reason",
+    "retry": "Retry",
+    "sensitivity": "Sensitivity",
+    "slug": "Slug",
+    "slugPreview": "Slug preview: {{slug}}",
+    "title": "Title",
+    "titleHintInvalid": "Enter 1-100 characters.",
+    "updateDraft": "Update draft",
+    "updating": "Updating…"
+  },
+  "templates": {
+    "label": "Template",
+    "blank": "Blank",
+    "list": {
+      "karpathyAgentGuidelines": {
+        "name": "Karpathy-inspired Agent Guidelines",
+        "description": "Karpathy-inspired guardrails that curb common LLM coding mistakes — think before coding, keep it simple, make surgical changes, and verify against goals. Merge with your project-specific instructions."
+      }
+    }
+  },
+  "errors": {
+    "activate": "Failed to activate Agent draft",
+    "loadDetail": "Failed to load Agent detail",
+    "loadDraft": "Failed to load the pending Agent draft",
+    "loadMore": "Failed to load more Agent pages",
+    "moveTreeNode": "Failed to move Agent tree node",
+    "refreshTree": "Failed to refresh Agent tree",
+    "reorderTreeNode": "Failed to reorder Agent tree node",
+    "itemUnavailable": "That Agent page is no longer available. It was removed from the list."
+  },
+  "labels": {
+    "unset": "unset",
+    "category": {
+      "agent_guide": "Agent guide",
+      "persona": "Persona",
+      "skill": "Skill",
+      "memory": "Memory"
+    },
+    "injectionPolicy": {
+      "always": "Always",
+      "default_on": "Default on",
+      "task_matched": "Task matched",
+      "permission_scoped": "Permission scoped"
+    },
+    "sensitivity": {
+      "workspace": "Workspace",
+      "private": "Private",
+      "public": "Public",
+      "secret_candidate": "Secret candidate"
+    }
+  },
+  "folder": {
+    "childCount": "{{count}} children",
+    "childPageCount": "{{count}} child pages",
+    "emptyCategory": "This Agent category is empty"
+  },
+  "layout": {
+    "details": "Details",
+    "explorer": "Explorer",
+    "createItem": "Create Agent item",
+    "new": "New",
+    "createFolder": "Create Agent folder",
+    "newFolder": "New folder"
+  },
+  "header": {
+    "eyebrow": "Behavior layer",
+    "title": "Agent pages",
+    "description": "Agent pages store instructions, skills, and memory for Ask and MCP clients. MCP clients must read an Agent page or build a bundle; pages are not injected into prompts automatically.",
+    "injectionSettings": "Injection settings",
+    "configuredUnit_one": "configured",
+    "configuredUnit_other": "configured"
+  },
+  "categories": {
+    "visible": "Visible",
+    "advancedCategories": "Advanced categories",
+    "advanced": "Advanced",
+    "createPage": "Create {{category}} Agent page",
+    "newAction": "+ New",
+    "sensitive": "Sensitive",
+    "sensitiveHint": "Sensitive category: only workspace owners can activate a draft here.",
+    "pageCount_one": "{{count}} page",
+    "pageCount_other": "{{count}} pages",
+    "injectionPolicyHint": {
+      "always": "Always: included in AI bundles whenever the page is readable.",
+      "default_on": "Default on: included automatically unless the page is disabled.",
+      "task_matched": "Task matched: included only when it matches the AI's current task.",
+      "permission_scoped": "Permission scoped: included whenever the requester's permissions match."
+    }
+  },
+  "table": {
+    "page": "Page",
+    "category": "Category",
+    "status": "Status",
+    "injection": "Injection",
+    "sensitivity": "Sensitivity",
+    "empty": "No Agent pages yet"
+  },
+  "units": {
+    "page_one": "page",
+    "page_other": "pages",
+    "item_one": "item",
+    "item_other": "items"
+  },
+  "panel": {
+    "recentHeading": "Recent updates"
+  },
+  "empty": {
+    "noTreeNodes": "No Agent tree nodes",
+    "selectPrompt": "Select an Agent page from the tree or table. Category folders organize pages and do not have reader content."
+  },
+  "reader": {
+    "activateConfirm": "Activate the pending draft for {{title}}?",
+    "activateDraft": "Activate draft",
+    "activateReason": "Activate Agent draft from the Agent reader",
+    "activating": "Activating…",
+    "createDraft": "Create draft",
+    "editDraft": "Edit draft",
+    "editPendingDraft": "Edit pending draft",
+    "injectionSettings": "Injection settings",
+    "injection": "Injection",
+    "priority": "Priority",
+    "sensitivity": "Sensitivity",
+    "ariaLabel": "Agent reader views",
+    "loadingDetail": "Loading Agent detail",
+    "sensitiveOwnerOnly": "This is a sensitive Agent page. Only workspace owners can view its contents.",
+    "noBody": "No body",
+    "bundleLoading": "Loading bundles…",
+    "bundleLoadFailed": "Could not load bundles",
+    "bundleEmpty": "No bundles reference this Agent page yet.",
+    "bundleName": "Bundle {{id}}",
+    "bundleIncluded": "Page included",
+    "bundleOmitted": "Page omitted",
+    "bundleCreated": "Created {{date}}",
+    "bundleExpires": "Expires {{date}}",
+    "noActivity": "No per-page activity stream yet. MCP chats that touched this page are listed under Linked chats below, and the workspace feed lives on the Activity page.",
+    "pendingDraft": "Pending draft v{{version}}",
+    "versionState": "Agent version state",
+    "viewingActive": "Viewing active v{{version}}",
+    "viewingDraft": "Viewing draft v{{version}}",
+    "tabs": {
+      "view": "View",
+      "history": "History",
+      "bundle": "Bundle",
+      "activity": "Activity",
+      "unavailable": "Not available yet"
+    }
+  },
+  "detail": {
+    "title": "Agent detail",
+    "empty": "Select an Agent page to inspect policy, versions, and MCP bundle metadata.",
+    "policy": "POLICY",
+    "priorityLine": "priority {{priority}} - {{category}}",
+    "versions": "VERSIONS",
+    "active": "Active",
+    "latestDraft": "Latest draft",
+    "draft": "draft",
+    "none": "none",
+    "status": "Status",
+    "actions": "ACTIONS",
+    "openPolicySettings": "Open policy settings"
+  },
+  "history": {
+    "noVersionHistory": "No version history yet.",
+    "clearSelection": "Clear selection",
+    "selectVersion": "Select version",
+    "compare": "Compare",
+    "compareTitle": "Compare Agent v{{version}} with current",
+    "closeDiff": "Close diff",
+    "loadingDiff": "Loading diff",
+    "currentUnavailable": "Current Agent version is unavailable.",
+    "versionUnavailable": "The selected Agent version is unavailable.",
+    "failedDiff": "Failed to load diff",
+    "failedRestore": "Failed to restore Agent version",
+    "restore": "Restore this version",
+    "restoring": "Restoring",
+    "restoreConfirm": "Restore Agent v{{version}} as a new draft? The active version stays unchanged.",
+    "restored": "Agent v{{version}} was restored as draft v{{draft}}.",
+    "describe": {
+      "active": "Active agent version",
+      "draft": "Draft - not active",
+      "status": "{{status}} version"
+    }
+  },
+  "notice": {
+    "activated": "{{title}} is now active.",
+    "ownerActivationRequired": "Draft saved. Owner activation is required before it becomes active.",
+    "reviewRequired": "Draft saved. Review is required before activation.",
+    "sentToReview": "Draft saved and sent to Review."
+  },
+  "loadMore": "Load more",
+  "loadingMore": "Loading…"
+}

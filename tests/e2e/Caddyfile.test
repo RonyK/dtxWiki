@@ -1,0 +1,24 @@
+{
+	admin off
+	local_certs
+	auto_https disable_redirects
+}
+
+https://dtxwiki.test {
+	tls internal
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy dtxwiki:21080 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Port 8443
+	}
+}

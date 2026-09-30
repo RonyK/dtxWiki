@@ -1,0 +1,83 @@
+name: dtxwiki-remote-e2e
+
+services:
+  keygen:
+    image: ${DTXWIKI_REMOTE_E2E_IMAGE:-dtxwiki:test}
+    command:
+      - sh
+      - -lc
+      - |
+        mkdir -p /etc/dtxwiki
+        test -s /etc/dtxwiki/jwt.pem || \
+          dtxwiki keygen --output /etc/dtxwiki/jwt.pem
+        chmod 0640 /etc/dtxwiki/jwt.pem
+    volumes:
+      - jwt-keys:/etc/dtxwiki
+
+  bootstrap:
+    image: ${DTXWIKI_REMOTE_E2E_IMAGE:-dtxwiki:test}
+    command: ["dtxwiki", "bootstrap"]
+    environment: &dtxwiki-env
+      DTXWIKI_APP_ENV: production
+      DTXWIKI_PUBLIC_BASE_URL: ${DTXWIKI_REMOTE_PUBLIC_BASE_URL:-https://dtxwiki.test:8443}
+      DTXWIKI_SESSION_SECRET: ${DTXWIKI_REMOTE_SESSION_SECRET:-phase5-remote-e2e-session-secret-change-me-64-chars}
+      DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH: /etc/dtxwiki/jwt.pem
+      DTXWIKI_DATABASE_URL: sqlite+pysqlite:////var/lib/dtxwiki/dtxwiki.sqlite
+      DTXWIKI_CORS_ORIGINS: ${DTXWIKI_REMOTE_PUBLIC_BASE_URL:-https://dtxwiki.test:8443}
+      DTXWIKI_MCP_HTTP_MODE: streamable
+      DTXWIKI_AUTO_BOOTSTRAP: "false"
+      DTXWIKI_FORCE_SECURITY_HEADERS: "1"
+    volumes:
+      - jwt-keys:/etc/dtxwiki
+      - dtxwiki-data:/var/lib/dtxwiki
+    depends_on:
+      keygen:
+        condition: service_completed_successfully
+
+  dtxwiki:
+    image: ${DTXWIKI_REMOTE_E2E_IMAGE:-dtxwiki:test}
+    command:
+      - dtxwiki
+      - serve
+      - --no-open
+      - --host
+      - 0.0.0.0
+      - --port
+      - "21080"
+    environment: *dtxwiki-env
+    volumes:
+      - jwt-keys:/etc/dtxwiki:ro
+      - dtxwiki-data:/var/lib/dtxwiki
+    expose:
+      - "21080"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:21080/health/live',
+          timeout=5)"
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  caddy:
+    image: caddy:2
+    ports:
+      - 127.0.0.1:${DTXWIKI_REMOTE_E2E_HTTPS_PORT:-8443}:443
+    volumes:
+      - ./Caddyfile.test:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      dtxwiki:
+        condition: service_healthy
+
+volumes:
+  jwt-keys:
+  dtxwiki-data:
+  caddy-data:
+  caddy-config:

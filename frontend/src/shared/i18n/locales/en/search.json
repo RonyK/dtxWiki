@@ -1,0 +1,118 @@
+{
+  "ask": {
+    "loading": "Loading Ask"
+  },
+  "breadcrumb": "Search",
+  "errors": {
+    "load": "Failed to search",
+    "loadMore": "Failed to load more results",
+    "capabilities": "Failed to load search capabilities",
+    "indexUnavailable": "Search index is not available in this build. Try Library, Context, or Agent navigation instead."
+  },
+  "header": {
+    "eyebrow": "Workspace search",
+    "title": "Search",
+    "subtitle": "Search across Context pages, Library sources, Agent pages, and changes."
+  },
+  "form": {
+    "query": "Query",
+    "clear": "Clear search",
+    "queryPlaceholder": "Search Context, Library, Agent pages, changes",
+    "scope": "Scope",
+    "mode": "Mode",
+    "submit": "Search"
+  },
+  "scopes": {
+    "all": "All",
+    "context_page": "Context",
+    "library_item": "Library",
+    "library_artifact": "Artifacts",
+    "agent_page": "Agent",
+    "change": "Changes"
+  },
+  "modes": {
+    "keyword": "Keyword retrieval",
+    "semantic": "Semantic retrieval",
+    "hybrid": "Hybrid retrieval"
+  },
+  "units": {
+    "results_one": "result",
+    "results_other": "results"
+  },
+  "labels": {
+    "unset": "unset",
+    "types": {
+      "context_page": "Context",
+      "context_claim": "Claim",
+      "library_item": "Library",
+      "library_artifact": "Artifact",
+      "agent_page": "Agent",
+      "feedback": "Feedback",
+      "change_set": "Change",
+      "change": "Change",
+      "source": "Library"
+    }
+  },
+  "results": {
+    "loading": "Loading search results",
+    "loadingLabel": "Loading results",
+    "count_one": "{{count}} result",
+    "count_other": "{{count}} results",
+    "countPlus": "{{count}}+ results",
+    "open": "Open {{title}}",
+    "openContext": "Open Context",
+    "openLibrary": "Open Library",
+    "openAgent": "Open Agent",
+    "openReview": "Open Review",
+    "openUnavailable": "Open unavailable",
+    "noCitation": "No citation",
+    "cannotOpen": "{{title}} cannot be opened from search yet",
+    "serverOrder": "Results",
+    "disambiguation": "Multiple exact matches",
+    "warningSummary": "{{warnings}}",
+    "matchedName": "Matched name: {{name}}"
+  },
+  "examples": {
+    "label": "Search examples",
+    "prompt": "Try:",
+    "embeddingPolicy": "embedding policy",
+    "reviewGuideline": "review guideline",
+    "sourceTrustLevel": "source trust level"
+  },
+  "empty": {
+    "unavailableTitle": "Search unavailable",
+    "unavailableDescription": "Use Library, Context, or Agent navigation while the search index is offline or not deployed in this build.",
+    "initialTitle": "Search your workspace",
+    "initialDescription": "Set a scope to narrow the search, or start from one of the examples below.",
+    "openLibrary": "Open Library",
+    "noResultsTitle": "No results",
+    "noResultsDescription": "Try a broader scope or search for a term from your Library or Context pages.",
+    "coverageGap": "Write a Context page",
+    "tryExample": "Try an example",
+    "addLibrarySource": "Add Library source"
+  },
+  "loadMore": "Load more",
+  "loadingMore": "Loading…",
+  "matchReasons": {
+    "exact_id": "Exact ID",
+    "exact_slug": "Exact slug",
+    "exact_title": "Exact title",
+    "exact_alias": "Exact alias",
+    "trigram": "Fuzzy name",
+    "keyword": "Keyword",
+    "semantic": "Semantic",
+    "hybrid": "Hybrid",
+    "associative": "Associated"
+  },
+  "warningCodes": {
+    "permission_limited": "Restricted Library items and artifacts are hidden for your current permissions",
+    "unsupported_filter_tag": "Tag filter not applied yet",
+    "unsupported_filter_date": "Date filter not applied yet",
+    "disambiguation_required": "Multiple exact matches — pick a candidate",
+    "semantic_fallback_used": "Semantic fallback results",
+    "keyword_lane_unavailable": "Local FTS5 search is unavailable for this database; exact and direct matches remain active",
+    "coverage_gap_recorded": "No evidence found; coverage gap recorded",
+    "llm_provider_unavailable": "The answer model is not usable right now, so this is the evidence summary. Ask an admin to check the server LLM settings.",
+    "llm_composer_failed": "The answer model did not respond, so this is the evidence summary. Retrying may compose a full answer."
+  }
+}

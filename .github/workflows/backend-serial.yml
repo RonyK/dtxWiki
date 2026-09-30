@@ -1,0 +1,62 @@
+name: Backend serial parity
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-serial-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-serial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dtxwiki_migration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dtxwiki_migration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL: >-
+        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_migration
+      DTXWIKI_POSTGRES_TEST_DATABASE_URL: >-
+        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_test
+      DTXWIKI_POSTGRES_CONCURRENCY_TEST_DATABASE_URL: >-
+        postgresql+pg8000://postgres:postgres@127.0.0.1:5432/dtxwiki_concurrency
+      DTXWIKI_REQUIRE_POSTGRES_CONCURRENCY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Create isolated PostgreSQL test databases
+        run: |
+          .venv/bin/python - <<'PY'
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(
+              "postgresql+pg8000://postgres:postgres@127.0.0.1:5432/postgres"
+          )
+          with engine.connect().execution_options(
+              isolation_level="AUTOCOMMIT"
+          ) as connection:
+              for database in ("dtxwiki_test", "dtxwiki_concurrency"):
+                  connection.execute(text(f"DROP DATABASE IF EXISTS {database}"))
+                  connection.execute(text(f"CREATE DATABASE {database}"))
+          PY
+      - name: Run backend tests without xdist
+        run: VENV=.venv make test-backend-serial

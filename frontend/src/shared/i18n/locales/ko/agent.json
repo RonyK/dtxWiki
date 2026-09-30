@@ -1,0 +1,218 @@
+{
+  "loading": "에이전트 불러오는 중",
+  "title": "에이전트",
+  "dialog": {
+    "advancedSlug": "고급 슬러그",
+    "agentPage": "Agent 페이지",
+    "body": "본문",
+    "cancel": "취소",
+    "category": "카테고리",
+    "closeAria": "에이전트 대화상자 닫기",
+    "createDraft": "초안 생성",
+    "createTitle": "Agent 초안 생성",
+    "creating": "생성 중…",
+    "defaultCreateReason": "Agent 페이지 초안 생성",
+    "defaultCreateReasonWithTitle": "{{title}} 초안 생성",
+    "defaultPersona": "기본 페르소나",
+    "defaultUpdateReason": "Agent 페이지 초안 수정",
+    "defaultUpdateReasonWithTitle": "{{title}} 초안 수정",
+    "editTitle": "Agent 초안 편집",
+    "existingPage": "기존 Agent 페이지",
+    "failedCreate": "Agent 페이지 생성 실패",
+    "failedUpdate": "Agent 페이지 수정 실패",
+    "loadingDraft": "최신 대기 초안을 불러오는 중입니다…",
+    "loadingDraftTitle": "대기 초안 불러오기",
+    "metadata": "메타데이터",
+    "newPage": "새 Agent 페이지",
+    "reason": "사유",
+    "retry": "다시 시도",
+    "sensitivity": "민감도",
+    "slug": "슬러그",
+    "slugPreview": "슬러그 미리보기: {{slug}}",
+    "title": "제목",
+    "titleHintInvalid": "1~100자를 입력하세요.",
+    "updateDraft": "초안 수정",
+    "updating": "수정 중…"
+  },
+  "templates": {
+    "label": "템플릿",
+    "blank": "빈 문서",
+    "list": {
+      "karpathyAgentGuidelines": {
+        "name": "Karpathy 기반 에이전트 지침",
+        "description": "Karpathy에서 영감을 받은, 흔한 LLM 코딩 실수를 줄이는 행동 지침 — 코딩 전 사고, 단순함 우선, 외과적 변경, 목표 기반 검증. 프로젝트별 지침과 병합해 사용하세요."
+      }
+    }
+  },
+  "errors": {
+    "activate": "Agent 초안 활성화에 실패했습니다",
+    "loadDetail": "Agent 상세 불러오기 실패",
+    "loadDraft": "대기 중인 Agent 초안을 불러오지 못했습니다",
+    "loadMore": "Agent 페이지를 더 불러오지 못했습니다",
+    "moveTreeNode": "Agent 트리 노드를 이동하지 못했습니다",
+    "refreshTree": "Agent 트리를 새로 고치지 못했습니다",
+    "reorderTreeNode": "Agent 트리 노드 순서를 변경하지 못했습니다",
+    "itemUnavailable": "해당 Agent 페이지를 더 이상 사용할 수 없어 목록에서 제거했습니다."
+  },
+  "labels": {
+    "unset": "미설정",
+    "category": {
+      "agent_guide": "에이전트 가이드",
+      "persona": "페르소나",
+      "skill": "스킬",
+      "memory": "메모리"
+    },
+    "injectionPolicy": {
+      "always": "항상 주입",
+      "default_on": "기본 주입",
+      "task_matched": "작업 일치 시",
+      "permission_scoped": "권한 범위 내"
+    },
+    "sensitivity": {
+      "workspace": "워크스페이스",
+      "private": "비공개",
+      "public": "공개",
+      "secret_candidate": "비밀 후보"
+    }
+  },
+  "folder": {
+    "childCount": "하위 {{count}}개",
+    "childPageCount": "하위 페이지 {{count}}개",
+    "emptyCategory": "이 Agent 카테고리는 비어 있습니다"
+  },
+  "layout": {
+    "details": "상세",
+    "explorer": "탐색기",
+    "createItem": "Agent 항목 생성",
+    "new": "새로 만들기",
+    "createFolder": "Agent 폴더 생성",
+    "newFolder": "새 폴더"
+  },
+  "header": {
+    "eyebrow": "행동 레이어",
+    "title": "Agent 페이지",
+    "description": "Agent 페이지는 Ask와 MCP 클라이언트를 위한 지침, 스킬, 메모리를 저장합니다. MCP 클라이언트는 Agent 페이지를 읽거나 번들을 만들어야 하며, 페이지는 프롬프트에 자동으로 주입되지 않습니다.",
+    "injectionSettings": "주입 설정",
+    "configuredUnit_one": "개 구성됨",
+    "configuredUnit_other": "개 구성됨"
+  },
+  "categories": {
+    "visible": "표시됨",
+    "advancedCategories": "고급 카테고리",
+    "advanced": "고급",
+    "createPage": "{{category}} Agent 페이지 생성",
+    "newAction": "+ 새로 만들기",
+    "sensitive": "민감",
+    "sensitiveHint": "민감 카테고리: 워크스페이스 소유자만 이 카테고리의 초안을 활성화할 수 있습니다.",
+    "pageCount_one": "{{count}}개 페이지",
+    "pageCount_other": "{{count}}개 페이지",
+    "injectionPolicyHint": {
+      "always": "항상: 읽을 수 있는 한 AI 번들에 항상 포함됩니다.",
+      "default_on": "기본 켜짐: 비활성화되지 않는 한 자동으로 포함됩니다.",
+      "task_matched": "작업 일치: 현재 AI 작업과 일치할 때만 포함됩니다.",
+      "permission_scoped": "권한 범위: 요청자의 권한이 일치할 때 포함됩니다."
+    }
+  },
+  "table": {
+    "page": "페이지",
+    "category": "카테고리",
+    "status": "상태",
+    "injection": "주입",
+    "sensitivity": "민감도",
+    "empty": "아직 Agent 페이지가 없습니다"
+  },
+  "units": {
+    "page_one": "페이지",
+    "page_other": "페이지",
+    "item_one": "개",
+    "item_other": "개"
+  },
+  "panel": {
+    "recentHeading": "최신 업데이트"
+  },
+  "empty": {
+    "noTreeNodes": "Agent 트리 노드가 없습니다",
+    "selectPrompt": "트리나 표에서 Agent 페이지를 선택하세요. 카테고리 폴더는 페이지를 정리하며 리더 콘텐츠가 없습니다."
+  },
+  "reader": {
+    "activateConfirm": "{{title}}의 대기 중인 초안을 활성화할까요?",
+    "activateDraft": "초안 활성화",
+    "activateReason": "Agent 화면에서 Agent 초안 활성화",
+    "activating": "활성화 중…",
+    "createDraft": "초안 만들기",
+    "editDraft": "초안 편집",
+    "editPendingDraft": "대기 초안 편집",
+    "injectionSettings": "주입 설정",
+    "injection": "주입",
+    "priority": "우선순위",
+    "sensitivity": "민감도",
+    "ariaLabel": "Agent 리더 보기",
+    "loadingDetail": "Agent 상세 불러오는 중",
+    "sensitiveOwnerOnly": "민감한 Agent 페이지입니다. 워크스페이스 소유자만 내용을 볼 수 있습니다.",
+    "noBody": "본문 없음",
+    "bundleLoading": "번들을 불러오는 중…",
+    "bundleLoadFailed": "번들을 불러오지 못했습니다",
+    "bundleEmpty": "아직 이 Agent 페이지를 참조하는 번들이 없습니다.",
+    "bundleName": "번들 {{id}}",
+    "bundleIncluded": "페이지 포함됨",
+    "bundleOmitted": "페이지 제외됨",
+    "bundleCreated": "{{date}} 생성",
+    "bundleExpires": "{{date}} 만료",
+    "noActivity": "아직 페이지별 활동 스트림은 없습니다. 이 페이지를 다룬 MCP 채팅은 아래 연결된 채팅에 있고, 워크스페이스 전체 피드는 활동 페이지에 있습니다.",
+    "pendingDraft": "대기 초안 v{{version}}",
+    "versionState": "Agent 버전 상태",
+    "viewingActive": "활성 버전 v{{version}} 보는 중",
+    "viewingDraft": "초안 v{{version}} 보는 중",
+    "tabs": {
+      "view": "보기",
+      "history": "히스토리",
+      "bundle": "번들",
+      "activity": "활동",
+      "unavailable": "아직 사용할 수 없습니다"
+    }
+  },
+  "detail": {
+    "title": "Agent 상세",
+    "empty": "정책, 버전, MCP 번들 메타데이터를 확인할 Agent 페이지를 선택하세요.",
+    "policy": "정책",
+    "priorityLine": "우선순위 {{priority}} - {{category}}",
+    "versions": "버전",
+    "active": "활성",
+    "latestDraft": "최신 초안",
+    "draft": "초안",
+    "none": "없음",
+    "status": "상태",
+    "actions": "작업",
+    "openPolicySettings": "정책 설정 열기"
+  },
+  "history": {
+    "noVersionHistory": "아직 버전 기록이 없습니다.",
+    "clearSelection": "선택 해제",
+    "selectVersion": "버전 선택",
+    "compare": "비교",
+    "compareTitle": "Agent v{{version, josaEulReul}} 현재와 비교",
+    "closeDiff": "diff 닫기",
+    "loadingDiff": "diff 불러오는 중",
+    "currentUnavailable": "현재 Agent 버전을 사용할 수 없습니다.",
+    "versionUnavailable": "선택한 Agent 버전을 사용할 수 없습니다.",
+    "failedDiff": "diff 불러오기 실패",
+    "failedRestore": "Agent 버전 복원 실패",
+    "restore": "이 버전 복원",
+    "restoring": "복원 중",
+    "restoreConfirm": "Agent v{{version, josaEulReul}} 새 초안으로 복원할까요? 활성 버전은 변경되지 않습니다.",
+    "restored": "Agent v{{version, josaIGa}} 초안 v{{draft, josaEuRo}} 복원되었습니다.",
+    "describe": {
+      "active": "활성 Agent 버전",
+      "draft": "초안 - 비활성",
+      "status": "{{status}} 버전"
+    }
+  },
+  "notice": {
+    "activated": "{{title, josaIGa}} 활성화되었습니다.",
+    "ownerActivationRequired": "초안이 저장되었습니다. 활성화하려면 소유자 승인이 필요합니다.",
+    "reviewRequired": "초안이 저장되었습니다. 활성화 전에 리뷰가 필요합니다.",
+    "sentToReview": "초안이 저장되어 Review로 전송되었습니다."
+  },
+  "loadMore": "더 보기",
+  "loadingMore": "불러오는 중…"
+}

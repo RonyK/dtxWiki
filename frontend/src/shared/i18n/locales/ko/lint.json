@@ -1,0 +1,291 @@
+{
+  "breadcrumb": "린트 큐",
+  "eyebrow": "워크스페이스 품질",
+  "title": "린트 큐",
+  "subtitle": "워크스페이스의 페이지와 소스를 규칙으로 점검합니다. 발견된 항목은 편집자가 처리할 때까지 열린 상태로 남습니다.",
+  "runLint": "린트 실행",
+  "readOnly": "읽기 전용 권한입니다 — 린트 결과는 볼 수 있지만, 린트 실행·처리는 편집자만 가능합니다.",
+  "loading": "린트 불러오는 중",
+  "runStatus": "린트 실행 {{status}}",
+  "linkedFinding": "이 커버리지 갭에 연결된 린트 항목을 표시하고 있습니다.",
+  "showAll": "전체 린트 항목 보기",
+  "severity": "심각도",
+  "view": "보기",
+  "status": "상태",
+  "layer": "레이어",
+  "filters": {
+    "title": "필터",
+    "active": "활성 필터 {{count}}개",
+    "reset": "초기화"
+  },
+  "viewFilter": {
+    "findings": "린트 항목",
+    "coverage": "커버리지 갭"
+  },
+  "statusFilter": {
+    "open": "미해결",
+    "resolved": "처리됨"
+  },
+  "layerFilter": {
+    "all": "전체",
+    "format": "형식",
+    "knowledge": "지식",
+    "nav": "내비게이션",
+    "maintenance": "유지보수"
+  },
+  "severityFilter": {
+    "all": "전체",
+    "error": "오류",
+    "warning": "경고",
+    "info": "정보"
+  },
+  "openFindings": "미해결 항목",
+  "findings": "린트 항목",
+  "pagination": {
+    "navigation": "린트 항목 페이지",
+    "previous": "이전",
+    "next": "다음",
+    "page": "{{page}}페이지로 이동",
+    "currentPage": "현재 {{page}}페이지",
+    "perPage": "페이지당 항목 수",
+    "range": "전체 {{total}}개 중 {{start}}–{{end}}개 표시"
+  },
+  "coverage": {
+    "title": "커버리지 갭",
+    "empty": "이 상태의 커버리지 갭이 없습니다",
+    "hits_one": "회",
+    "hits_other": "회",
+    "openFinding": "연결된 린트 항목 열기"
+  },
+  "surface": {
+    "ask": "질문",
+    "search_rest": "검색",
+    "search_mcp": "MCP 검색"
+  },
+  "lane": {
+    "entity": "엔티티",
+    "trigram": "유사 이름",
+    "bm25": "전문 검색",
+    "keyword": "키워드",
+    "semantic": "시맨틱",
+    "hybrid": "하이브리드",
+    "associative": "연관 개념",
+    "grep": "정확 문구",
+    "direct": "직접 일치",
+    "library_fallback": "라이브러리 대체 검색"
+  },
+  "targetType": {
+    "context_page": "Context 페이지",
+    "workspace_tree_node": "워크스페이스 폴더",
+    "knowledge_coverage_gap": "커버리지 갭",
+    "library_item": "라이브러리 항목",
+    "workspace": "워크스페이스"
+  },
+  "suggestedAction": {
+    "aiBadge": "AI 제안",
+    "fields": {
+      "proposal": "제안",
+      "verdict": "판정",
+      "confidence": "신뢰도",
+      "rationale": "판단 근거",
+      "reason": "사유",
+      "anchor": "참조 구절",
+      "nav_summary": "내비게이션 요약",
+      "negative_cues": "구분 단서",
+      "aliases": "별칭",
+      "nav_description": "내비게이션 설명",
+      "placement_hint": "배치 제안",
+      "title": "제목",
+      "page_type": "페이지 유형",
+      "outline": "개요",
+      "concept_path": "개념 경로",
+      "queries": "평가 질의",
+      "similarity": "유사도",
+      "session_count": "세션 수",
+      "tree_distance": "트리 거리",
+      "supported": "근거 부합",
+      "contradicts": "모순 여부",
+      "client_llm_verdict": "AI 판정"
+    }
+  },
+  "findingFallback": "{{target}}의 품질 문제를 검토하세요.",
+  "rules": {
+    "md_heading_hierarchy": {
+      "label": "제목 계층",
+      "message": "제목 단계가 한 단계 이상 건너뛰었습니다.",
+      "description": "제목 레벨을 건너뛴 곳을 표시합니다."
+    },
+    "md_code_fence_balance": {
+      "label": "코드 블록 닫힘",
+      "message": "닫히지 않은 코드 블록이 있습니다.",
+      "description": "닫히지 않은 코드 펜스를 표시합니다."
+    },
+    "md_table_wellformed": {
+      "label": "표 구조",
+      "message": "Markdown 표에 구분 행이 없습니다.",
+      "description": "구분행 없이 작성된 마크다운 표를 표시합니다."
+    },
+    "md_image_ref": {
+      "label": "이미지 참조",
+      "message": "이미지 참조에 사용할 수 있는 URL이 없습니다.",
+      "description": "사용할 수 있는 URL이 없는 이미지 참조를 표시합니다."
+    },
+    "md_mermaid_block": {
+      "label": "Mermaid 다이어그램",
+      "message": "Mermaid 블록이 비어 있거나 다이어그램 유형을 식별할 수 없습니다.",
+      "description": "비어 있거나 다이어그램 종류를 알 수 없는 Mermaid 블록을 표시합니다."
+    },
+    "link_unresolved": {
+      "label": "해결되지 않는 위키 링크",
+      "message": "위키 링크 [[{{written_slug}}]]에 해당하는 페이지를 찾을 수 없습니다.",
+      "description": "페이지에 연결된 적이 없는 위키 링크를 표시합니다."
+    },
+    "link_broken-slug": {
+      "label": "오래된 위키 링크 슬러그",
+      "message": "위키 링크 [[{{written_slug}}]]은 작동하지만 대상의 현재 슬러그는 [[{{current_slug}}]]입니다.",
+      "description": "작성된 슬러그가 대상 페이지의 현재 슬러그와 다른 고정 링크를 표시합니다."
+    },
+    "kb_orphan_page": {
+      "label": "고립된 페이지",
+      "message": "{{slug}}에 들어오는 위키 링크가 없습니다.",
+      "description": "다른 어떤 페이지도 링크하지 않는 페이지를 표시합니다."
+    },
+    "kb_missing_backlink": {
+      "label": "누락된 백링크",
+      "message": "{{source_slug}}에서 {{target_slug}}로 연결되지만 대상 페이지에는 돌아오는 링크가 없습니다.",
+      "description": "대상 페이지가 되돌아 링크하지 않는 링크를 표시합니다."
+    },
+    "kb_duplicate_concept": {
+      "label": "중복 개념",
+      "message": "다른 페이지와 같은 개념을 다룰 수 있습니다.",
+      "description": "다른 페이지와 같은 개념을 다룰 수 있는 페이지를 표시합니다."
+    },
+    "kb_term_collision": {
+      "label": "이름 충돌",
+      "message": "제목, 별칭 또는 slug가 둘 이상의 페이지를 가리킵니다.",
+      "description": "둘 이상의 페이지로 연결되는 제목·별칭·슬러그를 표시합니다."
+    },
+    "nav_fanout_exceeded": {
+      "label": "폴더 항목 과다",
+      "message": "보이는 하위 항목이 50개를 넘습니다. 더 명확한 분기로 나누세요.",
+      "description": "하위 항목이 팬아웃 한도를 넘는 폴더를 표시합니다."
+    },
+    "nav_missing_summary": {
+      "label": "내비게이션 요약 누락",
+      "message": "이 폴더를 구분할 수 있는 내비게이션 요약을 추가하세요.",
+      "description": "형제 폴더와 구분할 탐색 요약이 없는 폴더를 표시합니다."
+    },
+    "nav_unreachable": {
+      "label": "도달할 수 없는 콘텐츠",
+      "message": "보이는 기본 트리 경로에서 이 콘텐츠에 도달할 수 없습니다.",
+      "description": "기본 트리에서 도달할 경로가 없는 콘텐츠를 표시합니다."
+    },
+    "kb_hot_path_unmaterialized": {
+      "label": "반복 탐색 경로",
+      "message": "반복해서 사용되는 탐색 경로에 직접 링크가 필요할 수 있습니다.",
+      "description": "반복되는 탐색 경로 중 직접 링크가 필요할 수 있는 것을 표시합니다."
+    },
+    "kb_semantic_near_duplicate": {
+      "label": "중복 가능성",
+      "message": "의미가 유사한 두 페이지를 병합하거나 차이를 명확히 해야 합니다.",
+      "description": "병합할지 구분할지 판단이 필요할 만큼 유사한 두 페이지를 표시합니다."
+    },
+    "kb_misplaced_page": {
+      "label": "배치 오류 가능성",
+      "message": "이 페이지는 같은 폴더의 이웃 페이지와 내용이 크게 다릅니다.",
+      "description": "같은 폴더의 다른 페이지들과 크게 다른 페이지를 표시합니다."
+    },
+    "kb_dependent_maybe_stale": {
+      "label": "최신성 검토 필요",
+      "message": "의존하는 페이지가 변경되었습니다. 영향을 받는 구절을 검토하세요.",
+      "description": "출처가 바뀌어 내용이 낡았을 수 있는 페이지를 표시합니다."
+    },
+    "maintenance_nav_summary_suggestion": {
+      "label": "내비게이션 요약 제안",
+      "message": "외부 유지보수 작업이 폴더 내비게이션 요약을 제안했습니다.",
+      "description": "외부 유지보수 실행이 제안한 폴더 탐색 요약을 기록합니다."
+    },
+    "maintenance_coverage_gap_verdict": {
+      "label": "커버리지 갭 판정",
+      "message": "외부 유지보수 작업이 이 커버리지 갭을 판정했습니다.",
+      "description": "외부 유지보수 실행의 커버리지 공백 평가를 기록합니다."
+    },
+    "maintenance_page_meta_suggestion": {
+      "label": "페이지 메타데이터 제안",
+      "message": "외부 유지보수 작업이 페이지 메타데이터 변경을 제안했습니다.",
+      "description": "외부 유지보수 실행이 제안한 페이지 메타데이터 변경을 기록합니다."
+    },
+    "maintenance_import_batch_classification": {
+      "label": "가져오기 분류",
+      "message": "외부 유지보수 작업이 가져오기 분류 메타데이터를 제안했습니다.",
+      "description": "외부 유지보수 실행이 제안한 가져오기 분류를 기록합니다."
+    },
+    "maintenance_stale_contradiction_verdict": {
+      "label": "의존성 모순 판정",
+      "message": "외부 유지보수 작업이 의존 내용의 모순 여부를 판정했습니다.",
+      "description": "외부 유지보수 실행의 의존성 모순 평가를 기록합니다."
+    },
+    "maintenance_golden_query_candidates": {
+      "label": "평가 질의 후보",
+      "message": "외부 유지보수 작업이 검색 평가 질의를 제안했습니다.",
+      "description": "외부 유지보수 실행이 제안한 검색 평가 질의를 기록합니다."
+    }
+  },
+  "empty": {
+    "open": "미해결 린트 항목이 없습니다",
+    "resolved": "처리된 린트 항목이 없습니다",
+    "hint": "Settings 에서 켜 둔 규칙으로 이 워크스페이스를 검사하려면 린트를 실행하세요."
+  },
+  "actions": {
+    "acknowledge": "검토 완료로 표시",
+    "fix": "수정됨으로 기록",
+    "dismiss": "항목 무시",
+    "dismissReason": "이 항목을 무시하는 사유",
+    "selectAll": "이 페이지의 {{count}}개 모두 선택",
+    "unselectAll": "모두 선택 해제",
+    "selectedCount": "{{count}}개 선택됨",
+    "selectRow": "{{target}}에서 {{title}} 선택",
+    "openTarget": "대상 열기: {{title}}",
+    "more": "{{target}}의 {{title}} 추가 작업",
+    "bulkActions": "대량 작업"
+  },
+  "details": {
+    "suggestedAction": "권장 다음 단계"
+  },
+  "dismissDialog": {
+    "title": "항목 무시",
+    "body": "무시한 항목은 미해결 큐에서 빠지고 처리 이력에 남습니다.",
+    "reason": "사유",
+    "reasonOptional": "사유 (선택)",
+    "cancel": "취소",
+    "confirm": "항목 무시"
+  },
+  "fixDialog": {
+    "title": "수정됨으로 기록",
+    "body": "이 동작은 린트 항목의 상태만 변경하며 페이지 내용을 수정하지 않습니다.",
+    "cancel": "취소",
+    "confirm": "수정됨으로 기록"
+  },
+  "mutation": {
+    "acknowledgeSuccess": "린트 항목을 검토 완료로 표시했습니다.",
+    "dismissSuccess": "린트 항목을 무시했습니다.",
+    "fixSuccess": "린트 항목을 수정됨으로 기록했습니다. 페이지 내용은 변경되지 않았습니다.",
+    "batchResult": "{{succeeded}}개 항목 업데이트 완료, {{failed}}개 실패."
+  },
+  "loadMore": "더 보기",
+  "loadingMore": "불러오는 중",
+  "errors": {
+    "load": "린트를 불러오지 못했습니다",
+    "loadMore": "더 불러오지 못했습니다",
+    "run": "린트 실행에 실패했습니다",
+    "decide": "린트 결과 업데이트에 실패했습니다",
+    "workspaceNotFound": "작업 공간을 찾을 수 없습니다",
+    "batchPartialFailure": "{{count}}개의 결과를 업데이트하는 데 실패했습니다."
+  },
+  "runState": {
+    "queued": "대기 중",
+    "running": "실행 중",
+    "completed": "완료",
+    "failed": "실패"
+  }
+}

@@ -1,0 +1,427 @@
+"""One canonical Library version/artifact selection rule for all consumers."""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy import case, select
+from sqlalchemy.orm import Session
+
+from backend.library_media.ports import LibraryBlobRepositoryFactory
+from backend.media.domain import BlobEpoch, BlobReference
+from backend.models.library import (
+    LibraryArtifact,
+    LibraryArtifactConversionDetail,
+    LibraryAttempt,
+    LibraryItem,
+    LibraryItemVersion,
+)
+from backend.models.library_semantic_overlay import LibrarySemanticOverlay
+from backend.models.media import SecurityBlockedBlobRow
+from backend.repositories.workspace_scoped import get_in_workspace
+from backend.services.preview_contracts import renderer_accepts_media_type
+
+_LEGACY_READY_STATUSES = frozenset({"completed", "ready", "ready_partial"})
+
+
+def library_original_content_url(
+    *,
+    workspace_id: UUID,
+    version_id: UUID,
+    source_blob_id: UUID | None,
+) -> str | None:
+    """The one original-download URL projection, shared by version detail and
+    the Preview manifest (P4.4 invariant 4) -- so the two can never silently
+    diverge on whether a version's original is actually downloadable.
+    """
+
+    if source_blob_id is None:
+        return None
+    return f"/api/v1/workspaces/{workspace_id}/library/versions/{version_id}/content"
+
+
+def library_original_download_available(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    version: LibraryItemVersion,
+    blob_repository_factory: LibraryBlobRepositoryFactory | None,
+) -> bool:
+    """Whether this version's original bytes are still retrievable right now.
+
+    Doc §3-D (History "download this version"): the frontend must not infer
+    availability from `source_blob_id`/`original_url` presence alone -- a
+    version row survives long after its source blob can be GC'd, retention-
+    expired, or security-blocked, and `library_original_content_url` above
+    only ever checks for a non-null id. This is the server-authoritative
+    capability History uses to decide whether to show a download action at
+    all, deliberately kept separate from `original_url` so the *current*
+    version's shared P4.4 projection is never touched by this check.
+    """
+
+    if (
+        blob_repository_factory is None
+        or version.source_blob_workspace_id != workspace_id
+        or version.source_blob_id is None
+        or version.source_blob_epoch is None
+        or version.byte_size is None
+    ):
+        return False
+    reference = BlobReference(
+        workspace_id=workspace_id,
+        blob_id=version.source_blob_id,
+        epoch=BlobEpoch(version.source_blob_epoch),
+    )
+    blocked = session.get(
+        SecurityBlockedBlobRow,
+        {
+            "workspace_id": reference.workspace_id,
+            "blob_id": reference.blob_id,
+            "blob_epoch": reference.epoch.value,
+        },
+    )
+    if blocked is not None:
+        return False
+    blob = blob_repository_factory(session).get(reference)
+    return (
+        blob is not None
+        and blob.sha256.value == version.content_hash.lower()
+        and blob.byte_size == version.byte_size
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveLibraryMarkdown:
+    """The selected immutable Markdown base plus its optional authored body."""
+
+    base_artifact: LibraryArtifact
+    body_markdown: str
+    content_sha256: str
+    byte_size: int
+    revision: int
+    overlay: LibrarySemanticOverlay | None
+
+
+def get_canonical_library_version(
+    session: Session, item: LibraryItem
+) -> LibraryItemVersion | None:
+    """Return the last successfully projected version, never a pending latest.
+
+    The fallback is intentionally limited to completed pre-0005 rows. It keeps
+    metadata-created test/legacy databases readable while the migration
+    backfill establishes ``current_ready_version_id`` for durable databases.
+    """
+
+    if item.current_ready_version_id is not None:
+        version = session.get(LibraryItemVersion, item.current_ready_version_id)
+        if version is not None and version.library_item_id == item.id:
+            return version
+        return None
+    if item.current_version_id is None:
+        return None
+    legacy = session.get(LibraryItemVersion, item.current_version_id)
+    if (
+        legacy is not None
+        and legacy.library_item_id == item.id
+        and legacy.processing_status in _LEGACY_READY_STATUSES
+    ):
+        return legacy
+    return None
+
+
+def list_canonical_library_artifacts(
+    session: Session,
+    version: LibraryItemVersion,
+) -> tuple[LibraryArtifact, ...]:
+    """Return only the selected attempt's immutable artifact set.
+
+    A-1: the legacy "artifact with no attempt at all" shape is retired --
+    ``LibraryArtifact.attempt_id`` is NOT NULL now, so a version with no
+    selected conversion attempt yet has no canonical artifacts at all,
+    full stop (there is no more nullable-FK row to fall back to).
+    """
+
+    if version.selected_conversion_attempt_id is None:
+        return ()
+    statement = select(LibraryArtifact).where(
+        LibraryArtifact.library_item_version_id == version.id,
+        LibraryArtifact.attempt_id == version.selected_conversion_attempt_id,
+        LibraryArtifact.stage == "conversion",
+    )
+    return tuple(
+        session.scalars(
+            statement.order_by(
+                LibraryArtifact.ordinal.asc(),
+                LibraryArtifact.created_at.asc(),
+                LibraryArtifact.id.asc(),
+            )
+        )
+    )
+
+
+def get_canonical_markdown_artifact(
+    session: Session,
+    version: LibraryItemVersion,
+) -> LibraryArtifact | None:
+    """Select one canonical Markdown/search artifact deterministically."""
+
+    if version.selected_conversion_attempt_id is None:
+        return None
+    statement = select(LibraryArtifact).where(
+        LibraryArtifact.library_item_version_id == version.id,
+        LibraryArtifact.attempt_id == version.selected_conversion_attempt_id,
+        LibraryArtifact.stage == "conversion",
+        LibraryArtifact.role.in_(("markdown", "search_text")),
+    )
+    return session.scalar(
+        statement.order_by(
+            case(
+                (LibraryArtifact.role == "markdown", 0),
+                else_=1,
+            ),
+            LibraryArtifact.ordinal.asc(),
+            LibraryArtifact.created_at.asc(),
+            LibraryArtifact.id.asc(),
+        ).limit(1)
+    )
+
+
+def get_canonical_editable_markdown_artifact(
+    session: Session,
+    version: LibraryItemVersion,
+) -> LibraryArtifact | None:
+    """Return only an exact selected-attempt ``text/markdown`` base.
+
+    Legacy text and ``search_text`` fallbacks remain useful to read/search
+    callers, but they are intentionally not editable: an author overlay must
+    be fenced to one complete, immutable Markdown artifact selected by the
+    current conversion attempt.
+    """
+
+    if version.selected_conversion_attempt_id is None:
+        return None
+    return session.scalar(
+        select(LibraryArtifact)
+        .join(
+            LibraryArtifactConversionDetail,
+            LibraryArtifactConversionDetail.artifact_id == LibraryArtifact.id,
+        )
+        .where(
+            LibraryArtifact.library_item_version_id == version.id,
+            LibraryArtifact.attempt_id == version.selected_conversion_attempt_id,
+            LibraryArtifact.stage == "conversion",
+            LibraryArtifact.role == "markdown",
+            LibraryArtifact.media_type == "text/markdown",
+            LibraryArtifactConversionDetail.is_complete.is_(True),
+            LibraryArtifactConversionDetail.index_text.is_not(None),
+        )
+        .order_by(
+            LibraryArtifact.ordinal.asc(),
+            LibraryArtifact.created_at.asc(),
+            LibraryArtifact.id.asc(),
+        )
+        .limit(1)
+    )
+
+
+def get_effective_library_markdown(
+    session: Session,
+    version: LibraryItemVersion,
+) -> EffectiveLibraryMarkdown | None:
+    """Resolve an overlay only while its exact base remains selected."""
+
+    base = get_canonical_editable_markdown_artifact(session, version)
+    if base is None or base.conversion_detail is None:
+        return None
+    # content_sha256 is NOT NULL on LibraryArtifact now; index_text lives on
+    # the joined conversion detail row (the selecting query already required
+    # it IS NOT NULL, but the base object itself may have been loaded without
+    # the join re-verifying it -- keep the guard for clarity/safety).
+    if base.conversion_detail.index_text is None:
+        return None
+    base_body = base.conversion_detail.index_text
+    base_bytes = base_body.encode("utf-8")
+    base_digest = hashlib.sha256(base_bytes).hexdigest()
+    if base.byte_size != len(base_bytes) or base.content_sha256.lower() != base_digest:
+        return None
+    base_projection = EffectiveLibraryMarkdown(
+        base_artifact=base,
+        body_markdown=base_body,
+        content_sha256=base.content_sha256.lower(),
+        byte_size=len(base_bytes),
+        revision=0,
+        overlay=None,
+    )
+    if version.selected_semantic_overlay_id is None:
+        return base_projection
+    overlay = session.get(
+        LibrarySemanticOverlay,
+        version.selected_semantic_overlay_id,
+    )
+    if (
+        overlay is None
+        or overlay.library_item_version_id != version.id
+        or overlay.base_artifact_id != base.id
+        or overlay.base_artifact_sha256.lower() != base.content_sha256.lower()
+        or overlay.invalidated_at is not None
+    ):
+        return base_projection
+    overlay_bytes = overlay.body_markdown.encode("utf-8")
+    overlay_hash = hashlib.sha256(overlay_bytes).hexdigest()
+    if (
+        overlay.byte_size != len(overlay_bytes)
+        or overlay.content_sha256 != overlay_hash
+    ):
+        return base_projection
+    return EffectiveLibraryMarkdown(
+        base_artifact=base,
+        body_markdown=overlay.body_markdown,
+        content_sha256=overlay.content_sha256,
+        byte_size=overlay.byte_size,
+        revision=overlay.revision,
+        overlay=overlay,
+    )
+
+
+def canonical_library_artifact_belongs_to_item(
+    session: Session,
+    *,
+    item: LibraryItem,
+    artifact_id: UUID,
+) -> bool:
+    version = get_canonical_library_version(session, item)
+    if version is None:
+        return False
+    return any(
+        artifact.id == artifact_id
+        for artifact in list_canonical_library_artifacts(session, version)
+    )
+
+
+def preview_generation_dependency_matches(
+    session: Session,
+    version: LibraryItemVersion,
+    attempt: LibraryAttempt,
+) -> bool:
+    """Detect a preview-generation attempt whose input has since gone stale.
+
+    Shared by manifest variant listing and the flat artifact-content lookup
+    below so the two can never disagree on whether a generated artifact is
+    still backed by the version's currently selected input (P9.2 unifies
+    their transport onto one route).
+    """
+
+    detail = attempt.preview_detail
+    if detail is None:
+        return False
+    if detail.input_kind == "source":
+        return (
+            detail.input_attempt_id is None
+            and detail.input_artifact_id is None
+            and attempt.input_sha256 == version.content_hash.lower()
+        )
+    if (
+        detail.input_kind != "conversion_artifact"
+        or version.selected_conversion_attempt_id != detail.input_attempt_id
+        or detail.input_artifact_id is None
+    ):
+        return False
+    artifact = session.get(LibraryArtifact, detail.input_artifact_id)
+    return (
+        artifact is not None
+        and artifact.library_item_version_id == version.id
+        and artifact.attempt_id == detail.input_attempt_id
+        and artifact.content_sha256 is not None
+        and artifact.content_sha256.lower() == attempt.input_sha256
+    )
+
+
+def canonical_library_artifact_lookup(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    artifact_id: UUID,
+) -> tuple[LibraryItem, LibraryItemVersion, LibraryArtifact] | None:
+    """Resolve one artifact's canonical lineage for the flat
+    ``library/artifacts/{artifact_id}`` family (P9.2).
+
+    This is the single membership gate the family's metadata and content
+    routes share across every stage they now serve: a canonical ``stage ==
+    "conversion"`` artifact of the item's canonical version (the pre-P9.2
+    rule, unchanged), or the item's currently selected, non-stale
+    ``stage == "preview_generation"`` artifact. A "semantic artifact" is
+    simply a conversion-stage artifact that also renders as a semantic
+    presentation -- it needs no separate rule; the dedicated
+    ``preview/semantic-artifacts`` transport it used to require is retired.
+    """
+
+    artifact = get_in_workspace(
+        session,
+        LibraryArtifact,
+        workspace_id=workspace_id,
+        resource_id=artifact_id,
+    )
+    if artifact is None:
+        return None
+    version = get_in_workspace(
+        session,
+        LibraryItemVersion,
+        workspace_id=workspace_id,
+        resource_id=artifact.library_item_version_id,
+    )
+    if version is None:
+        return None
+    item = get_in_workspace(
+        session,
+        LibraryItem,
+        workspace_id=workspace_id,
+        resource_id=version.library_item_id,
+    )
+    if item is None:
+        return None
+
+    if artifact.stage == "conversion":
+        canonical_version = get_canonical_library_version(session, item)
+        if canonical_version is None or canonical_version.id != version.id:
+            return None
+        if artifact.attempt_id != version.selected_conversion_attempt_id:
+            return None
+        return item, version, artifact
+
+    if artifact.stage == "preview_generation":
+        if item.current_preview_version_id != version.id:
+            return None
+        if (
+            version.selected_preview_attempt_id is None
+            or version.preview_status not in {"ready", "ready_partial"}
+            or version.selected_preview_attempt_id != artifact.attempt_id
+        ):
+            return None
+        attempt = session.get(LibraryAttempt, artifact.attempt_id)
+        if attempt is None or not preview_generation_dependency_matches(
+            session, version, attempt
+        ):
+            return None
+        if artifact.preview_detail is None or not renderer_accepts_media_type(
+            artifact.preview_detail.renderer_contract, artifact.media_type
+        ):
+            return None
+        return item, version, artifact
+
+    return None
+
+
+__all__ = [
+    "EffectiveLibraryMarkdown",
+    "canonical_library_artifact_belongs_to_item",
+    "canonical_library_artifact_lookup",
+    "get_canonical_editable_markdown_artifact",
+    "get_canonical_library_version",
+    "get_canonical_markdown_artifact",
+    "get_effective_library_markdown",
+    "library_original_download_available",
+    "list_canonical_library_artifacts",
+    "preview_generation_dependency_matches",
+]

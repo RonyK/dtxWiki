@@ -1,0 +1,28 @@
+{
+  "name": "dtxwiki",
+  "displayName": "dtxWiki",
+  "version": "0.1.1",
+  "description": "Use dtxWiki MCP with grounded retrieval, draft authoring, human review, and staged maintenance workflows.",
+  "author": {
+    "name": "dtxSuite"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "dtxwiki-conventions",
+    "dtxwiki-retrieval",
+    "dtxwiki-authoring-review",
+    "dtxwiki-maintenance",
+    "wiki-capture"
+  ],
+  "skills": [
+    "./skills/dtxwiki-conventions/",
+    "./skills/dtxwiki-retrieval/",
+    "./skills/dtxwiki-authoring-review/",
+    "./skills/dtxwiki-maintenance/",
+    "./skills/wiki-capture/"
+  ],
+  "commands": [
+    "./commands/setup.md"
+  ],
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,28 @@
+dtxWiki
+Copyright 2026 Minsoo Kim (dtxSuite)
+
+Source code in this repository, except where otherwise noted, is licensed, at
+your election, under either of:
+
+  * the GNU Affero General Public License, version 3 only (see LICENSE-AGPL-3.0),
+    or
+  * the Elastic License 2.0 (see LICENSE-ELv2).
+
+SPDX-License-Identifier: AGPL-3.0-only OR Elastic-2.0
+
+The contents of the integrations/ directory are licensed under the Apache
+License, Version 2.0 (see integrations/LICENSE).
+
+Third-party components bundled with the web UI are licensed under their own
+terms. The built web UI ships their license texts and notices as
+THIRD_PARTY_NOTICES.txt and serves that file at /THIRD_PARTY_NOTICES.txt.
+
+The dtxWiki and dtxSuite names and logos are trademarks of Minsoo Kim. Neither
+license grants a right to use them beyond the reasonable and customary use
+needed to describe the origin of the software; for the AGPL, this is an
+additional term under its section 7(e).
+
+If your intended use is not permitted under either license, a commercial
+license is available from dtxSuite. Contact dtxwiki.ai@gmail.com.
+
+These terms apply from 2026-09-29, starting with release 0.1.1. Releases 0.0.x were published under the Apache License, Version 2.0.

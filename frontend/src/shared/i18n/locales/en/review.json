@@ -1,0 +1,316 @@
+{
+  "breadcrumb": "Review",
+  "errors": {
+    "load": "Failed to load Review",
+    "refresh": "Failed to refresh Review",
+    "restore": "Failed to restore Review detail",
+    "loadMore": "Failed to load more reviews",
+    "bulkPreview": "Failed to preview bulk approval",
+    "bulkApprove": "Failed to approve reviews",
+    "bulkDiscard": "Failed to discard reconciliation branches",
+    "decide": "Failed to decide Review",
+    "claim": "Failed to claim Review"
+  },
+  "header": {
+    "eyebrow": "Review queue",
+    "scopedEyebrow": "Review queue · {{status}}",
+    "title": "Review"
+  },
+  "empty": {
+    "title": "No pending reviews",
+    "filteredTitle": "No reviews match these filters",
+    "description": "Approved changes, dismissed items, and system records remain available in Activity."
+  },
+  "filters": {
+    "title": "Filters",
+    "status": "Status",
+    "risk": "Risk",
+    "scope": "Audience",
+    "lifecycleAriaLabel": "Review lifecycle",
+    "audienceAriaLabel": "Review audience",
+    "countLabel": "{{count}} items",
+    "statusLocked": "Locked to changes requested for this audience",
+    "olderReconciliations": "Older reconciliation branches",
+    "showOlderReconciliations_one": "Show {{count}} older reconciliation branch",
+    "showOlderReconciliations_other": "Show {{count}} older reconciliation branches",
+    "scopeOptions": {
+      "to_me": "To me",
+      "from_me": "From me",
+      "all": "All"
+    },
+    "statusOptions": {
+      "pending": "Pending",
+      "changes_requested": "Changes requested",
+      "resolved": "Resolved",
+      "approved": "approved",
+      "rejected": "rejected",
+      "all": "all"
+    },
+    "riskOptions": {
+      "high": "high",
+      "medium": "medium",
+      "low": "low",
+      "all": "all"
+    }
+  },
+  "audience": {
+    "requester": "To requester",
+    "chat_owner": "To chat owner",
+    "workspace_editors": "To editors",
+    "claimed": "Claimed"
+  },
+  "rail": {
+    "ariaLabel": "Review queue",
+    "close": "Close Review queue",
+    "hide": "Hide Review queue",
+    "restore": "Show Review queue",
+    "refresh": "Refresh reviews",
+    "empty": "Nothing to review",
+    "emptyForStatus_pending": "No pending items",
+    "emptyForStatus_changes_requested": "No change-requested items",
+    "emptyForStatus_resolved": "No resolved items",
+    "pageDraftGroup_one": "{{title}} · {{count}} pending draft shown",
+    "pageDraftGroup_other": "{{title}} · {{count}} pending drafts shown",
+    "pageDraftGroupTotal_one": "{{title}} · {{count}} pending draft",
+    "pageDraftGroupTotal_other": "{{title}} · {{count}} pending drafts",
+    "showPending": "Show pending",
+    "clearFilters": "Clear filters"
+  },
+  "overview": {
+    "eyebrow": "Queue overview",
+    "title": "Review operations",
+    "description": "Track open review load, approve low-friction queues, and inspect recent decisions.",
+    "queueRiskAria": "{{status}} · {{risk}}: {{count}}",
+    "recentDecisions": "Recent decisions",
+    "noRecentDecisionsTitle": "No decisions yet",
+    "noRecentDecisionsBody": "Approve, reject, or request changes and the decisions appear here.",
+    "untitledTarget": "Untitled review",
+    "unknownActor": "Unknown",
+    "decisionType": {
+      "approve": "Approved",
+      "request_changes": "Requested changes",
+      "reject": "Rejected",
+      "comment": "Commented"
+    }
+  },
+  "decisionSummary": {
+    "context_draft_requires_review": "Context draft requires review",
+    "context_update_requires_review": "Context update draft requires review",
+    "context_update_workflow_sequence_incomplete": "Context update draft requires review because the workflow sequence is incomplete"
+  },
+  "policy": {
+    "title": "Review risk policy",
+    "settingsLink": "Open Settings",
+    "enabledDescription": "Auto-approval uses separate Low and Medium delay rules. High-risk items always require manual review.",
+    "disabledDescription": "Auto-approval is off. Review items stay in the queue until an editor decides.",
+    "preset": "Preset",
+    "threshold": "Auto-approve up to",
+    "delay": "Delay",
+    "candidates": "Eligible now",
+    "autoApproveLabel": "Auto-approve",
+    "manualLabel": "Manual",
+    "openSettingsAria": "Open {{risk}} risk auto-approval settings",
+    "highManualReason": "High risk is locked to manual review",
+    "delayDays_one": "{{count}} day",
+    "delayDays_other": "{{count}} days",
+    "delayNotApplied": "No auto-approval delay",
+    "presetValue": {
+      "conservative": "Conservative",
+      "balanced": "Balanced",
+      "fast_moving": "Fast-moving",
+      "custom": "Custom"
+    },
+    "riskValue": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "columnRisk": "Risk",
+    "columnMode": "Mode",
+    "columnDelay": "Delay",
+    "columnEligible": "Eligible"
+  },
+  "bulk": {
+    "selected": "{{count}} selected",
+    "selectReview": "Select {{title}}",
+    "approveSelected": "Approve selected",
+    "confirmTitle": "Review bulk approval",
+    "confirmBody": "{{count}} reviews are eligible to approve under the current filters. Items that can no longer be approved are skipped and listed in the result.",
+    "confirmApproveCount": "Approve {{count}}",
+    "approving": "Approving",
+    "approvalImpact_one": "Approving the selected page versions will also settle {{count}} earlier pending review.",
+    "approvalImpact_other": "Approving the selected page versions will also settle {{count}} earlier pending reviews.",
+    "previewEligible": "{{count}} eligible",
+    "previewSkipped": "{{count}} skipped",
+    "result": "Approved {{approved}} reviews. Skipped {{skipped}}.",
+    "couldNotApprove": "{{count}} item(s) could not be approved",
+    "selectAllVisible": "Select all {{count}} shown",
+    "discardReconciliations": "Discard selected branches",
+    "discardTitle": "Discard selected reconciliation branches?",
+    "discardBody": "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
+    "discardReason": "Discard reason",
+    "discarding": "Discarding",
+    "confirmDiscard": "Discard selected branches",
+    "discardResult": "Discarded {{discarded}} branches. Skipped {{skipped}}.",
+    "cancel": "Cancel"
+  },
+  "routing": {
+    "title": "Request changes",
+    "intro": "Choose who should act on these changes.",
+    "legend": "Who should act on these changes",
+    "options": {
+      "chat_owner": "Chat owner",
+      "requester": "Me",
+      "workspace_editors": "All editors"
+    },
+    "optionHints": {
+      "chat_owner": "Routes to the chat owner and their AI for revision.",
+      "requester": "Routes to you for direct revision.",
+      "workspace_editors": "Routes to all workspace editors."
+    },
+    "chatOwnerUnavailable": "This change has no resolvable chat owner.",
+    "chatOwnerUnresolvable": "This change has no resolvable chat owner — route to you or all editors instead.",
+    "reasonRequired": "Enter a decision reason before requesting changes.",
+    "submit": "Request changes",
+    "cancel": "Cancel"
+  },
+  "reject": {
+    "confirmTitle": "Reject this review?",
+    "confirmBody": "Rejecting is final and removes the item from the queue.",
+    "confirming": "Rejecting",
+    "cancel": "Cancel"
+  },
+  "editDirectly": {
+    "action": "Edit directly",
+    "claiming": "Claiming",
+    "noTarget": "This change has no editable page target."
+  },
+  "pending": {
+    "title": "Review results",
+    "loadingMore": "Loading",
+    "loadMore": "Load more"
+  },
+  "detail": {
+    "reconciliationActionRequired": "This branch stays pending until it is reconciled or explicitly discarded. Generic review decisions are unavailable.",
+    "openReconciliation": "Open reconciliation",
+    "reconciliationProvenance": "Reconciliation provenance",
+    "reconciliationBase": "Base v{{version}}",
+    "reconciliationHeadAdvances_one": "HEAD advanced {{count}} time",
+    "reconciliationHeadAdvances_other": "HEAD advanced {{count}} times",
+    "reconciliationConflicts_one": "{{count}} conflict",
+    "reconciliationConflicts_other": "{{count}} conflicts",
+    "reconciliationActorWithName": "Author: {{kind}} · {{name}}",
+    "reconciliationActorKind": "Author: {{kind}}",
+    "openReconciliationConversation": "Open source conversation",
+    "openReconciliationConversationFor": "Open conversation for {{title}}",
+    "eyebrow": "Review detail",
+    "actionsAriaLabel": "Review actions",
+    "changeSet": "Change set",
+    "changeSetIdCopied": "Change Set ID copied",
+    "changeSetIdCopyFailed": "Copy Change Set ID failed",
+    "copyFullChangeSetId": "Copy full Change Set ID",
+    "updated": "Updated",
+    "trigger": "Trigger",
+    "citationCheck": "Citation check",
+    "skipped": "Skipped",
+    "passed": "Passed",
+    "reasonLabel": "Decision reason",
+    "reasonPlaceholder": "Add context for this decision.",
+    "reasonHint": "Required for Request changes. Optional for Approve and Reject.",
+    "actionBusy": "Review action is already being submitted.",
+    "approvalImpact_one": "Approving will publish this version. {{count}} earlier pending review will be settled with it.",
+    "approvalImpact_other": "Approving will publish this version. {{count}} earlier pending reviews will be settled with it.",
+    "summary": "Summary",
+    "whyRisk": "Why this risk?",
+    "policyVersion": "Policy",
+    "decisionHistory": "Decision history",
+    "previousDecision": "Previous decision",
+    "submitted": "Submitted",
+    "enteredQueue": "Entered the decision queue"
+  },
+  "actions": {
+    "moreActivities": "View all activity",
+    "openAsk": "Open Ask",
+    "cancel": "Cancel",
+    "approve": "Approve",
+    "requestChanges": "Request changes",
+    "reject": "Reject",
+    "reasonPromptConfirm": "Add reason"
+  },
+  "evidence": {
+    "title": "Change evidence",
+    "changeStatus": "Change status",
+    "reason": "Reason",
+    "none": "none"
+  },
+  "status": {
+    "changes_requested": "Changes requested"
+  },
+  "labels": {
+    "unset": "unset",
+    "reviewType": {
+      "context_reconciliation": "Context reconciliation",
+      "context_page_publish": "Context page publish",
+      "context_update": "Context update",
+      "context_ingress_accept": "Context ingress accept",
+      "agent_page_activation": "Agent page activation",
+      "page_inline_comment": "Page inline comment",
+      "source_deleted_notice": "Source deleted notice"
+    },
+    "decisionType": {
+      "approve": "Approved",
+      "request_changes": "Requested changes",
+      "reject": "Rejected",
+      "comment": "Commented",
+      "revision_submitted": "Revision submitted"
+    },
+    "actorType": {
+      "human": "Human",
+      "system": "System"
+    },
+    "operation": {
+      "create_draft": "Create draft",
+      "update_draft": "Update draft",
+      "publish": "Publish",
+      "rollback": "Rollback",
+      "activate": "Activate",
+      "inline_comment": "Inline comment",
+      "metadata_patch": "Metadata patch",
+      "preserve_alternative": "Preserve alternative",
+      "source_deleted_notice": "Source deleted notice",
+      "tree_create": "Tree create",
+      "tree_move": "Tree move",
+      "tree_rename": "Tree rename",
+      "tree_reorder": "Tree reorder",
+      "tree_delete": "Tree delete",
+      "tree_place": "Tree place"
+    },
+    "triggerType": {
+      "mcp_write_draft": "MCP write draft",
+      "mcp_update_draft": "MCP update draft",
+      "agent_page_draft": "Agent page draft",
+      "agent_page_activation": "Agent page activation",
+      "manual_edit": "Manual edit",
+      "manual_stale_recovery": "Manual stale recovery",
+      "inline_comment": "Inline comment",
+      "context_page_publish": "Context page publish",
+      "context_ingress_accept": "Context ingress accept",
+      "tree_mutation": "Tree mutation",
+      "library_registration": "Library registration",
+      "source_deleted": "Source deleted",
+      "schedule": "Schedule"
+    },
+    "changeSetStatus": {
+      "draft_created": "Draft created",
+      "revision_pending": "Revision pending",
+      "applied": "Applied",
+      "rejected": "Rejected"
+    },
+    "promotionState": {
+      "not_promoted": "Not promoted",
+      "proposed": "Proposed",
+      "accepted": "Accepted",
+      "rejected": "Rejected"
+    }
+  }
+}

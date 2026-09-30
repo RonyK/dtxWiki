@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: AGPL-3.0-only OR Elastic-2.0
+# dtxWiki production self-host stack (AGPL-3.0-only OR Elastic-2.0).
+#
+#   cd infra/prod
+#   cp .env.docker.example .env      # set DTXWIKI_DOMAIN + DTXWIKI_ADMIN_EMAIL
+#   docker compose up -d --build
+#   docker compose exec app dtxwiki users add admin@example.com
+#   docker compose exec app dtxwiki admin grant --email admin@example.com
+#
+# `docker compose exec app dtxwiki ...` runs next to the server with the same
+# environment: both secrets are read from files on the data volume, never from
+# values the entrypoint exported. While the app is stopped, use
+# `docker compose run --rm app dtxwiki ...` instead.
+#
+# Caddy terminates TLS on 80/443 (auto Let's Encrypt) and reverse-proxies to the
+# app on the internal network. SQLite on a named volume; no external DB needed.
+# NOTE: app + worker are two writers on one SQLite file. WAL + busy_timeout make
+# this safe at self-host scale. Do not add app/worker replicas; external DB and
+# horizontally scaled production are not supported by this release.
+# Prereqs: DNS A record for the domain -> this host, ports 80/443 reachable.
+#
+# Backup: stop the writers, then archive the data volume OUTSIDE this checkout,
+# readable by root only (the archive holds the database and both secrets):
+#   docker compose stop app worker
+#   sudo install -d -m 0700 /var/backups/dtxwiki
+#   docker run --rm --volumes-from "$(docker compose ps --all --quiet app)" \
+#     -v /var/backups/dtxwiki:/backup alpine \
+#     sh -c 'umask 077 && tar czf "/backup/dtxwiki-$(date +%F-%H%M%S).tgz" -C /var/lib/dtxwiki .'
+#   docker compose start app worker
+# With Caddyfile.docker.internal, archive the caddy_data volume the same way:
+# it holds the internal root CA that every client trusts.
+
+x-dtxwiki-image: &dtxwiki-image
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+    args:
+      # Optional trusted package index/proxy while building this checkout.
+      PIP_INDEX_URL: "${PIP_INDEX_URL:-}"
+  # Local build by default (image dtxwiki:local). For the container-registry path
+  # set the FULL image ref DTXWIKI_IMAGE=registry.example.com/dtxwiki:<ver>
+  # and `docker compose pull`.
+  image: "${DTXWIKI_IMAGE:-dtxwiki:local}"
+
+x-dtxwiki-env: &dtxwiki-env
+  DTXWIKI_APP_ENV: production
+  DTXWIKI_APP_MODE: team
+  DTXWIKI_PUBLIC_BASE_URL: "https://${DTXWIKI_DOMAIN}"
+  DTXWIKI_CORS_ORIGINS: "https://${DTXWIKI_DOMAIN}"
+  DTXWIKI_BEHIND_PROXY: "true"
+  # Trust forwarded headers only from the Caddy container's fixed address.
+  DTXWIKI_FORWARDED_ALLOW_IPS: "172.28.0.10"
+  DTXWIKI_DATABASE_URL: "sqlite+pysqlite:////var/lib/dtxwiki/dtxwiki.sqlite"
+  # Writable state (uploads, library files, logs) lives on the data volume, not
+  # the container's read-only home (~/.dtxwiki). Allowlisted by the startup guard.
+  DTXWIKI_DATA_DIR: "/var/lib/dtxwiki"
+  DTXWIKI_AUTO_BOOTSTRAP: "false"
+  DTXWIKI_MCP_HTTP_MODE: streamable
+  # Remote/team deployments are closed to self-signup unless explicitly opened.
+  DTXWIKI_SIGNUP_ENABLED: "${DTXWIKI_SIGNUP_ENABLED:-false}"
+  # Password recovery mail. `none` keeps administrator-assisted one-time links;
+  # SMTP enables verified-email self-service recovery through the shared outbox.
+  DTXWIKI_MAIL_PROVIDER: "${DTXWIKI_MAIL_PROVIDER:-none}"
+  DTXWIKI_MAIL_FROM_ADDRESS: "${DTXWIKI_MAIL_FROM_ADDRESS:-}"
+  DTXWIKI_SMTP_HOST: "${DTXWIKI_SMTP_HOST:-}"
+  DTXWIKI_SMTP_PORT: "${DTXWIKI_SMTP_PORT:-587}"
+  DTXWIKI_SMTP_USERNAME: "${DTXWIKI_SMTP_USERNAME:-}"
+  DTXWIKI_SMTP_PASSWORD: "${DTXWIKI_SMTP_PASSWORD:-}"
+  DTXWIKI_SMTP_STARTTLS: "${DTXWIKI_SMTP_STARTTLS:-true}"
+  DTXWIKI_SMTP_USE_SSL: "${DTXWIKI_SMTP_USE_SSL:-false}"
+  DTXWIKI_SMTP_TIMEOUT_SECONDS: "${DTXWIKI_SMTP_TIMEOUT_SECONDS:-10}"
+  # Display-only TLS mode for the deployment status surface. Set to `internal`
+  # (with DTXWIKI_CADDYFILE=./Caddyfile.docker.internal) for an internal CA.
+  DTXWIKI_TLS_MODE: "${DTXWIKI_TLS_MODE:-acme}"
+  # Secrets are passed as FILE PATHS on the data volume, so every process in
+  # every service (including `docker compose exec`) reads the same ones.
+  # docker-entrypoint.sh creates both files on first start (0600, owned by the
+  # container user) and never rotates them.
+  DTXWIKI_SESSION_SECRET_FILE: /var/lib/dtxwiki/session_secret
+  DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH: /var/lib/dtxwiki/jwt.pem
+  # Optional: pin a fixed session secret in .env instead. A non-empty value
+  # wins over DTXWIKI_SESSION_SECRET_FILE.
+  DTXWIKI_SESSION_SECRET: "${DTXWIKI_SESSION_SECRET:-}"
+  # Browser-session policy: ordinary sessions are absolute/non-sliding;
+  # remembered sessions rotate near expiry but never past the absolute cap.
+  DTXWIKI_SESSION_TTL_SECONDS: "${DTXWIKI_SESSION_TTL_SECONDS:-43200}"
+  DTXWIKI_SESSION_REMEMBERED_TTL_SECONDS: "${DTXWIKI_SESSION_REMEMBERED_TTL_SECONDS:-2592000}"
+  DTXWIKI_SESSION_REMEMBERED_REFRESH_THRESHOLD_SECONDS: "${DTXWIKI_SESSION_REMEMBERED_REFRESH_THRESHOLD_SECONDS:-604800}"
+  DTXWIKI_SESSION_REMEMBERED_ABSOLUTE_TTL_SECONDS: "${DTXWIKI_SESSION_REMEMBERED_ABSOLUTE_TTL_SECONDS:-7776000}"
+
+services:
+  # One-shot: keygen + session secret + migrations. app/worker wait on it.
+  init:
+    <<: *dtxwiki-image
+    environment:
+      <<: *dtxwiki-env
+    command: ["dtxwiki", "info"]
+    volumes:
+      - data:/var/lib/dtxwiki
+    networks:
+      - dtxnet
+    restart: "no"
+
+  app:
+    <<: *dtxwiki-image
+    # tini as PID 1: forwards SIGTERM to the server and reaps child processes.
+    init: true
+    environment:
+      <<: *dtxwiki-env
+      # NOT a DTXWIKI_ key: those are validated by the startup guard and an
+      # unknown one crash-loops the app. Plain env consumed by docker-entrypoint.sh
+      # + the worker; init (no flag) performs the single bootstrap.
+      SKIP_BOOTSTRAP: "1"
+    expose:
+      - "21080"
+    volumes:
+      - data:/var/lib/dtxwiki
+    networks:
+      - dtxnet
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    <<: *dtxwiki-image
+    # tini as PID 1: forwards SIGTERM to the worker and reaps child processes.
+    init: true
+    environment:
+      <<: *dtxwiki-env
+      # NOT a DTXWIKI_ key: those are validated by the startup guard and an
+      # unknown one crash-loops the app. Plain env consumed by docker-entrypoint.sh
+      # + the worker; init (no flag) performs the single bootstrap.
+      SKIP_BOOTSTRAP: "1"
+    command: ["dtxwiki-worker", "run"]
+    volumes:
+      - data:/var/lib/dtxwiki
+    networks:
+      - dtxnet
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    environment:
+      DTXWIKI_DOMAIN: "${DTXWIKI_DOMAIN:?set DTXWIKI_DOMAIN in .env}"
+      # Required for the acme path (Let's Encrypt notices); unused for the
+      # internal-CA path, so it is optional rather than hard-required.
+      DTXWIKI_ADMIN_EMAIL: "${DTXWIKI_ADMIN_EMAIL:-}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Defaults to the auto-ACME Caddyfile; set DTXWIKI_CADDYFILE=
+      # ./Caddyfile.docker.internal for an internal CA (no public domain).
+      - ${DTXWIKI_CADDYFILE:-./Caddyfile.docker}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      dtxnet:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  dtxnet:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

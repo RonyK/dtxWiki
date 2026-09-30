@@ -1,0 +1,1223 @@
+{
+  "input": {
+    "additionalProperties": false,
+    "properties": {
+      "aliases": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Aliases"
+      },
+      "body_md": {
+        "default": "",
+        "maxLength": 1000000,
+        "title": "Body Md",
+        "type": "string"
+      },
+      "conversation_token": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
+        "title": "Conversation Token"
+      },
+      "page_type": {
+        "anyOf": [
+          {
+            "enum": [
+              "overview",
+              "source",
+              "entity",
+              "concept",
+              "synthesis",
+              "comparison",
+              "decision",
+              "contradiction",
+              "query",
+              "guide"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Page Type"
+      },
+      "placement_parent_node_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Placement Parent Node Id"
+      },
+      "tags": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tags"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Title"
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "title": "Workspace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_id"
+    ],
+    "title": "CreateContextPageInput",
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "ContextEditPayload": {
+        "additionalProperties": false,
+        "description": "The page after an edit command, plus what that command changed.",
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "alternative_draft_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Alternative Draft Id"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "change_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Change Set Id"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Published Version Id"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Version Id"
+          },
+          "draft_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Draft Saved At"
+          },
+          "edit_receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EditReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What this write changed: sections, line/char counts, per-operation positions, and (for a patch) the id and hash of every block whose id or hash changed. replace_block keeps the block's id; a block other edits changed keeps its id while its text stays close to the old text, otherwise it gets a new one. null on an idempotent replay."
+          },
+          "editing_revision": {
+            "default": 1,
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "graph_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Graph Status"
+          },
+          "history_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "state_inconsistent",
+                  "current_editing",
+                  "current_draft",
+                  "published_snapshot",
+                  "alternative_draft",
+                  "discarded_draft",
+                  "superseded_snapshot",
+                  "superseded_draft"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "History Status"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inconsistency_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inconsistency Reasons",
+            "type": "array"
+          },
+          "is_alternative": {
+            "default": false,
+            "title": "Is Alternative",
+            "type": "boolean"
+          },
+          "is_discarded": {
+            "default": false,
+            "title": "Is Discarded",
+            "type": "boolean"
+          },
+          "is_draft_head": {
+            "default": false,
+            "title": "Is Draft Head",
+            "type": "boolean"
+          },
+          "is_public": {
+            "default": false,
+            "title": "Is Public",
+            "type": "boolean"
+          },
+          "is_published_head": {
+            "default": false,
+            "title": "Is Published Head",
+            "type": "boolean"
+          },
+          "is_visible_head": {
+            "default": false,
+            "title": "Is Visible Head",
+            "type": "boolean"
+          },
+          "page_type": {
+            "default": "overview",
+            "enum": [
+              "overview",
+              "source",
+              "entity",
+              "concept",
+              "synthesis",
+              "comparison",
+              "decision",
+              "contradiction",
+              "query",
+              "guide"
+            ],
+            "title": "Page Type",
+            "type": "string"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Version Id"
+          },
+          "preserved_as_alternative": {
+            "default": false,
+            "title": "Preserved As Alternative",
+            "type": "boolean"
+          },
+          "publish_blocked_reasons": {
+            "items": {
+              "$ref": "#/$defs/DraftReviewReason"
+            },
+            "title": "Publish Blocked Reasons",
+            "type": "array"
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Published Version No"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "superseded_review_count": {
+            "default": 0,
+            "title": "Superseded Review Count",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Status"
+          },
+          "visible_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Visible Version Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "updated_at",
+          "content_hash",
+          "workspace_id",
+          "body_md",
+          "version_id",
+          "created_at"
+        ],
+        "title": "ContextEditPayload",
+        "type": "object"
+      },
+      "DraftReviewReason": {
+        "additionalProperties": false,
+        "description": "One reason a write did not simply publish.\n\nLives here rather than beside either write surface because both use it: the\nMCP result names why a draft went to review, and the REST page payload names\nwhy a save was held from publication.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "DraftReviewReason",
+        "type": "object"
+      },
+      "EditReceipt": {
+        "additionalProperties": false,
+        "description": "Positions and sizes of one edit: sections, lines, characters, blocks.",
+        "properties": {
+          "changed_blocks": {
+            "description": "Blocks whose id or hash is new after a patch, so a follow-up block-addressed patch needs no read_structure_map round trip. Unchanged blocks keep the id and hash you already hold.",
+            "items": {
+              "$ref": "#/$defs/EditReceiptBlock"
+            },
+            "title": "Changed Blocks",
+            "type": "array"
+          },
+          "changed_sections": {
+            "description": "Heading paths of the sections the edit touched (max 20).",
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Changed Sections",
+            "type": "array"
+          },
+          "chars_added": {
+            "default": 0,
+            "title": "Chars Added",
+            "type": "integer"
+          },
+          "chars_removed": {
+            "default": 0,
+            "title": "Chars Removed",
+            "type": "integer"
+          },
+          "edit_mode": {
+            "enum": [
+              "patch",
+              "whole_body",
+              "create"
+            ],
+            "title": "Edit Mode",
+            "type": "string"
+          },
+          "editing_revision_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Editing Revision After"
+          },
+          "editing_revision_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Editing Revision Before"
+          },
+          "first_change": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EditReceiptFirstChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "lines_added": {
+            "default": 0,
+            "title": "Lines Added",
+            "type": "integer"
+          },
+          "lines_removed": {
+            "default": 0,
+            "title": "Lines Removed",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/$defs/EditReceiptOperation"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "edit_mode"
+        ],
+        "title": "EditReceipt",
+        "type": "object"
+      },
+      "EditReceiptBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "hash"
+        ],
+        "title": "EditReceiptBlock",
+        "type": "object"
+      },
+      "EditReceiptFirstChange": {
+        "additionalProperties": false,
+        "properties": {
+          "after_preview": {
+            "title": "After Preview",
+            "type": "string"
+          },
+          "before_preview": {
+            "title": "Before Preview",
+            "type": "string"
+          },
+          "line": {
+            "description": "1-indexed line of the first change in the new body.",
+            "title": "Line",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "before_preview",
+          "after_preview"
+        ],
+        "title": "EditReceiptFirstChange",
+        "type": "object"
+      },
+      "EditReceiptOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_block_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Block Ids",
+            "type": "array"
+          },
+          "chars_added": {
+            "default": 0,
+            "title": "Chars Added",
+            "type": "integer"
+          },
+          "chars_removed": {
+            "default": 0,
+            "title": "Chars Removed",
+            "type": "integer"
+          },
+          "heading_path": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Heading Path"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "line_range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1-indexed inclusive line range in the body BEFORE the patch.",
+            "title": "Line Range"
+          },
+          "match_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exact",
+                  "normalized",
+                  "fuzzy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "replace_text only: how old_text was found. 'normalized' ignored whitespace/Unicode differences; 'fuzzy' forgave a small copy slip inside the addressed block or section -- check the result.",
+            "title": "Match Kind"
+          },
+          "match_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "replace_text only: version of the matching rules applied.",
+            "title": "Match Policy"
+          },
+          "match_similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only for match_kind='fuzzy': 0-1 similarity of the target.",
+            "title": "Match Similarity"
+          },
+          "matched_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only for a non-exact match: sha256 of the original text that was replaced (several matches joined by NUL).",
+            "title": "Matched Sha256"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "op"
+        ],
+        "title": "EditReceiptOperation",
+        "type": "object"
+      },
+      "EnvelopeWarning": {
+        "additionalProperties": false,
+        "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
+        "properties": {
+          "code": {
+            "description": "Stable warning code; must be drawn from WARNING_CODES.",
+            "enum": [
+              "stale",
+              "permission_limited",
+              "citation_missing",
+              "citation_weak",
+              "citation_stale",
+              "token_budget",
+              "workflow_sequence_incomplete",
+              "draft_not_injectable",
+              "expired_context",
+              "archived",
+              "unsupported_retrieval_mode_fallback",
+              "deprecated_tool",
+              "conversation_token_not_supplied",
+              "unresolved_diverged_branch",
+              "conversation_read_stale",
+              "lint_publish_blocked",
+              "published_with_findings",
+              "draft_unpublished",
+              "text_occurrence_mismatch",
+              "text_not_found",
+              "unsupported_filter_tag",
+              "unsupported_filter_date",
+              "disambiguation_required",
+              "semantic_fallback_used",
+              "keyword_lane_unavailable",
+              "coverage_gap_recorded",
+              "evidence_not_citable",
+              "mrtr_preview_unavailable",
+              "borrowed_rerank_applied",
+              "borrowed_query_rewrite_applied",
+              "llm_provider_unavailable",
+              "llm_composer_failed",
+              "job_fanout_incomplete"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "MCPActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "mcp_client",
+              "agent",
+              "system"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPErrorDetail": {
+        "additionalProperties": false,
+        "description": "One actionable defect in a rejected tool call.\n\nShaped for a caller that has to repair its own request: `field` locates the\nproblem, `message` states it, and `fix` says what to send instead. Never\necho the offending value here \u2014 a rejected `body_markdown` can be a\nmegabyte, and reflecting client input back into a response (and into the\nstored trace) is both wasteful and an injection vector.",
+        "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextMatchCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidates"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fix"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_index": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Index"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPResultEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ref": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Activity Ref"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MCPActor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human",
+                  "mcp_client",
+                  "agent",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Kind"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audit Event Id"
+          },
+          "client_self_reported": {
+            "default": false,
+            "title": "Client Self Reported",
+            "type": "boolean"
+          },
+          "conversation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Opaque MCP conversation token. Echo this value on the next tool call to append to the same dtxWiki MCP chat.",
+            "title": "Conversation Token"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_details": {
+            "items": {
+              "$ref": "#/$defs/MCPErrorDetail"
+            },
+            "title": "Error Details",
+            "type": "array"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Meta"
+          },
+          "model_id": {
+            "default": "unknown",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Version"
+          },
+          "params_summary": {
+            "additionalProperties": true,
+            "title": "Params Summary",
+            "type": "object"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result_status": {
+            "enum": [
+              "accepted",
+              "succeeded",
+              "failed",
+              "partial",
+              "rejected_by_policy",
+              "needs_review",
+              "conflict"
+            ],
+            "title": "Result Status",
+            "type": "string"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retryable"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "schema_version": {
+            "const": "llmwiki.mcp.v1",
+            "default": "llmwiki.mcp.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "result_status"
+        ],
+        "title": "MCPResultEnvelope",
+        "type": "object"
+      },
+      "TextMatchCandidate": {
+        "additionalProperties": false,
+        "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
+        "properties": {
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Block Id"
+          },
+          "line_end": {
+            "minimum": 1,
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "minimum": 1,
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "match_kind": {
+            "enum": [
+              "exact",
+              "normalized",
+              "fuzzy"
+            ],
+            "title": "Match Kind",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "line_start",
+          "line_end",
+          "similarity",
+          "match_kind"
+        ],
+        "title": "TextMatchCandidate",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "data": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextEditPayload"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "envelope": {
+        "$ref": "#/$defs/MCPResultEnvelope"
+      }
+    },
+    "required": [
+      "envelope"
+    ],
+    "title": "CreateContextPageToolOutput",
+    "type": "object"
+  }
+}

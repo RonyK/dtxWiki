@@ -1,0 +1,139 @@
+# Changelog
+
+## 0.1.1 — Unreleased
+
+0.1.1 is the first public release of dtxWiki under its current design. The
+date is set when the release is tagged. Releases 0.0.x were an early
+preview; 0.1.0 was never released.
+
+### Licensing
+
+- dtxWiki is licensed under `AGPL-3.0-only OR Elastic-2.0`, at your election.
+  dtxSuite also offers a commercial license. Releases 0.0.x were published
+  under Apache-2.0 and remain under that license.
+- `integrations/` (agent skills and client plugins) stays under Apache-2.0.
+- `NOTICE` records the vendored third-party material, and the web UI serves
+  the bundled packages' license texts at `/THIRD_PARTY_NOTICES.txt`.
+
+### Install and upgrade
+
+- Python 3.12 is required. Node.js 22.18 or newer is needed only to build
+  from source.
+- `pipx install dtxwiki` (or `uv tool install dtxwiki`) is the solo install
+  path. A source build needs `make install` before `make build-wheel`.
+- `npx @dtxsuite/dtxwiki` runs dtxWiki from npm. The npm package is a
+  launcher: it runs the PyPI release of the same version through `uvx`, or
+  `pipx run` when uv is missing, and needs Node.js 22 or newer and uv or
+  pipx. Under it, `dtxwiki update` and `dtxwiki rollback` change nothing and
+  print the npm steps instead.
+- Remote deployment is supported through Docker Compose (built locally; no
+  container image is published) and through the systemd Quick install
+  (`infra/prod/install.sh` or `dtxwiki setup production`).
+- **Databases created by 0.0.x are not upgraded.** The migration preflight
+  refuses them; back them up and start from a fresh database. Released
+  migrations 0001 and 0002 are frozen, and later schema changes arrive as new
+  revisions.
+- Desktop installers are not part of this release.
+
+### MCP and API changes (breaking)
+
+- The MCP server speaks Streamable HTTP only, at the authenticated `/mcp`
+  endpoint. Clients authenticate with a personal access token or with
+  dtxWiki's OAuth 2.1 flow (dynamic client registration, PKCE, JWT access
+  tokens). The earlier local stdio MCP process and its client install
+  commands are removed; use `dtxwiki mcp register-http` or the client's own
+  HTTP MCP configuration.
+- Removed MCP tools, with no aliases:
+
+  | Removed | Use instead |
+  | --- | --- |
+  | `list_pages`, `read_page` | `search`, `fetch`, `read` |
+  | `write_page` | `create_context_page` |
+  | `write_draft` | `create_context_page` |
+  | `update_draft` | `update_context_edit` |
+  | `patch_draft` | `begin_context_edit`, then `patch_context_edit` |
+
+- The REST surface is the canonical workspace-scoped API under
+  `/api/v1/workspaces/{workspace_id}/...`. The old `/api/v1/pages*` routes
+  and the intermediate `context-pages` and `context-media` routes are
+  removed. The `/pages/:slug` and `/p/:pageId` browser routes are gone as
+  well.
+- One credential now carries a set of allowed workspaces, editable in
+  Settings > MCP access without reissuing the token. Requests outside the set
+  fail with `token_workspace_denied`.
+- `serverInfo.version` is `<app_version>+llmwiki.mcp.v1.tools.<N>.<digest>`.
+  Compare the whole string for equality; when it changes, re-read
+  `tools/list`. This release is tool contract revision 11 (29 tools).
+- `update_context_edit` accepts an optional `version_id`. A stale save
+  conflicts and returns the current `version_id` and `editing_revision`;
+  clients must re-read with `version='my_edit'` before retrying.
+- Editing fixes: new editing rows can start above revision 1; fuzzy matches
+  across a trailing hard break, exact-only zones and ambiguous occurrences
+  are refused instead of silently editing the wrong text; hard-break-only
+  edits are saved.
+- Unsupported legacy variables (`DTXWIKI_WORKSPACE_SLUG`,
+  `DTXWIKI_MCP_TOKEN` and similar) are ignored with a startup warning.
+
+### Security hardening
+
+- Session secret: `DTXWIKI_SESSION_SECRET_FILE` reads the secret from a file.
+  In `solo_local` without a secret, dtxWiki creates and reuses
+  `<data dir>/session_secret` (mode 0600). Remote modes refuse to start
+  without a secret. Placeholder values, the old development literal and, in
+  remote modes, values shorter than 32 characters are rejected.
+- `DTXWIKI_ALLOWED_HOSTS` restricts the `Host` header (other hosts receive
+  400 except `/health/live` and `/health/ready`); the MCP endpoint has
+  DNS-rebinding protection.
+- `DTXWIKI_MAX_REQUEST_BODY_BYTES` (default 16 MiB) is enforced before
+  authentication and answers 413. Uploads have their own, larger caps, and
+  the bundled proxy templates cap bodies at 64 MB.
+- Password-reset and email-verification links carry their token in the URL
+  fragment, and the token checks use POST bodies, so tokens no longer reach
+  access logs. The uvicorn access log is off; the JSON request log records
+  route templates without query strings. The Caddy templates drop token query
+  parameters and the `Referer` header from their logs and no longer override
+  the application's security headers (HSTS is added at the proxy).
+- `dtxwiki serve` in `solo_local` on a non-loopback host prints a warning:
+  sign-up is open and there is no TLS.
+- Dependency floors were raised for security updates.
+
+### Operations
+
+- `DTXWIKI_AUTO_BOOTSTRAP=false` makes `dtxwiki serve` refuse to start until
+  `dtxwiki bootstrap` has brought the database to the current revision (back
+  up first). Server and worker never migrate by themselves in that mode.
+  `dtxwiki setup production`, `install.sh` and the Docker `init` service run
+  bootstrap before starting the services.
+- `dtxwiki serve` and the worker hold a runtime lock. `dtxwiki update`,
+  `rollback` and `migrate-data` refuse while either runs ("stop dtxWiki
+  (server and worker) first"); the systemd update path stops the services
+  itself. The worker exits non-zero on a schema or version mismatch and
+  shuts down cleanly on SIGTERM.
+- Docker: `docker compose exec app dtxwiki users add ...` works; the
+  entrypoint creates `/var/lib/dtxwiki/session_secret`. Update with
+  `git fetch --tags && git checkout v<version>`, a backup,
+  `docker compose build` and `docker compose up -d`. A registry pull is used
+  only when `DTXWIKI_IMAGE` points at a registry.
+- Quick install adds the official Caddy apt repository when the distribution
+  has no `caddy` package (Ubuntu 22.04). `setup production --bind-host` lets
+  a remote TLS proxy or load balancer reach the app (default `127.0.0.1`).
+  The env file is `root:<service user>` mode 0640, the systemd units are
+  sandboxed with `UMask=0027`, and `nginx.conf.example` has an HTTP-only
+  ACME bootstrap block.
+- `make migrate` runs `dtxwiki bootstrap` and honours `DTXWIKI_DATABASE_URL`.
+- Caddy's `pki` directory is part of the documented backup set.
+- The manual `ALTER TABLE ... result_detail` step is gone; it applied only to
+  pre-release builds.
+
+### Earlier
+
+Wire-contract notes from the 0.0.x preview that integrators may still meet:
+
+- **2026-05 Sprint_3**: a tool result envelope's `warnings` entries changed
+  from plain string codes to `{code, message}` objects. A client comparing
+  `warnings[0] == "deprecated_tool"` must migrate to
+  `warnings[0].code == "deprecated_tool"`.
+- **2026-05 Sprint_3 Hotfix-2**: that warning object's JSON Schema title was
+  renamed from `Warning` to `EnvelopeWarning`. The wire shape
+  (`{code, message}`) is unchanged; schema-generated client types need
+  regeneration.

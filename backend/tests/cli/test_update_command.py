@@ -1,0 +1,167 @@
+"""CLI-level tests for `dtxwiki update` / `dtxwiki rollback` wrappers."""
+
+import os
+
+import typer
+from typer.testing import CliRunner
+
+from backend.cli.commands import update as cmd
+from backend.cli.main import app
+from backend.services.ops.install_method import InstallMethod
+
+runner = CliRunner()
+
+
+def test_update_abort_maps_to_exit_2(monkeypatch):
+    # Non-interactive confirm raises typer.Abort (Typer would map it to exit 1);
+    # the wrapper must surface the documented exit 2 'aborted by operator'.
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda method, env_file: None)
+
+    def boom(*a, **k):
+        raise typer.Abort()
+
+    monkeypatch.setattr(cmd.update_service, "run_update", boom)
+    result = runner.invoke(app, ["update", "--method", "venv"])
+    assert result.exit_code == 2
+
+
+def test_rollback_abort_maps_to_exit_2(monkeypatch):
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda method, env_file: None)
+
+    def boom(*a, **k):
+        raise typer.Abort()
+
+    monkeypatch.setattr(cmd.update_service, "run_rollback", boom)
+    result = runner.invoke(app, ["rollback", "--method", "venv"])
+    assert result.exit_code == 2
+
+
+def test_load_prod_env_systemd_sources_file(monkeypatch, tmp_path):
+    # On the systemd tier the CLI must source the prod env file so Settings()
+    # resolves the real DB/data dir instead of root defaults (B2/#31).
+    env = tmp_path / "dtxwiki.env"
+    env.write_text(
+        "DTXWIKI_DATABASE_URL=sqlite+pysqlite:////var/lib/dtxwiki/dtxwiki.sqlite\n"
+        "DTXWIKI_DATA_DIR=/var/lib/dtxwiki\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cmd.install_method,
+        "detect_install_method",
+        lambda override=None: InstallMethod(
+            "systemd", None, None, (), None, ("dtxwiki",)
+        ),
+    )
+    # setenv-then-delenv (not delenv(raising=False)) so monkeypatch records an
+    # undo entry even when the var is absent — _load_prod_env writes os.environ
+    # directly and the prod paths must not leak into later tests.
+    for key in ("DTXWIKI_DATABASE_URL", "DTXWIKI_DATA_DIR"):
+        monkeypatch.setenv(key, "leak-guard")
+        monkeypatch.delenv(key)
+
+    cmd._load_prod_env("systemd", str(env))
+
+    db_url = os.environ["DTXWIKI_DATABASE_URL"]
+    assert db_url.endswith("/var/lib/dtxwiki/dtxwiki.sqlite")
+    assert os.environ["DTXWIKI_DATA_DIR"] == "/var/lib/dtxwiki"
+
+
+def test_load_prod_env_strips_quotes_like_systemd(monkeypatch, tmp_path):
+    # systemd's EnvironmentFile strips surrounding quotes, so a hand-quoted
+    # DATABASE_URL works for the running service; the CLI must see the same
+    # unquoted value or make_url() rejects it and the pre-update backup
+    # silently skips the DB snapshot.
+    from sqlalchemy.engine import make_url
+
+    env = tmp_path / "dtxwiki.env"
+    env.write_text(
+        'DTXWIKI_DATABASE_URL="sqlite+pysqlite:////var/lib/dtxwiki/dtxwiki.sqlite"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cmd.install_method,
+        "detect_install_method",
+        lambda override=None: InstallMethod(
+            "systemd", None, None, (), None, ("dtxwiki",)
+        ),
+    )
+    monkeypatch.setenv("DTXWIKI_DATABASE_URL", "leak-guard")
+    monkeypatch.delenv("DTXWIKI_DATABASE_URL")
+
+    cmd._load_prod_env("systemd", str(env))
+
+    url = make_url(os.environ["DTXWIKI_DATABASE_URL"])
+    assert url.get_backend_name() == "sqlite"
+    assert os.environ["DTXWIKI_DATABASE_URL"].startswith("sqlite+pysqlite://")
+
+
+def test_update_no_db_backup_flag_reaches_service(monkeypatch):
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda method, env_file: None)
+    captured = {}
+
+    def fake_run_update(settings, **kwargs):
+        captured.update(kwargs)
+        return cmd.update_service.UpdateResult(
+            True, 0, "0.1.0", "0.2.0", None, "updated"
+        )
+
+    monkeypatch.setattr(cmd.update_service, "run_update", fake_run_update)
+    result = runner.invoke(
+        app, ["update", "--method", "venv", "--yes", "--no-db-backup"]
+    )
+    assert result.exit_code == 0
+    assert captured["no_db_backup"] is True
+
+
+def test_finalize_bootstrap_echoes_redacted_db_url(monkeypatch):
+    # The parent `dtxwiki update` re-echoes this subprocess output, so embedded
+    # credentials (userinfo password, sslpassword) must never be printed raw.
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda method, env_file: None)
+    monkeypatch.setattr(cmd, "bootstrap_app", lambda settings: None)
+    monkeypatch.setenv(
+        "DTXWIKI_DATABASE_URL",
+        "postgresql+pg8000://dtx:s3cret@db.internal:5432/dtx?sslpassword=keypass",
+    )
+
+    result = runner.invoke(app, ["update", "--finalize-bootstrap"])
+
+    assert result.exit_code == 0
+    assert "s3cret" not in result.stdout
+    assert "keypass" not in result.stdout
+    assert "dtx:****@db.internal" in result.stdout
+    assert "sslpassword=****" in result.stdout
+
+
+def test_update_invalid_method_is_usage_error():
+    # An unknown --method must be a clean exit-2 usage error, not the raw
+    # ValueError detect_install_method raises (unhandled-exception box, exit 1).
+    result = runner.invoke(app, ["update", "--method", "banana"])
+    assert result.exit_code == 2
+    assert "must be one of" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_rollback_invalid_method_is_usage_error():
+    result = runner.invoke(app, ["rollback", "--method", "banana"])
+    assert result.exit_code == 2
+    assert "must be one of" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_validate_method_accepts_all_kinds_and_auto():
+    from backend.services.ops.install_method import VALID_KINDS
+
+    for value in sorted(VALID_KINDS | {"auto"}):
+        assert cmd._validate_method(value) == value
+
+
+def test_load_prod_env_noop_on_venv(monkeypatch):
+    # Non-systemd tier without --env-file must not touch the environment.
+    monkeypatch.setattr(
+        cmd.install_method,
+        "detect_install_method",
+        lambda override=None: InstallMethod(
+            "venv", None, None, ("py", "-m", "pip"), None, ()
+        ),
+    )
+    assert cmd._load_prod_env("venv", None) is None

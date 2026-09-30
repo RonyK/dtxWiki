@@ -1,0 +1,16 @@
+# gitleaks configuration for the CI leak scan (.github/workflows/ci.yml).
+# The default rules stay on. Each allowlist below is scoped to ONE file and to
+# the generic-api-key heuristic only, so a provider token (GitHub, AWS, Stripe,
+# a PEM key, ...) pasted into the same file is still reported.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SHA-256 digests of the frozen migration files are not secrets"
+targetRules = ["generic-api-key"]
+paths = ['''backend/migrations/frozen_revisions\.json$''']
+
+[[allowlists]]
+description = "A retired Alembic revision identifier used as test data"
+targetRules = ["generic-api-key"]
+paths = ['''backend/tests/unit/test_revision_classifier_after_freeze\.py$''']

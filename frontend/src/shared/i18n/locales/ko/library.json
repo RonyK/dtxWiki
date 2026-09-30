@@ -1,0 +1,291 @@
+{
+  "upload": {
+    "refreshFailed": "파일 업로드는 완료됐지만 라이브러리를 새로고침하지 못했습니다. 최신 항목을 보려면 다시 불러오세요.",
+    "partialFailure": "{{totalCount}}개 파일 중 {{failedCount}}개를 업로드하지 못했습니다. {{details}}",
+    "action": "업로드",
+    "uploading": "업로드 중",
+    "title": "라이브러리 파일 업로드",
+    "ariaMobile": "모바일 작업에서 라이브러리 파일 업로드",
+    "ariaMobileBusy": "모바일 작업에서 라이브러리 파일 업로드 중",
+    "drop": "파일을 끌어다 놓아 업로드",
+    "queue": "업로드 대기열",
+    "cancel": "취소",
+    "retry": "재시도",
+    "retryAfter": "{{seconds}}초 후에 다시 시도하세요.",
+    "openPolicySettings": "라이브러리 정책 설정 열기",
+    "failedFallback": "라이브러리 항목을 업로드하지 못했습니다.",
+    "reloadCapabilities": "정책 다시 불러오기",
+    "retryAriaLabel": "{{name}} 업로드 재시도",
+    "status": {
+      "queued": "대기 중",
+      "uploading": "업로드 중",
+      "cancelling": "취소 결과 확인 중",
+      "succeeded": "완료",
+      "failed": "실패",
+      "cancelled": "취소됨",
+      "outcome-unknown": "결과 확인 필요 — 재시도하여 확인"
+    },
+    "errors": {
+      "batchLimit": "한 번에 {{count}}개 이하의 파일을 선택하세요.",
+      "unsupportedFormat": "이 워크스페이스에서 허용되지 않은 파일 형식입니다.",
+      "tooLarge": "이 파일은 해당 형식의 {{maxSize}} 제한을 초과합니다.",
+      "capabilitiesUnavailable": "서버의 형식 정책을 확인할 수 없어 업로드를 일시적으로 사용할 수 없습니다. 다시 불러와 재시도하세요."
+    }
+  },
+  "errors": {
+    "load": "라이브러리를 불러오지 못했습니다. 다시 시도하세요.",
+    "loadDetail": "라이브러리 항목을 불러오지 못했습니다. 다시 시도하세요.",
+    "moveTreeNode": "라이브러리 항목을 이동하지 못했습니다. 다시 시도하세요.",
+    "reorderTreeNode": "라이브러리 항목 순서를 변경하지 못했습니다. 다시 시도하세요.",
+    "upload": "라이브러리 파일을 업로드하지 못했습니다. 다시 시도하세요.",
+    "itemUnavailable": "해당 라이브러리 항목을 더 이상 사용할 수 없어 목록에서 제거했습니다."
+  },
+  "history": {
+    "sourceVersion": "원본 가져온 버전",
+    "selectedVersion": "선택한 라이브러리 버전"
+  },
+  "overview": {
+    "eyebrow": "참조 저장소",
+    "title": "라이브러리",
+    "empty": "아직 라이브러리 항목이 없습니다",
+    "emptyDescription": "라이브러리는 컨텍스트 페이지와 Ask 답변이 인용해야 할 신뢰할 수 있는 원본 자료를 저장합니다.",
+    "addFirst": "첫 라이브러리 항목 추가",
+    "openContext": "컨텍스트 열기",
+    "loadMore": "더 보기",
+    "loadingMore": "불러오는 중…"
+  },
+  "panel": {
+    "recentHeading": "최신 업데이트",
+    "itemsHeading": "항목",
+    "items_one": "개",
+    "items_other": "개"
+  },
+  "labels": {
+    "unset": "미설정",
+    "connectorType": {
+      "manual_upload": "수동 업로드",
+      "upload": "업로드",
+      "web": "웹",
+      "file": "파일"
+    },
+    "format": {
+      "markdown": "마크다운",
+      "text": "일반 텍스트",
+      "csv": "CSV",
+      "json": "JSON",
+      "yaml": "YAML",
+      "pdf": "PDF",
+      "html": "HTML",
+      "unknown": "알 수 없음"
+    },
+    "artifactType": {
+      "extracted_text": "추출된 텍스트",
+      "extracted_markdown": "추출된 마크다운",
+      "text": "텍스트"
+    },
+    "trustLevel": {
+      "unknown": "알 수 없음",
+      "trusted": "신뢰됨",
+      "restricted": "제한됨"
+    },
+    "lifecycleStatus": {
+      "registered": "등록됨",
+      "active": "활성",
+      "archived": "보관됨",
+      "published": "게시됨",
+      "draft": "초안",
+      "ready": "준비됨",
+      "ready_partial": "일부 제한으로 준비됨",
+      "stored_unconverted": "원본만 저장됨",
+      "failed": "실패",
+      "timed_out": "시간 초과",
+      "extract_pending": "추출 대기 중",
+      "extract_failed": "추출 실패"
+    },
+    "processingStatus": {
+      "pending": "대기 중",
+      "queued": "대기 중",
+      "converting": "변환 중",
+      "projecting": "검색 준비 중",
+      "ready": "준비됨",
+      "ready_partial": "일부 제한으로 준비됨",
+      "stored_unconverted": "원본만 저장됨",
+      "completed": "완료됨",
+      "failed": "실패",
+      "timed_out": "시간 초과"
+    }
+  },
+  "deleteDialog": {
+    "eyebrow": "항목 삭제",
+    "title": "{{title}} 삭제",
+    "close": "닫기",
+    "closeDialog": "삭제 대화상자 닫기",
+    "checking": "참조 확인 중…",
+    "referenced_one": "1개 페이지가 이 항목을 인용합니다. 삭제하면 해당 페이지에 삭제된 항목 표시가 남고 리뷰어에게 알림이 생성됩니다.",
+    "referenced_other": "{{count}}개 페이지가 이 항목을 인용합니다. 삭제하면 해당 페이지들에 삭제된 항목 표시가 남고 리뷰어에게 알림이 생성됩니다.",
+    "unreferenced": "이 작업은 항목과 모든 버전을 영구 삭제합니다. 되돌릴 수 없습니다.",
+    "cancel": "취소",
+    "deleting": "삭제 중",
+    "deletePermanently": "영구 삭제",
+    "errors": {
+      "loadReferences": "참조를 불러오지 못했습니다",
+      "delete": "항목을 삭제하지 못했습니다"
+    }
+  },
+  "loading": "라이브러리 불러오는 중",
+  "libraryName": "라이브러리",
+  "reader": {
+    "updated": "{{value}} 업데이트",
+    "ariaLabel": "라이브러리 리더 보기",
+    "tabs": {
+      "view": "보기",
+      "history": "기록",
+      "activity": "활동",
+      "unavailable": "아직 사용할 수 없습니다"
+    },
+    "delete": "삭제",
+    "edit": "마크다운 편집",
+    "addVersion": "새 버전 업로드",
+    "addingVersion": "새 버전 업로드 중…",
+    "downloadOriginal": "원본 파일 다운로드",
+    "potentiallyActiveOriginalDownloadWarning": "dtxWiki는 미리보기 중 이 파일을 실행하지 않지만, 원본에는 다운로드 후 다른 애플리케이션이 실행할 수 있는 활성 콘텐츠가 포함될 수 있습니다. 신뢰하는 파일만 다운로드하세요.",
+    "downloadingOriginal": "원본 파일 다운로드 중…",
+    "downloadFailed": "원본 파일을 다운로드하지 못했습니다. 다시 시도하세요.",
+    "retryConversion": "변환 다시 시도",
+    "retryingConversion": "변환 다시 시도 중…",
+    "retryConversionFailed": "문서 변환을 다시 시작하지 못했습니다.",
+    "editor": {
+      "title": "시맨틱 마크다운 편집",
+      "loading": "편집 가능한 마크다운을 불러오는 중…",
+      "unavailable": "이 버전에는 더 이상 편집 가능한 시맨틱 마크다운이 없습니다.",
+      "loadFailed": "편집 가능한 마크다운을 불러오지 못했습니다.",
+      "retry": "다시 시도",
+      "save": "저장",
+      "saving": "저장 중…",
+      "saved": "저장됨",
+      "cancel": "취소",
+      "stale": "편집 화면을 연 뒤 마크다운이 변경되었습니다. 다시 저장하기 전에 최신 버전을 불러오세요.",
+      "staleStatus": "새 버전 사용 가능",
+      "reloadLatest": "최신 버전 불러오기",
+      "saveFailed": "마크다운을 저장하지 못했습니다. 편집 내용은 화면에 남아 있습니다.",
+      "unsaved": "저장되지 않음",
+      "unsavedChanges": "저장되지 않은 변경 사항",
+      "noChanges": "저장되지 않은 변경 사항 없음",
+      "controlsAria": "편집기 컨트롤",
+      "modeAria": "편집기 모드",
+      "sourceMode": "소스",
+      "sourceModeTitle": "소스 모드",
+      "readingMode": "읽기",
+      "readingModeTitle": "읽기 모드",
+      "splitMode": "분할",
+      "splitModeTitle": "분할 모드",
+      "bodyAria": "마크다운 본문",
+      "bodyPlaceholder": "내용을 입력하세요…",
+      "actionBar": {
+        "more": "편집기 작업 더 보기",
+        "moreMenu": "편집기 작업 더 보기",
+        "moreShort": "더 보기",
+        "readingDisabled": "읽기 모드에서는 편집 명령을 사용할 수 없습니다.",
+        "toolbar": "편집기 작업"
+      }
+    },
+    "history": {
+      "conversionFailed": "문서 변환에 실패했습니다. 원본 파일은 안전하게 저장되어 있습니다.",
+      "conversionTimedOut": "문서 변환 시간이 초과되었습니다. 원본 파일은 안전하게 저장되어 있습니다.",
+      "originalStored": "검색 가능한 변환 없이 원본 파일만 저장했습니다.",
+      "conversionInProgress": "문서를 변환하는 중입니다.",
+      "conversionReadyPartial": "일부 제한과 함께 문서 변환을 완료했습니다.",
+      "conversionReady": "문서 변환을 완료했습니다.",
+      "sourceVersion": "원본 파일 버전입니다.",
+      "downloadVersion": "이 버전 다운로드",
+      "downloadingVersion": "이 버전 다운로드 중…",
+      "sourceUnavailable": "원본 파일이 보존되어 있지 않습니다."
+    },
+    "noExtractedView": "추출된 보기 없음",
+    "jsonPreview": "JSON 소스 미리보기",
+    "pdfUnavailable": "PDF 미리보기를 사용할 수 없습니다",
+    "pdfNoUrl": "이 PDF 라이브러리 항목은 아직 브라우저에서 읽을 수 있는 문서 URL을 제공하지 않습니다.",
+    "preview": {
+      "fileSavedConverting": "파일을 저장했습니다. 문서 미리보기를 만드는 중입니다.",
+      "fileSavedConversionFailed": "파일은 저장됐지만 문서 변환에 실패했습니다.",
+      "fileSavedConversionTimedOut": "파일은 저장됐지만 문서 변환 시간이 초과되었습니다. 원본 파일은 계속 다운로드할 수 있습니다.",
+      "originalSavedNoConverter": "원본을 저장했습니다. 검색 가능한 문서 미리보기는 제공되지 않습니다.",
+      "previewPendingSourceSaved": "미리보기를 준비 중입니다. 원본 파일은 안전하게 보관되어 있습니다.",
+      "previewGenerationFailedSourceSaved": "미리보기 생성에 실패했습니다. 원본 파일은 안전하게 보관되어 있습니다.",
+      "previewUnavailableSourceSaved": "인라인 미리보기는 없지만 원본 파일은 안전하게 보관되어 있습니다.",
+      "mediaAuthUnavailable": "현재 로그인 방식에서는 인라인 미디어 미리보기를 사용할 수 없습니다. 원본 파일은 안전하게 보관되어 있습니다.",
+      "mediaCodecUnsupported": "이 브라우저에서는 해당 미디어 형식을 재생할 수 없습니다. 원본 파일은 안전하게 보관되어 있습니다.",
+      "mediaRuntimeFailed": "미디어 미리보기를 재생하지 못했습니다. 원본 파일은 안전하게 보관되어 있습니다.",
+      "loading": "미리보기를 불러오는 중…",
+      "loadError": "미리보기를 불러오지 못했습니다.",
+      "retry": "미리보기 다시 시도",
+      "previousVersion": "이전에 사용 가능했던 버전의 미리보기를 표시하고 있습니다.",
+      "rendererLoading": "미리보기 표시기를 불러오는 중…",
+      "generating": "미리보기를 생성하고 있습니다.",
+      "generationFailed": "미리보기 생성에 실패했습니다. 원본 파일은 계속 다운로드할 수 있습니다.",
+      "unavailable": "이 파일에 사용할 수 있는 미리보기가 없습니다.",
+      "truncated": "이 미리보기는 일부만 표시됩니다.",
+      "metadataAria": "파일 메타데이터 미리보기",
+      "downloadUnsupported": "이 파일은 인라인 미리보기를 지원하지 않습니다.",
+      "downloading": "파일 다운로드 중…",
+      "download": "파일 다운로드",
+      "downloadFailed": "다운로드에 실패했습니다. 다시 시도하세요.",
+      "audioAria": "{{title}} 오디오 미리보기",
+      "videoAria": "{{title}} 비디오 미리보기"
+    },
+    "rendition": {
+      "label": "보기 방식",
+      "original": "원본",
+      "converted": "변환본",
+      "goOriginal": "원본 보기 →",
+      "goConverted": "변환본 보기 →",
+      "derivedNote": "원본을 안전하게 재인코딩한 사본을 표시합니다.",
+      "showingOriginalFallback": "이 버전에는 변환본이 없어 원본을 표시합니다.",
+      "showingConvertedFallback": "이 버전에는 원본이 없어 변환본을 표시합니다.",
+      "format": {
+        "markdown": "마크다운",
+        "table": "표",
+        "text": "텍스트",
+        "pdf": "PDF",
+        "image": "이미지",
+        "audio": "오디오",
+        "video": "비디오",
+        "metadata": "메타데이터"
+      }
+    },
+    "pdf": {
+      "previewFor": "{{title}} PDF 미리보기",
+      "previousAria": "이전 PDF 페이지",
+      "previous": "이전",
+      "pageWithTotal": "{{current}} / {{total}}페이지",
+      "pageCurrent": "{{current}}페이지",
+      "nextAria": "다음 PDF 페이지",
+      "next": "다음",
+      "zoomOutAria": "PDF 페이지 축소",
+      "zoomInAria": "PDF 페이지 확대",
+      "zoomLevelAria": "PDF 확대 배율",
+      "loading": "PDF 미리보기 불러오는 중…",
+      "loadingViewer": "PDF 뷰어 불러오는 중…",
+      "extractedText": "추출된 텍스트",
+      "fallback": "원본 파일을 열거나 아래의 추출된 텍스트를 사용하세요."
+    },
+    "noActivity": "아직 자료별 활동 스트림은 없습니다. 업로드와 개정 이력은 히스토리에 있고, 워크스페이스 전체 피드는 활동 페이지에 있습니다."
+  },
+  "inspector": {
+    "emptyTitle": "라이브러리 상세",
+    "emptyBody": "라이브러리 항목을 선택하면 신뢰도, 버전, 아티팩트를 확인할 수 있습니다.",
+    "trust": "신뢰도",
+    "versions": "버전",
+    "current": "현재",
+    "none": "없음",
+    "status": "상태",
+    "updated": "업데이트",
+    "artifacts": "아티팩트",
+    "noArtifacts": "추출된 아티팩트 없음"
+  },
+  "treeEmpty": "라이브러리 트리 노드 없음",
+  "layout": {
+    "details": "상세",
+    "explorer": "탐색기"
+  }
+}

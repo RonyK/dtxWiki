@@ -1,0 +1,4341 @@
+@media (max-width: 720px) {
+  .review-operations-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  /* Below this width two columns leave the title too little to read, so the
+     actions take their own row -- by viewport, not by title length. */
+  .review-detail-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.data-row > div,
+.entity-row > div,
+.folder-child-row > div,
+.artifact-row > div,
+.operations-row > div,
+.review-row > div {
+  min-width: 0;
+}
+
+.data-row strong,
+.entity-row strong,
+.folder-child-row strong,
+.artifact-row strong,
+.operations-row strong,
+.review-row strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-row p {
+  margin: 2px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.folder-child-row p {
+  margin: 2px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.detail-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: 18px;
+}
+
+.reader-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 14px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.reader-meta-date {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* F1: inline pending-draft review banner on the Context surface. */
+.pending-review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pending-review-label {
+  font-weight: 600;
+}
+
+.pending-review-impact {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pending-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pending-review-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pending-review-reason textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.pending-review-error {
+  margin: 0;
+  color: var(--danger, #b00020);
+  font-size: 13px;
+}
+
+.reader-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.reader-chip-action {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.reader-tabs-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reader-tabs-row[data-accent="context"] { --reader-accent: var(--context); }
+.reader-tabs-row[data-accent="agent"] { --reader-accent: var(--agent); }
+.reader-tabs-row[data-accent="library"] { --reader-accent: var(--library); }
+.reader-tabs-row[data-accent="ask"] { --reader-accent: var(--ask); }
+.reader-tabs-row[data-accent="review"] { --reader-accent: var(--review); }
+
+.reader-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+}
+
+.reader-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 0 -2px 0 transparent;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 8px 2px;
+  cursor: pointer;
+}
+
+.reader-tab:hover:not([disabled]) {
+  color: var(--ink);
+}
+
+.reader-tab.active {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--reader-accent, var(--context));
+}
+
+.reader-tab:focus-visible {
+  outline: 2px solid var(--reader-accent, var(--context));
+  outline-offset: 2px;
+}
+
+.reader-tabs-trailing {
+  display: flex;
+  align-items: center;
+  padding-bottom: 4px;
+}
+
+.reader-action-status {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.reader-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface-active);
+  color: var(--ink-muted);
+  font-size: 11px;
+  padding: 0 5px;
+}
+
+.reader-tab.active .reader-tab-count {
+  background: color-mix(in srgb, var(--reader-accent, var(--context)) 14%, var(--surface));
+  color: var(--reader-accent, var(--context));
+}
+
+.wiki-empty {
+  display: grid;
+  gap: 8px;
+  place-items: center;
+  min-height: 260px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--ink-muted);
+  text-align: center;
+  padding: 24px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.evidence-box,
+.form-field {
+  display: grid;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.evidence-box p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.form-field > span,
+.form-field .form-field-label {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.form-field textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.form-field input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.field-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: var(--z-dialog);
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(15 23 42 / 28%);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-x: hidden;
+  padding: 20px;
+}
+
+.dialog-panel {
+  width: min(440px, 100%);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  max-height: calc(100dvh - 40px);
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  outline: none;
+  padding: 18px;
+}
+
+.dialog-scroll-region {
+  max-height: calc(100dvh - 76px);
+  min-inline-size: 0;
+  overflow: auto;
+}
+
+.dialog-panel.diff-dialog-panel {
+  width: min(1080px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: hidden;
+}
+
+.dialog-panel.diff-dialog-panel.is-mobile-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.dialog-panel.diff-dialog-panel.is-mobile-fullscreen .diff-dialog {
+  min-height: 100%;
+}
+
+.dialog-panel.diff-dialog-panel.is-mobile-fullscreen .diff-viewer-unified {
+  max-height: none;
+}
+
+.diff-dialog {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  min-width: 0;
+}
+
+.diff-dialog .diff-viewer {
+  margin-top: 0;
+}
+
+.diff-dialog .diff-viewer-split,
+.diff-dialog .diff-viewer-unified {
+  max-height: min(58vh, 620px);
+}
+
+.dialog-form {
+  display: grid;
+  gap: 14px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 18px;
+}
+
+.dialog-form > * {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+/* Panels whose direct child already supplies its own 18px padding (.dialog-form,
+   .diff-dialog above) opt back out of .dialog-panel's default, so it doesn't
+   double-pad them -- it only reaches panels that render their content bare
+   (e.g. workspace-settings-dialog, lint dismiss), which previously sat flush
+   against the border. */
+.dialog-panel:has(> .dialog-form),
+.dialog-panel:has(> .diff-dialog) {
+  padding: 0;
+}
+
+.agent-create-form textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.dialog-panel.agent-editor-dialog {
+  width: min(880px, 100%);
+  overflow: hidden;
+}
+
+.agent-editor-dialog .agent-create-form {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.agent-editor-dialog .dialog-header {
+  position: sticky;
+  z-index: 2;
+  top: -18px;
+  margin: -18px -18px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 18px 18px 12px;
+}
+
+.agent-editor-dialog .dialog-actions {
+  position: sticky;
+  z-index: 2;
+  bottom: -18px;
+  margin: 0 -18px -18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px 18px 18px;
+}
+
+/* `.form-field` is dual-purpose: a bordered read-only value card (shared with
+   .evidence-box) and a plain <label> around an editable control. In the second
+   role its own border/background/padding wrap a control that already draws its
+   own box, so every field in this dialog rendered as a box inside a box.
+   `.editor-properties-popover .form-field` (03-editor.css) resets this for the
+   page-properties popover; the persona dialog is the other input-bearing
+   consumer and needs the same reset. */
+.agent-editor-dialog .form-field {
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-editor-dialog .agent-create-form textarea {
+  min-height: 200px;
+}
+
+.agent-editor-dialog .detail-list.agent-edit-metadata {
+  /* Beats `.detail-list.inline`'s three columns, which this rule previously
+     lost to on source order — leaving the fourth pair stranded on its own row. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-editor-dialog .agent-edit-metadata dd {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.dialog-panel.agent-editor-loading-dialog {
+  width: min(560px, 100%);
+}
+
+.dialog-header,
+.dialog-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog-header > :first-child {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.dialog-header :is(h2, p),
+.dialog-form :is(.field-hint, .form-error),
+.form-field > span {
+  overflow-wrap: anywhere;
+}
+
+.dialog-actions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.detail-heading {
+  margin-bottom: 14px;
+}
+
+.detail-heading h2,
+.inspector-stack h2,
+.inspector-empty h2,
+.placeholder-panel h2 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.detail-list.inline {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.detail-list.compact {
+  gap: 6px;
+}
+
+.detail-list div {
+  min-width: 0;
+}
+
+.detail-list dt {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.detail-list dd {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-panel {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--surface-subtle);
+  padding: 22px 16px;
+}
+
+.inspector-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+/* Scrolls independently of the toolbar above it so panels with content
+   taller than the available height (e.g. a long version history) get
+   a real scrollbar instead of being clipped by .inspector-panel's own
+   overflow:hidden (04-knowledge.css). */
+.inspector-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspace-panel-restore {
+  display: grid;
+  grid-template-rows: 18px minmax(0, 1fr);
+  place-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  min-width: 0;
+  border: 0;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.workspace-panel-restore:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.workspace-panel-restore-left {
+  border-right: 1px solid var(--border);
+}
+
+.workspace-panel-restore-right {
+  border-left: 1px solid var(--border);
+}
+
+.workspace-panel-restore span {
+  writing-mode: vertical-rl;
+}
+
+.inspector-stack,
+.inspector-empty {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: 14px;
+}
+
+.inspector-stack {
+  gap: 0;
+}
+
+.inspector-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.inspector-section:first-of-type {
+  border-top: 0;
+}
+
+.inspector-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.inspector-section dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.inspector-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.version-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.version-row dt {
+  color: var(--ink-soft);
+}
+
+.version-row dd {
+  font-family: inherit;
+  color: var(--ink);
+  margin: 0;
+}
+
+.policy-anchor,
+.trust-anchor,
+.warning-anchor {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.sensitivity-badge,
+.trust-badge,
+.warning-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sensitivity-low,
+.sensitivity-normal,
+.trust-unknown {
+  background: var(--surface-active);
+  color: var(--ink-muted);
+}
+
+.sensitivity-medium,
+.sensitivity-restricted,
+.trust-internal,
+.warning-amber {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sensitivity-high,
+.trust-untrusted {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.trust-trusted,
+.warning-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.history-row time.meta-line {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.review-recent-decision-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.review-recent-decision-link:hover,
+.review-recent-decision-link:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-subtle);
+}
+
+.history-help {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.history-compare-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.history-compare-toolbar p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.context-diff-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.context-diff-selectors label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.context-diff-selectors select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 0 10px;
+  font: inherit;
+}
+
+.context-diff-selectors p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+@media (max-width: 720px) {
+  .context-diff-selectors {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-diff-selectors p {
+    grid-column: auto;
+  }
+}
+
+.history-timeline {
+  position: relative;
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding-left: 12px;
+  list-style: none;
+}
+
+.history-timeline::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--border);
+}
+
+.history-timeline[data-accent="context"] {
+  --reader-accent: var(--context);
+}
+
+.history-timeline[data-accent="agent"] {
+  --reader-accent: var(--agent);
+}
+
+.history-timeline[data-accent="library"] {
+  --reader-accent: var(--library);
+}
+
+.history-card {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 12px 20px;
+  border-bottom: 1px dashed var(--border);
+  text-align: left;
+}
+
+.history-card-highlighted {
+  outline: 2px solid var(--tree-accent, var(--context));
+  outline-offset: 2px;
+}
+
+.context-children-index {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.context-children-index ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-children-index .entity-row {
+  width: 100%;
+}
+
+.context-children-index small {
+  display: block;
+  color: var(--ink-soft);
+}
+
+button.history-card {
+  width: 100%;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.history-card.is-clickable:hover {
+  background: var(--surface-hover);
+}
+
+.history-card.is-clickable:focus-visible {
+  outline: 2px solid var(--reader-accent, var(--context));
+  outline-offset: 2px;
+}
+
+.history-card.is-selected {
+  background: var(--surface-active);
+  box-shadow: inset 3px 0 0 var(--reader-accent, var(--context));
+}
+
+.history-card:last-child {
+  border-bottom: 0;
+}
+
+.history-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--ink-muted);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.history-card[data-tone="published"]::before {
+  background: var(--accent-context, var(--context, #7c3aed));
+}
+
+.history-card[data-tone="active"]::before {
+  background: var(--ok, #15803d);
+}
+
+.history-card[data-tone="alternative"]::before {
+  background: #f59e0b;
+}
+
+.history-card[data-tone="draft"]::before {
+  background: transparent;
+  box-shadow: 0 0 0 2px var(--accent-context, var(--context, #7c3aed)) inset;
+}
+
+.history-card[data-tone="superseded"]::before {
+  background: var(--ink-faint, #ccc);
+}
+
+.history-card[data-tone="danger"]::before {
+  background: var(--danger, #be123c);
+}
+
+.history-card[data-tone="warn"]::before {
+  background: #d97706;
+}
+
+.history-card[data-tone="ok"]::before {
+  background: var(--ok, #15803d);
+}
+
+.history-card[data-tone="info"]::before {
+  background: var(--info, #2563eb);
+}
+
+.history-card[data-tone="muted"]::before,
+.history-card[data-tone="neutral"]::before {
+  background: var(--ink-faint, #cbd5e1);
+}
+
+.history-card-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.history-card-desc {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.history-card-meta {
+  color: var(--ink-muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-card-author {
+  margin-block: 4px;
+}
+
+.history-card-meta .delta-plus {
+  color: var(--ok, #15803d);
+}
+
+.history-card-meta .delta-minus {
+  color: var(--danger, #b91c1c);
+}
+
+.history-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.history-card-actions .compact-button {
+  min-height: 32px;
+}
+
+.history-card-unavailable {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.segmented-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* No bottom margin: every parent that holds one of these is already a grid or
+   flex container with a gap, and the two stacked into an odd double seam. */
+.segmented-control {
+  margin: 0;
+}
+
+.segmented-control.compact {
+  width: fit-content;
+}
+
+.segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-weight: 700;
+  /* No text-transform: labels are authored/translated with intended casing
+     (auth "Sign in", activity period "All time"); CSS must not re-case them. */
+}
+
+.segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.segmented-control button:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* Hover has to stay one step weaker than the selection: sharing a single rule
+   made a hovered sibling pixel-identical to the checked segment, so a
+   radiogroup under the pointer showed two current values. `.active` follows so
+   it keeps winning at equal specificity when the checked segment is hovered. */
+.segmented-control button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.segmented-control button.active {
+  border-color: var(--ink-muted);
+  background: var(--surface-active);
+  color: var(--ink);
+}
+
+.review-detail-card {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  border-color: var(--border-strong);
+}
+
+/* Two fixed columns rather than a wrapping row: the decision buttons stay in
+   the top-right corner whatever the title's length. A wrapping row let a long
+   title push the whole cluster onto a line of its own, so where Approve sat
+   depended on how the page happened to be named. The title column keeps a
+   floor so the actions cannot squeeze it away on a narrow pane. */
+.review-detail-header {
+  display: grid;
+  grid-template-columns: minmax(min(100%, 200px), 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+
+.review-detail-heading {
+  min-width: 0;
+}
+
+.review-detail-heading h2 {
+  margin: 2px 0 4px;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.review-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: start;
+  margin-bottom: 6px;
+}
+
+.review-risk-explanation {
+  display: grid;
+  gap: 10px;
+}
+
+.review-risk-meta,
+.review-risk-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.code-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.review-decision-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.review-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0;
+}
+
+.review-reason-field {
+  margin: 0;
+}
+
+.review-reason-field textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.review-routing-options {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.review-routing-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Review surfaces use the review hue for their check controls
+   (.review-bulk-select-all, .review-row-select); this radio was the only one
+   left on the base accent. */
+.review-routing-option input {
+  grid-row: 1 / span 2;
+  margin-top: 3px;
+  accent-color: var(--review);
+}
+
+.review-routing-option-label {
+  font-weight: 600;
+}
+
+.review-routing-option-hint {
+  grid-column: 2;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.review-routing-option.is-disabled {
+  opacity: 0.6;
+}
+
+.review-operation-row {
+  grid-template-columns: minmax(0, 1fr) minmax(160px, auto);
+}
+
+.review-operation-row p {
+  margin: 2px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* One column, like every other settings section. Side by side, these two cards
+   were half the width of a policy card anywhere else, and equalising their
+   heights to align the action footers left a large blank panel under the
+   shorter one (which supersedes UI-15's footer alignment). */
+.citation-write-policy-grid {
+  display: grid;
+  /* Grid children never match the `.policy-card + .policy-card` token below, so
+     the gap has to carry the same 14px value by hand. */
+  gap: 14px;
+}
+
+.citation-write-policy-grid > .policy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* An uploaded file name is arbitrary and frequently unbroken
+   (screenshot-2026-09-10-at-11.42.07.png). Let it wrap inside its own notice
+   rather than widening the Settings content column on a phone. */
+.attachments .status-banner > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Section navigation below the desktop two-column layout.
+
+   Replaces a horizontal snap strip that could not work at any width under
+   1024px: on a phone it showed 2.5 of 12 entries behind a mask that faded both
+   edges unconditionally, and on a tablet the one-column collapse turned it
+   into a ~504px list that pushed all content past the fold. The trigger costs
+   one row and always names where you are. */
+.settings-section-picker {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-page, var(--surface));
+  padding-block: 4px;
+}
+
+.settings-section-picker-trigger {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 8px 14px;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.settings-section-picker-trigger:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.settings-section-picker-trigger-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.settings-section-picker-trigger-group {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-section-picker-trigger-label {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-section-picker-groups {
+  display: grid;
+  gap: 14px;
+}
+
+/* Same rows as the desktop rail -- the markup is shared so the two cannot
+   drift -- but the sheet always shows the description, because the rail's
+   `title` fallback is unreachable by touch. */
+.settings-section-picker-dialog .settings-subnav-group-items button {
+  position: relative;
+  justify-items: start;
+  width: 100%;
+  min-height: 44px;
+  padding-right: 36px;
+  text-align: start;
+}
+
+.settings-section-picker-dialog .settings-subnav-group-items .meta-line {
+  display: block;
+  grid-column: 1 / -1;
+  /* .meta-line is monospace on purpose -- it is the face for values, sizes and
+     timestamps. These are sentences, and the rail only ever renders one of
+     them at a time so the mismatch never showed. The sheet renders all ten. */
+  font-family: inherit;
+}
+
+.settings-section-picker-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: var(--context);
+}
+
+.settings-subnav {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: 8px;
+}
+
+/* Settings reached twelve top-level entries, so the rail is grouped rather
+   than flat. The group is a real box (not `display: contents`) because the
+   phone layout below turns the rail into a horizontal strip and needs the
+   heading to sit inline with its own items instead of consuming a full
+   card-width column of its own. */
+.settings-subnav-group {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* 260912 design feedback: a visible line between "This workspace" / "Your
+   account" / "System administration", not just whitespace -- the groups are
+   about SCOPE (whose settings these are), the axis a reader must not get
+   wrong, so the boundary between them earns more than a gap does between
+   two items in the same group. */
+.settings-subnav-group + .settings-subnav-group {
+  margin-block-start: 10px;
+  border-top: 1px solid var(--border);
+  padding-block-start: 10px;
+}
+
+.settings-subnav-group-title {
+  margin: 0;
+  padding: 2px 9px 2px 13px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.settings-subnav-group-items {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* The chip that tells a reader an entry is server-wide rather than about the
+   workspace they are in. Non-admins never see these entries at all, so this is
+   not an access hint -- it is the answer to "why is 'User accounts' in the
+   same list as this workspace's members". */
+.nav-admin-badge {
+  /* Its own row in the section button's grid, exactly as .meta-line does.
+     Inline, it wrapped only when it did not fit, so "User accounts" pushed it
+     to a second line while "Deployment" kept it beside the label -- two
+     entries in the same group looking different for no reason a reader can
+     see. justify-self keeps the pill hugging its text instead of stretching
+     across the row. */
+  grid-column: 1 / -1;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 17px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: 999px;
+  background: var(--warning-soft);
+  /* Amber ring, ink text. Amber-on-amber would sit near 3:1 at this size --
+     under AA for anything below 18.66px bold -- and --warning-strong does not
+     exist in this stylesheet, so naming it would have silently voided the
+     declaration. --ink-muted on --warning-soft measures ~7.9:1. */
+  color: var(--ink-muted);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 2px 5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.settings-subnav button,
+.settings-subnav a {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  column-gap: 8px;
+  row-gap: 2px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  padding: 7px 9px 7px 13px;
+}
+
+/* Shown for the selected entry only. Measured at twelve entries: the rail was
+   1065px tall and its last entry's bottom sat at 1235px -- below the fold on
+   1440x900, 1280x720 AND 1920x1080 -- which also made `position: sticky`
+   pointless, since an element taller than its viewport never sticks. The
+   description lines were 371px of that. Every entry keeps its description in
+   the `title` attribute, so hovering an unselected one still explains it. */
+
+
+/* Not revealed for the selected entry any more: the page header prints that
+   same description a line away, so the rail was showing one sentence twice.
+   The tooltip still carries it for the unselected ones, and the narrow-screen
+   picker shows every description outright. */
+
+.settings-subnav-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 260912 design feedback: a leading glyph per destination. Sized to the
+   label's line-height rather than the 15px passed to the component, and
+   never allowed to shrink -- the label column is the one that gives way. */
+.settings-subnav-icon {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+}
+
+.settings-subnav button.active .settings-subnav-icon,
+.settings-subnav a.active .settings-subnav-icon {
+  color: var(--context);
+}
+
+/* Back to one line and ellipsis. The wrap this rule used to carry existed only
+   because the System admin chip shared the row and squeezed "User accounts"
+   into an 83px box; with the chip on its own row the label has the full
+   minmax(0, 1fr) column (~198px against the 91px it needs).
+   Targets the explicit label class rather than `:first-child` -- the leading
+   icon is now the real first child, and `:first-child` is blind to tag
+   type, so the positional rule stopped matching the label entirely. */
+.settings-subnav-title > .settings-subnav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-subnav .nav-preview-badge {
+  flex: 0 0 auto;
+}
+
+/* CSS-3A: only the active item carries the tinted "selected" background +
+   inset ring. Hover uses the neutral surface-hover so a hovered item is never
+   mistaken for a second active/selected item. */
+.settings-subnav button.active,
+.settings-subnav a.active {
+  background: var(--context-soft);
+  color: var(--ink);
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--context) 18%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings-subnav button:hover,
+  .settings-subnav a:hover {
+    background: var(--surface-hover);
+    color: var(--ink);
+  }
+}
+
+/* S2: structured policy JSON tree (react-json-view-lite) inside policy
+   disclosures. */
+.policy-json-viewer {
+  overflow: auto;
+  max-height: 320px;
+  font-size: 12px;
+}
+
+.review-auto-approve-matrix {
+  display: grid;
+  gap: 8px;
+}
+
+.review-auto-approve-head {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.8fr) minmax(76px, 0.7fr) minmax(140px, 1.4fr) minmax(82px, 0.8fr);
+  gap: 10px;
+  padding: 0 10px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.review-auto-approve-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.8fr) minmax(76px, 0.7fr) minmax(140px, 1.4fr) minmax(82px, 0.8fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 9px 10px;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* RO-4: the policy rows are clickable buttons that deep-link to Settings. */
+@media (hover: hover) and (pointer: fine) {
+  .review-auto-approve-row:hover {
+    border-color: var(--context);
+  }
+}
+
+.review-auto-approve-row:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+}
+
+.review-auto-approve-row strong {
+  color: var(--ink);
+}
+
+/* UI-08: soften the "No auto-approval delay" cell on Manual rows so it reads as
+   an inactive state rather than a configured delay value. */
+.review-auto-approve-row .muted {
+  color: var(--ink-soft);
+}
+
+.review-auto-approve-settings {
+  margin-top: 14px;
+}
+
+.review-risk-rules-card {
+  margin-top: 14px;
+}
+
+.review-risk-rules-card .advanced-disclosure {
+  margin-bottom: 0;
+}
+
+.review-auto-approve-settings-list {
+  display: grid;
+  gap: 8px;
+}
+
+.review-auto-approve-setting-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(110px, auto) minmax(120px, auto);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 10px;
+}
+
+/* RO-4: brief flash when deep-linked from the review overview policy rows. */
+.review-auto-approve-setting-row.is-highlighted {
+  animation: review-policy-flash 1.5s ease-out;
+}
+
+@keyframes review-policy-flash {
+  0% {
+    background: color-mix(in srgb, var(--context) 16%, var(--surface));
+    box-shadow: 0 0 0 2px var(--context);
+  }
+  100% {
+    background: var(--surface-subtle);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-auto-approve-setting-row.is-highlighted {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--context);
+  }
+}
+
+/* Inline like the "Allowed" control beside it. As a caps micro-label stacked
+   above the input it repeated a column header on every row and sat on its own
+   baseline. */
+.review-auto-approve-delay {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.review-auto-approve-delay input {
+  width: 78px;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-auto-approve-delay input:hover:not(:disabled) {
+  border-color: var(--ink-muted);
+}
+
+.review-auto-approve-delay input:focus-visible {
+  outline: none;
+  border-color: var(--review);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--review) 28%, transparent);
+}
+
+.review-auto-approve-delay input:disabled {
+  opacity: 0.55;
+  background: var(--surface-subtle);
+  cursor: not-allowed;
+}
+
+/* S1: current-workspace default status + confirm affordance. */
+.workspace-default-actions {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.workspace-default-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+
+.settings-subnav button.active .meta-line,
+.settings-subnav a.active .meta-line {
+  color: var(--ink-muted);
+}
+
+.settings-subnav button.active::before,
+.settings-subnav a.active::before {
+  content: "";
+  position: absolute;
+  inset-block: 7px;
+  left: 0;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent-context, var(--context));
+}
+
+.policy-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: 12px;
+}
+
+.workspace-default-card {
+  gap: 10px;
+}
+
+.workspace-default-card > p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.workspace-danger-zone {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-card);
+  background: var(--danger-surface);
+  box-shadow: var(--shadow-1);
+  padding: 14px;
+}
+
+.workspace-danger-copy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.workspace-danger-list {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.workspace-danger-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  min-width: 0;
+  border-top: 1px solid var(--danger-border);
+  padding-top: 14px;
+}
+
+.workspace-danger-item + .workspace-danger-item {
+  margin-top: 14px;
+}
+
+.workspace-danger-item-title {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.workspace-slug-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: min(100%, 420px);
+}
+
+.workspace-slug-form .field-stack {
+  min-width: 220px;
+}
+
+.workspace-danger-status {
+  grid-column: 1 / -1;
+}
+
+.workspace-danger-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.workspace-danger-zone p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.workspace-danger-note {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.workspace-delete-blockers {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-delete-blockers p,
+.workspace-delete-blockers ul {
+  margin: 0;
+}
+
+.workspace-delete-blockers ul {
+  padding-inline-start: 20px;
+}
+
+.workspace-delete-blockers li + li {
+  margin-top: 4px;
+}
+
+/* The escalation from "deletion is blocked" to "delete the data too" lives
+   inside the warning banner, directly under the counts it refers to, so the
+   records are named before the box that agrees to destroy them. Aligned to the
+   first line rather than centred: the label wraps to several lines at rail
+   width and a centred box drifts away from its own text. */
+.workspace-delete-purge-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workspace-delete-purge-ack input {
+  flex: none;
+  /* Nudged down to sit on the label's first-line baseline rather than its box
+     top, which a bare checkbox overshoots at this font size. */
+  margin-block-start: 2px;
+  accent-color: var(--danger);
+}
+
+.workspace-delete-purge-ack input:disabled {
+  cursor: not-allowed;
+}
+
+.workspace-delete-purge-ack:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.danger-action {
+  border-color: var(--danger-border);
+  background: var(--surface);
+  color: var(--danger);
+}
+
+.danger-action:hover {
+  border-color: var(--danger-border-strong);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.warning-action {
+  border-color: #fed7aa;
+  background: #fff;
+  color: #b45309;
+}
+
+.warning-action:hover {
+  border-color: #fdba74;
+  background: #fff7ed;
+  color: #92400e;
+}
+
+.danger-confirm-button {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.danger-modal-panel strong {
+  color: var(--ink);
+}
+
+.field-stack .meta-line,
+.policy-card .meta-line,
+.library-family-editor-dialog .meta-line {
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.field-stack .validation-message {
+  color: var(--danger);
+}
+
+.policy-settings-list {
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+
+.policy-edit-field {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 0;
+  margin: 0;
+}
+
+/* The actions row below the list draws its own border-top, so a bottom rule on
+   the final field stacked a second 1px line one card-gap above it — two
+   visible separators between the last setting and Discard/Save. */
+.policy-settings-list > .policy-edit-field:last-child {
+  border-bottom: 0;
+}
+
+.policy-edit-field.is-dirty {
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+  padding-inline: 12px;
+}
+
+.policy-edit-field > label {
+  min-width: 0;
+}
+
+.policy-setting-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.policy-setting-copy label {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.policy-setting-description {
+  max-width: 72ch;
+  line-height: 1.45;
+}
+
+.policy-setting-control {
+  min-width: 0;
+}
+
+.policy-setting-state {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  text-transform: none;
+}
+
+.policy-current-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+.policy-current-value > span {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.policy-current-value.is-pending {
+  color: #1d4ed8;
+}
+
+.policy-edit-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.policy-edit-control.is-multiline {
+  align-items: stretch;
+}
+
+.policy-edit-control .icon-button {
+  min-height: 38px;
+}
+
+.byte-size-editor,
+.duration-editor,
+.days-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.unit-input-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 120px;
+  gap: 8px;
+}
+
+.duration-editor {
+  grid-template-columns: repeat(3, minmax(90px, 1fr));
+}
+
+/* One casing rule for settings micro-labels: uppercase, like .field-stack.
+   These two editors were resetting it and reading as a third style. */
+.unit-input-row label,
+.duration-editor label,
+.days-editor label {
+  display: grid;
+  gap: 5px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.duration-cap-hint {
+  grid-column: 1 / -1;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.settings-option-hint {
+  border-left: 3px solid color-mix(in srgb, var(--context) 34%, transparent);
+  padding-left: 8px;
+}
+
+.structured-policy-editor,
+.citation-type-editor {
+  display: grid;
+  gap: 8px;
+}
+
+/* A lone grid child stretches to the container, which turned this control into
+   a full-width tinted bar that read as a banner rather than a button. */
+.structured-policy-editor > .add-rule-button {
+  justify-self: start;
+}
+
+.library-rule-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.library-rule-static {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+  padding: 8px 10px;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.citation-type-editor {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.citation-type-option {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  padding: 6px 8px;
+}
+
+/* The one settings-card header: icon + sentence-case title, then the card's
+   state chip or count immediately beside it (never on its own row, never
+   pinned to the opposite edge of the card). */
+.policy-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.policy-card-heading > span:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.policy-card-status-row,
+.policy-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.policy-card-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+/* Save confirmation, beside the button that saved. Pushed to the left of the
+   row so it reads as a status for this card rather than another action. */
+.policy-card-saved {
+  margin-inline-end: auto;
+  font-size: 12px;
+  color: var(--ok-strong, var(--ink-muted));
+}
+
+.dirty-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: #2563eb;
+  vertical-align: middle;
+}
+
+.policy-snippet {
+  max-width: 100%;
+  max-height: 210px;
+  min-height: 130px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.search-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+/* Keep labels separate from the shared SearchField container so the form
+   remains valid HTML while the input keeps its flex layout. */
+.search-panel > label,
+.search-panel-field {
+  display: grid;
+  gap: 6px;
+}
+
+.search-panel > label,
+.search-panel-field > label {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.search-panel select {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.turn-list {
+  display: grid;
+  gap: 10px;
+}
+
+.turn-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.turn-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.turn-bubble {
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.turn-bubble.user {
+  background: var(--surface-active);
+  color: var(--ink);
+}
+
+.turn-bubble.assistant {
+  margin: 0;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.turn-bubble.assistant .markdown-body {
+  max-width: none;
+  margin: 0;
+  color: #e2e8f0;
+  line-height: 1.55;
+}
+
+/* M-9 (260908 UI audit): .markdown-body's headings/table/code colors assume
+   a light page background (var(--ink), var(--surface-subtle), ...) -- this
+   bubble kept its existing dark terminal background, so those need their own
+   values here instead of inheriting the light-background defaults. */
+.turn-bubble.assistant .markdown-body h1,
+.turn-bubble.assistant .markdown-body h2,
+.turn-bubble.assistant .markdown-body h3 {
+  color: #f8fafc;
+  border-bottom-color: #334155;
+}
+
+.turn-bubble.assistant .markdown-body th,
+.turn-bubble.assistant .markdown-body td {
+  border-color: #334155;
+}
+
+.turn-bubble.assistant .markdown-body th {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.turn-bubble.assistant .markdown-body blockquote {
+  background: #1e293b;
+  border-left-color: #475569;
+  color: #cbd5f5;
+}
+
+.turn-bubble.assistant .markdown-body :not(pre) > code {
+  border-color: #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.turn-bubble.assistant .markdown-body li::marker {
+  color: #94a3b8;
+}
+
+.ask-evidence-pack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.ask-evidence-pack h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ask-evidence-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.ask-evidence-item {
+  min-width: 0;
+}
+
+.ask-evidence-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ask-evidence-title-row > a,
+.ask-evidence-title-row > span {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.ask-evidence-path {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: 11px;
+  white-space: normal;
+}
+
+.ask-search-path summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ask-search-path .metadata-row {
+  margin-top: 7px;
+}
+
+.ask-search-trace-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+
+.ask-search-trace-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ask-search-trace-list li > span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.no-evidence-turn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.turn-bubble.assistant.no-evidence {
+  border: 1px solid #fde68a;
+  background: #fff7ed;
+  color: #78350f;
+}
+
+/* The dark-terminal markdown-body overrides above assume the default dark
+   background; .no-evidence swaps to a light amber panel instead, so its
+   nested markdown-body needs the light-appropriate counterpart. */
+.turn-bubble.assistant.no-evidence .markdown-body,
+.turn-bubble.assistant.no-evidence .markdown-body h1,
+.turn-bubble.assistant.no-evidence .markdown-body h2,
+.turn-bubble.assistant.no-evidence .markdown-body h3 {
+  color: #78350f;
+  border-bottom-color: #fde68a;
+}
+
+.turn-bubble.assistant.no-evidence .markdown-body th,
+.turn-bubble.assistant.no-evidence .markdown-body td {
+  border-color: #fde68a;
+}
+
+.turn-bubble.assistant.no-evidence .markdown-body th {
+  background: #fef3c7;
+  color: #78350f;
+}
+
+.turn-bubble.assistant.no-evidence .markdown-body blockquote {
+  background: #fef3c7;
+  border-left-color: #fbbf24;
+  color: #78350f;
+}
+
+.turn-bubble.assistant.no-evidence .markdown-body :not(pre) > code {
+  border-color: #fde68a;
+  background: #fef3c7;
+  color: #78350f;
+}
+
+.turn-bubble.assistant.no-evidence .markdown-body li::marker {
+  color: #92400e;
+}
+
+.no-evidence-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #78350f;
+  padding: 12px;
+}
+
+.no-evidence-panel h3 {
+  margin: 0;
+  color: #78350f;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.no-evidence-panel p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ask-composer {
+  position: sticky;
+  z-index: 20;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  /* The bottom padding only shows once the transcript scrolls and the composer
+     pins to the scrollport edge; without it the input's border sat flush
+     against the bottom of the window (the mobile branch already reserves it). */
+  padding: 14px 0 16px;
+}
+
+.ask-screen .feature-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.ask-content-region {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ask-content-region > .feature-section {
+  width: 100%;
+}
+
+.ask-composer input,
+.field-stack input,
+.field-stack select,
+.field-stack textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.field-stack textarea {
+  resize: vertical;
+}
+
+.field-stack {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Top-level settings fields speak the policy-field label language (14px/800
+   sentence case, see `.policy-setting-copy label`), not the caps micro-label
+   used for sub-labels inside an editor. Direct-child selectors only, so the
+   caps stay on `.token-scope-option` inside the scope row and on every
+   `.field-stack` in a dialog. */
+.mcp-key-form-fields > .field-stack,
+.workspace-slug-form > .field-stack {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: none;
+}
+
+/* The label element wraps its own control, so label typography inherits into
+   the value the user typed; only the label itself should be heavy. */
+.mcp-key-form-fields > .field-stack > :is(input, select),
+.workspace-slug-form > .field-stack > input {
+  font-weight: 400;
+}
+
+/* WS-08: the delete-workspace modal asks the user to retype the lowercase
+   slug and compares it case-sensitively; the caps micro-label style above
+   must not reach that field, or the retyped value visibly mismatches what
+   was asked for. */
+.danger-modal-panel .field-stack {
+  text-transform: none;
+}
+
+/* Help text and validation errors inside a field stack are prose, not the
+   field's micro-label: the caps/700 label face must not reach them. Member
+   search shouted "SEARCH THE CURRENT MEMBER LIST..." under its input, and
+   every `.field-error` in Settings rendered upper-case. */
+.field-stack > :is(small, .field-hint, .field-error) {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.field-stack > small,
+.field-stack > .field-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.field-stack > .field-error {
+  font-weight: 650;
+}
+
+.settings-content {
+  /* Two steps, not three: with 420/560/680 the fields in a single card each
+     ended at a different x and shared no right-hand alignment. */
+  --settings-control-width: 560px;
+  --settings-control-wide: 560px;
+  --settings-control-structured: 680px;
+  min-width: 0;
+}
+
+.settings-content .policy-card > p,
+.settings-content .mcp-step-card > p,
+.settings-content .mcp-manual-config p {
+  max-width: 72ch;
+}
+
+.settings-content .field-stack:not(.checkbox-field) > input,
+.settings-content .field-stack:not(.checkbox-field) > select {
+  width: min(100%, var(--settings-control-width));
+}
+
+.settings-content .field-stack:not(.checkbox-field) > textarea {
+  width: min(100%, var(--settings-control-wide));
+}
+
+.settings-content .policy-edit-field {
+  width: 100%;
+}
+
+.settings-content .policy-setting-control {
+  width: min(100%, var(--settings-control-width));
+}
+
+.settings-content .policy-edit-field.is-wide .policy-setting-control {
+  width: min(100%, var(--settings-control-wide));
+}
+
+.settings-content .policy-edit-field.is-structured .policy-setting-control {
+  width: min(100%, var(--settings-control-structured));
+}
+
+.settings-content .policy-edit-control,
+.settings-content .byte-size-editor,
+.settings-content .duration-editor,
+.settings-content .days-editor {
+  width: min(100%, var(--settings-control-wide));
+}
+
+.settings-content .structured-policy-editor,
+.settings-content .citation-type-editor {
+  width: 100%;
+}
+
+/* Deliberately NOT scoped to .settings-content. These five editors are only
+   ever rendered by Settings, but Dialog.tsx portals its panel to <body>, so an
+   ancestor-scoped rule stops matching the moment one of them appears inside a
+   dialog — which is how the Add-format-family upload limit ended up as a raw
+   22px native input/select beside the 38px designed ones. Width caps below
+   stay scoped, since those are about the settings column, not the control. */
+:is(
+    .policy-edit-control,
+    .byte-size-editor,
+    .duration-editor,
+    .days-editor,
+    .structured-policy-editor
+  )
+  :is(input, select, textarea) {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.settings-content .policy-edit-control:not(.is-multiline),
+.settings-content .byte-size-editor,
+.settings-content .duration-editor,
+.settings-content .days-editor {
+  max-width: var(--settings-control-width);
+}
+
+.settings-content .policy-edit-control.is-multiline {
+  max-width: var(--settings-control-wide);
+}
+
+.settings-content .policy-edit-control.is-multiline textarea {
+  width: 100%;
+}
+
+.settings-content .structured-policy-editor,
+.settings-content .citation-type-editor {
+  max-width: var(--settings-control-structured);
+}
+
+.settings-content .library-rule-row input,
+.settings-content .library-rule-row select {
+  width: 100%;
+}
+
+.settings-content .mcp-key-form,
+.settings-content .mcp-key-rename {
+  max-width: var(--settings-control-wide);
+}
+
+.settings-content .workspace-slug-form {
+  min-width: min(100%, var(--settings-control-width));
+  max-width: var(--settings-control-wide);
+}
+
+.checkbox-field {
+  display: grid;
+  /* A-1 (260908 UI audit): matches the 24px checkbox target size below. */
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  text-transform: none;
+}
+
+/* I15: the section-level Auto-fix mode toggle is separated from the per-rule
+   list below it so it does not read as an unlabeled rule. */
+.lint-autofix {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+/* F-9: the High auto-approval "danger noted" acknowledgement, warning-toned. */
+.review-high-danger-ack {
+  margin-top: 0.5rem;
+}
+
+.review-high-danger-ack > span {
+  color: var(--danger-strong, var(--danger, #b42318));
+  font-weight: 600;
+}
+
+/* F-7: lint rule groups styled within the policy-card (peer-consistent). */
+.lint-rules-card .lint-rule-group {
+  margin-top: 0.85rem;
+}
+
+.lint-rules-card .lint-rule-group h3 {
+  margin: 0 0 0.45rem;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.lint-rules-card .lint-rule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One anatomy for every rule, toggleable or not: control column, then copy.
+   Read-only rules used to be laid out control-less with their badge pushed to
+   the far edge, so no two rows in the list started at the same x. */
+.lint-rules-card .lint-rule-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 10px;
+}
+
+/* The row grid reserves a 16px first column, but the box itself carried no
+   size, so the UA default rendered ~9x13 and sat off-centre in its track.
+   Match .checkbox-field's 16px so every settings check control is one size. */
+.lint-rules-card .lint-rule-row > input[type="checkbox"],
+.lint-rules-card .lint-rule-group-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+}
+
+.lint-rules-card .lint-rule-lock {
+  margin-top: 3px;
+  color: var(--ink-muted);
+}
+
+.lint-rules-card .lint-rule-row--busy {
+  opacity: 0.6;
+}
+
+.lint-rules-card .lint-rule-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lint-rules-card .lint-rule-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.lint-rules-card .lint-rule-label label {
+  cursor: pointer;
+}
+
+.lint-rules-card .lint-rule-description {
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.lint-rules-card .lint-rules-header,
+.lint-rules-card .lint-rule-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lint-rules-card .lint-rules-header .metric-card-title,
+.lint-rules-card .lint-rule-group-header h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lint-rules-card .lint-rule-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lint-rules-card .lint-rule-group-count {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-muted);
+}
+
+.lint-rules-card .lint-rule-group-note {
+  margin: 0 0 0.45rem;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.checkbox-field input[type="checkbox"] {
+  /* A-1 (260908 UI audit): WCAG 2.2 SC 2.5.8 needs a 24x24 minimum target;
+     .review-row-select already uses 24px for the same reason. */
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--context);
+  justify-self: start;
+}
+
+.checkbox-field > span {
+  min-width: 0;
+}
+
+/* The public-exposure consent carries a bolded title plus a body sentence, so
+   the base rule's align-items:center would float the box against a two-line
+   block. Top-align it the way .workspace-access-option does. */
+.checkbox-field.public-exposure-acknowledgement {
+  align-items: start;
+}
+
+.checkbox-field.public-exposure-acknowledgement input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.checkbox-field.public-exposure-acknowledgement > span {
+  display: grid;
+  gap: 3px;
+}
+
+.inline-checkbox {
+  min-height: 38px;
+  justify-content: start;
+}
+
+.placement-summary {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 10px;
+}
+
+.placement-summary p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.placement-preview {
+  min-height: 96px;
+  max-height: 180px;
+}
+
+.placement-actions,
+.placement-reject {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.placement-reject {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.placement-reject .field-stack {
+  flex: 1 1 180px;
+}
+
+.markdown-snippet {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.placeholder-panel {
+  display: grid;
+  gap: 10px;
+  place-items: center;
+  min-height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: center;
+  background: rgb(15 23 42 / 38%);
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.modal-panel {
+  display: grid;
+  gap: 14px;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  padding: 18px;
+}
+
+.modal-panel p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  /* CSS-3F: keep short count labels (e.g. "6 rule groups") on one line so the
+     pill stays compact instead of wrapping into a tall blob on narrow screens. */
+  white-space: nowrap;
+}
+
+.status-pill.compact {
+  min-height: 20px;
+  padding: 2px 7px;
+}
+
+.status-pill span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* Neutral count/metric chip — NOT a status: no dot, no info/warn tone. */
+.count-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  width: fit-content;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.count-chip.compact {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.count-chip-danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+
+/* Value-graded count chips: amber for tool calls, violet for writes. The tint
+   deepens with the count bucket (data-intensity 1..4); a zero count renders as
+   the neutral chip (no data-intensity). */
+.count-chip-calls {
+  color: #92400e;
+}
+.count-chip-calls[data-intensity="1"] {
+  border-color: color-mix(in srgb, #f59e0b 26%, var(--border));
+  background: color-mix(in srgb, #f59e0b 9%, var(--surface));
+}
+.count-chip-calls[data-intensity="2"] {
+  border-color: color-mix(in srgb, #f59e0b 38%, var(--border));
+  background: color-mix(in srgb, #f59e0b 16%, var(--surface));
+}
+.count-chip-calls[data-intensity="3"] {
+  border-color: color-mix(in srgb, #f59e0b 50%, var(--border));
+  background: color-mix(in srgb, #f59e0b 24%, var(--surface));
+  color: #78350f;
+}
+.count-chip-calls[data-intensity="4"] {
+  border-color: color-mix(in srgb, #f59e0b 64%, var(--border));
+  background: color-mix(in srgb, #f59e0b 34%, var(--surface));
+  color: #78350f;
+}
+
+.count-chip-writes {
+  color: #5b21b6;
+}
+.count-chip-writes[data-intensity="1"] {
+  border-color: color-mix(in srgb, #8b5cf6 26%, var(--border));
+  background: color-mix(in srgb, #8b5cf6 9%, var(--surface));
+}
+.count-chip-writes[data-intensity="2"] {
+  border-color: color-mix(in srgb, #8b5cf6 38%, var(--border));
+  background: color-mix(in srgb, #8b5cf6 16%, var(--surface));
+}
+.count-chip-writes[data-intensity="3"] {
+  border-color: color-mix(in srgb, #8b5cf6 50%, var(--border));
+  background: color-mix(in srgb, #8b5cf6 24%, var(--surface));
+  color: #4c1d95;
+}
+.count-chip-writes[data-intensity="4"] {
+  border-color: color-mix(in srgb, #8b5cf6 64%, var(--border));
+  background: color-mix(in srgb, #8b5cf6 34%, var(--surface));
+  color: #4c1d95;
+}
+
+.status-pill-ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.status-pill-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.status-pill-danger {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.status-pill-muted {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.status-pill-info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* The upload queue is a notice, and it used to be the only one in the app
+   rendered as bare text: a .feature-section (whose entire rule is
+   margin-bottom) wrapping an unclassed <ul> of unclassed <li>. It sits
+   directly beneath real StatusBanners, so the mismatch was side by side on
+   screen. It is not a StatusBanner itself -- that is one message with one
+   tone, and this is a list whose rows each carry their own status pill and
+   actions -- so it borrows the banner's surface and keeps its own rows. */
+.library-upload-queue {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 10px 12px;
+}
+
+.library-upload-queue-title {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.library-upload-queue ul {
+  display: grid;
+  gap: 6px;
+}
+
+.library-upload-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 6px 10px;
+  min-width: 0;
+}
+
+.library-upload-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Pushed right so a row reads name -> status -> what you can do about it,
+   instead of the buttons trailing the status as more inline words. */
+.library-upload-row-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+
+.library-upload-retry-after {
+  display: inline-block;
+  margin-inline-start: 8px;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 1024px) {
+  /* minmax(0, 1fr), never a bare 1fr: `1fr` is minmax(auto, 1fr), whose floor is
+     the item's min-content. .topbar carries no min-width:0/overflow firewall and
+     .topbar-actions floors itself at max-content, so a bare 1fr let the topbar's
+     intrinsic width push the shell column past the viewport — clipped, not
+     scrollable. The desktop rules above already use minmax(0, 1fr). */
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "main";
+  }
+
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* `.app-shell-public .topbar` (01-base.css) is declared outside any media
+     query at specificity (0,2,0) and so beat the (0,1,0) rule above: every
+     signed-out screen kept the desktop three-column topbar on a phone, and its
+     minmax(180px, var(--sidebar-w)) lead track pushed the shell to a 343px
+     minimum, floored by .topbar-actions' own max-content width. Below that —
+     320px phones, and 360/390px once a locale widens the actions — the Sign up
+     control, the card edge and even the email field were clipped away. */
+  .app-shell-public .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .topbar-brand {
+    justify-content: flex-start;
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
+    justify-content: flex-start;
+    padding: 0 16px;
+  }
+
+  .brand-name {
+    display: none;
+  }
+
+  /* Public authentication routes have no workspace switcher or navigation
+     trigger competing for this space. Keep their service identity visible. */
+  .app-shell-public .brand-name {
+    display: inline;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .workspace-controls {
+    display: inline-flex;
+  }
+
+  /* Undo the desktop collapsed compaction: mobile shows the full switcher.
+     Re-assert the viewport width cap at matching specificity, else the desktop
+     rule's `max-width: none` would leak in and let the switcher overflow. */
+  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
+    grid-template-columns: 22px minmax(0, 1fr) 14px;
+    width: 100%;
+    min-width: 0;
+    max-width: min(340px, 100%);
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-label {
+    display: block;
+  }
+
+  /* 340px, not the 210px this used to be. The old ceiling never lifted, so on
+     a tablet the switcher stayed a 210px chip while the brand cell around it
+     had room to spare -- measured 210px inside 576px at 768x1024 and inside
+     832px at 1024x768. 100% still governs the phone, where the brand cell is
+     the real constraint. */
+  .workspace-switcher-button {
+    width: 100%;
+    min-width: 0;
+    max-width: min(340px, 100%);
+  }
+
+  .workspace-controls {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .workspace-switcher-button,
+  .reader-tab,
+  .review-rail .reader-tab,
+  .review-filter-toggle,
+  .history-compare-toolbar .text-button,
+  .history-card-actions .compact-button,
+  .mcp-timeline-summary,
+  .mcp-strip-toggle,
+  .mcp-client-identity > summary,
+  .mcp-tool-display-items a,
+  .mcp-provenance-link,
+  .editor-mode-tabs.editor-mode-tabs button,
+  .tree-filter,
+  .tree-rail-search,
+  .advanced-disclosure-toggle,
+  .context-list-filters select {
+    min-height: 44px;
+  }
+
+  /* `.reader-chip-action` used to sit in the floor above. It is the only
+     interactive chip in `.reader-meta-row`, so raising its box to 44px made it
+     exactly twice the height of the plain 22px `.reader-chip` siblings it sits
+     beside — one pill towering over the row read as a layout bug rather than as
+     an affordance. The affordance is already carried by the accent fill, the
+     border and the trailing arrow, so the pill keeps the shared chip height and
+     the touch floor moves to a transparent overlay that costs no layout. */
+  .reader-chip-action {
+    position: relative;
+  }
+
+  .reader-chip-action::after {
+    position: absolute;
+    inset-inline: 0;
+    /* 22px pill + 11px on each side = the same 44px target as the floor above. */
+    inset-block: -11px;
+    content: "";
+  }
+
+  .workspace-screen[data-mobile-action-reserve="true"] .feature-main {
+    padding-bottom: calc(180px + env(safe-area-inset-bottom));
+  }
+
+  .reader-tab,
+  .mcp-strip-toggle,
+  .mcp-tool-display-items a,
+  .mcp-provenance-link {
+    min-width: 44px;
+  }
+
+  .mobile-nav-toggle {
+    display: inline-flex;
+  }
+
+  .desktop-sidebar-toggle {
+    display: none;
+  }
+
+  .mobile-search-link {
+    display: inline-flex;
+  }
+
+  /* M-3 (260908 UI audit): the .topbar-search/.sidebar mobile hide moved to
+     02-shell.css, which already owns both selectors' base rules. */
+
+  .topbar-actions {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .topbar-actions .icon-button:not(.mobile-search-link):not(.primary):not(.language-toggle) {
+    display: none;
+  }
+
+  .create-menu .text-button span {
+    display: none;
+  }
+
+  /* Collapses to its glyph like the Create button beside it; the accessible
+     name already lives on aria-label/title. */
+  .language-toggle span {
+    display: none;
+  }
+
+  .page-workspace,
+  .workspace-screen,
+  .citation-write-policy-grid,
+  .editor-grid,
+  .editor-form,
+  .editor-property-grid,
+  .editor-shortcut-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page-workspace:not(.focus-mode) {
+    position: relative;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .page-workspace:not(.focus-mode) > .workspace-mobile-drawer-toggle {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .page-workspace:not(.focus-mode) > .editor-panel {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .workspace-screen {
+    position: relative;
+    /* Mobile drawers and sheets are fixed overlays. Give the in-flow trigger
+       an intrinsic header row and let the feature body consume the remainder;
+       implicit auto rows otherwise split free height and stretch the trigger. */
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .workspace-screen > .workspace-mobile-drawer-toggle {
+    grid-row: 1;
+    grid-column: 1;
+    align-self: start;
+  }
+
+  .workspace-screen > .feature-main {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .workspace-panel-restore {
+    display: none;
+  }
+
+  .editor-mode-tabs {
+    order: -1;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .editor-mode-tabs.editor-mode-tabs button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .editor-action-bar-shell {
+    max-width: 100%;
+  }
+
+  .editor-action-bar {
+    min-height: 44px;
+  }
+
+  .editor-action-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .workspace-mobile-drawer-toggle {
+    position: sticky;
+    top: 8px;
+    left: 8px;
+    z-index: 35;
+    display: inline-flex;
+    width: fit-content;
+    margin: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-1);
+  }
+
+  .workspace-mobile-drawer-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 65;
+    display: block;
+    border: 0;
+    background: rgb(15 23 42 / 35%);
+  }
+
+  .workspace-mobile-actions {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 55;
+    display: flex;
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Context pages can contain horizontally pannable diagrams anywhere in the
+     document. Keep the New and Details actions in a dedicated mobile header
+     row so fixed controls never cover chart nodes while the diagram pans. */
+  .context-screen {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .context-screen .workspace-mobile-drawer-toggle {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .context-screen .workspace-mobile-actions {
+    position: static;
+    z-index: 35;
+    grid-row: 1;
+    grid-column: 1;
+    align-self: center;
+    justify-self: end;
+    flex-direction: row;
+    margin: 8px 16px 8px auto;
+  }
+
+  .context-screen > .feature-main {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .context-screen .feature-main {
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .workspace-mobile-inspector-toggle {
+    display: inline-flex;
+    background: var(--surface);
+    box-shadow: var(--shadow-1);
+  }
+
+  .workspace-mobile-inspector-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 75;
+    display: block;
+    border: 0;
+    background: rgb(15 23 42 / 35%);
+  }
+
+  .workspace-left-panel {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 70;
+    width: min(360px, 86vw);
+    max-width: 86vw;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow-2);
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+  }
+
+  .workspace-left-panel[data-mobile-open="true"] {
+    transform: translateX(0);
+  }
+
+  /* R1: the Review rail defaults wider (420px) than other rails, so its mobile
+     off-canvas drawer must be able to span the full viewport — otherwise the
+     360px cap clips the lifecycle tabs off the left edge when opened. */
+  .review-screen .workspace-left-panel {
+    width: min(420px, 100vw);
+    max-width: 100vw;
+  }
+
+  .workspace-left-panel .tree-rail,
+  .workspace-left-panel .ask-session-rail {
+    height: 100%;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .icon-button,
+  .compact-icon-button,
+  .compact-button,
+  .filter-chip,
+  .segmented-control button,
+  .search-field-clear,
+  .editor-toolbar-button,
+  .emoji-picker-close,
+  .emoji-picker-option {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* TreeRail's compact controls intentionally use its local 36px token here.
+     Keep them out of this general 44px floor so the row and its real button
+     boxes stay aligned on narrow and coarse-pointer layouts. */
+
+  /* These compact controls do not use the shared icon-button primitive, so
+     their fixed 23/32px desktop dimensions need an explicit mobile target. */
+  .markdown-code-copy,
+  .mermaid-zoom-toolbar-button,
+  .mermaid-zoom-readout,
+  .editor-link-header button,
+  .editor-link-actions button,
+  .editor-comment-header button,
+  .editor-comment-actions button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .editor-toolbar-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* The scoped compact rail-header rule above has higher specificity than the
+     bare .icon-button selector in this query, so re-assert the 44px tap target
+     for those buttons here (matching specificity + later source order). */
+  .tree-rail-header-actions .icon-button,
+  .ask-session-rail-actions .icon-button {
+    min-width: 44px;
+    width: 44px;
+    min-height: 44px;
+  }
+
+  /* Same deal for the compact segmented controls scoped under the Review
+     filter axis (30px) and MCP chat filters (38px): those two-class selectors
+     outrank the bare ".segmented-control button" rule above. */
+  .review-filter-axis .segmented-control button,
+  .mcp-chat-filters .segmented-control button {
+    min-height: 44px;
+  }
+
+  /* No .tree-row override here. It used to hard-code
+     `grid-template-columns: 44px 18px minmax(0, 1fr)` plus `min-height: 48px`,
+     which restated --tree-row-block-size and, worse, ignored
+     --tree-leading-visual-slot: the chevron kept centring itself against the
+     28px token while the track it sat in was 44px, so the arrow ended up 30px
+     from the folder icon on touch against 12px on desktop. The tokens in
+     04-knowledge.css already cover this breakpoint (and coarse pointers, which
+     this max-width query misses), so the geometry belongs there alone. */
+
+  .reader-header,
+  .editor-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .editor-title-row {
+    flex-wrap: wrap;
+  }
+
+  .editor-title-tags {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .reader-actions {
+    justify-content: flex-start;
+  }
+
+  .tree-rail,
+  .ask-session-rail {
+    max-height: 220px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .inspector-panel {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    max-height: min(72vh, 640px);
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    background: var(--surface);
+    box-shadow: var(--shadow-2);
+    overflow: auto;
+    transform: translateY(105%);
+    transition: transform 180ms ease;
+  }
+
+  .inspector-panel[data-mobile-open="true"] {
+    transform: translateY(0);
+  }
+
+  .data-row,
+  .entity-row,
+  .operations-row,
+  /* .operations-row.compact is (0,2,0) vs .operations-row's (0,1,0); a media
+     query doesn't add specificity, so without this the compact 3-column
+     grid keeps winning at mobile widths and the body column gets crushed.
+     .recent-items-list .entity-row (04-knowledge.css) is the same trap --
+     also (0,2,0) against plain .entity-row's (0,1,0) here. */
+  .operations-row.compact,
+  .recent-items-list .entity-row,
+  .review-row,
+  .review-auto-approve-row,
+  .account-grid,
+  .account-quick-grid,
+  .ask-composer,
+  .policy-edit-control,
+  .unit-input-row,
+  .duration-editor,
+  .days-editor,
+  .library-rule-row,
+  .search-panel,
+  .settings-layout,
+  .workspace-danger-item,
+  .detail-list.inline {
+    grid-template-columns: 1fr;
+  }
+
+  /* Keep the approved-app icon and details together when compact operation
+     rows collapse. The generic .operations-row.compact selector above has
+     higher specificity than a bare .oauth-consent-row and otherwise wins,
+     leaving the explicit actions column to create an unintended implicit
+     second track. */
+  .operations-row.compact.oauth-consent-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .oauth-consent-actions {
+    grid-column: 2;
+  }
+
+  .oauth-consent-revoke {
+    min-height: 44px;
+  }
+
+  .mcp-copy-issued-key {
+    justify-self: start;
+    min-height: 44px;
+  }
+
+  /* Once the rows stack to one column the header has nothing to head, and its
+     four minimum tracks would overflow the card. */
+  .review-auto-approve-head {
+    display: none;
+  }
+
+  .settings-subnav {
+    position: static;
+    top: auto;
+  }
+
+  .account-profile-panel,
+  .account-tools-panel,
+  .workspace-access-panel {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+}
+
+/* In the lint card header the save note sits between the title and the queue
+   link, so it must not claim the row's free space the way it does in a card
+   actions row. */
+.lint-rules-header .policy-card-saved {
+  margin-inline-end: 0;
+}
+
+/* Selects and textareas were left as bare browser controls inside `.form-field`,
+   so a dialog mixed styled inputs with native ones. `.field-stack` already
+   styles all three together; this brings `.form-field` in line. */
+.form-field :is(select, textarea) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  min-height: 36px;
+  font: inherit;
+}
+
+.form-field textarea {
+  resize: vertical;
+}
+
+/* `.field-stack` sets label typography on the row, which then leaks into any
+   prose rendered inside it — an empty-state sentence came out in all caps. */
+.field-stack .empty-state {
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* An inline empty state inside a card has no box of its own, so side padding
+   just pushed its text off the card's left edge. */
+.policy-card .empty-state {
+  padding-inline: 0;
+}
+
+/* Disabled reader tabs had no state of their own: same colour, same pointer
+   cursor as a tab you can actually open. */
+.reader-tab[disabled] {
+  color: var(--ink-soft);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Search's scope select inherited the wrapping label's 12px bold caps, so it
+   spoke a different control language than the input beside it. */
+.search-panel select {
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  border-radius: 8px;
+}
+
+/* One spacing token for the gap between policy cards, instead of four
+   per-card margins that produced 12/14/16/18px between sections. The
+   margin-bottom reset is what makes the token effective: a section keeping the
+   generic 18px bottom margin wins the adjacent-margin collapse against 14px,
+   and the same reset overrides `.mcp-access-section`'s own 16px. */
+.settings-content .feature-section {
+  margin-bottom: 0;
+}
+
+.settings-content .feature-section > .policy-card + .policy-card,
+.settings-content .feature-section > .policy-card + .workspace-danger-zone,
+.settings-content .feature-section + .feature-section {
+  margin-top: 14px;
+}
+
+/* An empty command box reserved 188px of grey nothing. */
+.command-block.is-disabled .policy-snippet {
+  min-height: 0;
+}
+
+/* Inside a dialog the form owns spacing through its gap; the per-field margin
+   stacked on top of it and made sibling fields 27/43/33px apart. */
+.dialog-form > .form-field,
+.dialog-form > .advanced-disclosure {
+  margin-bottom: 0;
+  margin-top: 0;
+}
+
+/* An optional field, not a callout: the dashed tinted box made the slug row
+   read as a warning next to its plain siblings. */
+.agent-editor-dialog .advanced-disclosure {
+  border-style: solid;
+  background: transparent;
+}
+
+/* The last value column sits on the row's right edge instead of floating in
+   the middle of its track with 210px of empty space after it. */
+.review-auto-approve-head > :last-child,
+.review-auto-approve-row > :last-child {
+  justify-self: end;
+  text-align: right;
+}
+
+/* Membership and sharing are one Settings destination and one visual surface.
+   Task-specific subsections remain distinct so membership mutations are not
+   confused with discovery/publication toggles, but they no longer look like
+   competing top-level Settings sections. */
+.workspace-members-access-unified {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: 16px;
+}
+
+.workspace-members-access-heading {
+  display: grid;
+  gap: 5px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+}
+
+.workspace-members-access-heading :is(h2, p) {
+  margin: 0;
+}
+
+.workspace-members-access-heading p {
+  max-width: 72ch;
+  color: var(--ink-muted);
+}
+
+.workspace-member-settings,
+.workspace-access-settings {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-content .workspace-members-access-unified > .feature-section {
+  margin-top: 0;
+}
+
+.workspace-members-access-unified
+  :is(.workspace-member-settings, .workspace-access-settings) {
+  gap: 0;
+}
+
+.workspace-members-access-unified .workspace-settings-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 0;
+}
+
+.workspace-members-access-unified
+  .workspace-settings-card
+  + .workspace-settings-card,
+.workspace-members-access-unified
+  > .workspace-access-settings {
+  border-top: 1px solid var(--border);
+}
+
+.workspace-settings-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: 16px;
+}
+
+.workspace-settings-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.workspace-settings-heading > div {
+  min-width: 0;
+}
+
+.workspace-settings-heading :is(h3, p) {
+  margin: 0;
+}
+
+.workspace-settings-heading h3 {
+  margin-top: 2px;
+}
+
+.workspace-settings-heading h3 + p {
+  margin-top: 5px;
+  color: var(--ink-muted);
+}
+
+/* Member/join counts now use the shared `CountChip`, so this card no longer
+   ships a second count face of its own. */
+
+.workspace-member-lookup {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(130px, 180px) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.workspace-member-lookup .field-stack {
+  margin: 0;
+}
+
+.workspace-member-search {
+  min-width: 0;
+}
+
+.workspace-member-search small {
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+
+.workspace-member-add-action {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 180px) auto;
+  align-items: end;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  padding: 11px;
+}
+
+.workspace-member-add-action > div {
+  display: grid;
+  align-self: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workspace-member-add-action span {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.workspace-member-active-filter {
+  min-height: 18px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-member-list {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.workspace-member-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+}
+
+.workspace-member-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.workspace-member-identity > strong {
+  flex: 0 0 100%;
+  overflow-wrap: anywhere;
+}
+
+.workspace-member-identity > span:not(.workspace-member-anchor, .workspace-member-you) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+}
+
+.workspace-member-anchor,
+.workspace-member-you {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workspace-member-anchor {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.workspace-member-you {
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+}
+
+.workspace-member-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.workspace-member-actions select {
+  min-width: 112px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.workspace-load-more {
+  justify-self: center;
+}
+
+.workspace-whole-access-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.workspace-access-policy-guide {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  padding: 12px;
+}
+
+.workspace-access-policy-guide :is(h4, p) {
+  margin: 0;
+}
+
+.workspace-access-policy-guide h4 {
+  font-size: 14px;
+}
+
+.workspace-access-policy-guide > p,
+.workspace-access-policy-cards span {
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.workspace-access-policy-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-access-policy-cards > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  border-left: 2px solid var(--border-strong, var(--border));
+  padding-left: 9px;
+}
+
+.workspace-access-policy-cards span {
+  font-size: 12px;
+}
+
+.workspace-access-choice-group {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.workspace-access-choice-group legend {
+  color: var(--ink);
+  font-weight: 800;
+  padding: 0;
+}
+
+.workspace-access-choice-group > p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.workspace-access-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.workspace-access-options--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspace-access-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 11px;
+  cursor: pointer;
+}
+
+.workspace-access-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--context) 45%, var(--border));
+  background: var(--context-soft);
+}
+
+.workspace-access-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.workspace-access-option input {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
+.workspace-access-option span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workspace-access-option small {
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.workspace-access-impact-summary {
+  display: grid;
+  /* auto-fit, not a fixed repeat(2, ...): UI-09 dropped this down to one
+     card (the pending-request count moved to the Members queue instead of
+     being duplicated here); a fixed 2-column grid would leave a dead gap
+     where the second card used to be. */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 9px;
+}
+
+.workspace-access-impact-summary > div {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 10px;
+}
+
+.workspace-access-impact-summary strong {
+  font-size: 18px;
+}
+
+.workspace-access-impact-summary span {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-access-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.workspace-access-save-row p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.workspace-access-summary,
+.workspace-access-change-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.workspace-access-summary > div,
+.workspace-access-change-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 11px 0;
+}
+
+.workspace-access-summary dt,
+.workspace-access-change-list dt {
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+
+.workspace-access-summary dd,
+.workspace-access-change-list dd {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.workspace-access-summary dd span {
+  color: var(--ink-muted);
+}
+
+.dialog-panel.workspace-settings-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(560px, calc(100vw - 32px));
+}
+
+.workspace-settings-dialog :is(h2, p) {
+  margin: 0;
+}
+
+.workspace-access-effects {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 640px) {
+  .context-screen .workspace-mobile-actions .fab-label,
+  .context-screen .workspace-mobile-inspector-toggle span {
+    display: none;
+  }
+
+  .workspace-settings-card {
+    padding: 13px;
+  }
+
+  .workspace-members-access-unified {
+    padding: 13px;
+  }
+
+  .workspace-members-access-heading {
+    padding-bottom: 13px;
+  }
+
+  .workspace-members-access-unified .workspace-settings-card {
+    padding: 16px 0;
+  }
+
+  .workspace-settings-heading,
+  .workspace-access-save-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-member-lookup,
+  .workspace-member-add-action,
+  .workspace-member-row,
+  .workspace-access-policy-cards,
+  .workspace-access-options,
+  .workspace-access-options--two,
+  .workspace-access-impact-summary,
+  .workspace-access-summary > div,
+  .workspace-access-change-list > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-member-actions {
+    justify-content: stretch;
+  }
+
+  .workspace-member-actions select,
+  .workspace-member-actions .icon-button,
+  .workspace-member-lookup .icon-button,
+  .workspace-access-save-row .icon-button {
+    width: 100%;
+  }
+
+  .workspace-member-actions > * {
+    flex: 1 1 0;
+  }
+
+  .workspace-settings-dialog .dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  .workspace-settings-dialog .dialog-actions .icon-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar {
+    column-gap: 6px;
+  }
+
+  .topbar-brand {
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
+    padding-inline: 8px;
+  }
+
+  .workspace-controls,
+  .app-shell[data-sidebar-collapsed="true"] .workspace-controls {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: calc(100% - 50px);
+  }
+
+  .topbar-brand .prism-glyph {
+    display: none;
+  }
+
+  /* At 390px the brand cell is 204px and the nav toggle takes 44 of it, so the
+     switcher gets 138px and the title clipped at 73px of it. The initials
+     badge is a stand-in for a name you cannot see -- it is pure redundancy
+     while the name is right beside it -- so it yields its 22px track and its
+     7px gap to the title, which is what the reader actually needs. Same
+     reasoning as .prism-glyph directly above. */
+  .workspace-switcher-button,
+  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
+    grid-template-columns: minmax(0, 1fr) 14px;
+  }
+
+  .workspace-initials {
+    display: none;
+  }
+}
+
+/* Hybrid laptops and large tablets can expose a coarse pointer above the
+   narrow-layout breakpoint. Preserve the contract's 44px hit area there too. */
+@media (any-pointer: coarse) {
+  .markdown-code-copy,
+  .mermaid-zoom-toolbar-button,
+  .mermaid-zoom-readout,
+  .editor-link-header button,
+  .editor-link-actions button,
+  .editor-comment-header button,
+  .editor-comment-actions button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Secondary text controls escaped the shared icon/segmented-control rules.
+   Preserve their compact desktop chrome while making every narrow or coarse
+   pointer surface meet the same 44px interaction contract. */
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]),
+  .settings-content select,
+  .ask-composer input,
+  .empty-suggestions button,
+  .search-panel select,
+  .inline-action,
+  .ask-search-path summary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .ask-search-path summary {
+    padding-block: 13px;
+  }
+}
+
+/* The Context write card is two signposts, not a field list: each row names a
+   gate, says what it does, and offers the tab that holds it. */
+.context-write-gate-list {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-write-gate-list li {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.context-write-gate-list strong {
+  font-size: 13px;
+}
+
+.context-write-gate-list .icon-button {
+  margin-top: 3px;
+}
+
+/* Why a filtered row is in the list. Only ever rendered while a query is
+   active and only when a TAB matched, so the unfiltered rail stays a bare list
+   of names -- which is the reason its descriptions were removed. */
+.settings-subnav-match {
+  grid-column: 1 / -1;
+  justify-self: start;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+}

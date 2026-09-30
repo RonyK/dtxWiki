@@ -1,0 +1,125 @@
+{
+  "breadcrumb": "대시보드",
+  "editorRequiredBanner": "이 워크스페이스에서 콘텐츠를 만들거나 편집하려면 편집자 권한이 필요합니다.",
+  "errors": {
+    "load": "대시보드를 불러오지 못했습니다"
+  },
+  "header": {
+    "eyebrow": "워크스페이스 현재 상태",
+    "title": "워크스페이스 운영",
+    "subtitle": "변경 전에 독자와 AI가 보게 될 내용을 확인하세요.",
+    "activityUnit": {
+      "today_other": "건 · 오늘",
+      "week_other": "건 · 이번 주",
+      "month_other": "건 · 이번 달",
+      "all_other": "건 · 전체",
+      "today_one": "건 · 오늘",
+      "week_one": "건 · 이번 주",
+      "month_one": "건 · 이번 달",
+      "all_one": "건 · 전체"
+    }
+  },
+  "lanes": {
+    "pending": "대기 중",
+    "advisory": "주의",
+    "history": "기록",
+    "pendingHint": "리뷰 필요",
+    "advisoryHint": "확인 필요",
+    "historyHint": "완료된 변경"
+  },
+  "period": {
+    "label": "대시보드 활동 기간",
+    "options": {
+      "today": "오늘",
+      "week": "이번 주",
+      "month": "이번 달",
+      "all": "전체"
+    },
+    "filterOptions": {
+      "today": "오늘",
+      "week": "이번 주",
+      "month": "이번 달",
+      "all": "전체"
+    }
+  },
+  "spaces": {
+    "title": "영역",
+    "library": "라이브러리",
+    "context": "컨텍스트",
+    "agent": "에이전트",
+    "agentDescription": "에이전트 주입 정책",
+    "libraryPurpose": "인용할 참조 자료",
+    "contextPurpose": "팀이 오래 쓰는 지식",
+    "agentPurpose": "지침·스킬·메모리"
+  },
+  "recent": {
+    "title": "최근 활동",
+    "unit_one": "건",
+    "unit_other": "건",
+    "emptyTitle": "{{period}} 워크스페이스 활동 없음",
+    "viewSystemEvents": "Activity에서 시스템 이벤트 보기",
+    "systemEventsHint": "시스템 이벤트는 대시보드에 표시되지 않습니다",
+    "emptyDescription": "페이지, 자료, 리뷰, Ask 변경 사항이 여기에 표시됩니다. 시스템 로그인 이벤트는 Activity에 남아 대시보드를 집중된 상태로 유지합니다.",
+    "action": {
+      "restored": "복원됨",
+      "published": "게시됨",
+      "created": "생성됨",
+      "edited": "편집됨",
+      "failed": "실패",
+      "logged": "기록됨"
+    },
+    "viewAll": "활동 전체 보기"
+  },
+  "firstUse": {
+    "title": "워크스페이스 설정 순서",
+    "status": {
+      "done": "완료",
+      "next": "다음",
+      "prep": "준비",
+      "later": "나중에"
+    },
+    "steps": {
+      "library": {
+        "label": "원본 자료 추가",
+        "description": "답변이 인용할 수 있는 원본 자료를 모읍니다.",
+        "action": "첫 원본 자료 추가"
+      },
+      "context": {
+        "label": "컨텍스트 페이지 작성",
+        "description": "중요한 지식을 오래 유지되는 워크스페이스 페이지로 만듭니다.",
+        "action": "첫 컨텍스트 페이지 작성"
+      },
+      "ask": {
+        "label": "질문하기",
+        "description": "워크스페이스에 사용할 수 있는 근거가 생긴 뒤 질문합니다.",
+        "action": "질문하기"
+      },
+      "review": {
+        "label": "저장 또는 리뷰",
+        "description": "배치를 확인한 뒤에만 유용한 답변을 승격합니다.",
+        "action": "리뷰 큐 열기"
+      }
+    }
+  },
+  "setup": {
+    "label": "워크스페이스 설정",
+    "eyebrow": "설정",
+    "title": "첫 워크스페이스 시작",
+    "next": "다음: {{label}}",
+    "progress": "설정 단계 4개 중 {{count}}개 완료.",
+    "description": "신뢰할 수 있는 자료를 추가하고, 오래 유지될 페이지를 정리하고, 맥락 기반 질문을 한 뒤 위키가 업데이트되기 전에 변경 사항을 검토하세요.",
+    "progressLabel": "워크스페이스 설정 진행률",
+    "personalWorkspaceTitle": "개인 워크스페이스를 나에게 맞게 설정하세요",
+    "personalWorkspaceDescription": "개인 워크스페이스의 이름을 바꿀 수 있습니다. 지속적인 팀 협업에는 워크스페이스 전환 메뉴에서 별도의 협업 워크스페이스를 만드세요.",
+    "renamePersonalAction": "개인 워크스페이스 이름 바꾸기",
+    "findWorkspaceTitle": "함께 사용할 워크스페이스를 찾고 계신가요?",
+    "findWorkspaceDescription": "현재 선택을 바꾸지 않고 검색 가능한 워크스페이스를 둘러보세요.",
+    "findWorkspaceAction": "워크스페이스 찾기",
+    "ask": "질문",
+    "review": "리뷰 큐",
+    "libraryDescription": "답변이 인용할 수 있는 원본 자료를 모읍니다.",
+    "contextDescription": "팀이 읽고 편집할 수 있는 검토된 페이지를 유지합니다.",
+    "askDescription": "질문하고, 유용한 답변을 승격하고, 변경 사항을 검토합니다.",
+    "reviewDescription": "업데이트가 오래 유지되기 전에 승인, 거절, 변경 요청을 처리합니다."
+  }
+}

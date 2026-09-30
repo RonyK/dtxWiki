@@ -6,6 +6,7 @@ __pycache__/
 # Python build and packaging outputs
 build/
 dist/
+dist-npm/
 *.egg-info/
 .eggs/
 *.egg
@@ -20,9 +21,47 @@ ENV/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+ruff_cache/
 .coverage
 coverage.xml
 htmlcov/
+*.tsbuildinfo
+
+# Node, frontend, and browser-test outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/storybook-static/
+backend/static/
+desktop/build/
+desktop/release/
+# Cross-process coordination lock for the atomic static-bundle deploy helper.
+backend/.static.deploy.lock
+playwright-report/
+test-results/
+# The canonical lock file is the workspace root package-lock.json.
+# Running `npm install` from inside frontend/ creates a duplicate lock that
+# can drift from the root — never commit it.
+frontend/package-lock.json
+
+# Local development databases (SQLite + WAL/journal sidecars).
+# Production deployments mount their own volumes; nothing here belongs in git.
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+dtxwiki.sqlite*
+
+# Node.js specific logs and files
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
 
 # Tool and notebook checkpoints
 .ipynb_checkpoints/
@@ -31,12 +70,63 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.docker.example
+Makefile.local
+# Docker data-volume archives (they hold the database and both secrets). Keep
+# them outside the checkout; this only guards an archive left here by mistake.
+infra/prod/backups/
 
-# VS Code workspace settings
-.vscode/
+# VS Code workspace settings use `.vscode/*`, not `.vscode/`, so the two
+# publishable examples below can be re-included.
+.vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json.example
 
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# AI Tools
+.agents/
+.cursor/
+.claude/
+.codex/
+
+# doc/ is entirely temporary working scratch (planning, reviews, drafts).
+# Operator artifacts go to internal/audit/; test fixtures go to tests/fixtures/.
+# CI captures pytest logs as artifacts (.github/workflows/ci.yml packaging job).
+doc/
+
+# docs/ holds detailed design and plan documents; review/ holds adversarial
+# review reports and their screenshot evidence. This is a public repository, so
+# internal design, defect rosters, branch names and commit SHAs must not be
+# published through it. Share such documents through dtxWiki instead.
+# (2026-08-26 decision; review/ added 2026-09-03 with the Epic-1 rebaseline.)
+# The one deliberate retention exception is internal/audit/ -- hand-written
+# operator audit notes, kept on purpose and secret-scanned by
+# tests/packaging/test_evidence_redaction.py. See AGENTS.md "Design Sources".
+docs/
+/review/
+tmp/
+
+# CI evidence working dir — captured by upload-artifact, never committed.
+.ci-evidence/
+
+# Local-only browser screenshots and probes; curated evidence is uploaded to dtxWiki.
+artifacts/editor-ui-audit/
+artifacts/alias-group-height/
+artifacts/alias-group-hover/
+artifacts/family-popup-css-recovery/
+artifacts/family-popup-integrated/
+home.png
+page.html
+screenshot.js
+shot_*.png
+
+# Scratch UI-verification harness artifacts (see playwright testIgnore):
+# ANY underscore-prefixed entry under tests/e2e is session-local temp code —
+# ad-hoc _*.spec.ts specs, _dev/ probe scripts (.mjs), and __*__/ capture
+# folders. Keep all throwaway test code under a "_" name so it is never tracked.
+tests/e2e/_*
+
+frontend/src/assets/brand/*

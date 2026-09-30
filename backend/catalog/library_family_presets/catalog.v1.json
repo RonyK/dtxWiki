@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "catalog_revision": "2026-08-10.1",
+  "presets": [
+    {
+      "preset_id": "text",
+      "revision": 1,
+      "name": "Text",
+      "description": "Markdown and plain text files.",
+      "format_ids": ["markdown", "text"]
+    },
+    {
+      "preset_id": "document",
+      "revision": 1,
+      "name": "Documents",
+      "description": "PDF, Office, and Korean document formats.",
+      "format_ids": ["pdf", "docx", "pptx", "xlsx", "doc", "ppt", "xls", "hwp", "hwpx", "hwpml"]
+    },
+    {
+      "preset_id": "image",
+      "revision": 1,
+      "name": "Images",
+      "description": "Common raster image formats.",
+      "format_ids": ["jpeg", "png", "gif", "webp", "tiff"]
+    },
+    {
+      "preset_id": "audio",
+      "revision": 1,
+      "name": "Audio",
+      "description": "Validated passive audio containers.",
+      "format_ids": ["mp3", "ogg", "wav"]
+    },
+    {
+      "preset_id": "video",
+      "revision": 1,
+      "name": "Video",
+      "description": "Validated passive video containers.",
+      "format_ids": ["mp4", "webm"]
+    },
+    {
+      "preset_id": "data",
+      "revision": 1,
+      "name": "Data",
+      "description": "Structured and scientific data formats.",
+      "format_ids": ["csv", "tsv", "json", "yaml", "hdf5", "hdf4", "parquet"]
+    }
+  ]
+}

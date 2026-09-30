@@ -1,0 +1,291 @@
+{
+  "breadcrumb": "Lint queue",
+  "eyebrow": "Workspace quality",
+  "title": "Lint queue",
+  "subtitle": "Deterministic checks over this workspace's pages and sources. Findings stay open until an editor resolves them.",
+  "runLint": "Run lint",
+  "readOnly": "You have read-only access — lint findings are visible, but only editors can run lint or resolve findings.",
+  "loading": "Loading Lint",
+  "runStatus": "Lint run {{status}}",
+  "linkedFinding": "Showing the finding linked from this coverage gap.",
+  "showAll": "Show all findings",
+  "severity": "Severity",
+  "view": "View",
+  "status": "Status",
+  "layer": "Layer",
+  "filters": {
+    "title": "Filters",
+    "active": "{{count}} active filters",
+    "reset": "Reset"
+  },
+  "viewFilter": {
+    "findings": "Findings",
+    "coverage": "Coverage gaps"
+  },
+  "statusFilter": {
+    "open": "Open",
+    "resolved": "Resolved"
+  },
+  "layerFilter": {
+    "all": "All",
+    "format": "Format",
+    "knowledge": "Knowledge",
+    "nav": "Navigation",
+    "maintenance": "Maintenance"
+  },
+  "severityFilter": {
+    "all": "All",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info"
+  },
+  "openFindings": "Open findings",
+  "findings": "Findings",
+  "pagination": {
+    "navigation": "Lint findings pages",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Go to page {{page}}",
+    "currentPage": "Page {{page}}, current page",
+    "perPage": "Findings per page",
+    "range": "Showing {{start}}–{{end}} of {{total}} findings"
+  },
+  "coverage": {
+    "title": "Coverage gaps",
+    "empty": "No coverage gaps in this state",
+    "hits_one": "hit",
+    "hits_other": "hits",
+    "openFinding": "Open linked finding"
+  },
+  "surface": {
+    "ask": "Ask",
+    "search_rest": "Search",
+    "search_mcp": "MCP search"
+  },
+  "lane": {
+    "entity": "Entity",
+    "trigram": "Similar name",
+    "bm25": "Full text",
+    "keyword": "Keyword",
+    "semantic": "Semantic",
+    "hybrid": "Hybrid",
+    "associative": "Related concepts",
+    "grep": "Exact text",
+    "direct": "Direct match",
+    "library_fallback": "Library fallback"
+  },
+  "targetType": {
+    "context_page": "Context page",
+    "workspace_tree_node": "Workspace folder",
+    "knowledge_coverage_gap": "Coverage gap",
+    "library_item": "Library item",
+    "workspace": "Workspace"
+  },
+  "suggestedAction": {
+    "aiBadge": "AI suggestion",
+    "fields": {
+      "proposal": "Proposal",
+      "verdict": "Verdict",
+      "confidence": "Confidence",
+      "rationale": "Rationale",
+      "reason": "Reason",
+      "anchor": "Referenced passage",
+      "nav_summary": "Navigation summary",
+      "negative_cues": "Distinguishing cues",
+      "aliases": "Aliases",
+      "nav_description": "Navigation description",
+      "placement_hint": "Placement hint",
+      "title": "Title",
+      "page_type": "Page type",
+      "outline": "Outline",
+      "concept_path": "Concept path",
+      "queries": "Evaluation queries",
+      "similarity": "Similarity",
+      "session_count": "Sessions",
+      "tree_distance": "Tree distance",
+      "supported": "Support",
+      "contradicts": "Contradiction",
+      "client_llm_verdict": "AI assessment"
+    }
+  },
+  "findingFallback": "Review the quality issue for {{target}}.",
+  "rules": {
+    "md_heading_hierarchy": {
+      "label": "Heading hierarchy",
+      "message": "A heading skips one or more levels.",
+      "description": "Flags a heading that skips a level."
+    },
+    "md_code_fence_balance": {
+      "label": "Code fence balance",
+      "message": "A fenced code block is not closed.",
+      "description": "Flags a fenced code block that is never closed."
+    },
+    "md_table_wellformed": {
+      "label": "Table structure",
+      "message": "A Markdown table is missing its separator row.",
+      "description": "Flags a Markdown table written without a separator row."
+    },
+    "md_image_ref": {
+      "label": "Image reference",
+      "message": "An image reference has no usable URL.",
+      "description": "Flags an image reference with no usable URL."
+    },
+    "md_mermaid_block": {
+      "label": "Mermaid diagram",
+      "message": "A Mermaid block is empty or has no recognized diagram type.",
+      "description": "Flags a Mermaid block that is empty or has no recognized diagram type."
+    },
+    "link_unresolved": {
+      "label": "Unresolved wiki link",
+      "message": "The wiki link [[{{written_slug}}]] does not resolve to a page.",
+      "description": "Flags a wiki link that has never resolved to a page."
+    },
+    "link_broken-slug": {
+      "label": "Stale wiki-link slug",
+      "message": "The wiki link [[{{written_slug}}]] still works, but the target is now [[{{current_slug}}]].",
+      "description": "Flags pinned links whose written slug no longer matches the target page."
+    },
+    "kb_orphan_page": {
+      "label": "Orphan page",
+      "message": "{{slug}} has no inbound wiki links.",
+      "description": "Flags a page that no other page links to."
+    },
+    "kb_missing_backlink": {
+      "label": "Missing backlink",
+      "message": "{{source_slug}} links to {{target_slug}}, but the target does not link back.",
+      "description": "Flags a link that the target page does not link back to."
+    },
+    "kb_duplicate_concept": {
+      "label": "Duplicate concept",
+      "message": "This page may duplicate another concept.",
+      "description": "Flags a page that may cover the same concept as another."
+    },
+    "kb_term_collision": {
+      "label": "Name collision",
+      "message": "A title, alias, or slug resolves to more than one page.",
+      "description": "Flags a title, alias, or slug that resolves to more than one page."
+    },
+    "nav_fanout_exceeded": {
+      "label": "Folder fanout",
+      "message": "This folder has more than 50 visible children; split it into clearer branches.",
+      "description": "Flags a folder with more visible children than the fanout limit."
+    },
+    "nav_missing_summary": {
+      "label": "Missing navigation summary",
+      "message": "Add a discriminative navigation summary for this folder.",
+      "description": "Flags a folder with no navigation summary to tell it apart from its siblings."
+    },
+    "nav_unreachable": {
+      "label": "Unreachable content",
+      "message": "This content is not reachable through a visible primary tree path.",
+      "description": "Flags content with no visible path through the primary tree."
+    },
+    "kb_hot_path_unmaterialized": {
+      "label": "Repeated navigation path",
+      "message": "A frequently repeated navigation path may need a direct link.",
+      "description": "Flags a frequently repeated navigation path that may deserve a direct link."
+    },
+    "kb_semantic_near_duplicate": {
+      "label": "Possible duplicate",
+      "message": "Two pages are semantically similar and need merge-or-distinguish review.",
+      "description": "Flags two pages similar enough to need a merge-or-distinguish decision."
+    },
+    "kb_misplaced_page": {
+      "label": "Possible misplaced page",
+      "message": "This page differs substantially from neighboring pages in its folder.",
+      "description": "Flags a page that differs substantially from the others in its folder."
+    },
+    "kb_dependent_maybe_stale": {
+      "label": "Possibly stale dependency",
+      "message": "A page this content depends on changed; review the affected passage.",
+      "description": "Flags a page whose source changed, so a passage may now be out of date."
+    },
+    "maintenance_nav_summary_suggestion": {
+      "label": "Navigation summary proposal",
+      "message": "An external maintenance run proposed a folder navigation summary.",
+      "description": "Records folder navigation summaries proposed by an external maintenance run."
+    },
+    "maintenance_coverage_gap_verdict": {
+      "label": "Coverage gap assessment",
+      "message": "An external maintenance run assessed this coverage gap.",
+      "description": "Records coverage-gap assessments from an external maintenance run."
+    },
+    "maintenance_page_meta_suggestion": {
+      "label": "Page metadata proposal",
+      "message": "An external maintenance run proposed page metadata changes.",
+      "description": "Records page metadata changes proposed by an external maintenance run."
+    },
+    "maintenance_import_batch_classification": {
+      "label": "Import classification",
+      "message": "An external maintenance run proposed import classification metadata.",
+      "description": "Records import classifications proposed by an external maintenance run."
+    },
+    "maintenance_stale_contradiction_verdict": {
+      "label": "Dependency contradiction assessment",
+      "message": "An external maintenance run assessed whether a dependency is contradictory.",
+      "description": "Records dependency-contradiction assessments from an external maintenance run."
+    },
+    "maintenance_golden_query_candidates": {
+      "label": "Evaluation query candidates",
+      "message": "An external maintenance run proposed search evaluation queries.",
+      "description": "Records search evaluation queries proposed by an external maintenance run."
+    }
+  },
+  "empty": {
+    "open": "No unresolved lint findings",
+    "resolved": "No resolved lint findings",
+    "hint": "Run lint to check this workspace against the rules enabled in Settings."
+  },
+  "actions": {
+    "acknowledge": "Mark reviewed",
+    "fix": "Record as fixed",
+    "dismiss": "Ignore finding",
+    "dismissReason": "Reason for ignoring this finding",
+    "selectAll": "Select all {{count}} on this page",
+    "unselectAll": "Unselect all",
+    "selectedCount": "{{count}} selected",
+    "selectRow": "Select {{title}} on {{target}}",
+    "openTarget": "Open target {{title}}",
+    "more": "More actions for {{title}} on {{target}}",
+    "bulkActions": "Bulk actions"
+  },
+  "details": {
+    "suggestedAction": "Suggested next step"
+  },
+  "dismissDialog": {
+    "title": "Ignore finding",
+    "body": "Ignored findings leave the unresolved queue and remain in resolved history.",
+    "reason": "Reason",
+    "reasonOptional": "Reason (optional)",
+    "cancel": "Cancel",
+    "confirm": "Ignore finding"
+  },
+  "fixDialog": {
+    "title": "Record as fixed",
+    "body": "This action changes the finding status only. It never modifies page content.",
+    "cancel": "Cancel",
+    "confirm": "Record as fixed"
+  },
+  "mutation": {
+    "acknowledgeSuccess": "Finding marked as reviewed.",
+    "dismissSuccess": "Finding ignored.",
+    "fixSuccess": "Finding recorded as fixed. Page content was not changed.",
+    "batchResult": "{{succeeded}} findings updated; {{failed}} failed."
+  },
+  "loadMore": "Load more",
+  "loadingMore": "Loading",
+  "errors": {
+    "load": "Failed to load Lint",
+    "loadMore": "Failed to load more",
+    "run": "Failed to run lint",
+    "decide": "Failed to update the lint finding",
+    "workspaceNotFound": "Workspace not found",
+    "batchPartialFailure": "Failed to update {{count}} findings."
+  },
+  "runState": {
+    "queued": "queued",
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed"
+  }
+}

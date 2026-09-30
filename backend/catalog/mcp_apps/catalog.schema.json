@@ -1,0 +1,1166 @@
+{
+  "$defs": {
+    "AccessTokenAtom": {
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "enum": [
+            "access-token",
+            "access-token-env",
+            "authorization-bearer"
+          ],
+          "title": "Slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot"
+      ],
+      "title": "AccessTokenAtom",
+      "type": "object"
+    },
+    "AppCommandArtifact": {
+      "additionalProperties": false,
+      "description": "A command typed inside the AI app itself, such as ``/mcp auth``.\n\nSome clients run their OAuth flow only from their own prompt, so the\nstep has no shell command to copy. Rendering it as a shell command\nwould be a lie, and burying it in prose is what hid the login step in\nthe first place, so it is its own kind. The value is public-only: an\nin-app prompt is not an approved credential sink, and the repository\nadditionally pins it to slash-command form so this kind can never be\nused to smuggle a shell invocation past the executable registry.",
+      "properties": {
+        "step": {
+          "default": "register",
+          "enum": [
+            "register",
+            "authenticate"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "kind": {
+          "const": "app-command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LiteralAtom"
+              },
+              {
+                "$ref": "#/$defs/McpUrlAtom"
+              },
+              {
+                "$ref": "#/$defs/ServerNameAtom"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Value",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "AppCommandArtifact",
+      "type": "object"
+    },
+    "AppVerification": {
+      "additionalProperties": false,
+      "properties": {
+        "tier": {
+          "enum": [
+            "verified",
+            "community"
+          ],
+          "title": "Tier",
+          "type": "string"
+        },
+        "verifiedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifiedat"
+        },
+        "provenance": {
+          "items": {
+            "$ref": "#/$defs/VerificationProvenance"
+          },
+          "title": "Provenance",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tier",
+        "provenance"
+      ],
+      "title": "AppVerification",
+      "type": "object"
+    },
+    "CatalogIcon": {
+      "additionalProperties": false,
+      "properties": {
+        "assetPath": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Assetpath",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "mediaType": {
+          "enum": [
+            "image/svg+xml",
+            "image/png"
+          ],
+          "title": "Mediatype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assetPath",
+        "sha256",
+        "mediaType"
+      ],
+      "title": "CatalogIcon",
+      "type": "object"
+    },
+    "CommandArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "default": "register",
+          "enum": [
+            "register",
+            "authenticate"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "kind": {
+          "const": "command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "executableId": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Executableid",
+          "type": "string"
+        },
+        "argv": {
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LiteralAtom"
+                },
+                {
+                  "$ref": "#/$defs/McpUrlAtom"
+                },
+                {
+                  "$ref": "#/$defs/ServerNameAtom"
+                },
+                {
+                  "$ref": "#/$defs/AccessTokenAtom"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "title": "Argv",
+          "type": "array"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/LiteralAtom"
+                    },
+                    {
+                      "$ref": "#/$defs/McpUrlAtom"
+                    },
+                    {
+                      "$ref": "#/$defs/ServerNameAtom"
+                    },
+                    {
+                      "$ref": "#/$defs/AccessTokenAtom"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^[A-Z_][A-Z0-9_]*$"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Env"
+        }
+      },
+      "required": [
+        "kind",
+        "executableId",
+        "argv"
+      ],
+      "title": "CommandArtifact",
+      "type": "object"
+    },
+    "CopyMcpUrlArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "default": "register",
+          "enum": [
+            "register",
+            "authenticate"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "kind": {
+          "const": "copy-mcp-url",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "value": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LiteralAtom"
+              },
+              {
+                "$ref": "#/$defs/McpUrlAtom"
+              },
+              {
+                "$ref": "#/$defs/ServerNameAtom"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Value",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "value"
+      ],
+      "title": "CopyMcpUrlArtifact",
+      "type": "object"
+    },
+    "DeepLinkArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "default": "register",
+          "enum": [
+            "register",
+            "authenticate"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "kind": {
+          "const": "deep-link",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "url": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LiteralAtom"
+              },
+              {
+                "$ref": "#/$defs/McpUrlAtom"
+              },
+              {
+                "$ref": "#/$defs/ServerNameAtom"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Url",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "url"
+      ],
+      "title": "DeepLinkArtifact",
+      "type": "object"
+    },
+    "ExecutableDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "commandName": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "title": "Commandname",
+          "type": "string"
+        },
+        "invocation": {
+          "const": "direct-argv",
+          "title": "Invocation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "commandName",
+        "invocation"
+      ],
+      "title": "ExecutableDefinition",
+      "type": "object"
+    },
+    "InstructionArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "default": "register",
+          "enum": [
+            "register",
+            "authenticate"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "kind": {
+          "const": "instruction",
+          "title": "Kind",
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/$defs/LocalizedText"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "title": "InstructionArtifact",
+      "type": "object"
+    },
+    "JsonConfigArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "default": "register",
+          "enum": [
+            "register",
+            "authenticate"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "kind": {
+          "const": "json-config",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonConfigTemplate"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "value"
+      ],
+      "title": "JsonConfigArtifact",
+      "type": "object"
+    },
+    "LiteralAtom": {
+      "additionalProperties": false,
+      "properties": {
+        "literal": {
+          "title": "Literal",
+          "type": "string"
+        }
+      },
+      "required": [
+        "literal"
+      ],
+      "title": "LiteralAtom",
+      "type": "object"
+    },
+    "LocalizedText": {
+      "additionalProperties": false,
+      "properties": {
+        "en": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "En",
+          "type": "string"
+        },
+        "ko": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Ko",
+          "type": "string"
+        }
+      },
+      "required": [
+        "en",
+        "ko"
+      ],
+      "title": "LocalizedText",
+      "type": "object"
+    },
+    "McpAppDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "icon": {
+          "$ref": "#/$defs/CatalogIcon"
+        },
+        "vendor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vendor"
+        },
+        "runtimeBrand": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtimebrand"
+        },
+        "localConfigAdapterId": {
+          "anyOf": [
+            {
+              "enum": [
+                "antigravity-json",
+                "claude-json",
+                "codex-toml",
+                "gemini-json"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Localconfigadapterid"
+        },
+        "featuredRank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Featuredrank"
+        },
+        "lifecycle": {
+          "enum": [
+            "active",
+            "disabled",
+            "tombstone"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "verification": {
+          "$ref": "#/$defs/AppVerification"
+        },
+        "variants": {
+          "items": {
+            "$ref": "#/$defs/McpConnectionVariant"
+          },
+          "minItems": 1,
+          "title": "Variants",
+          "type": "array"
+        },
+        "oauthIdentities": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/VerifiedOAuthIdentity"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oauthidentities"
+        }
+      },
+      "required": [
+        "id",
+        "labels",
+        "icon",
+        "lifecycle",
+        "verification",
+        "variants"
+      ],
+      "title": "McpAppDefinition",
+      "type": "object"
+    },
+    "McpConnectionVariant": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "surface": {
+          "enum": [
+            "cli",
+            "desktop",
+            "ide",
+            "web"
+          ],
+          "title": "Surface",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "streamable-http",
+            "sse"
+          ],
+          "title": "Transport",
+          "type": "string"
+        },
+        "auth": {
+          "enum": [
+            "oauth",
+            "access-key"
+          ],
+          "title": "Auth",
+          "type": "string"
+        },
+        "endpointReachability": {
+          "items": {
+            "enum": [
+              "loopback",
+              "private-network",
+              "public-https"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Endpointreachability",
+          "type": "array"
+        },
+        "requires": {
+          "$ref": "#/$defs/VariantRequirements"
+        },
+        "defaultScopePreset": {
+          "enum": [
+            "read-only",
+            "agent-draft",
+            "authoring"
+          ],
+          "title": "Defaultscopepreset",
+          "type": "string"
+        },
+        "recipeIds": {
+          "items": {
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Recipeids",
+          "type": "array"
+        },
+        "priority": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "surface",
+        "transport",
+        "auth",
+        "endpointReachability",
+        "defaultScopePreset",
+        "recipeIds",
+        "priority"
+      ],
+      "title": "McpConnectionVariant",
+      "type": "object"
+    },
+    "McpGenericProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "icon": {
+          "$ref": "#/$defs/CatalogIcon"
+        },
+        "variants": {
+          "items": {
+            "$ref": "#/$defs/McpConnectionVariant"
+          },
+          "minItems": 1,
+          "title": "Variants",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "labels",
+        "icon",
+        "variants"
+      ],
+      "title": "McpGenericProfile",
+      "type": "object"
+    },
+    "McpSetupRecipe": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "variantId": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Variantid",
+          "type": "string"
+        },
+        "selectors": {
+          "$ref": "#/$defs/RecipeSelectors"
+        },
+        "artifacts": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "app-command": "#/$defs/AppCommandArtifact",
+                "command": "#/$defs/CommandArtifact",
+                "copy-mcp-url": "#/$defs/CopyMcpUrlArtifact",
+                "deep-link": "#/$defs/DeepLinkArtifact",
+                "instruction": "#/$defs/InstructionArtifact",
+                "json-config": "#/$defs/JsonConfigArtifact"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CopyMcpUrlArtifact"
+              },
+              {
+                "$ref": "#/$defs/CommandArtifact"
+              },
+              {
+                "$ref": "#/$defs/AppCommandArtifact"
+              },
+              {
+                "$ref": "#/$defs/JsonConfigArtifact"
+              },
+              {
+                "$ref": "#/$defs/DeepLinkArtifact"
+              },
+              {
+                "$ref": "#/$defs/InstructionArtifact"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "verify": {
+          "$ref": "#/$defs/RecipeVerification"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "variantId",
+        "artifacts",
+        "verify"
+      ],
+      "title": "McpSetupRecipe",
+      "type": "object"
+    },
+    "McpUrlAtom": {
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "const": "mcp-url",
+          "title": "Slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot"
+      ],
+      "title": "McpUrlAtom",
+      "type": "object"
+    },
+    "RecipeSelectors": {
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "anyOf": [
+            {
+              "enum": [
+                "windows",
+                "macos",
+                "linux"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Platform"
+        },
+        "shell": {
+          "anyOf": [
+            {
+              "enum": [
+                "powershell",
+                "bash",
+                "zsh"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shell"
+        },
+        "appVersion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appversion"
+        }
+      },
+      "title": "RecipeSelectors",
+      "type": "object"
+    },
+    "RecipeVerification": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "first-mcp-call",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instruction": {
+          "$ref": "#/$defs/LocalizedText"
+        }
+      },
+      "required": [
+        "kind",
+        "instruction"
+      ],
+      "title": "RecipeVerification",
+      "type": "object"
+    },
+    "ServerNameAtom": {
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "const": "server-name",
+          "title": "Slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot"
+      ],
+      "title": "ServerNameAtom",
+      "type": "object"
+    },
+    "VariantRequirements": {
+      "additionalProperties": false,
+      "properties": {
+        "serverOAuth": {
+          "anyOf": [
+            {
+              "const": true,
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Serveroauth"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "windows",
+                  "macos",
+                  "linux"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Platform"
+        },
+        "shell": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "powershell",
+                  "bash",
+                  "zsh"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shell"
+        },
+        "minimumAppVersion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimumappversion"
+        }
+      },
+      "title": "VariantRequirements",
+      "type": "object"
+    },
+    "VerificationProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "sourceUrl": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Sourceurl",
+          "type": "string"
+        },
+        "checkedAt": {
+          "maxLength": 40,
+          "minLength": 10,
+          "title": "Checkedat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceUrl",
+        "checkedAt"
+      ],
+      "title": "VerificationProvenance",
+      "type": "object"
+    },
+    "VerifiedOAuthIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "exact-registration-profile",
+          "title": "Kind",
+          "type": "string"
+        },
+        "normalizedMetadataFingerprint": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Normalizedmetadatafingerprint",
+          "type": "string"
+        },
+        "provenanceRef": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Provenanceref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "normalizedMetadataFingerprint",
+        "provenanceRef"
+      ],
+      "title": "VerifiedOAuthIdentity",
+      "type": "object"
+    },
+    "PublicJsonTemplateValue": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "$ref": "#/$defs/LiteralAtom"
+        },
+        {
+          "$ref": "#/$defs/McpUrlAtom"
+        },
+        {
+          "$ref": "#/$defs/ServerNameAtom"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PublicJsonTemplateValue"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "not": {
+              "enum": [
+                "literal",
+                "slot",
+                "bearerToken"
+              ]
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/PublicJsonTemplateValue"
+          }
+        }
+      ]
+    },
+    "JsonConfigTemplate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PublicJsonTemplateValue"
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "not": {
+              "enum": [
+                "literal",
+                "slot"
+              ]
+            }
+          },
+          "properties": {
+            "bearerToken": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PublicJsonTemplateValue"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "slot": {
+                      "const": "access-token"
+                    }
+                  },
+                  "required": [
+                    "slot"
+                  ]
+                }
+              ]
+            },
+            "headers": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PublicJsonTemplateValue"
+                },
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "not": {
+                      "enum": [
+                        "literal",
+                        "slot",
+                        "bearerToken"
+                      ]
+                    }
+                  },
+                  "properties": {
+                    "Authorization": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/PublicJsonTemplateValue"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "slot": {
+                              "const": "authorization-bearer"
+                            }
+                          },
+                          "required": [
+                            "slot"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/PublicJsonTemplateValue"
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/PublicJsonTemplateValue"
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaMajor": {
+      "const": 1,
+      "title": "Schemamajor",
+      "type": "integer"
+    },
+    "catalogRevision": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Catalogrevision",
+      "type": "string"
+    },
+    "apps": {
+      "items": {
+        "$ref": "#/$defs/McpAppDefinition"
+      },
+      "title": "Apps",
+      "type": "array"
+    },
+    "genericProfiles": {
+      "items": {
+        "$ref": "#/$defs/McpGenericProfile"
+      },
+      "title": "Genericprofiles",
+      "type": "array"
+    },
+    "executables": {
+      "items": {
+        "$ref": "#/$defs/ExecutableDefinition"
+      },
+      "title": "Executables",
+      "type": "array"
+    },
+    "recipes": {
+      "items": {
+        "$ref": "#/$defs/McpSetupRecipe"
+      },
+      "title": "Recipes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schemaMajor",
+    "catalogRevision",
+    "apps",
+    "genericProfiles",
+    "executables",
+    "recipes"
+  ],
+  "title": "dtxWiki MCP application catalog v1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dtxwiki.local/schemas/mcp-app-catalog.v1.json"
+}

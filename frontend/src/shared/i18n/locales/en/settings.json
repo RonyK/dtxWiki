@@ -1,0 +1,1790 @@
+{
+  "breadcrumb": "Settings",
+  "loading": "Loading Settings",
+  "loadRetry": "Retry",
+  "errors": {
+    "loadFailed": "Could not load Settings.",
+    "requestFailed": "The Settings request failed. Please try again.",
+    "workspaceUnavailable": "Choose a workspace before changing Settings.",
+    "accessKeyNameRequired": "Enter an access key name.",
+    "mcpClientIdMissing": "This MCP client cannot be managed because its identifier is missing."
+  },
+  "header": {
+    "eyebrow": "Workspace settings",
+    "title": "Settings",
+    "description": "Manage workspace rules, AI behavior, and outside tool access."
+  },
+  "navigationLabel": "Settings sections",
+  "nav": {
+    "pickerTitle": "Go to a settings section",
+    "searchLabel": "Filter settings sections",
+    "searchPlaceholder": "Filter sections",
+    "searchClear": "Clear filter",
+    "noMatches": "No section matches that",
+    "noMatchesHint": "Clear the filter to see every section.",
+    "discardDraftsConfirm": "You have unsaved changes here. Leave without saving them?",
+    "matchedTab": "Goes to {{tab}}"
+  },
+  "sectionGroups": {
+    "workspace": "This workspace",
+    "account": "Your account",
+    "system": "System administration",
+    "adminChip": "System admin",
+    "adminChipTitle": "Server-wide setting, visible to server admins only — not scoped to this workspace."
+  },
+  "sections": {
+    "workspace": {
+      "label": "Workspace",
+      "description": "Name, owner, language, and visibility."
+    },
+    "policies": {
+      "label": "Content policies",
+      "description": "Library uploads, citations, AI instructions, review routing, and lint."
+    },
+    "library": {
+      "label": "Library policy",
+      "description": "Upload limits, formats, and processing behavior."
+    },
+    "citationWrite": {
+      "label": "Citation & write policy",
+      "description": "Answer citations and page publishing."
+    },
+    "agentInjection": {
+      "label": "Agent injection",
+      "description": "What rules and Agent pages reach the AI.",
+      "previewBadge": "Preview",
+      "previewDescription": "Preview: this area is still being refined."
+    },
+    "review": {
+      "label": "Review policy",
+      "description": "Risk scoring and per-risk auto-approval."
+    },
+    "lint": {
+      "label": "Lint",
+      "description": "Choose which quality checks run for this workspace."
+    },
+    "mcp": {
+      "label": "MCP access",
+      "description": "Every connection on your account, and which workspaces each one reaches.",
+      "badgeTitle": "{{count}} personal connections (access keys + OAuth apps)"
+    },
+    "members": {
+      "label": "Members & access",
+      "description": "Members, roles, pending join requests, discoverability, and public access."
+    },
+    "users": {
+      "label": "User accounts",
+      "description": "Search every account on this server and start account recovery."
+    },
+    "jobs": {
+      "label": "Jobs",
+      "description": "Background job queue, failures, and retries."
+    },
+    "attachments": {
+      "label": "Attachments",
+      "description": "Files uploaded into pages, including unused uploads."
+    },
+    "deployment": {
+      "label": "Deployment",
+      "description": "Domain, TLS, and service status. Changes are made with the dtxwiki CLI."
+    }
+  },
+  "crossLinks": {
+    "toUsers": "This is who can reach this workspace. To find a person across every workspace on the server, or to start account recovery, go to",
+    "toMembers": "This reads every account on the server. To change who is in this workspace, or their roles, go to"
+  },
+  "workspaceMembers": {
+    "title": "Members",
+    "description": "Add existing active users, assign roles, and review requests for this workspace.",
+    "readOnlyDescription": "Your membership applies to the current workspace. Owners manage the member list.",
+    "readOnlyRole": "Your role is {{role}}. Member management is available to workspace owners.",
+    "wholeWorkspaceNotice": "Membership grants access to the whole workspace, not to a single folder or page.",
+    "memberCount_one": "{{count}} member",
+    "memberCount_other": "{{count}} members",
+    "loadingWorkspace": "Loading workspace access",
+    "workspaceUnavailable": "Workspace access is unavailable.",
+    "loadingMembers": "Loading members…",
+    "loadingMore": "Loading…",
+    "loadMore": "Load more",
+    "joined": "Joined {{date}}",
+    "personalAnchor": "Personal workspace owner",
+    "you": "You",
+    "roleFor": "Role for {{name}}",
+    "remove": "Remove",
+    "roles": {
+      "all": "All roles",
+      "viewer": "Viewer",
+      "editor": "Editor",
+      "owner": "Owner"
+    },
+    "add": {
+      "email": "Exact login email",
+      "emailPlaceholder": "person@example.com",
+      "role": "Initial role",
+      "action": "Add member",
+      "adding": "Adding…",
+      "fromSearchTitle": "Add exact login email",
+      "fromSearchReady": "Add {{email}} as a workspace member.",
+      "fromSearchHint": "Enter a complete login email above to add an existing active user."
+    },
+    "filters": {
+      "query": "Find or add members",
+      "queryPlaceholder": "Name or exact login email",
+      "queryHelp": "Search the current member list. A complete login email can also be added from the same field.",
+      "role": "Role filter",
+      "search": "Search",
+      "active": "Showing {{query}} · {{role}}",
+      "anyQuery": "all members"
+    },
+    "empty": {
+      "title": "No members match",
+      "description": "Change the search or role filter and try again."
+    },
+    "notice": {
+      "added": "{{email}} was added to this workspace.",
+      "alreadyMember": "{{email}} is already a member; no role was changed.",
+      "roleChanged": "{{name}} is now {{role}}.",
+      "removed": "{{name}} was removed from this workspace."
+    },
+    "error": {
+      "selfRemovalRefreshFailed": "Access was removed. Reloading your fallback workspace failed; retry from the workspace switcher."
+    },
+    "leave": {
+      "action": "Leave workspace",
+      "title": "Leave this workspace?",
+      "warning": "You will lose access to all of {{workspace}}.",
+      "body": "You can request to join again later if the workspace allows join requests, or ask an owner to re-add you.",
+      "confirm": "Leave workspace"
+    },
+    "join": {
+      "title": "Join requests",
+      "description": "Approval grants Viewer access to the whole workspace.",
+      "count_one": "{{count}} pending",
+      "count_other": "{{count}} pending",
+      "loading": "Loading join requests…",
+      "requested": "Requested {{date}} · attempt {{attempt}}",
+      "approve": "Approve as Viewer",
+      "reject": "Reject",
+      "updating": "Updating…",
+      "empty": {
+        "title": "No pending requests",
+        "description": "New requests appear here when the join policy allows requests."
+      },
+      "notice": {
+        "approved": "{{name}} was approved as a Viewer.",
+        "alreadyMember": "{{name}} is already a member; no role was changed.",
+        "rejected": "{{name}}'s request was rejected."
+      }
+    },
+    "dialog": {
+      "firstShareTitle": "Share the whole workspace?",
+      "firstShareWarning": "Adding {{email}} shares all of {{workspace}} with that member.",
+      "firstShareScope": "This is not page-level sharing. The member receives the selected role across the entire workspace.",
+      "collaborativeRecommendation": "If you only want to share part of your work, create a new collaborative Workspace and move or copy that work there.",
+      "renamePersonalRecommendation": "Recommended: rename the Personal Workspace before sharing so its shared purpose is clear.",
+      "renameRecommendation": "Recommended: use a workspace name that makes its shared purpose clear.",
+      "ownerTitle": "Grant Owner access?",
+      "ownerWarning": "{{name}} will be able to manage members, sharing, policies, and other owners.",
+      "ownerBody": "Owner access applies to the whole workspace. Only grant it to someone who should control this workspace.",
+      "removeTitle": "Remove this member?",
+      "removeBody": "{{name}} will lose access to all of {{workspace}}. Their landing workspace will move to another accessible workspace, or clear if none remains.",
+      "selfDemoteTitle": "Give up Owner access?",
+      "selfDemoteWarning": "You will become {{role}} in {{workspace}} and lose owner controls immediately.",
+      "selfDemoteBody": "Another owner will need to promote you again to restore Owner access — this cannot be undone from here.",
+      "cancel": "Cancel",
+      "updating": "Updating…",
+      "confirmShare": "Share whole workspace",
+      "confirmSelfDemote": "Give up Owner access",
+      "confirmOwner": "Grant Owner access",
+      "confirmRemove": "Remove member"
+    }
+  },
+  "workspaceAccess": {
+    "title": "Discovery, joining & web publishing",
+    "description": "Set who can discover this workspace and how signed-in users can ask to join.",
+    "readOnlyDescription": "These settings apply to the whole workspace. Workspace owners can change them.",
+    "readOnlyRole": "Your role is {{role}}. Access settings are read-only for you.",
+    "wholeWorkspaceNotice": "These settings control the workspace boundary. They do not grant access to an individual page.",
+    "loading": "Loading access settings…",
+    "unavailable": "Access settings are unavailable.",
+    "staleRefreshed": "Access settings changed elsewhere. The latest values were loaded; review your change again.",
+    "separateControlsNotice": "Visibility and join policy are separate controls; neither replaces membership.",
+    "reviewChange": "Review change",
+    "policyGuide": {
+      "title": "How public access works",
+      "description": "Discovery, membership, and web publishing are independent gates.",
+      "publicWorkspace": {
+        "title": "Public workspace",
+        "description": "Anyone can discover the public profile. Internal pages still require workspace membership."
+      },
+      "joinRequest": {
+        "title": "Join request",
+        "description": "A signed-in non-member asks to join. Only owner approval creates a Viewer membership."
+      },
+      "publicPage": {
+        "title": "Published web page",
+        "description": "Anonymous visitors see only a published Context version that an editor separately publishes to the web."
+      }
+    },
+    "visibility": {
+      "title": "Visibility",
+      "description": "Controls who can discover the workspace. Membership still controls authenticated access.",
+      "options": {
+        "private": {
+          "label": "Private",
+          "description": "Only members can discover and open it. Join requests are disabled."
+        },
+        "team": {
+          "label": "Team",
+          "description": "Signed-in users on this server can discover it; membership is still required to enter."
+        },
+        "public": {
+          "label": "Public",
+          "description": "Anyone can discover its public profile. Internal content still requires membership; anonymous visitors see only pages separately published to the web."
+        }
+      }
+    },
+    "joinPolicy": {
+      "title": "Join policy",
+      "description": "Controls how signed-in non-members can obtain membership.",
+      "privateForcesInvite": "Private visibility forces Invite only and closes pending requests when saved.",
+      "options": {
+        "invite_only": {
+          "label": "Invite only",
+          "description": "Owners add an existing active user by exact email."
+        },
+        "request": {
+          "label": "Request to join",
+          "description": "Signed-in non-members can ask to join. If an owner approves, they become Viewer members."
+        }
+      }
+    },
+    "counts": {
+      "publicPages": "pages currently marked public"
+    },
+    "notice": {
+      "saved": "Access settings saved. {{closed}} pending requests closed; {{cleared}} public-page flags cleared."
+    },
+    "dialog": {
+      "title": "Confirm access change",
+      "workspace": "This changes the boundary for {{workspace}}.",
+      "closesRequests_one": "{{count}} pending join request will be closed.",
+      "closesRequests_other": "{{count}} pending join requests will be closed.",
+      "keepsRequests_one": "{{count}} pending join request will remain open.",
+      "keepsRequests_other": "{{count}} pending join requests will remain open.",
+      "clearsPages_one": "The public flag will be cleared from {{count}} page, removing anonymous page/upload/index exposure.",
+      "clearsPages_other": "The public flag will be cleared from {{count}} pages, removing anonymous page/upload/index exposure.",
+      "keepsPages_one": "{{count}} public-page flag will remain unchanged.",
+      "keepsPages_other": "{{count}} public-page flags will remain unchanged.",
+      "forcesInviteOnly": "Private visibility forces the join policy to Invite only.",
+      "wholeWorkspaceWarning": "This change applies to the entire workspace and can immediately reduce discovery or public access.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "confirm": "Confirm and save"
+    }
+  },
+  "setup": {
+    "loading": "Loading deployment status",
+    "loadError": "Failed to load deployment status",
+    "subtitle": "Read-only. To change a value, run the shown command in a terminal on the server — the app cannot edit /etc itself.",
+    "systemScopeNote": "These are dtxWiki SERVER settings — they apply to the whole instance (all workspaces), not just this workspace. Server admins only.",
+    "updateAvailable": "dtxWiki {{latest}} is available (current {{current}}). Run 'dtxwiki update' on the server to upgrade.",
+    "tlsNotReady": "HTTPS is not configured. Set a public https:// URL and let the reverse proxy obtain a certificate (DNS + ports 80/443 must reach this server).",
+    "notConfigured": "Not configured",
+    "commandsTitle": "Change configuration",
+    "commandsHint": "Config source of truth: {{path}}",
+    "copy": "Copy command",
+    "copyNamed": "Copy {{title}} command",
+    "copied": "Copied",
+    "selected": "Selected - press Ctrl+C",
+    "copyUnavailable": "Copy unavailable - select the command text",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "seconds_one": "{{count}} second",
+    "seconds_other": "{{count}} seconds",
+    "source": {
+      "environment": "Environment override",
+      "default": "Built-in default"
+    },
+    "fields": {
+      "oauthAccessLifetime": "OAuth access lifetime",
+      "oauthRefreshLifetime": "OAuth refresh lifetime",
+      "oauthSliding": "Extend refresh sessions while in use",
+      "publicUrl": "Public URL",
+      "mcpUrl": "MCP endpoint",
+      "mode": "Mode",
+      "tls": "HTTPS / TLS",
+      "tlsMode": "TLS mode",
+      "oauth": "MCP OAuth",
+      "oauthSelfRegistration": "OAuth client self-registration",
+      "health": "Health"
+    },
+    "oauthUrlClientIdAvailable": "OAuth with HTTPS URL client identifiers remains available.",
+    "signup": {
+      "group": "Identity & access",
+      "title": "Self-service sign-up",
+      "description": "Controls whether a new visitor can create an account. Existing users and workspace access are unchanged.",
+      "allowed": "Allowed",
+      "blocked": "Not allowed",
+      "configured": "Configured value",
+      "source": "Setting source",
+      "explicit": "Explicit environment",
+      "modeDefault": "Mode default",
+      "defaults": "Mode defaults",
+      "defaultsValue": "solo_local: {{soloLocal}} · solo_remote: {{soloRemote}} · team: {{team}}",
+      "impact": "Impact",
+      "impactValue": "Service restart required. Only new sign-ups change; existing sessions and memberships are preserved.",
+      "showInstructions": "Show setup method",
+      "hideInstructions": "Hide setup method",
+      "systemd": "Systemd installation",
+      "compose": "Docker Compose installation"
+    },
+    "recovery": {
+      "group": "Identity & Recovery",
+      "title": "Password recovery",
+      "description": "Recovery availability, mail delivery, canonical HTTPS URL, and outbox health for this server.",
+      "method": "Password recovery",
+      "mode": {
+        "email": "Email",
+        "admin_assisted": "Admin support",
+        "disabled": "Disabled"
+      },
+      "mailProvider": "Mail provider",
+      "smtp": "SMTP",
+      "mailStatus": "Mail configuration",
+      "mail": {
+        "configured": "Configured",
+        "not_configured": "Not configured",
+        "incomplete": "Incomplete"
+      },
+      "lastObservedDelivery": "Last observed mail delivery",
+      "deliveryObservation": {
+        "not_configured": "Not configured",
+        "not_checked": "No delivery observed",
+        "succeeded": "Last delivery succeeded",
+        "failed": "Last delivery failed"
+      },
+      "noDeliveryAttempt": "No delivery attempt recorded",
+      "fromAddress": "From address",
+      "smtpCredentials": "SMTP credentials",
+      "credentialsConfigured": "Configured (value hidden)",
+      "publicUrl": "Canonical public URL",
+      "adminSupport": "Admin-assisted links",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "outbox": "Delivery outbox",
+      "outboxValue": "{{queued}} queued · {{failed}} failed",
+      "worker": "Delivery worker",
+      "workerRequired": "Required",
+      "workerNotRequired": "Not required",
+      "failedDeliveries_one": "{{count}} recovery message failed. Check the worker and mail provider.",
+      "failedDeliveries_other": "{{count}} recovery messages failed. Check the worker and mail provider.",
+      "showInstructions": "Show setup method",
+      "hideInstructions": "Hide setup method",
+      "systemd": "Systemd installation",
+      "compose": "Docker Compose installation"
+    },
+    "health": {
+      "db": "Database",
+      "app_version": "App version",
+      "mcp": "MCP service",
+      "oauth_jwk": "OAuth signing key"
+    },
+    "healthStatus": {
+      "ok": "OK",
+      "n/a": "Not applicable",
+      "error": "Error",
+      "unsynced": "Unsynced",
+      "drift": "Drift",
+      "manager_missing": "Manager missing",
+      "ephemeral_unsafe": "Ephemeral (unsafe)",
+      "invalid": "Invalid"
+    },
+    "pill": {
+      "ready": "Ready",
+      "notReady": "Not ready",
+      "degraded": "Degraded",
+      "available": "Available",
+      "unavailable": "Unavailable"
+    },
+    "blast": {
+      "reload": "proxy reload",
+      "restart": "restart required",
+      "session_invalidation": "signs everyone out",
+      "token_invalidation": "re-auth all clients",
+      "data_migration": "migrate data first"
+    }
+  },
+  "setupScreen": {
+    "breadcrumb": "Setup",
+    "loading": "Loading Setup",
+    "loadError": "Failed to load Setup",
+    "eyebrow": "Get your workspace ready",
+    "title": "Setup",
+    "description": "Add the sources, pages, and rules your AI will use to answer.",
+    "status": {
+      "ready": "3 of 3 · Ready",
+      "pending": "0 of 3 · Pending",
+      "partial": "{{count}} of 3 · Partial"
+    },
+    "itemCount_one": "{{count}} item",
+    "itemCount_other": "{{count}} items",
+    "itemCountAtLeast": "{{count}}+ items loaded",
+    "callout": {
+      "allSetTitle": "All set. Try asking a question.",
+      "allSetBody": "Your workspace has sources, knowledge pages, and AI rules.",
+      "openAsk": "Open Ask",
+      "emptyTitle": "Library is empty. Start by adding a source.",
+      "emptyBody": "Even one PDF or page is enough to ask your first question.",
+      "addFirstSource": "Add your first source",
+      "partialTitle": "Keep going.",
+      "partialFallback": "Review the remaining setup items."
+    },
+    "cards": {
+      "library": {
+        "title": "Library",
+        "description": "Reference materials",
+        "ready": "Ready to cite",
+        "empty": "None yet · Add your first source",
+        "openAction": "Open Library",
+        "emptyAction": "Add source",
+        "nextStep": "Add source material so answers can cite real references."
+      },
+      "context": {
+        "title": "Knowledge pages",
+        "description": "Curated team knowledge",
+        "ready": "Ready for answers",
+        "empty": "None yet · Create a knowledge page",
+        "openAction": "Open Context",
+        "emptyAction": "Create page",
+        "nextStep": "Create a knowledge page to organize the team context."
+      },
+      "agent": {
+        "title": "AI rules",
+        "description": "How the AI should answer",
+        "ready": "Rules active",
+        "empty": "None yet · Add an AI rule",
+        "openAction": "Open Agent",
+        "emptyAction": "Add rule",
+        "nextStep": "Add an AI rule to control how answers are written."
+      }
+    },
+    "rules": {
+      "heading": "Workspace rules",
+      "review": "Review",
+      "open": "Open",
+      "workspaceTitle": "Workspace basics",
+      "workspaceBody": "Name, language, and visibility.",
+      "citationTitle": "Citation & write policy",
+      "citationBody": "How answers are cited and pages move through review.",
+      "agentTitle": "Agent injection",
+      "agentBody": "What workspace rules and Agent pages are sent to the AI.",
+      "mcpTitle": "Connect external AI tools (MCP)",
+      "mcpBody": "Generate an MCP key and copy setup commands."
+    }
+  },
+  "lint": {
+    "eyebrow": "Lint rules",
+    "description": "Choose which deterministic checks run for this workspace. Rules marked External source are supplied by external runs — shown for transparency, and not toggleable.",
+    "requiredSafeguard": "Required safeguard",
+    "externalSource": "External source",
+    "loading": "Loading lint rules…",
+    "loadError": "Failed to load lint rules.",
+    "saveError": "Failed to update the rule.",
+    "layer": {
+      "format": "Format",
+      "knowledge": "Knowledge",
+      "nav": "Navigation",
+      "maintenance": "Maintenance"
+    },
+    "autoFix": "Auto-fix safe formatting on save",
+    "openQueue": "Open lint queue",
+    "autoFixHint": "When a page is saved, deterministic formatting cleanups are applied — heading and list-marker spacing, trailing whitespace, extra blank lines, and table alignment. Code blocks, wording, and content are never changed.",
+    "enabledOfTotal": "{{enabled}} of {{total}} toggleable on",
+    "toggleLayerAria": "Toggle every {{layer}} rule",
+    "saved": "Saved",
+    "empty": "No lint rules",
+    "emptyHint": "This server reports no lint rules, so nothing runs when a page is saved."
+  },
+  "summary": {
+    "workspace": "The name, owner, and default language for this workspace.",
+    "library": "Control Library upload limits, formats, and safe processing behavior.",
+    "citation": "How strictly answers must cite supporting sources.",
+    "contextWrite": "When knowledge pages can be drafted and published.",
+    "agentInjection": "Choose which Agent pages and workspace rules are sent to the AI.",
+    "review": "Control review risk scoring, manual review thresholds, risk rules, and per-risk auto-approval delays."
+  },
+  "policy": {
+    "cardTitles": {
+      "workspace": "Workspace basics",
+      "library": "Library upload policy",
+      "citation": "Citation policy",
+      "context_write": "Context write policy",
+      "agent_injection": "Agent injection policy",
+      "review": "Review risk policy",
+      "lint": "Lint rules"
+    },
+    "workspace": {
+      "title": {
+        "label": "Workspace title",
+        "hint": "Shown across the app and in AI answers."
+      },
+      "name": {
+        "label": "Workspace title",
+        "hint": "Shown across the app and in AI answers."
+      },
+      "goal": {
+        "label": "Goal",
+        "hint": "The AI uses this to understand workspace purpose."
+      },
+      "defaultLanguage": {
+        "label": "Default language",
+        "hint": "Used when a question does not specify a language."
+      },
+      "owner": {
+        "label": "Owner",
+        "hint": "Person or team responsible for this workspace."
+      },
+      "decision": {
+        "label": "Review decision",
+        "hint": "How workspace policy changes are handled."
+      },
+      "askRetrievalMode": {
+        "label": "Ask retrieval mode",
+        "hint": "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."
+      }
+    },
+    "library": {
+      "allowedSources": {
+        "label": "Allowed Library inputs",
+        "hint": "Source patterns the AI librarian should accept when importing. Advisory — not enforced at upload time.",
+        "empty": "No allowed sources yet"
+      },
+      "deniedSources": {
+        "label": "Denied Library inputs",
+        "hint": "Patterns the AI librarian must refuse. Takes precedence over allowed rules. Advisory — not enforced at upload time.",
+        "empty": "No denied sources"
+      },
+      "maxUploadBytes": {
+        "label": "Manual upload limit",
+        "hint": "Files larger than this are rejected before import."
+      },
+      "sourcePatterns": {
+        "label": "Allowed Library input patterns",
+        "hint": "URL or connector patterns accepted by this workspace."
+      },
+      "trustLevel": {
+        "label": "Trust level",
+        "hint": "Default review level for new materials."
+      },
+      "decision": {
+        "label": "Review decision",
+        "hint": "How Library policy changes are handled."
+      }
+    },
+    "libraryUpload": {
+      "title": "Library upload policy",
+      "description": "Control what can be uploaded, how large it may be, and what happens when conversion is unavailable. More specific format or family limits replace the Workspace default; server hard limits still apply.",
+      "saved": "Library upload policy saved",
+      "capabilitiesLoadFailed": "Current server format capabilities could not be verified. Configured values remain visible, but editing is disabled until the policy is reloaded.",
+      "retryCapabilities": "Reload capabilities",
+      "invalidLimit": "The Workspace default must be 1 KB–50 MB. Family and individual format limits may be 1 KB–4 GiB.",
+      "invalidPolicy": "Use a 1 KB–50 MB Workspace default and 1 KB–4 GiB family or individual limits, then resolve duplicate values.",
+      "configured": "Configured: {{value}}",
+      "effective": "Effective: {{value}} — limited by {{source}}",
+      "outer": {
+        "title": "Workspace upload limit",
+        "label": "Manual upload limit",
+        "hint": "This is the default for formats without a more specific setting. Family and exact-format defaults may be higher or lower; server hard limits still apply."
+      },
+      "families": {
+        "title": "Format families",
+        "hint": "Families are optional format-specific defaults. A family may be higher or lower than the Workspace default; formats outside a family use the Workspace default.",
+        "add": "Add family",
+        "addTitle": "Add format family",
+        "editTitle": "Edit format family",
+        "editorHint": "Start from a preset or build a family from Workspace formats.",
+        "startLabel": "Start from",
+        "startPreset": "Preset",
+        "startCustom": "Custom",
+        "presetLabel": "Family preset",
+        "presetInUse": "{{preset}} — In use",
+        "presetModified": "Modified from preset",
+        "restorePreset": "Restore preset defaults",
+        "noPresets": "No verified family presets are available from this server.",
+        "presetUnavailable": "This saved preset snapshot is no longer offered by the server. You can still edit it or restore its saved baseline.",
+        "savedPresetSnapshot": "Saved preset snapshot (revision {{revision}})",
+        "selectCurrentPreset": "Select a current preset",
+        "nameLabel": "Format family name",
+        "extensionsLabel": "Extensions",
+        "extensionsFor": "Extensions in {{family}}",
+        "extensionsPlaceholder": "Type .docx or a format name",
+        "aliasHint": "Registered extensions add existing formats; unknown extensions continue to format registration.",
+        "addFormatsLabel": "Add formats",
+        "addFormatsHint": "Enter an extension, format name, or alias. Registered formats are reused automatically; an unknown extension can be registered here.",
+        "findRegisteredLabel": "Add formats",
+        "findRegisteredPlaceholder": "Extension or format name",
+        "findRegisteredHint": "Registered extensions add existing formats; unknown extensions continue to format registration.",
+        "findRegisteredCustomOption": "Register '{{extension}}' as a new format…",
+        "blockedReason": "Finish the highlighted extension edit before saving.",
+        "revealBlockedReason": "Review it →",
+        "aliasGroupsLabel": "Format alias groups",
+        "aliasGroupsHint": "Every format added to this Family appears here. Preset members are marked; custom names and all extension aliases are editable. Alias changes apply Workspace-wide.",
+        "removeFormat": "Remove",
+        "removeFormatLabel": "Remove {{format}} from this family",
+        "noFormats": "Use Add formats to choose a registered format or register a custom format.",
+        "limitLabel": "Upload limit",
+        "useWorkspaceLimit": "Use workspace upload limit",
+        "workspaceLimitReference": "Workspace upload limit: {{value}}",
+        "customLimitLabel": "Family upload limit",
+        "customLimitHint": "This format-specific default may be higher or lower than the Workspace default.",
+        "hardCapHint": "{{value}} is the most you can set here — this dtxWiki server won't accept more for these formats.",
+        "hardCapAdminLink": "Raise it in deployment settings →",
+        "hardCapAdminNote": "A server admin can raise it in the server's deployment settings.",
+        "workspaceDefault": "Workspace default",
+        "limitSummary": "Configured {{configured}} · effective {{effective}} ({{source}})",
+        "presetBadge": "Preset",
+        "customBadge": "Custom",
+        "emptyTitle": "No format families",
+        "empty": "All supported formats use the Workspace default limit unless a family is added.",
+        "editLabel": "Edit {{family}}",
+        "removeLabel": "Remove {{family}}",
+        "update": "Update family",
+        "customFormat": {
+          "register": "Register {{extension}} as a custom format",
+          "title": "Register custom format",
+          "editTitle": "Edit custom format",
+          "hint": "Group aliases that identify the same format, such as .md and .markdown.",
+          "name": "Format name",
+          "extensions": "Extension aliases",
+          "extensionsPlaceholder": ".foo, .bar",
+          "extensionsHint": "Add 1–{{count}} aliases. Press Enter or comma after each extension.",
+          "managerTitle": "Workspace custom formats",
+          "managerHint": "Browse, edit, or delete Workspace custom formats and add them to this family.",
+          "addAction": "Register custom format",
+          "manageAction": "Manage custom formats ({{count}})",
+          "integratedListLabel": "Registered custom formats",
+          "empty": "No Workspace custom formats are registered yet.",
+          "usedBy": "Used by {{families}}",
+          "hasIndividualLimit": "Remove its individual format limit before deleting it.",
+          "selected": "In this family",
+          "addToFamily": "Add to family",
+          "addToFamilyLabel": "Add {{format}} to this family",
+          "editLabel": "Edit {{format}}",
+          "delete": "Delete format",
+          "deleteLabel": "Delete {{format}}",
+          "newRequiresFamily": "New custom formats must be saved with this family. Add/update the family to keep them.",
+          "familyChangesRequireSave": "Family changes are also pending. Add/update the family to apply both changes together.",
+          "applyHint": "Apply edits or deletions to pending Settings changes without adding or updating this family.",
+          "apply": "Apply format changes",
+          "orAddInBulk": "or add several groups in bulk",
+          "rawSource": "Raw source (add / register)",
+          "rawSourceHint": "Registered aliases add existing formats; unknown groups register Workspace custom formats (up to {{count}} characters).",
+          "bulkAdd": "Add or register groups",
+          "add": "Register format",
+          "update": "Update format",
+          "errors": {
+            "invalidName": "Use a name without control characters.",
+            "invalidExtension": "Invalid extension: {{extensions}}",
+            "extensionTooLong": "{{extension}} is too long. Extensions can contain at most {{count}} characters including the leading dot.",
+            "unsafeExtension": "Blocked extension: {{extensions}}. Executable, active-content, archive, and macro-enabled aliases cannot be registered.",
+            "extensionConflict": "{{extension}} already belongs to {{format}} ({{aliases}}).",
+            "stableOwnerTransfer": "{{extension}} is reserved by {{format}}. Remove it there before assigning it here.",
+            "stableOwnerTransferDetail": "{{extension}} belonged to {{format}} when these Settings were loaded. Save its removal first, then reopen Settings to assign it to another custom format.",
+            "nameConflict": "A custom format named '{{format}}' already exists.",
+            "stableNameOwnerTransfer": "The name '{{name}}' belonged to {{format}} when these Settings were loaded. Save that format's rename or deletion first, then reopen Settings before assigning the name to another custom format.",
+            "tooManyExtensions": "A format can have up to {{count}} extension aliases.",
+            "formatLimit": "This Workspace can register up to {{count}} custom formats."
+          }
+        },
+        "aliasGroup": {
+          "preset": "Preset",
+          "presetHint": "This alias group came from the selected family preset.",
+          "editName": "Edit alias group {{format}}",
+          "editNameLabel": "Edit alias group name",
+          "extensionsLabel": "Extensions for {{format}}",
+          "extensionsHint": "Type an extension and press Enter or comma to add it.",
+          "extensionsPlaceholder": "+ Add extension",
+          "extensionsLabelShort": "Extensions",
+          "duplicateExtension": "{{extension}} is already in this group.",
+          "editExtension": "Edit extension {{extension}}",
+          "removeExtension": "Remove extension {{extension}}",
+          "lastExtensionHint": "An alias group must keep at least one extension.",
+          "stableOwnerTransfer": "{{extension}} belonged to {{format}} when this dialog opened. Save its removal first, then reopen Settings before assigning it here."
+        },
+        "inputErrors": {
+          "duplicate_extension": "{{value}} appears more than once. Keep each extension in one alias group.",
+          "duplicate_label": "{{value}} is used by more than one alias group.",
+          "empty_input": "Enter at least one extension.",
+          "invalid_extension": "{{value}} is not a valid extension. Use letters, numbers, _, +, or -.",
+          "invalid_label": "Enter a valid alias group name.",
+          "invalid_syntax": "Use comma-separated extensions or [name](.ext1,.ext2).",
+          "too_many_extensions": "One alias group can contain up to {{count}} extensions.",
+          "rawTooLong": "Raw source can contain up to {{count}} characters.",
+          "unsafeExtension": "{{extensions}} cannot be registered because executable, active-content, archive, and macro-enabled aliases are blocked.",
+          "tooManyGroups": "This source would register {{count}} new groups, but only {{remaining}} Workspace custom format slots remain.",
+          "ambiguousExtension": "{{extension}} matches more than one registered format ({{formats}}). Choose a specific suggestion.",
+          "mixedOwners": "All extensions in one alias group must belong to the same format. Split registered and new extensions into separate groups.",
+          "registeredName": "{{extensions}} already belong to {{format}}. Use that registered group name instead of {{label}}."
+        },
+        "errors": {
+          "extensionConflict": "{{extension}} is already in '{{family}}'. Remove it there before adding it here.",
+          "duplicateName": "A family named '{{family}}' already exists.",
+          "conflictTitle": "Resolve duplicate formats before saving",
+          "conflictFamily": "Already used by {{family}}",
+          "invalidLimit": "The family limit must be between 1 KB and 4 GiB.",
+          "familyLimit": "This MVP supports up to {{count}} format families."
+        }
+      },
+      "familyPresets": {
+        "names": {
+          "text": "Text",
+          "document": "Documents",
+          "image": "Images",
+          "audio": "Audio",
+          "video": "Video",
+          "data": "Data"
+        }
+      },
+      "categories": {
+        "noExtensions": "No registered extension",
+        "moreExtensions": "+{{count}} more",
+        "showExtraExtensions": "Show {{count}} more extensions for {{family}}",
+        "hideExtraExtensions": "Hide extra extensions for {{family}}",
+        "hideExtensions": "Show fewer"
+      },
+      "overrides": {
+        "label": "{{format}} format override",
+        "add": "Set an individual limit",
+        "change": "Change individual limit",
+        "remove": "Use inherited default"
+      },
+      "advanced": {
+        "title": "Individual format limits",
+        "count": "{{count}} configured",
+        "hint": "An individual format limit overrides its family and the Workspace default. Search {{count}} available formats to add one.",
+        "search": "Add an individual format limit",
+        "searchPlaceholder": "Search by name or extension",
+        "add": "Add",
+        "addLabel": "Add an individual limit for {{format}}",
+        "noSearchResults": "No file formats match this search.",
+        "empty": "No individual format limits.",
+        "inherited": "Family or Workspace default",
+        "remove": "Remove limit",
+        "removeLabel": "Remove the individual limit for {{format}}",
+        "loadMore": "Show {{remaining}} more formats"
+      },
+      "states": {
+        "ready": "Ready",
+        "validator_unavailable": "validator unavailable",
+        "denied": "Blocked",
+        "available": "Available",
+        "available_after_validation": "Available after validation",
+        "stored_unconverted": "Original only",
+        "degraded": "Degraded",
+        "unavailable": "Unavailable"
+      },
+      "reasons": {
+        "deployment_ingest_disabled": "Uploads are temporarily unavailable on this deployment.",
+        "validator_unavailable": "A safe validator is not available for this file type.",
+        "policy_disabled": "This file type is blocked by policy.",
+        "converter_unavailable": "The original can be stored, but document conversion is not available.",
+        "stored_without_converter": "The original is stored without document conversion.",
+        "unknown": "This file type is not currently available."
+      },
+      "behavior": {
+        "title": "Processing behavior",
+        "hint": "This choice does not weaken format validation or converter safety limits.",
+        "storeWithoutConverter": "Store a verified original even when conversion is unavailable",
+        "discoveryReview": "Require review before discovered sources are added"
+      },
+      "sources": {
+        "workspace": "workspace limit",
+        "family": "family limit",
+        "format": "format override",
+        "instance": "deployment limit"
+      },
+      "fields": {
+        "builtin_format_overrides": "Built-in format aliases",
+        "format_families": "Format families",
+        "custom_formats": "Workspace custom formats",
+        "max_upload_bytes": "Workspace upload limit",
+        "format_overrides": "Format overrides",
+        "allow_store_without_converter": "Store without converter"
+      }
+    },
+    "citation": {
+      "strictness": {
+        "label": "Citation strictness",
+        "hint": "How strongly answers must cite Library material."
+      },
+      "acceptedCitationTypes": {
+        "label": "Citable Library input types",
+        "hint": "Source types that may appear in answers."
+      },
+      "decision": {
+        "label": "Review decision",
+        "hint": "How citation policy changes are handled."
+      }
+    },
+    "contextWrite": {
+      "draftOnly": {
+        "label": "Drafts only",
+        "hint": "Prevents new pages from being published directly."
+      },
+      "publishRequiresReview": {
+        "label": "Review required",
+        "hint": "Requires review before a draft can go live."
+      },
+      "decision": {
+        "label": "Review decision",
+        "hint": "How page publishing policy changes are handled."
+      },
+      "title": "Publishing a knowledge page",
+      "lintTitle": "Lint errors force review",
+      "lintBody": "An unclosed code fence or frontmatter block sends the write to the review queue instead of publishing it.",
+      "openLint": "Open Lint rules",
+      "reviewTitle": "Review policy decides the rest",
+      "reviewBody": "Risk thresholds, whether agent writes always wait for a person, and per-risk auto-approval delays.",
+      "openReview": "Open Review policy"
+    },
+    "agentInjection": {
+      "bundleTtlDefaultSeconds": {
+        "label": "Reference refresh interval",
+        "hint": "How long dtxWiki can reuse the AI reference set before rebuilding it."
+      },
+      "bundleTtlMaxSeconds": {
+        "label": "Maximum reference reuse",
+        "hint": "Must be equal to or longer than the refresh interval."
+      },
+      "agentGuide": {
+        "label": "Agent guide inclusion",
+        "hint": "When agent guide pages (system prompt, rules, instructions) are sent to the AI."
+      },
+      "persona": {
+        "label": "Persona inclusion",
+        "hint": "When persona pages are included."
+      },
+      "skill": {
+        "label": "Skill inclusion",
+        "hint": "When skill pages are included."
+      },
+      "memory": {
+        "label": "Memory inclusion",
+        "hint": "When memory pages are included."
+      },
+      "decision": {
+        "label": "Review decision",
+        "hint": "How AI instruction changes are handled."
+      }
+    },
+    "review": {
+      "preset": {
+        "label": "Policy preset",
+        "hint": "Choose a baseline risk posture for review routing."
+      },
+      "alwaysForAiAuthored": {
+        "label": "Review what agents write",
+        "hint": "Hold every write that arrives over MCP, OAuth or a token until someone approves it. Turn this off and agent writes publish the way a person's do, still recorded with the policy that allowed them."
+      },
+      "reconciliationReminder": {
+        "label": "Reconciliation reminder",
+        "hint": "Notify workspace owners when a reconciliation branch remains unresolved for this many hours."
+      },
+      "reconciliationAttention": {
+        "label": "Reconciliation attention window",
+        "hint": "Collapse an unresolved reconciliation branch from the default Review filter after this many days without deleting it."
+      },
+      "reviewFromRisk": {
+        "label": "Manual review from",
+        "hint": "Changes at or above this risk level enter the review queue. Auto-approval rules, if any, then act on what is queued."
+      },
+      "contextDraftCreate": {
+        "label": "New Context draft",
+        "hint": "Default risk for a newly drafted Context page."
+      },
+      "contextFullRewrite": {
+        "label": "Full Context rewrite",
+        "hint": "Default risk when an edit replaces most of a Context page."
+      },
+      "contextIngressReview": {
+        "label": "Imported Context needing review",
+        "hint": "Default risk for imported Context proposals that require review."
+      },
+      "agentSensitiveDraft": {
+        "label": "Sensitive Agent draft",
+        "hint": "Default risk for sensitive Agent content drafts."
+      },
+      "treeMutation": {
+        "label": "Tree structure change",
+        "hint": "Default risk for workspace tree mutations."
+      },
+      "presetValue": {
+        "conservative": "Conservative",
+        "balanced": "Balanced",
+        "fast_moving": "Fast-moving",
+        "custom": "Custom"
+      },
+      "presetHint": {
+        "conservative": "Routes more changes through manual review.",
+        "balanced": "Keeps routine edits moving while protecting risky changes.",
+        "fast_moving": "Uses fewer manual review gates for trusted workflows.",
+        "custom": "Shown when individual risk fields differ from a preset."
+      },
+      "riskValue": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "riskRules": {
+        "title": "Risk rules",
+        "description": "Escalation signals are managed by the review policy and shown as structured JSON.",
+        "show": "Show risk rules JSON"
+      },
+      "autoApproveByRisk": {
+        "title": "Auto-approve by risk",
+        "description": "Applies to items already in the review queue. Set the whole-day delay (0 = no wait) before each auto-approval.",
+        "highReason": "Auto-approving high-risk changes skips human review. Acknowledge the risk below to enable it.",
+        "highDangerAck": "Danger noted — I understand auto-approving high-risk changes skips human review.",
+        "rowHint": "Allow automatic approval and set the whole-day delay before it triggers.",
+        "fromRiskLocked": "To allow {{risk}} auto-approval, first raise \"Manual review from\" to {{risk}} or higher (currently {{fromRisk}}).",
+        "fromRiskConflict": "{{risk}} auto-approval exceeds \"Manual review from\" ({{fromRisk}}). Turn it off here or raise the manual review level first.",
+        "delay": "Delay days",
+        "allowed": "Allowed",
+        "saved": "Auto-approval rules saved"
+      }
+    },
+    "duration": {
+      "hours": "Hours",
+      "minutes": "Minutes",
+      "seconds": "Seconds",
+      "cap": "Maximum {{hours}} hours (1 year)."
+    },
+    "byteSize": {
+      "amount": "Amount",
+      "unit": "Unit",
+      "unitLabel": "{{label}} unit"
+    },
+    "defaultPolicy": {
+      "label": "No custom values",
+      "hint": "The workspace is using server defaults for this rule group."
+    }
+  },
+  "userRecovery": {
+    "headerEyebrow": "System settings",
+    "headerTitle": "Users",
+    "headerDescription": "Search instance users and start a secure account-recovery flow.",
+    "serverAdminOnlyNotice": "User search and account recovery are visible to server admins only.",
+    "eyebrow": "Server administration",
+    "title": "Account recovery",
+    "description": "Find an instance user and start a one-time recovery flow. You never choose or see the user's new password.",
+    "serverAdminOnly": "Server admin only",
+    "boundary": "A successful reset signs the user out of every browser session. PAT/MCP tokens are separate and are revoked only when selected below.",
+    "unlock": {
+      "title": "Unlock protected user search",
+      "description": "Re-enter your server-admin password before viewing the instance user directory.",
+      "password": "Your current password",
+      "action": "Unlock user search",
+      "unlocking": "Verifying…",
+      "unlocked": "Protected user search is unlocked until {{date}}.",
+      "shortTime": "the short verification window ends",
+      "error": "Your password was not accepted. Try again.",
+      "expired": "Your recent verification expired. Re-enter your password to search users again."
+    },
+    "searchLabel": "Search users",
+    "searchHint": "Email, display name, or workspace name",
+    "searchPlaceholder": "e.g. alex@example.com or Research",
+    "searchAction": "Search",
+    "searching": "Searching…",
+    "searchRequired": "Enter an email, display name, or workspace.",
+    "searchError": "User search failed. Try again.",
+    "resultCount_one": "{{count}} user found",
+    "resultCount_other": "{{count}} users found",
+    "noResults": "No users found",
+    "noResultsHint": "Check the search term and try again.",
+    "pagination": {
+      "label": "User search pages",
+      "previous": "Previous",
+      "next": "Next",
+      "position": "{{start}}–{{end}} of {{total}}"
+    },
+    "emailVerified": "Email verified",
+    "emailUnverified": "Email unverified",
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "roles": {
+      "viewer": "viewer",
+      "editor": "editor",
+      "owner": "owner"
+    },
+    "noWorkspaces": "No workspace memberships",
+    "inactiveHint": "Recovery is available only for active accounts.",
+    "startAction": "Start recovery",
+    "emailAction": "Send recovery email",
+    "linkAction": "Issue one-time link",
+    "emailUnverifiedActionHint": "Email delivery is unavailable because this address is not verified.",
+    "mailUnavailableActionHint": "Email delivery is unavailable because server mail recovery is not ready.",
+    "capabilityLoading": "Checking server recovery availability…",
+    "capabilityError": "Recovery availability could not be confirmed. Reload before issuing a reset.",
+    "adminRecoveryUnavailable": "Admin-assisted recovery is unavailable until the canonical HTTPS public URL is ready.",
+    "emailQueued": "Recovery email queued for {{email}}.",
+    "linkMissing": "The server did not return a recovery link. Issue a new reset.",
+    "linkDismissed": "The one-time link was hidden. Issue a new reset if another link is needed.",
+    "dialog": {
+      "eyebrow": "Confirm privileged action",
+      "title": "Issue a password reset?",
+      "description": "This starts recovery for {{email}}. The user chooses the new password; you cannot view it.",
+      "delivery": "Delivery method",
+      "email": "Send recovery email",
+      "emailHint": "Queues mail to the user's verified email address.",
+      "emailUnverifiedHint": "Unavailable because this email is not verified.",
+      "link": "Show one-time link",
+      "linkHint": "Shown once after confirmation. Send it through a separate secure channel.",
+      "mode": "Recovery mode",
+      "ordinary": "Ordinary recovery",
+      "ordinaryHint": "Browser sessions are revoked after reset; PAT/MCP tokens stay active by default.",
+      "compromise": "Suspected account compromise",
+      "compromiseHint": "Defaults to revoking every PAT/MCP token when the user completes the reset.",
+      "currentPassword": "Your current password",
+      "currentPasswordHint": "Re-enter your server-admin password to authorize this request.",
+      "revokeTokens": "Also revoke all PAT/MCP tokens",
+      "revokeTokensHint": "Use this for suspected account takeover. Browser sessions are always revoked after reset.",
+      "cancel": "Cancel",
+      "issuing": "Issuing reset…",
+      "confirm": "Issue password reset"
+    },
+    "linkDialog": {
+      "eyebrow": "One-time reveal",
+      "title": "Copy this recovery link now",
+      "warning": "This link is shown once. Closing this dialog permanently hides it; it cannot be reopened.",
+      "recipient": "Send the link to {{email}} through a separate secure channel.",
+      "linkLabel": "Recovery link",
+      "expires": "Expires {{date}}",
+      "tokensWillRevoke": "All PAT/MCP tokens will be revoked when this reset is completed.",
+      "copy": "Copy link",
+      "copied": "Recovery link copied.",
+      "selected": "Link selected. Press Ctrl+C to copy.",
+      "copyUnavailable": "Copy unavailable. Select the link manually.",
+      "close": "Close and hide link"
+    },
+    "errors": {
+      "reauthentication": "Your current password is incorrect. Try again.",
+      "unavailable": "That delivery method is unavailable. Close this dialog and explicitly choose an available recovery action.",
+      "generic": "Password reset could not be issued. Try again."
+    }
+  },
+  "jobs": {
+    "serverAdminOnlyNotice": "The background job queue is visible to server admins only.",
+    "eyebrow": "Server administration",
+    "workspaceEyebrow": "This workspace",
+    "title": "Jobs",
+    "description": "Background job queue depth, terminal failures, and jobs stuck past their worker lease.",
+    "refresh": "Refresh",
+    "loadError": "Could not load jobs.",
+    "summary": {
+      "queued": "Queued",
+      "running": "Running",
+      "failed": "Failed",
+      "leaseExpired": "Past lease"
+    },
+    "problemsOnly": "Show only failures and jobs past their lease",
+    "loading": "Loading jobs…",
+    "empty": "No jobs",
+    "emptyHint": "The queue is empty.",
+    "emptyProblems": "No problem jobs",
+    "emptyProblemsHint": "Nothing is failed or stuck past its lease right now.",
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "meta": "retry {{retryCount}} · updated {{updated}}",
+    "incompleteWarning_one": "{{count}} workspace could not be reached; the totals and list below may be missing its jobs.",
+    "incompleteWarning_other": "{{count}} workspaces could not be reached; the totals and list below may be missing their jobs.",
+    "retry": "Retry",
+    "retrying": "Retrying…",
+    "retryUnsupported": "This job type's failure also updated a domain record; it cannot be retried from here yet.",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…",
+    "retryError": {
+      "generic": "Retry could not be started. Try again.",
+      "notFound": "This job is no longer failed. Refresh the list."
+    }
+  },
+  "attachments": {
+    "serverEyebrow": "Server administration",
+    "workspaceEyebrow": "This workspace",
+    "title": "Attachments",
+    "description": "Images, audio and video uploaded into this workspace's pages.",
+    "listTitle": {
+      "all": "Every attachment",
+      "mine": "Your uploads",
+      "orphans": "Unused uploads"
+    },
+    "countText_one": "{{count}} file",
+    "countText_other": "{{count}} files",
+    "refresh": "Refresh",
+    "loading": "Loading attachments…",
+    "loadError": "Could not load attachments.",
+    "serverAdminFallbackNotice": "You are not a member of this workspace, so this lists unused uploads only, without previews or deletion. Join the workspace to manage its attachments.",
+    "editorOnlyNotice": "Attachments are managed by editors and owners. You can still see the files on each page you can read.",
+    "retentionNotice": "Unused uploads are reclaimed automatically once they pass the server's retention window. Deleting one here only brings that forward.",
+    "allScopeNotice": "Every attachment except those staged in someone else's unsaved draft — an open draft stays private to its author until it is saved.",
+    "mineScopeNotice": "These are the attachments you uploaded. Workspace owners can see every member's.",
+    "fileMeta": "{{mediaType}} · {{size}}",
+    "mineBadge": "You",
+    "state": {
+      "inUse": "In use",
+      "historyOnly": "History only",
+      "staging": "In an open draft",
+      "unused": "Unused"
+    },
+    "stateHint": {
+      "inUse": "Shown on the current published version of its page.",
+      "historyOnly": "Only referenced by older versions of its page.",
+      "staging": "Uploaded into an edit nobody has saved yet, so it is held.",
+      "unused": "No version of its page references it; the retention sweep will reclaim it."
+    },
+    "previewPrivate": "No preview: an unused upload stays readable only by the person who uploaded it.",
+    "previewNotAnImage": "No preview for this file type.",
+    "filters": {
+      "label": "Which attachments",
+      "all": "All",
+      "mine": "Mine",
+      "orphans": "Unused"
+    },
+    "search": {
+      "label": "Search attachments by file name",
+      "placeholder": "File name",
+      "clear": "Clear search",
+      "submit": "Search"
+    },
+    "size": {
+      "bytes": "{{value}} B",
+      "kilobytes": "{{value}} KB",
+      "megabytes": "{{value}} MB"
+    },
+    "associationState": {
+      "pending_install": "Pending install",
+      "tombstoned": "Removed"
+    },
+    "facts": {
+      "uploadedBy": "Uploaded by",
+      "page": "Page",
+      "uploadedAt": "Uploaded"
+    },
+    "actions": {
+      "delete": "Delete",
+      "deleting": "Deleting…",
+      "loadMore": "Load more",
+      "loadingMore": "Loading…"
+    },
+    "confirmDelete": {
+      "body": "Permanently delete {{filename}}? This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete attachment"
+    },
+    "errors": {
+      "changed": "Someone referenced or changed this attachment while the list was open. Refresh and try again.",
+      "inUse": "Someone is using this attachment right now, so it cannot be deleted.",
+      "delete": "Could not delete this attachment. Try again."
+    },
+    "empty": {
+      "all": "No attachments yet",
+      "mine": "You have not uploaded anything yet",
+      "orphans": "Nothing to clean up",
+      "search": "No attachment matches that name"
+    },
+    "emptyHint": {
+      "all": "Images added to any page in this workspace appear here.",
+      "mine": "Images you drop into a page you are editing appear here once they upload.",
+      "orphans": "Every uploaded file in this workspace is either published, in a draft, or still an upload in progress.",
+      "search": "Clear the search box to see every attachment again."
+    },
+    "expandPreview": "Expand {{filename}}",
+    "previewViewerTitle": "{{filename}} preview",
+    "closePreview": "Close preview"
+  },
+  "deployment": {
+    "serverAdminOnlyNotice": "These are dtxWiki server (system) settings, visible to server admins only. Ask a server admin, or grant access with `dtxwiki admin grant`.",
+    "headerEyebrow": "System settings",
+    "headerTitle": "Deployment",
+    "headerDescription": "dtxWiki server settings — these apply to all workspaces. Read-only here; change them with the dtxwiki CLI."
+  },
+  "mcp": {
+    "tokenRenamed": "The name \"{{requested}}\" was already in use, so this key was saved as \"{{saved}}\".",
+    "approvedApps": "Approved apps",
+    "connectedClients": "Connected MCP clients",
+    "accessKeys": "Access keys",
+    "appsUnit_one": "app",
+    "appsUnit_other": "apps",
+    "clientsUnit_one": "client",
+    "clientsUnit_other": "clients",
+    "keysUnit_one": "key",
+    "keysUnit_other": "keys"
+  },
+  "mcpClients": {
+    "filterLabel": "MCP client state",
+    "filter": {
+      "active": "Active",
+      "disabled": "Deactivated",
+      "all": "All"
+    },
+    "loading": "Loading MCP clients…",
+    "searchLabel": "Search MCP clients",
+    "searchPlaceholder": "Search client name or type",
+    "searchSubmit": "Search",
+    "searchClear": "Clear client search",
+    "retry": "Retry MCP client list",
+    "disableConfirm": {
+      "title": "Disable MCP client",
+      "body": "{{client}} stops accepting calls immediately. Re-enable any time.",
+      "cancel": "Cancel",
+      "confirm": "Disable client",
+      "busy": "Disabling…"
+    },
+    "deleteConfirm": {
+      "title": "Delete deactivated MCP client",
+      "body": "Delete {{client}} from this list? Its history stays available, but this binding cannot be reactivated. A new authorization or access key is required to connect again.",
+      "cancel": "Cancel",
+      "confirm": "Delete client",
+      "busy": "Deleting…"
+    }
+  },
+  "accessKeys": {
+    "filterLabel": "Access key state",
+    "filter": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "all": "All"
+    },
+    "loading": "Loading access keys…",
+    "loadFailed": "Could not load access keys.",
+    "noneForFilter": "No access keys match this state.",
+    "searchLabel": "Search access keys",
+    "searchPlaceholder": "Search key name",
+    "searchSubmit": "Search",
+    "searchClear": "Clear access key search",
+    "retry": "Retry access key list"
+  },
+  "pagination": {
+    "previous": "Previous",
+    "next": "Next",
+    "range": "{{start}}–{{end}} of {{total}}",
+    "cursorReset": "The list changed. Showing the first page."
+  },
+  "connections": {
+    "filterLabel": "Connection state",
+    "oauthFilterLabel": "OAuth app state",
+    "loadFailed": "Could not load MCP clients.",
+    "filter": {
+      "active": "Active",
+      "expired": "Expired",
+      "all": "All"
+    },
+    "hidden_one": "expired or revoked connection hidden",
+    "hidden_other": "expired or revoked connections hidden",
+    "cleanup": "Clean up expired and revoked connections",
+    "identityExplanation": "An approved app is an OAuth registration and consent; an MCP client is the identity that actually calls tools.",
+    "noneForFilter": "No connections match this state.",
+    "groupSummary": "{{client}} · {{registrations}} registrations · {{active}} active",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…",
+    "cleanupTitle": "Clean up old connections",
+    "cleanupBody": "Remove {{count}} expired or revoked consent records? MCP client identities and their traces stay in history.",
+    "cleanupConfirm": "Clean up",
+    "cleaning": "Cleaning up…"
+  },
+  "language": {
+    "en": "English",
+    "ko": "Korean"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "discard": "Discard",
+    "edit": "Edit",
+    "remove": "Remove",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "showRaw": "Show raw values"
+  },
+  "saveTitle": {
+    "busy": "Settings are being saved.",
+    "invalid": "Fix validation errors before saving.",
+    "clean": "Make a policy change to enable saving.",
+    "ready": "Save policy changes."
+  },
+  "validation": {
+    "reuseBelowRefresh": "Maximum reuse must be at least the refresh interval.",
+    "uploadWholeBytes": "Maximum upload size must resolve to a whole number of bytes.",
+    "uploadMin": "Maximum upload size must be at least 1 KB (1,000 bytes).",
+    "uploadMax": "Maximum upload size must be 50 MB (50,000,000 bytes) or smaller.",
+    "durationWholeSeconds": "Duration must resolve to whole seconds.",
+    "durationNegative": "Duration cannot be negative.",
+    "durationMax": "Duration must be {{hours}} hours ({{seconds}} seconds) or smaller.",
+    "autoApproveWholeHours": "Auto-approve delay must resolve to whole hours.",
+    "autoApproveMin": "Auto-approve delay must be at least 1 hour.",
+    "autoApproveMax": "Auto-approve delay must be {{days}} days or shorter.",
+    "reconciliationReminderMin": "Reconciliation reminder delay must be at least 1 hour.",
+    "reconciliationReminderMax": "Reconciliation reminder delay must be 30 days or shorter.",
+    "reconciliationAttentionMin": "Reconciliation attention window must be at least 1 day.",
+    "reconciliationAttentionMax": "Reconciliation attention window must be 365 days or shorter.",
+    "webRulePattern": "Web URL rule {{index}} requires a pattern."
+  },
+  "state": {
+    "unsaved": "{{count}} unsaved",
+    "reviewSave": "Review and save changes together.",
+    "managed": "Managed by workspace defaults or server policy",
+    "ownerOnly": "Owner only",
+    "saving": "Saving…",
+    "unsavedChanges": "Unsaved changes",
+    "pending": "Pending",
+    "current": "Current",
+    "value": "value",
+    "limit": "limit",
+    "interval": "interval",
+    "maximum": "maximum",
+    "delay": "delay",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "notSet": "Not set",
+    "updating": "Updating…",
+    "fieldSaved": "{{label}} saved",
+    "cardSaved": "{{label}} saved",
+    "readOnly": "Read only",
+    "partiallyEditable": "Partially editable",
+    "editable": "Editable"
+  },
+  "workspaceDefault": {
+    "title": "Default workspace",
+    "description": "Whether this workspace opens first after you sign in.",
+    "badge": "Current",
+    "currentDefault": "Current default: {{title}}",
+    "none": "No default workspace is set yet.",
+    "confirmPrefix": "Set",
+    "confirmSuffix": "as your default workspace?",
+    "confirmReplace": "Your current default ({{title}}) will be unset.",
+    "thisWorkspace": "this workspace",
+    "setAsDefault": "Set as default",
+    "setAsDefaultWorkspace": "Set as default workspace",
+    "statusChanged": "{{title}} is now your default workspace."
+  },
+  "scopes": {
+    "read": {
+      "label": "Read - view sources and pages",
+      "hint": "The tool can see sources and pages in the workspaces you allow."
+    },
+    "write": {
+      "label": "Write - add or edit sources and pages",
+      "hint": "The tool can add new sources and edit pages."
+    },
+    "agent": {
+      "label": "Run AI - ask questions and get answers",
+      "hint": "The tool can use the AI of the workspaces you allow to answer questions."
+    }
+  },
+  "workspaceScopeRole": {
+    "owner": "Owner",
+    "editor": "Editor",
+    "viewer": "Viewer"
+  },
+  "access": {
+    "sessionSettings": "Session settings",
+    "sessionSettingsFor": "Session settings for {{client}}",
+    "sessionLength": "Session length",
+    "sessionLengthFor": "Session length for {{client}}",
+    "sessionDays_one": "{{count}} day",
+    "sessionDays_other": "{{count}} days",
+    "sessionConfiguredOption": "{{duration}} · Current setting",
+    "sessionMaximumOption": "{{duration}} · Server maximum",
+    "extendWhileInUse": "Extend while in use",
+    "extendWhileInUseFor": "Extend session while in use for {{client}}",
+    "approvedAppsAccountScope": "Every app you approved is listed here, not only the ones that reach the current workspace ({{workspace}}). Each app carries its own allowed workspaces.",
+    "accessKeysAccountScope": "Every access key on your account is listed here, not only the ones that reach the current workspace ({{workspace}}). Each key carries its own allowed workspaces.",
+    "connectedClientsWorkspaceScope": "The MCP client identities that call from {{workspace}}. Unlike the cards above, this one is scoped to this workspace.",
+    "editWorkspaces": "Edit workspaces",
+    "editWorkspacesFor": "Edit workspaces for {{client}}",
+    "retryConsents": "Retry OAuth app list",
+    "workspaceScope": {
+      "createLabel": "Workspaces this key may reach",
+      "createHint": "Required. This screen is not limited to the current workspace ({{workspace}}) — pick every workspace this key should reach.",
+      "currentWorkspaceUnknown": "the current workspace",
+      "requiredError": "Choose at least one workspace this access key may reach.",
+      "listLabel": "Allowed workspaces",
+      "popoverLabel": "Allowed workspaces",
+      "searchAria": "Filter workspaces",
+      "searchClear": "Clear workspace filter",
+      "searchPlaceholder": "Workspace name or slug",
+      "selectAllShown": "Select all shown",
+      "clearAll": "Clear all",
+      "selectedCount": "selected",
+      "toggleAllAria": "Select or clear every shown workspace",
+      "defaultBadge": "Default",
+      "membershipMissing": "No membership",
+      "noMatches": "No workspace matches this search.",
+      "noWorkspaces": "No workspace",
+      "emptySelection": "With no workspace selected this connection can reach no workspace at all.",
+      "moreChips": "+{{count}}",
+      "showAll": "Show every allowed workspace",
+      "grantedScopes": "Granted scopes",
+      "syncPending": "Syncing",
+      "syncFailed": "Sync failed",
+      "syncFailedHint": "Requests for this workspace are refused; a retry is running.",
+      "editTitle": "Workspaces for {{subject}}",
+      "editIntro": "This connection can reach exactly the workspaces checked below. Adding one lets the existing credential reach it without re-authenticating.",
+      "diffNone": "No change yet.",
+      "diffAddedOnly": "{{added}} added · 0 removed.",
+      "diffWithRemovals": "{{added}} added · {{removed}} removed ({{names}} — access stops immediately). Work already in progress is kept.",
+      "save": "Save workspaces",
+      "saving": "Saving…"
+    },
+    "savingSessionSettings": "Saving session settings…",
+    "sessionSettingsSaved": "Session settings saved",
+    "sessionSettingsHint": "Changes apply when this app next refreshes its session.",
+    "oauthApps": "OAuth apps",
+    "oauthCounts": "{{apps}} · {{clients}}",
+    "oauthAppsIntro": "Recommended for OAuth-aware MCP clients. Browser approval keeps access keys out of local environment files.",
+    "oauthAppsIntroUrlClientId": "OAuth is available for MCP clients configured with an HTTPS URL client identifier. Automatic client self-registration is disabled on this server.",
+    "oauthAppsIntroUnavailable": "OAuth-aware MCP clients normally connect here, but it is unavailable on this server (see above). Use an Access Key instead.",
+    "oauthDetailsToggle": "Show OAuth details (unavailable on this server)",
+    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+    "pill": {
+      "recommended": "Recommended",
+      "unavailable": "Not configured",
+      "advancedFallback": "Advanced fallback",
+      "recommendedFallback": "Recommended fallback",
+      "urlClientIdOnly": "URL client IDs only",
+      "unknown": "Status unavailable"
+    },
+    "setupPreferredWhenNoOauth": "OAuth isn't available on this server, so an Access Key is the way to connect MCP clients here.",
+    "signIn": "Sign in",
+    "connectWithOauth": "Connect with OAuth",
+    "oauthGuideIntro": "To authorize another OAuth MCP client, add dtxWiki from that client and approve the browser consent page. Approved clients appear here automatically.",
+    "oauthGuideUrlClientId": "Configure your MCP client with its HTTPS URL client identifier. Automatic self-registration is disabled, so setup commands that require it are not offered here.",
+    "codexAddCommand": "Codex CLI add command",
+    "codexLoginCommand": "Codex CLI login command",
+    "codexReauth": "Codex starts OAuth after add. To re-authenticate later:",
+    "claudeAddCommand": "Claude Code add command",
+    "claudeCodeRunPrefix": "Then run ",
+    "claudeCodeRunSuffix": " in Claude Code and authenticate.",
+    "copyNamedCommand": "Copy {{label}}",
+    "selectNamedCommand": "Select {{label}}",
+    "bearerFallbackPrefix": "If your client only supports bearer tokens, use ",
+    "bearerFallbackLink": "access keys",
+    "bearerFallbackSuffix": " below.",
+    "approvedAppsBody": "Apps you approved through browser sign-in.",
+    "loadingConsents": "Loading OAuth consents…",
+    "consentsError": "Could not load OAuth consents",
+    "noOauthApps": "No OAuth apps are authorized yet.",
+    "noOauthAppsHint": "Recommended for most users. Authorize dtxWiki from your MCP client; no access key or environment variable setup is needed.",
+    "noOauthAppsHintUrlClientId": "OAuth works for clients configured with an HTTPS URL client identifier. Clients that expect automatic self-registration need an access key instead.",
+    "noOauthAppsHintUnavailable": "OAuth is unavailable on this server, so apps cannot be authorized here. Use an access key instead.",
+    "consentGrantedMeta": "Granted {{granted}}",
+    "revoke": "Revoke",
+    "consentRevoked": "OAuth consent revoked. 1 app updated.",
+    "consentAlreadyRevoked": "OAuth consent was already revoked. The list was refreshed.",
+    "revokeAllAria": "Revoke all consents for {{client}}",
+    "connectedClientsBody": "MCP clients authenticated through OAuth or a PAT access key appear here. Deactivate a client to block future calls without removing its credential history.",
+    "noConnectedTools": "No connected tools",
+    "systemClientsNote": "System-managed MCP clients are internal and hidden from user-managed connection controls.",
+    "setupTitle": "Access key setup",
+    "setupIntro": "Use this fallback only when your MCP client cannot use OAuth. It creates bearer keys that you must store and rotate carefully.",
+    "setupIntroNoDcr": "Use an access key when your MCP client expects automatic OAuth self-registration or cannot use an HTTPS URL client identifier. Treat keys like passwords and rotate them periodically.",
+    "setupIntroPrimary": "Create a bearer access key and paste the setup command into your MCP client. Treat keys like passwords and rotate them periodically.",
+    "localUrlWarning": "This command uses a local MCP URL. It works from this machine; use a public HTTPS server URL when connecting from another PC.",
+    "stepKeyIssued": "Key issued",
+    "stepCreateKey": "Create an MCP access key",
+    "issuedMeta": "Client: {{client}} · Scopes: {{scopes}}",
+    "keyGeneratedTitle": "API key (shown once)",
+    "keyGeneratedBodyPrefix": "This access key is shown once and is embedded in the setup command. Treat it like a password. The access key list shows ",
+    "keyGeneratedBodySuffix": " later so you can identify this key.",
+    "copyGeneratedKey": "Copy API key",
+    "generateAnotherKey": "Generate another key",
+    "generateAnotherKeyHint": "This closes the one-time view; the current key remains active.",
+    "clientLabel": "Client",
+    "customAppLabel": "AI app display name",
+    "customAppLabelPlaceholder": "e.g. Grok Desktop",
+    "customAppLabelHint": "Saved only as this key's display snapshot; it does not identify or authorize the app.",
+    "customAppLabelRequired": "Enter the AI app name used with this access key.",
+    "customAppLabelTooLong": "Use {{max}} characters or fewer.",
+    "keyName": "Key name",
+    "keyNamePlaceholder": "e.g. AI app on my laptop",
+    "scopesGroupLabel": "Access key scopes",
+    "generating": "Generating…",
+    "generateKey": "Generate access key",
+    "copyAndRun": "Copy and run on your PC",
+    "commandShell": "Command shell",
+    "shellMac": "macOS/Linux",
+    "shellWindows": "Windows",
+    "shellZsh": "Zsh",
+    "registerCommand": "Register command",
+    "copyCommand": "Copy command",
+    "selectCommand": "Select command",
+    "registerHelp": "This setup tells your local MCP client to register this server. dtxWiki itself does not need to be installed on your PC.",
+    "registerHelpPending": "Choose a client and generate an access key in Step 1. The copyable setup command will appear here.",
+    "manualConfig": "Manual token config",
+    "manualConfigHelp": "Advanced. Copy this generic HTTP config only when your MCP client does not support the command above.",
+    "manualConfigHelpPending": "Advanced. This template shows the expected config shape. Generate a key before using it.",
+    "connectionSettings": "MCP connection settings",
+    "connectionTemplate": "MCP connection template",
+    "copySettings": "Copy settings",
+    "copyTemplate": "Copy template",
+    "selectSettings": "Select settings",
+    "selectTextAction": "Select text",
+    "accessKeysBody": "Use access keys only when your MCP client cannot use OAuth. They require token handling and local environment setup.",
+    "accessKeysBodyNoDcr": "Use access keys for clients that expect automatic OAuth self-registration or cannot use an HTTPS URL client identifier.",
+    "accessKeysBodyOnlyOption": "Access keys are the only way to connect an MCP client to this server. Each key is shown once when it is created; revoke a key to cut off the client using it.",
+    "noAccessKeys": "No access keys yet",
+    "noAccessKeysHint": "Generate one above for bearer-token setup.",
+    "accessKeyCopied": "Access key copied",
+    "commandCopied": "Command copied",
+    "settingsCopied": "Settings copied",
+    "templateCopied": "Template copied - replace the placeholder token before use",
+    "labels": {
+      "accessKey": "access key",
+      "command": "Command",
+      "settings": "Settings",
+      "template": "Template"
+    },
+    "setupCommandPlaceholder": "The setup command appears here once a key exists.",
+    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+    "oauthCapabilityRetry": "Try again"
+  },
+  "clipboard": {
+    "copied": "{{label}} copied",
+    "selected": "{{label}} selected",
+    "unavailable": "Copy unavailable - select the {{label}} text instead",
+    "failed": "Copy failed - select the {{label}} text instead"
+  },
+  "keyRow": {
+    "keyName": "Key name",
+    "renameAria": "Rename {{name}}",
+    "saveName": "Save name",
+    "cancel": "Cancel",
+    "previewTitle": "Starts with {{prefix}}. Match this with the access key copied when it was created.",
+    "prefixNotSaved": "Prefix not saved",
+    "prefixNotSavedTitle": "This key was created before prefix previews were stored.",
+    "created": "Created {{date}}",
+    "lastUsed": "Last used {{date}}",
+    "expires": "Expires {{date}}",
+    "never": "never",
+    "client": "Client {{client}}",
+    "uuid": "UUID {{id}}",
+    "uuidTitle": "Internal token UUID: {{id}}",
+    "rename": "Rename",
+    "editWorkspaces": "Edit workspaces",
+    "editWorkspacesNamed": "Edit workspaces for {{name}}",
+    "disableKey": "Disable key",
+    "revoke": "Revoke",
+    "revokeNamed": "Revoke key {{name}}",
+    "delete": "Delete",
+    "deleteKey": "Delete key",
+    "deleteNamed": "Delete key {{name}}"
+  },
+  "clientRow": {
+    "scopes": "{{type}} · Scopes {{scopes}}",
+    "lastUsed": "Last used {{date}}",
+    "never": "never",
+    "viewDetails": "View details",
+    "clientId": "Client ID",
+    "notSet": "not set",
+    "systemClient": "System client",
+    "noScopes": "none",
+    "status": "Status",
+    "lifecycle": "Management lifecycle",
+    "connectionHealth": "Connection health",
+    "scopesLabel": "Scopes",
+    "updating": "Updating…",
+    "disable": "Disable",
+    "disableNamed": "Disable {{name}}",
+    "enable": "Enable",
+    "reactivate": "Reactivate",
+    "reactivateNamed": "Reactivate {{name}}",
+    "delete": "Delete client",
+    "deleteNamed": "Delete client {{name}}",
+    "cleanup": "Clean up",
+    "connectionTiming": "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
+    "noLiveExpiry": "no live token",
+    "state": {
+      "active": "Active",
+      "expired": "Expired",
+      "revoked": "Revoked",
+      "disabled": "Deactivated"
+    }
+  },
+  "dangerZone": {
+    "title": "Danger Zone",
+    "intro": "Risky workspace identity and removal actions live here.",
+    "slugNote": "Slug changes can break saved links, API calls, and integrations.",
+    "changeSlugTitle": "Change workspace slug",
+    "changeSlugBody": "Change the URL-facing workspace identifier.",
+    "workspaceSlug": "Workspace slug",
+    "updating": "Updating…",
+    "changeSlug": "Change slug",
+    "slugUpdated": "Workspace slug updated",
+    "deleteTitle": "Delete workspace",
+    "deleteBody": "Permanently delete this workspace. If it still holds content or operational records, you will see what they are and can confirm deleting those too.",
+    "deleteSeparateNote": "Retained audit history is detached from the workspace, not erased.",
+    "deleteAction": "Delete workspace…",
+    "loadingWorkspace": "Workspace is still loading.",
+    "unavailableUntilLoaded": "Workspace deletion is unavailable until the workspace list is loaded.",
+    "disabled": {
+      "not_owner": "Only workspace owners can delete a workspace."
+    }
+  },
+  "modals": {
+    "deleteWorkspace": {
+      "title": "Delete workspace?",
+      "bodyPrefix": "This will permanently delete ",
+      "bodySuffix": ". If the workspace still holds content or operational records, they are listed here first so you can confirm deleting them too; retained audit history is detached, not erased.",
+      "blockedSummary": "Deletion is blocked by retained workspace data:",
+      "grantExpired": "Your confirmation expired. Please try again.",
+      "purgeHint": "Nothing has been deleted yet. Confirm below to delete these records along with the workspace.",
+      "purgeRetryHint": "The deletion could not be completed. Confirm the retained records below before retrying.",
+      "purgeAcknowledge": "Also permanently delete these {{count}} records. This cannot be undone.",
+      "blockers": {
+        "agent_bundles": "Agent input bundles: {{count}}",
+        "ask_sessions": "Ask sessions: {{count}}",
+        "changes": "Change sets: {{count}}",
+        "context_ingress": "Context ingress proposals: {{count}}",
+        "context_pages": "Context pages: {{count}}",
+        "custom_agent_pages": "Custom Agent pages: {{count}}",
+        "feedback": "Feedback items: {{count}}",
+        "jobs": "Background jobs: {{count}}",
+        "library": "Library items: {{count}}",
+        "library_discovery_candidates": "Library discovery candidates: {{count}}",
+        "library_discovery_runs": "Library discovery runs: {{count}}",
+        "library_sync_runs": "Library sync runs: {{count}}",
+        "lint_runs": "Lint runs: {{count}}",
+        "mcp_chats": "MCP chats: {{count}}",
+        "mcp_tool_calls": "MCP tool calls: {{count}}",
+        "oauth_codes": "OAuth authorization codes: {{count}}",
+        "oauth_consents": "OAuth consents: {{count}}",
+        "oauth_refresh_tokens": "OAuth refresh tokens: {{count}}",
+        "reviews": "Review items: {{count}}",
+        "unknown": "Other retained records: {{count}}"
+      },
+      "confirmLabel": "Type \"{{expected}}\" to confirm",
+      "cancel": "Cancel",
+      "deleting": "Deleting…",
+      "confirm": "Permanently delete workspace",
+      "confirmWithPurge": "Delete workspace and all its data"
+    },
+    "revoke": {
+      "title": "Revoke OAuth consent",
+      "bodyPrefix": "This will revoke all consents and active refresh tokens for ",
+      "bodySuffix": ". The client must re-authorize before it can call the API again.",
+      "cancel": "Cancel",
+      "revoking": "Revoking…",
+      "confirm": "Revoke"
+    },
+    "disableToken": {
+      "title": "Revoke access key",
+      "bodyPrefix": "This will revoke ",
+      "bodySuffix": ". Existing tools using this key will stop connecting until you generate and register a new key.",
+      "cancel": "Cancel",
+      "disabling": "Revoking…",
+      "confirm": "Revoke key"
+    },
+    "deleteToken": {
+      "title": "Delete inactive access key",
+      "bodyPrefix": "This removes ",
+      "bodySuffix": " from the access key list. The key is already revoked or expired and cannot be used to connect.",
+      "cancel": "Cancel",
+      "deleting": "Deleting…",
+      "confirm": "Delete key"
+    }
+  },
+  "appHub": {
+    "eyebrow": "AI app connections",
+    "title": "Connect your AI app",
+    "description": "Choose an app and dtxWiki will show the connection methods and setup steps it supports.",
+    "connect": "Connect AI app",
+    "loading": "Loading supported apps…",
+    "catalogLoadError": "The AI app catalog could not be loaded.",
+    "retryCatalog": "Retry app catalog",
+    "quickConnect": "Quick connect",
+    "noFeaturedApps": "No featured apps are available. Browse the full catalog.",
+    "browseAppsHint": "Open the full app catalog",
+    "oauthAvailable": "OAuth is available; access keys remain an advanced option.",
+    "oauthUnavailable": "OAuth is unavailable on this server; use an access key.",
+    "pickerEyebrow": "MCP app catalog",
+    "pickerTitle": "Choose an AI app",
+    "close": "Close app picker",
+    "back": "All apps",
+    "chooseMethod": "Choose how this app should authenticate. OAuth is preferred when available.",
+    "searchLabel": "Search AI apps",
+    "searchPlaceholder": "Search name, vendor, or alias",
+    "noResults": "No app matches this search.",
+    "resultCount_one": "{{count}} catalog app found",
+    "resultCount_other": "{{count}} catalog apps found",
+    "genericFallback": "No catalog app matches. Choose Other MCP client for generic setup.",
+    "generic": "Generic setup",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "requiredMethodUnavailable": "This app does not support the required connection method.",
+    "unavailableReasons": {
+      "catalogAppUnavailable": "This catalog app is unavailable.",
+      "appVersionRequired": "Enter the app version to check this method.",
+      "appVersionTooOld": "Update the app to use this method.",
+      "endpointUnreachable": "The server URL is not reachable by this method.",
+      "platformRequired": "Choose a platform to check this method.",
+      "platformUnsupported": "This platform is not supported.",
+      "serverOauthUnavailable": "OAuth is unavailable on this server.",
+      "shellRequired": "Choose a shell to check this method.",
+      "shellUnsupported": "This shell is not supported.",
+      "transportUnavailable": "This MCP transport is not supported.",
+      "unknown": "This method is unavailable for the current setup."
+    },
+    "oauth": "OAuth",
+    "accessKey": "Access Key",
+    "oauthDescription": "Browser approval; no long-lived key to paste.",
+    "accessKeyDescription": "Advanced: create and store a bearer key locally.",
+    "recommended": "Recommended",
+    "preparing": "Preparing setup…",
+    "preparingShell": "Preparing the setup recipe for this shell…",
+    "shellPlanLoadError": "The recipe for that shell could not be loaded. The previous shell is still selected.",
+    "useClient": "Use this client",
+    "retrySetup": "Try setup again",
+    "keyRequired": "Generate an access key to reveal the setup recipe.",
+    "planLoadError": "The current setup could not be generated.",
+    "recipeInvalid": "This setup recipe could not be rendered safely.",
+    "setupSteps": "Setup steps",
+    "copied": "Copied",
+    "selected": "Selected",
+    "copyFailed": "Copy failed",
+    "copy": "Copy",
+    "copyArtifact": "Copy {{label}}",
+    "copyCommandForShell": "Copy {{label}} for {{shell}}",
+    "selectArtifact": "Select {{label}}",
+    "selectCommandForShell": "Select {{label}} for {{shell}}",
+    "select": "Select text",
+    "recipeVersion": "Recipe {{recipe}} v{{version}} · catalog {{revision}}",
+    "chooseAppFirst": "Choose an AI app before generating an access key.",
+    "unknownApp": "AI app",
+    "chooseOauthApp": "Choose an app for OAuth",
+    "chooseApp": "Choose an AI app",
+    "browseApps": "Browse all AI apps",
+    "chooseAppForRecipe": "Choose an AI app to load its setup recipe.",
+    "stepPosition": "Step {{index}} of {{total}}",
+    "stepRegister": "Register the server",
+    "stepAuthenticate": "Sign in with OAuth",
+    "labelRegisterCommand": "Register command",
+    "labelLoginCommand": "Login command",
+    "labelInAppLoginCommand": "In-app login command",
+    "labelInAppCommand": "In-app command",
+    "labelInstruction": "Instruction",
+    "typeInApp": "Type in {{app}}",
+    "thisApp": "this app",
+    "copyCommandForApp": "Copy {{label}} to type in {{app}}",
+    "selectCommandForApp": "Select {{label}} to type in {{app}}"
+  },
+  "commandBlock": {
+    "copyFallback": "Copy {{label}}"
+  }
+}

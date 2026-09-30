@@ -1,0 +1,173 @@
+{
+  "breadcrumb": "Activity",
+  "loadMore": "Load more",
+  "loadingMore": "Loading",
+  "errors": {
+    "load": "Failed to load Activity",
+    "loadMore": "Failed to load more"
+  },
+  "header": {
+    "eyebrow": "Operations timeline",
+    "title": "Activity",
+    "subtitle": "Pending, advisory, and completed workspace events.",
+    "eventUnit_one": "event",
+    "eventUnit_other": "events"
+  },
+  "filters": {
+    "title": "Filters",
+    "activeTitle": "Filters ({{count}})"
+  },
+  "overview": {
+    "windowNotice": "Showing the newest {{count}} events. Open a lane to load older activity."
+  },
+  "filterSummary": {
+    "label": "Filtered",
+    "reset": "Reset"
+  },
+  "period": {
+    "label": "Period",
+    "options": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "week": "Week",
+      "month": "Month",
+      "all": "All time"
+    },
+    "titles": {
+      "today": "Show today activity",
+      "yesterday": "Show yesterday activity",
+      "week": "Show week activity",
+      "month": "Show month activity",
+      "all": "Show all activity"
+    }
+  },
+  "kind": {
+    "label": "Type",
+    "options": {
+      "workspace": "Workspace",
+      "mcp": "MCP",
+      "system": "System",
+      "all": "All"
+    },
+    "titles": {
+      "workspace": "Workspace activity from pages, sources, review, Ask, and MCP tools.",
+      "mcp": "External MCP traces from Codex CLI, Claude Code, Cursor, and other clients.",
+      "system": "Platform & operations: sign-ins, settings, automated checks, and background jobs.",
+      "all": "All workspace and system activity."
+    }
+  },
+  "subtype": {
+    "label": "Sub-type",
+    "all": "All",
+    "options": {
+      "library": "Library",
+      "context": "Context",
+      "agent": "Agent",
+      "ask": "Ask",
+      "review": "Review",
+      "chat": "Chat",
+      "read": "Read",
+      "write": "Write",
+      "search": "Search",
+      "auth": "Auth",
+      "oauth": "OAuth",
+      "settings": "Settings",
+      "lint": "Lint",
+      "jobs": "Jobs"
+    }
+  },
+  "lanes": {
+    "pending": {
+      "title": "Pending",
+      "tone": "Needs review"
+    },
+    "advisory": {
+      "title": "Advisory",
+      "tone": "Needs attention"
+    },
+    "history": {
+      "title": "History",
+      "tone": "Completed changes"
+    }
+  },
+  "empty": {
+    "title": "No {{title}} activity",
+    "system": "No system events for this period.",
+    "mcp": "No MCP traces for this period.",
+    "workspace": "No workspace activity for this period.",
+    "filteredTitle": "No matches on this page",
+    "filteredHint": "Load more to look for matches in older activity."
+  },
+  "actions": {
+    "openMcpSetup": "Open MCP setup",
+    "openChats": "Open Chats",
+    "browseContext": "Browse Context pages",
+    "createPage": "Create a new page",
+    "review": "Review",
+    "seeAll": "See all {{count}}",
+    "seeAllUnbounded": "See all",
+    "openTarget": "Open target {{title}}"
+  },
+  "eventTitles": {
+    "context_page_draft_publish": "Published page",
+    "tree_node_move": "Moved item",
+    "tree_node_rename": "Renamed {{previous_title}} to {{title}}",
+    "workspace_join_request_requested": "Requested to join the workspace",
+    "workspace_join_request_approved": "Approved the join request",
+    "workspace_join_request_rejected": "Rejected the join request"
+  },
+  "targetKinds": {
+    "change_set": "Change set",
+    "context_page": "Context page",
+    "agent_page": "Agent page",
+    "source": "Source",
+    "library_item": "Library item",
+    "mcp_tool_call": "MCP tool call",
+    "job": "Background job"
+  },
+  "actors": {
+    "agentWorker": "Internal agent worker"
+  },
+  "details": {
+    "trigger": "Triggered by {{value}}",
+    "progress": "{{value}} complete",
+    "progressStarting": "Starting",
+    "stage": "Stage: {{value}}",
+    "error": "Error: {{value}}",
+    "errorCodeFallback": "The job reported a failure.",
+    "validationFailed": "The action could not be completed because its input was invalid."
+  },
+  "jobs": {
+    "trigger": {
+      "library_registration": "a new source",
+      "library_extraction": "source extraction",
+      "context_page_publish": "a page publish",
+      "feedback_submit": "feedback",
+      "librarian_tick": "the library sweep",
+      "schedule": "a schedule",
+      "scheduled": "a schedule",
+      "manual": "a manual run"
+    },
+    "errorCode": {
+      "job_failed": "The job failed.",
+      "job_retry_scheduled": "An attempt failed; a retry is scheduled."
+    },
+    "title": {
+      "feedback_resolution": "Feedback triage",
+      "lint_tick": "Lint sweep",
+      "library_conversion": "Library conversion"
+    }
+  },
+  "units": {
+    "event_one": "event",
+    "event_other": "events"
+  },
+  "auditCode": {
+    "library": "Library change",
+    "context": "Context change",
+    "agent": "Agent change",
+    "ask": "Ask activity",
+    "review": "Review decision",
+    "chat": "Chat activity"
+  }
+}

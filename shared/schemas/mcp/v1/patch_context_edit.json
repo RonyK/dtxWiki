@@ -1,0 +1,1797 @@
+{
+  "input": {
+    "$defs": {
+      "AnchorAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_text": {
+            "deprecated": true,
+            "minLength": 1,
+            "title": "Anchor Text",
+            "type": "string"
+          },
+          "by": {
+            "const": "anchor",
+            "deprecated": true,
+            "title": "By",
+            "type": "string"
+          },
+          "char_offset_hint": {
+            "deprecated": true,
+            "minimum": 0,
+            "title": "Char Offset Hint",
+            "type": "integer"
+          },
+          "context_after": {
+            "default": "",
+            "deprecated": true,
+            "title": "Context After",
+            "type": "string"
+          },
+          "context_before": {
+            "default": "",
+            "deprecated": true,
+            "title": "Context Before",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "anchor_text",
+          "char_offset_hint"
+        ],
+        "title": "AnchorAddress",
+        "type": "object"
+      },
+      "AppendDocumentOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "op": {
+            "const": "append_document",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "content"
+        ],
+        "title": "AppendDocumentOperation",
+        "type": "object"
+      },
+      "BlockTextAddress": {
+        "additionalProperties": false,
+        "description": "One block from read_structure_map, as the scope of a replace_text.\n\nThe same `block`/`expected` pair replace_block takes: the id names the\nblock and `expected` (its current content hash) proves the caller saw its\ncurrent text. A slightly wrong id or hash fails; it never picks another\nblock.",
+        "properties": {
+          "block": {
+            "minLength": 1,
+            "title": "Block",
+            "type": "string"
+          },
+          "by": {
+            "const": "block",
+            "title": "By",
+            "type": "string"
+          },
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "block",
+          "expected"
+        ],
+        "title": "BlockTextAddress",
+        "type": "object"
+      },
+      "DeleteBlockOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "block": {
+            "minLength": 1,
+            "title": "Block",
+            "type": "string"
+          },
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "op": {
+            "const": "delete_block",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "block",
+          "expected"
+        ],
+        "title": "DeleteBlockOperation",
+        "type": "object"
+      },
+      "DeleteSectionOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_fuzzy": {
+            "default": false,
+            "description": "Only for a deprecated `at.by='anchor'` address: accept an anchor found far from char_offset_hint. It never loosens old_text matching (see match_mode) or any hash check.",
+            "title": "Accept Fuzzy",
+            "type": "boolean"
+          },
+          "at": {
+            "$ref": "#/$defs/SectionAddress"
+          },
+          "expected_section_hash": {
+            "title": "Expected Section Hash",
+            "type": "string"
+          },
+          "op": {
+            "const": "delete_section",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "at",
+          "expected_section_hash"
+        ],
+        "title": "DeleteSectionOperation",
+        "type": "object"
+      },
+      "EditOperation": {
+        "discriminator": {
+          "mapping": {
+            "append_document": "#/$defs/AppendDocumentOperation",
+            "delete_block": "#/$defs/DeleteBlockOperation",
+            "delete_section": "#/$defs/DeleteSectionOperation",
+            "insert_after": "#/$defs/InsertAfterOperation",
+            "insert_row": "#/$defs/InsertRowOperation",
+            "insert_section": "#/$defs/InsertSectionOperation",
+            "insert_text": "#/$defs/InsertTextOperation",
+            "replace_block": "#/$defs/ReplaceBlockOperation",
+            "replace_document": "#/$defs/ReplaceDocumentOperation",
+            "replace_section": "#/$defs/ReplaceSectionOperation",
+            "replace_text": "#/$defs/ReplaceTextOperation"
+          },
+          "propertyName": "op"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ReplaceTextOperation"
+          },
+          {
+            "$ref": "#/$defs/InsertTextOperation"
+          },
+          {
+            "$ref": "#/$defs/AppendDocumentOperation"
+          },
+          {
+            "$ref": "#/$defs/ReplaceDocumentOperation"
+          },
+          {
+            "$ref": "#/$defs/ReplaceSectionOperation"
+          },
+          {
+            "$ref": "#/$defs/InsertSectionOperation"
+          },
+          {
+            "$ref": "#/$defs/DeleteSectionOperation"
+          },
+          {
+            "$ref": "#/$defs/ReplaceBlockOperation"
+          },
+          {
+            "$ref": "#/$defs/InsertAfterOperation"
+          },
+          {
+            "$ref": "#/$defs/InsertRowOperation"
+          },
+          {
+            "$ref": "#/$defs/DeleteBlockOperation"
+          }
+        ]
+      },
+      "HeadingPathAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "const": "heading_path",
+            "title": "By",
+            "type": "string"
+          },
+          "heading_path": {
+            "description": "Every enclosing heading from the top of the page down to the target, as written -- the page's # title included, not just the last heading: [\"Guide\", \"Install\", \"Linux\"]. read_context_outline lists each section's path.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Heading Path",
+            "type": "array"
+          },
+          "occurrence": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Occurrence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "by",
+          "heading_path"
+        ],
+        "title": "HeadingPathAddress",
+        "type": "object"
+      },
+      "InsertAfterOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "block": {
+            "minLength": 1,
+            "title": "Block",
+            "type": "string"
+          },
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "op": {
+            "const": "insert_after",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "block",
+          "expected",
+          "content"
+        ],
+        "title": "InsertAfterOperation",
+        "type": "object"
+      },
+      "InsertRowOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "op": {
+            "const": "insert_row",
+            "title": "Op",
+            "type": "string"
+          },
+          "row": {
+            "minLength": 1,
+            "title": "Row",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "row",
+          "expected",
+          "content"
+        ],
+        "title": "InsertRowOperation",
+        "type": "object"
+      },
+      "InsertSectionOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_fuzzy": {
+            "default": false,
+            "description": "Only for a deprecated `at.by='anchor'` address: accept an anchor found far from char_offset_hint. It never loosens old_text matching (see match_mode) or any hash check.",
+            "title": "Accept Fuzzy",
+            "type": "boolean"
+          },
+          "at": {
+            "$ref": "#/$defs/SectionAddress"
+          },
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "op": {
+            "const": "insert_section",
+            "title": "Op",
+            "type": "string"
+          },
+          "position": {
+            "enum": [
+              "before",
+              "after",
+              "append_child"
+            ],
+            "title": "Position",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "at",
+          "position",
+          "title",
+          "content"
+        ],
+        "title": "InsertSectionOperation",
+        "type": "object"
+      },
+      "InsertTextOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_fuzzy": {
+            "default": false,
+            "description": "Only for a deprecated `at.by='anchor'` address: accept an anchor found far from char_offset_hint. It never loosens old_text matching (see match_mode) or any hash check.",
+            "title": "Accept Fuzzy",
+            "type": "boolean"
+          },
+          "at": {
+            "$ref": "#/$defs/AnchorAddress"
+          },
+          "new_text": {
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "New Text",
+            "type": "string"
+          },
+          "op": {
+            "const": "insert_text",
+            "title": "Op",
+            "type": "string"
+          },
+          "side": {
+            "enum": [
+              "before",
+              "after"
+            ],
+            "title": "Side",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "at",
+          "new_text",
+          "side"
+        ],
+        "title": "InsertTextOperation",
+        "type": "object"
+      },
+      "ReplaceBlockOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "block": {
+            "minLength": 1,
+            "title": "Block",
+            "type": "string"
+          },
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "op": {
+            "const": "replace_block",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "block",
+          "expected",
+          "content"
+        ],
+        "title": "ReplaceBlockOperation",
+        "type": "object"
+      },
+      "ReplaceDocumentOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_content_hash": {
+            "title": "Expected Content Hash",
+            "type": "string"
+          },
+          "op": {
+            "const": "replace_document",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "content",
+          "expected_content_hash"
+        ],
+        "title": "ReplaceDocumentOperation",
+        "type": "object"
+      },
+      "ReplaceSectionOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_fuzzy": {
+            "default": false,
+            "description": "Only for a deprecated `at.by='anchor'` address: accept an anchor found far from char_offset_hint. It never loosens old_text matching (see match_mode) or any hash check.",
+            "title": "Accept Fuzzy",
+            "type": "boolean"
+          },
+          "at": {
+            "$ref": "#/$defs/SectionAddress"
+          },
+          "content": {
+            "description": "Markdown to write. replace_block: exactly ONE top-level block (for more, use replace_text or insert_after); insert_row: ONE table row; other ops: any number of blocks.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_section_hash": {
+            "title": "Expected Section Hash",
+            "type": "string"
+          },
+          "op": {
+            "const": "replace_section",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "at",
+          "content",
+          "expected_section_hash"
+        ],
+        "title": "ReplaceSectionOperation",
+        "type": "object"
+      },
+      "ReplaceTextOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_fuzzy": {
+            "default": false,
+            "description": "Only for a deprecated `at.by='anchor'` address: accept an anchor found far from char_offset_hint. It never loosens old_text matching (see match_mode) or any hash check.",
+            "title": "Accept Fuzzy",
+            "type": "boolean"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextScopeAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Where to look. Best: {by:'block', block, expected} from read_structure_map (version='my_edit'); or a section. Omit to search the whole document (exact and whitespace/Unicode-insensitive matching only)."
+          },
+          "expected_occurrences": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Expected Occurrences",
+            "type": "integer"
+          },
+          "match_mode": {
+            "default": "safe",
+            "description": "'safe' (default): exact first; then ignore invisible differences (line endings, Unicode form, repeated spaces, curly quotes, dashes); then, only inside a block or section `at` and for a single occurrence of 12+ characters, accept a small copy slip if exactly one place is that close. Code, URLs, link targets, HTML, math, Markdown markup, digits, identifiers and each line's indentation and list/heading marker must match exactly even here. Refuses with text_match_ambiguous / text_match_low_confidence / text_match_not_found instead of guessing. 'exact': byte-for-byte only.",
+            "enum": [
+              "exact",
+              "safe"
+            ],
+            "title": "Match Mode",
+            "type": "string"
+          },
+          "new_text": {
+            "title": "New Text",
+            "type": "string"
+          },
+          "old_text": {
+            "minLength": 1,
+            "title": "Old Text",
+            "type": "string"
+          },
+          "op": {
+            "const": "replace_text",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "old_text",
+          "new_text"
+        ],
+        "title": "ReplaceTextOperation",
+        "type": "object"
+      },
+      "SectionAddress": {
+        "discriminator": {
+          "mapping": {
+            "anchor": "#/$defs/AnchorAddress",
+            "heading_path": "#/$defs/HeadingPathAddress",
+            "section_id": "#/$defs/SectionIdAddress"
+          },
+          "propertyName": "by"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SectionIdAddress"
+          },
+          {
+            "$ref": "#/$defs/HeadingPathAddress"
+          },
+          {
+            "$ref": "#/$defs/AnchorAddress"
+          }
+        ]
+      },
+      "SectionIdAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "const": "section_id",
+            "title": "By",
+            "type": "string"
+          },
+          "section_id": {
+            "minLength": 1,
+            "title": "Section Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "section_id"
+        ],
+        "title": "SectionIdAddress",
+        "type": "object"
+      },
+      "TextScopeAddress": {
+        "discriminator": {
+          "mapping": {
+            "anchor": "#/$defs/AnchorAddress",
+            "block": "#/$defs/BlockTextAddress",
+            "heading_path": "#/$defs/HeadingPathAddress",
+            "section_id": "#/$defs/SectionIdAddress"
+          },
+          "propertyName": "by"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SectionIdAddress"
+          },
+          {
+            "$ref": "#/$defs/HeadingPathAddress"
+          },
+          {
+            "$ref": "#/$defs/AnchorAddress"
+          },
+          {
+            "$ref": "#/$defs/BlockTextAddress"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "description": "Apply typed block/section edit operations to the caller's own open\n'editing' row in place.\n\n`operations` is the same typed union of block/section edit operations\nminus `resolve_conflict` (reconciliation-only, out of scope here: this\ntool always targets the row's own current body, never a shared\nreconciled head).",
+    "properties": {
+      "conversation_token": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
+        "title": "Conversation Token"
+      },
+      "expected_editing_revision": {
+        "description": "The editing_revision from your last create/begin/update/patch response (or read_structure_map with version='my_edit').",
+        "minimum": 1,
+        "title": "Expected Editing Revision",
+        "type": "integer"
+      },
+      "idempotency_key": {
+        "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:-]+$",
+        "title": "Idempotency Key",
+        "type": "string"
+      },
+      "operations": {
+        "description": "1-20 edits applied atomically in one revision. Every operation is resolved against the SAME current body (not against the result of the operation before it). If any operation is refused, or any two target overlapping text, nothing is changed and error_details names the operation_index. Independent replace_text ops may be combined even without `at`. Do not mix block-addressed ops (replace_block, insert_after, insert_row, delete_block) with text/section ops in one call; replace_text with a block `at` counts as a text op. replace_block takes exactly ONE top-level block and insert_row ONE table row; insert_after takes any number of blocks. Replacing or deleting a block and inserting after it in the same call overlaps: put the extra blocks in a replace_text new_text, or send a second call with the block's new hash from data.edit_receipt. Best for changing a sentence: [{\"op\": \"replace_text\", \"old_text\": \"<sentence copied from the block>\", \"new_text\": \"<new sentence>\", \"at\": {\"by\": \"block\", \"block\": \"<id from read_structure_map>\", \"expected\": \"<its hash>\"}}] -- a small copy slip in old_text is then forgiven (receipt match_kind='fuzzy'). Other examples: [{\"op\": \"replace_text\", \"old_text\": \"recieve\", \"new_text\": \"receive\"}] or [{\"op\": \"replace_block\", \"block\": \"<id>\", \"expected\": \"<its hash>\", \"content\": \"New paragraph.\"}].",
+        "items": {
+          "$ref": "#/$defs/EditOperation"
+        },
+        "maxItems": 20,
+        "minItems": 1,
+        "title": "Operations",
+        "type": "array"
+      },
+      "page_id": {
+        "format": "uuid",
+        "title": "Page Id",
+        "type": "string"
+      },
+      "retry_only": {
+        "default": false,
+        "title": "Retry Only",
+        "type": "boolean"
+      },
+      "version_id": {
+        "format": "uuid",
+        "title": "Version Id",
+        "type": "string"
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "title": "Workspace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_id",
+      "page_id",
+      "version_id",
+      "operations",
+      "expected_editing_revision",
+      "idempotency_key"
+    ],
+    "title": "PatchContextEditInput",
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "ContextEditPayload": {
+        "additionalProperties": false,
+        "description": "The page after an edit command, plus what that command changed.",
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "alternative_draft_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Alternative Draft Id"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "change_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Change Set Id"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Published Version Id"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Version Id"
+          },
+          "draft_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Draft Saved At"
+          },
+          "edit_receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EditReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What this write changed: sections, line/char counts, per-operation positions, and (for a patch) the id and hash of every block whose id or hash changed. replace_block keeps the block's id; a block other edits changed keeps its id while its text stays close to the old text, otherwise it gets a new one. null on an idempotent replay."
+          },
+          "editing_revision": {
+            "default": 1,
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "graph_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Graph Status"
+          },
+          "history_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "state_inconsistent",
+                  "current_editing",
+                  "current_draft",
+                  "published_snapshot",
+                  "alternative_draft",
+                  "discarded_draft",
+                  "superseded_snapshot",
+                  "superseded_draft"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "History Status"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inconsistency_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inconsistency Reasons",
+            "type": "array"
+          },
+          "is_alternative": {
+            "default": false,
+            "title": "Is Alternative",
+            "type": "boolean"
+          },
+          "is_discarded": {
+            "default": false,
+            "title": "Is Discarded",
+            "type": "boolean"
+          },
+          "is_draft_head": {
+            "default": false,
+            "title": "Is Draft Head",
+            "type": "boolean"
+          },
+          "is_public": {
+            "default": false,
+            "title": "Is Public",
+            "type": "boolean"
+          },
+          "is_published_head": {
+            "default": false,
+            "title": "Is Published Head",
+            "type": "boolean"
+          },
+          "is_visible_head": {
+            "default": false,
+            "title": "Is Visible Head",
+            "type": "boolean"
+          },
+          "page_type": {
+            "default": "overview",
+            "enum": [
+              "overview",
+              "source",
+              "entity",
+              "concept",
+              "synthesis",
+              "comparison",
+              "decision",
+              "contradiction",
+              "query",
+              "guide"
+            ],
+            "title": "Page Type",
+            "type": "string"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Version Id"
+          },
+          "preserved_as_alternative": {
+            "default": false,
+            "title": "Preserved As Alternative",
+            "type": "boolean"
+          },
+          "publish_blocked_reasons": {
+            "items": {
+              "$ref": "#/$defs/DraftReviewReason"
+            },
+            "title": "Publish Blocked Reasons",
+            "type": "array"
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Published Version No"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "superseded_review_count": {
+            "default": 0,
+            "title": "Superseded Review Count",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Status"
+          },
+          "visible_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Visible Version Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "updated_at",
+          "content_hash",
+          "workspace_id",
+          "body_md",
+          "version_id",
+          "created_at"
+        ],
+        "title": "ContextEditPayload",
+        "type": "object"
+      },
+      "DraftReviewReason": {
+        "additionalProperties": false,
+        "description": "One reason a write did not simply publish.\n\nLives here rather than beside either write surface because both use it: the\nMCP result names why a draft went to review, and the REST page payload names\nwhy a save was held from publication.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "DraftReviewReason",
+        "type": "object"
+      },
+      "EditReceipt": {
+        "additionalProperties": false,
+        "description": "Positions and sizes of one edit: sections, lines, characters, blocks.",
+        "properties": {
+          "changed_blocks": {
+            "description": "Blocks whose id or hash is new after a patch, so a follow-up block-addressed patch needs no read_structure_map round trip. Unchanged blocks keep the id and hash you already hold.",
+            "items": {
+              "$ref": "#/$defs/EditReceiptBlock"
+            },
+            "title": "Changed Blocks",
+            "type": "array"
+          },
+          "changed_sections": {
+            "description": "Heading paths of the sections the edit touched (max 20).",
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Changed Sections",
+            "type": "array"
+          },
+          "chars_added": {
+            "default": 0,
+            "title": "Chars Added",
+            "type": "integer"
+          },
+          "chars_removed": {
+            "default": 0,
+            "title": "Chars Removed",
+            "type": "integer"
+          },
+          "edit_mode": {
+            "enum": [
+              "patch",
+              "whole_body",
+              "create"
+            ],
+            "title": "Edit Mode",
+            "type": "string"
+          },
+          "editing_revision_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Editing Revision After"
+          },
+          "editing_revision_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Editing Revision Before"
+          },
+          "first_change": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EditReceiptFirstChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "lines_added": {
+            "default": 0,
+            "title": "Lines Added",
+            "type": "integer"
+          },
+          "lines_removed": {
+            "default": 0,
+            "title": "Lines Removed",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/$defs/EditReceiptOperation"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "edit_mode"
+        ],
+        "title": "EditReceipt",
+        "type": "object"
+      },
+      "EditReceiptBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "hash"
+        ],
+        "title": "EditReceiptBlock",
+        "type": "object"
+      },
+      "EditReceiptFirstChange": {
+        "additionalProperties": false,
+        "properties": {
+          "after_preview": {
+            "title": "After Preview",
+            "type": "string"
+          },
+          "before_preview": {
+            "title": "Before Preview",
+            "type": "string"
+          },
+          "line": {
+            "description": "1-indexed line of the first change in the new body.",
+            "title": "Line",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "before_preview",
+          "after_preview"
+        ],
+        "title": "EditReceiptFirstChange",
+        "type": "object"
+      },
+      "EditReceiptOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_block_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Block Ids",
+            "type": "array"
+          },
+          "chars_added": {
+            "default": 0,
+            "title": "Chars Added",
+            "type": "integer"
+          },
+          "chars_removed": {
+            "default": 0,
+            "title": "Chars Removed",
+            "type": "integer"
+          },
+          "heading_path": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Heading Path"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "line_range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1-indexed inclusive line range in the body BEFORE the patch.",
+            "title": "Line Range"
+          },
+          "match_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exact",
+                  "normalized",
+                  "fuzzy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "replace_text only: how old_text was found. 'normalized' ignored whitespace/Unicode differences; 'fuzzy' forgave a small copy slip inside the addressed block or section -- check the result.",
+            "title": "Match Kind"
+          },
+          "match_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "replace_text only: version of the matching rules applied.",
+            "title": "Match Policy"
+          },
+          "match_similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only for match_kind='fuzzy': 0-1 similarity of the target.",
+            "title": "Match Similarity"
+          },
+          "matched_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only for a non-exact match: sha256 of the original text that was replaced (several matches joined by NUL).",
+            "title": "Matched Sha256"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "op"
+        ],
+        "title": "EditReceiptOperation",
+        "type": "object"
+      },
+      "EnvelopeWarning": {
+        "additionalProperties": false,
+        "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
+        "properties": {
+          "code": {
+            "description": "Stable warning code; must be drawn from WARNING_CODES.",
+            "enum": [
+              "stale",
+              "permission_limited",
+              "citation_missing",
+              "citation_weak",
+              "citation_stale",
+              "token_budget",
+              "workflow_sequence_incomplete",
+              "draft_not_injectable",
+              "expired_context",
+              "archived",
+              "unsupported_retrieval_mode_fallback",
+              "deprecated_tool",
+              "conversation_token_not_supplied",
+              "unresolved_diverged_branch",
+              "conversation_read_stale",
+              "lint_publish_blocked",
+              "published_with_findings",
+              "draft_unpublished",
+              "text_occurrence_mismatch",
+              "text_not_found",
+              "unsupported_filter_tag",
+              "unsupported_filter_date",
+              "disambiguation_required",
+              "semantic_fallback_used",
+              "keyword_lane_unavailable",
+              "coverage_gap_recorded",
+              "evidence_not_citable",
+              "mrtr_preview_unavailable",
+              "borrowed_rerank_applied",
+              "borrowed_query_rewrite_applied",
+              "llm_provider_unavailable",
+              "llm_composer_failed",
+              "job_fanout_incomplete"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "MCPActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "mcp_client",
+              "agent",
+              "system"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPErrorDetail": {
+        "additionalProperties": false,
+        "description": "One actionable defect in a rejected tool call.\n\nShaped for a caller that has to repair its own request: `field` locates the\nproblem, `message` states it, and `fix` says what to send instead. Never\necho the offending value here \u2014 a rejected `body_markdown` can be a\nmegabyte, and reflecting client input back into a response (and into the\nstored trace) is both wasteful and an injection vector.",
+        "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextMatchCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidates"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fix"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_index": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Index"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPResultEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ref": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Activity Ref"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MCPActor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human",
+                  "mcp_client",
+                  "agent",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Kind"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audit Event Id"
+          },
+          "client_self_reported": {
+            "default": false,
+            "title": "Client Self Reported",
+            "type": "boolean"
+          },
+          "conversation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Opaque MCP conversation token. Echo this value on the next tool call to append to the same dtxWiki MCP chat.",
+            "title": "Conversation Token"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_details": {
+            "items": {
+              "$ref": "#/$defs/MCPErrorDetail"
+            },
+            "title": "Error Details",
+            "type": "array"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Meta"
+          },
+          "model_id": {
+            "default": "unknown",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Version"
+          },
+          "params_summary": {
+            "additionalProperties": true,
+            "title": "Params Summary",
+            "type": "object"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result_status": {
+            "enum": [
+              "accepted",
+              "succeeded",
+              "failed",
+              "partial",
+              "rejected_by_policy",
+              "needs_review",
+              "conflict"
+            ],
+            "title": "Result Status",
+            "type": "string"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retryable"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "schema_version": {
+            "const": "llmwiki.mcp.v1",
+            "default": "llmwiki.mcp.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "result_status"
+        ],
+        "title": "MCPResultEnvelope",
+        "type": "object"
+      },
+      "TextMatchCandidate": {
+        "additionalProperties": false,
+        "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
+        "properties": {
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Block Id"
+          },
+          "line_end": {
+            "minimum": 1,
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "minimum": 1,
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "match_kind": {
+            "enum": [
+              "exact",
+              "normalized",
+              "fuzzy"
+            ],
+            "title": "Match Kind",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "line_start",
+          "line_end",
+          "similarity",
+          "match_kind"
+        ],
+        "title": "TextMatchCandidate",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "data": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextEditPayload"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "envelope": {
+        "$ref": "#/$defs/MCPResultEnvelope"
+      }
+    },
+    "required": [
+      "envelope"
+    ],
+    "title": "PatchContextEditToolOutput",
+    "type": "object"
+  }
+}

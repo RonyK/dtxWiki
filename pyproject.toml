@@ -1,0 +1,157 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dtxwiki"
+version = "0.1.1"
+description = "Local-first MCP-native Markdown wiki for AI tools."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "dtxSuite" }]
+license = "AGPL-3.0-only OR Elastic-2.0"
+license-files = ["LICENSE", "LICENSE-AGPL-3.0", "LICENSE-ELv2", "NOTICE"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Documentation",
+  "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+  # Several floors below are security floors, not feature floors: starlette
+  # 1.3.1 (Host-header path confusion, urlencoded field limits, Windows
+  # StaticFiles UNC paths), PyJWT 2.15.1 (a nested JWT header escaping
+  # jwt.decode as RecursionError), python-multipart 0.0.32, mcp 1.28.1,
+  # cryptography 50 (bundled OpenSSL), anyio 4.14.2 and pydantic-settings
+  # 2.14.2. `pip install dtxwiki` and the Docker image resolve inside these
+  # ranges rather than from uv.lock, so never lower one to widen compatibility.
+  "alembic>=1.14",
+  # Imported directly -- anyio.run in mcp_doctor and
+  # anyio.to_thread.run_sync in the multipart upload limiter -- not merely
+  # inherited from starlette/mcp. Declared so a transport-layer swap upstream
+  # cannot silently remove it.
+  "anyio>=4.14.2",
+  "argon2-cffi>=23.1",
+  "cryptography>=50.0.0",
+  "fastapi>=0.115",
+  # Imported directly, not just through httpx: the CIMD fetcher subclasses
+  # httpcore's network backend so a validated IP is the one actually dialled.
+  # That is a security control, so the dependency is declared rather than
+  # inherited -- an httpx release that swapped backends would otherwise remove
+  # the pinning silently.
+  "httpcore>=1.0",
+  "httpx>=0.27",
+  # Used directly for browser-equivalent UTS #46 host normalization. This is
+  # an authorization boundary, so do not rely on httpx to provide it transitively.
+  "idna>=3.10",
+  # Runner-side structuredContent validation (backend/mcp/protocol/
+  # output_validation.py) deliberately replaces the SDK's own outputSchema
+  # check, so it must not depend on `mcp` continuing to pull jsonschema in
+  # as a transitive.
+  "jsonschema>=4.23",
+  "mcp>=1.28.1,<2",
+  "markdown-it-py>=4.0",
+  "packaging>=23",
+  "pillow==12.3.0",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.14.2",
+  "pg8000>=1.31",
+  "python-multipart>=0.0.32",
+  "PyJWT>=2.15.1",
+  "PyYAML>=6.0.2",
+  "sqlalchemy>=2.0",
+  # ASGI types, BaseHTTPMiddleware and ClientDisconnect are imported from
+  # starlette directly rather than through FastAPI's re-exports; fastapi
+  # pins only a lower bound, so declare our own.
+  "starlette>=1.3.1",
+  "tomlkit>=0.13",
+  "typer>=0.12",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.urls]
+Homepage = "https://www.dtxwiki.com/"
+Repository = "https://github.com/dtxSuite/dtxWiki"
+Issues = "https://github.com/dtxSuite/dtxWiki/issues"
+Changelog = "https://github.com/dtxSuite/dtxWiki/blob/main/CHANGELOG.md"
+
+[project.scripts]
+dtxwiki = "backend.cli.main:main"
+dtxwiki-worker = "backend.worker.entry:main"
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "pytest>=8.3",
+  "pytest-xdist>=3.6",
+  "ruff>=0.8",
+]
+desktop = [
+  "pyinstaller>=6.16,<7",
+]
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+exclude = ["backend.tests*"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.package-data]
+backend = [
+  "alembic.ini",
+  "catalog/mcp_apps/*.json",
+  "catalog/mcp_apps/*.md",
+  "catalog/mcp_apps/icons/*",
+  "catalog/library_family_presets/*.json",
+  "migrations/**/*",
+  "static/**/*",
+]
+
+[tool.setuptools.data-files]
+"share/dtxwiki" = [
+  "DEPLOYMENT.md",
+]
+"share/dtxwiki/infra/prod" = [
+  "infra/prod/dtxwiki.service",
+  "infra/prod/dtxwiki-worker.service",
+  "infra/prod/Caddyfile.example",
+  "infra/prod/Caddyfile.internal.example",
+  "infra/prod/Caddyfile.custom.example",
+  "infra/prod/Caddyfile.insecure.example",
+  "infra/prod/nginx.conf.example",
+  "infra/prod/.env.example",
+  "infra/prod/install.sh",
+  "infra/prod/Caddyfile.docker",
+  "infra/prod/Caddyfile.docker.internal",
+  "infra/prod/docker-compose.yml",
+  "infra/prod/docker-entrypoint.sh",
+  "infra/prod/.env.docker.example",
+]
+"share/dtxwiki/tests/packaging" = [
+  "tests/packaging/production_smoke.sh",
+  "tests/packaging/production_smoke.ps1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "tests"]
+pythonpath = ["."]
+markers = [
+  "unit: backend/tests/unit/** — fast in-process unit test",
+  "integration: backend/tests/integration/** — legacy/product integration test",
+  "mcp_http: MCP HTTP transport (streamable + stateless)",
+  "oauth_flow: OAuth 2.1 + DCR + PKCE + refresh + revoke flow",
+  "cross_transport: 5-transport workspace isolation matrix",
+  "production_smoke: tests/packaging/** — production guard / smoke",
+  "cross_transport_remote: tests/e2e/remote_mcp_smoke.py — server PC × dev PC split",
+  "real_argon2: opts out of the fast test hasher and exercises the production Argon2id cost",
+  "counterexample(reason): builds a violating input and asserts its guard rejects it",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "RUF100"]

@@ -1,0 +1,443 @@
+{
+  "home": { "eyebrow": "컨텍스트 홈" },
+  "children": {
+    "title": "하위 항목",
+    "eyebrow": "직접 하위 인덱스",
+    "description": "이 페이지의 인덱스에서 직접 하위 페이지 또는 폴더를 여세요.",
+    "count_one": "하위 항목 {{count}}개",
+    "count_other": "하위 항목 {{count}}개",
+    "folderChildCount_one": "직접 하위 항목 {{count}}개",
+    "folderChildCount_other": "직접 하위 항목 {{count}}개",
+    "showingRange": "전체 {{total}}개 중 {{start}}–{{end}} 표시",
+    "paginationLabel": "하위 항목 페이지 탐색",
+    "previous": "이전",
+    "pageLabel": "{{page}}페이지",
+    "next": "다음"
+  },
+  "loading": "Context 불러오는 중",
+  "errors": {
+    "load": "Context를 불러오지 못했습니다",
+    "workspaceNotFound": "워크스페이스를 찾을 수 없습니다",
+    "refreshTree": "Context 트리를 새로 고치지 못했습니다. 다시 시도하세요.",
+    "moveTreeNode": "Context 항목을 이동하지 못했습니다. 다시 시도하세요.",
+    "reorderTreeNode": "Context 항목의 순서를 바꾸지 못했습니다. 다시 시도하세요.",
+    "loadDetail": "Context 페이지를 불러오지 못했습니다. 다시 시도하세요.",
+    "itemUnavailable": "해당 Context 페이지를 더 이상 사용할 수 없어 목록에서 제거했습니다."
+  },
+  "layout": {
+    "details": "상세",
+    "explorer": "탐색기"
+  },
+  "actions": {
+    "createItem": "Context 항목 만들기",
+    "edit": "편집",
+    "linkCopied": "링크가 복사되었습니다",
+    "linkSelected": "링크가 선택되었습니다. Ctrl+C를 누르세요.",
+    "linkCopyUnavailable": "복사를 사용할 수 없습니다",
+    "linkCopyReasons": {
+      "permission": "브라우저 권한이 복사를 차단했습니다. 링크를 선택하고 Ctrl+C를 누르세요.",
+      "insecure": "자동 복사는 HTTPS가 필요합니다. 링크를 선택하고 Ctrl+C를 누르세요.",
+      "unsupported": "이 브라우저는 자동 복사를 지원하지 않습니다. 링크를 선택하고 Ctrl+C를 누르세요.",
+      "selection": "링크를 선택하지 못했습니다. 링크에 포커스하고 직접 복사하세요."
+    },
+    "morePageActions": "페이지 작업 더 보기",
+    "new": "새로 만들기"
+  },
+  "share": {
+    "action": "공유",
+    "eyebrow": "읽기 전용 공유",
+    "title": "{{title}} 공유",
+    "close": "닫기",
+    "closeDialog": "대화상자 닫기",
+    "ready": "준비됨",
+    "required": "필요",
+    "workspaceUnavailable": "워크스페이스 링크 정보를 사용할 수 없습니다. 새로 고친 뒤 다시 시도하세요.",
+    "publishVersionFirst": "이 페이지를 웹에 게시하기 전에 페이지 버전을 먼저 게시하세요.",
+    "workspaceLink": {
+      "title": "워크스페이스 링크",
+      "description": "dtxWiki 내부의 Context 페이지를 여는 링크입니다. 접근 권한이 있는 로그인 워크스페이스 멤버만 사용할 수 있습니다.",
+      "copy": "워크스페이스 링크 복사"
+    },
+    "web": {
+      "title": "웹에 게시",
+      "description": "익명 방문자를 위한 별도의 읽기 전용 URL을 만듭니다. 워크스페이스 내부 페이지와 초안은 계속 비공개입니다.",
+      "exposureScope": "익명 공개 범위",
+      "indexedScope": "공개 및 검색 가능",
+      "unlistedScope": "미등록 직접 링크",
+      "publishedVersion": "게시된 페이지 버전 존재",
+      "draftNote": "방문자는 현재 게시된 버전을 계속 봅니다. 게시되지 않은 초안은 노출되지 않습니다.",
+      "editorOnly": "워크스페이스 편집자와 소유자만 웹 게시를 변경할 수 있습니다.",
+      "ownerOnlyUnlisted": "워크스페이스가 공개가 아닐 때는 소유자만 익명 공유를 시작할 수 있습니다."
+    },
+    "copy": {
+      "copied": "워크스페이스 링크가 복사되었습니다",
+      "selected": "링크가 선택되었습니다 - Ctrl+C를 누르세요",
+      "unavailable": "복사를 사용할 수 없습니다 - 링크 텍스트를 직접 선택하세요",
+      "reasons": {
+        "permission": "브라우저 권한이 복사를 차단했습니다. 링크를 선택하고 Ctrl+C를 누르세요.",
+        "insecure": "자동 복사는 HTTPS가 필요합니다. 링크를 선택하고 Ctrl+C를 누르세요.",
+        "unsupported": "이 브라우저는 자동 복사를 지원하지 않습니다. 링크를 선택하고 Ctrl+C를 누르세요.",
+        "selection": "링크를 선택하지 못했습니다. 링크에 포커스하고 직접 복사하세요."
+      }
+    }
+  },
+  "rail": {
+    "home": "컨텍스트 홈",
+    "title": "컨텍스트",
+    "empty": "컨텍스트 트리 노드가 없습니다"
+  },
+  "breadcrumb": {
+    "root": "컨텍스트"
+  },
+  "header": {
+    "eyebrow": "지식 기반",
+    "title": "컨텍스트",
+    "newPage": "새 컨텍스트 페이지",
+    "subtitle": "팀과 AI가 함께 읽는 지속 페이지입니다. 초안은 게시 전까지 답변에 쓰이지 않습니다."
+  },
+  "publishArrival": {
+    "published": "게시했습니다.",
+    "published_with_findings": "게시했지만 형식 문제가 발견되었습니다.",
+    "review_completed": "게시하고 검토 요청을 완료했습니다.",
+    "review_failed": "게시했지만 검토 요청을 완료하지 못했습니다: {{error}}",
+    "review_superseded": "게시했습니다. 이 편집으로 검토 요청이 대체되었습니다."
+  },
+  "empty": {
+    "title": "아직 Context 페이지가 없습니다",
+    "description": "Context 페이지는 Ask와 Agent workflow가 인용할 수 있는 오래 유지되는 지식입니다.",
+    "writeFirst": "첫 Context 페이지 작성",
+    "openLibrary": "Library 열기"
+  },
+  "folder": {
+    "systemPrefix": "시스템 관리 ",
+    "childCount": "하위 항목 {{count}}개",
+    "pageFolderCount": "{{pages}} · {{folders}}",
+    "pageCount_one": "페이지 {{count}}개",
+    "pageCount_other": "페이지 {{count}}개",
+    "folderCount_one": "폴더 {{count}}개",
+    "folderCount_other": "폴더 {{count}}개",
+    "empty": "이 폴더는 비어 있습니다.",
+    "description": "탐색기에서 하위 페이지나 폴더를 선택하세요.",
+    "childPageCount": "하위 페이지 {{count}}개"
+  },
+  "units": {
+    "page_one": "페이지",
+    "page_other": "페이지",
+    "item_one": "개",
+    "item_other": "개"
+  },
+  "panel": {
+    "recentHeading": "최신 업데이트"
+  },
+  "list": {
+    "draftIndicator": "게시되지 않은 초안",
+    "loadMore": "더 보기",
+    "loadingMore": "불러오는 중…"
+  },
+  "filters": {
+    "draftState": "초안 상태",
+    "draftOptions": {
+      "all": "모든 페이지",
+      "with": "게시되지 않은 초안 있음",
+      "without": "게시되지 않은 초안 없음"
+    }
+  },
+  "labels": {
+    "unset": "미지정",
+    "pageType": {
+      "overview": "개요",
+      "source": "출처",
+      "entity": "엔터티",
+      "concept": "개념",
+      "synthesis": "종합",
+      "comparison": "비교",
+      "decision": "결정",
+      "decision_log": "결정 로그",
+      "contradiction": "모순",
+      "query": "쿼리",
+      "guide": "가이드"
+    },
+    "nodeKind": {
+      "folder": "폴더",
+      "page_ref": "페이지",
+      "saved_view": "저장된 보기",
+      "context_page": "Context 페이지"
+    }
+  },
+  "reader": {
+    "ariaLabel": "Context 리더 보기",
+    "readersSeeThis": "독자가 볼 수 있음",
+    "viewingDraft": "초안 편집 중",
+    "notVisible": "아직 보이지 않음",
+    "readersSeeVersion": "독자가 v{{version}}을 봄",
+    "readersSeeVersionAction": "독자가 v{{version}}을 봄; 히스토리에서 이 버전 열기",
+    "readersSeeVersionTip": "독자에게 공개되는 게시 스냅샷입니다. 히스토리에서 바로 확인할 수 있습니다.",
+    "tagTip": "태그 도움말",
+    "readersSeeNone": "아직 게시되지 않음",
+    "draftPending": "초안 대기 중",
+    "noBody": "본문 없음",
+    "deletedSource": "{{title}} (삭제됨 - {{detail}})",
+    "deletedSourceShort": "{{title}} (삭제됨)",
+    "tabs": {
+      "view": "보기",
+      "history": "히스토리",
+      "graph": "그래프",
+      "bundle": "번들",
+      "activity": "활동",
+      "children": "하위 항목",
+      "unavailable": "아직 사용할 수 없습니다"
+    },
+    "selectPagePrompt": "트리 또는 페이지 목록에서 Context 페이지를 선택하세요.",
+    "bundleUnavailable": "번들 미리보기는 아직 사용할 수 없습니다. 번들은 Agent 페이지로 구성되며, MCP 클라이언트는 build_agent_input_bundle 로 어떤 내용이 포함될지 확인할 수 있습니다.",
+    "activityLoading": "활동 불러오는 중",
+    "activityEmpty": "이 페이지에 아직 아무 일도 없었습니다.",
+    "activityLoadError": "이 페이지의 활동을 불러오지 못했습니다.",
+    "activityLoadMoreError": "이전 페이지 활동을 불러오지 못했습니다.",
+    "activityListLabel": "페이지 활동",
+    "activityUnknownDate": "날짜를 확인할 수 없음",
+    "activityYou": "나",
+    "activityUnknownActor": "알 수 없는 작업자",
+    "activityLoadingOlder": "이전 활동 불러오는 중",
+    "activityLoadOlder": "이전 활동 불러오기"
+  },
+  "inspector": {
+    "ariaLabel": "Context 상세",
+    "emptyTitle": "Context 상세",
+    "emptyDescription": "세부 정보와 인용을 확인할 Context 페이지를 선택하세요.",
+    "summary": "요약",
+    "properties": "속성",
+    "backlinks": "백링크",
+    "history": "히스토리",
+    "citationHealth": "인용 상태",
+    "ok": "정상",
+    "warnings": "경고",
+    "noWarnings": "경고 없음",
+    "warningCount": "경고 {{count}}개",
+    "contextProperties": "Context 속성",
+    "type": "유형",
+    "slug": "슬러그",
+    "status": "상태",
+    "version": "버전",
+    "none": "없음",
+    "graph": "그래프",
+    "backlinksAndRefs": "백링크 및 참조",
+    "childPages": "하위 페이지",
+    "noBacklinks": "아직 이 페이지를 연결한 페이지가 없습니다.",
+    "historyHeading": "히스토리",
+    "versions": "버전",
+    "feedback": "피드백",
+    "changeSets": "변경 세트",
+    "noVersionHistory": "아직 버전 히스토리가 없습니다."
+  },
+  "neighbors": {
+    "backlinksHeading": "백링크",
+    "citationsHeading": "인용",
+    "emptyBacklinks": "이 페이지를 연결한 표시 가능한 페이지가 없습니다.",
+    "emptyCitations": "표시 가능한 인용이 없습니다.",
+    "coAccessHeading": "함께 읽힌 문서",
+    "emptyCoAccess": "아직 co-access 탐색 기록이 컴파일되지 않았습니다.",
+    "graphLoading": "그래프 불러오는 중…",
+    "graphEmpty": "표시할 그래프 관계가 없습니다.",
+    "graphLoadError": "그래프를 불러오지 못했습니다.",
+    "relationshipList": "그래프 관계",
+    "relationshipListDescription": "다이어그램과 같은 관계를 키보드로 열려면 이 목록을 사용하세요.",
+    "loadError": "이웃 정보를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+    "unavailable": "이웃 목록을 표시할 수 없습니다.",
+    "outbound": "나가는 링크"
+  },
+  "history": {
+    "clearSelection": "선택 해제",
+    "closeDiff": "차이 닫기",
+    "closeDiffForVersion": "v{{version}} 비교 닫기",
+    "compare": "비교",
+    "compareVersionPair": "v{{version}}과 v{{previous}} 비교",
+    "compareWithPrevious": "v{{version}}을 직전 버전과 비교",
+    "compareUnavailable": "비교할 수 없음",
+    "compareTwo": "두 버전 비교",
+    "compareTwoUnavailable": "두 버전을 비교하려면 버전이 두 개 이상 필요합니다.",
+    "compareTitle": "v{{version}}과(와) 현재 버전 비교",
+    "currentPublished": "현재 게시본",
+    "crossLineageWarning": "이 버전들은 서로 다른 계보에 있습니다. 이 차이는 하나의 진행 과정이 아니라 브랜치를 가로지르는 스냅샷을 비교합니다.",
+    "currentUnavailable": "현재 Context 버전을 사용할 수 없습니다.",
+    "describe": {
+      "active": "활성 리더 버전",
+      "alternative": "대체 브랜치",
+      "draft": "초안 - 아직 게시되지 않음",
+      "published": "게시된 스냅샷",
+      "superseded": "최신 버전으로 대체됨"
+    },
+    "failedDiff": "차이를 불러오지 못했습니다",
+    "failedDiscard": "대체 버전을 폐기하지 못했습니다",
+    "failedRestore": "Context 버전을 복원하지 못했습니다",
+    "loadOlderFailed": "이전 버전을 불러오지 못했습니다.",
+    "firstVersionNoComparison": "첫 버전은 비교할 이전 버전이 없습니다.",
+    "previousVersionUnavailable": "이전 버전을 사용할 수 없습니다.",
+    "firstVersion": "첫 버전",
+    "parentHidden": "이전 버전을 볼 권한이 없습니다",
+    "parentMissing": "이전 버전을 사용할 수 없습니다",
+    "parentOlder": "더 오래된 버전에서 이어짐",
+    "branchedFrom": "v{{version}}에서 분기됨",
+    "continuesFrom": "v{{version}}에서 이어짐",
+    "event": "이벤트",
+    "help": "버전과 페이지 이벤트를 최신순 타임라인에서 함께 봅니다. 버전을 선택해 확인, 비교 또는 복원하세요.",
+    "earlierEndpoint": "이전 버전",
+    "laterEndpoint": "이후 버전",
+    "loadingDiff": "차이 불러오는 중",
+    "loadingOlder": "이전 버전 불러오는 중",
+    "loadOlder": "이전 버전 불러오기",
+    "latestDraft": "최신 초안",
+    "noEarlierEndpoint": "빈 기준선",
+    "restore": "이 버전 복원",
+    "restoreConfirm": "v{{version, josaEulReul}} 새 초안으로 복원할까요? 게시된 버전은 변경되지 않습니다.",
+    "restored": "Context v{{version, josaIGa}} 초안 v{{draft, josaEuRo}} 복원되었습니다.",
+    "restoring": "복원 중",
+    "readerVisibleVersion": "독자가 보는 버전",
+    "reviewLabel": "리뷰",
+    "discard": "폐기",
+    "discardConfirm": "대체 버전 v{{version, josaEulReul}} 폐기할까요? 이 작업은 되돌릴 수 없습니다.",
+    "discardReason": "폐기 사유",
+    "cancelDiscard": "취소",
+    "confirmDiscard": "브랜치 영구 폐기",
+    "discarded": "대체 버전 v{{version, josaEulReul}} 폐기했습니다.",
+    "discarding": "폐기 중",
+    "selectVersion": "버전 선택",
+    "selectorHelp": "같은 버전끼리는 비교할 수 없습니다. 쌍은 자동으로 오래된 버전부터 정렬됩니다.",
+    "versionDisabledEarlier": "v{{version}} — 선택 불가: 이미 이전 버전으로 선택됨",
+    "versionDisabledLater": "v{{version}} — 선택 불가: 이미 이후 버전으로 선택됨",
+    "versionSelectors": "비교할 버전",
+    "visibleHead": "현재 표시 버전",
+    "states": {
+      "state_inconsistent": {
+        "label": "상태 확인 필요",
+        "description": "운영 점검 필요"
+      },
+      "current_editing": {
+        "label": "편집 중",
+        "description": "아직 제출되지 않은 비공개 편집본. 제출 전까지 작성자 본인에게만 보임"
+      },
+      "current_draft": {
+        "label": "현재 초안",
+        "description": "아직 게시되지 않은 현재 편집본. 독자는 현재 게시본을 봄"
+      },
+      "published_snapshot": {
+        "label": "현재 게시 스냅샷",
+        "description": "독자가 보는 버전"
+      },
+      "alternative_draft": {
+        "label": "대안 초안",
+        "description": "현재 편집 경로와 분기되어 보존됨"
+      },
+      "discarded_draft": {
+        "label": "폐기된 초안",
+        "description": "대안에서 제외됨"
+      },
+      "superseded_snapshot": {
+        "label": "대체된 스냅샷",
+        "description": "더 최신 게시본으로 대체됨"
+      },
+      "superseded_draft": {
+        "label": "대체된 초안",
+        "description": "더 최신 버전으로 대체됨"
+      }
+    }
+  },
+  "reconciliation": {
+    "eyebrow": "브랜치 화해",
+    "title": "브랜치 화해",
+    "open": "화해하기",
+    "close": "닫기",
+    "loading": "화해 정보 불러오는 중",
+    "loadError": "화해 정보를 불러오지 못했습니다.",
+    "submitError": "이 브랜치를 화해하지 못했습니다.",
+    "discardError": "이 브랜치를 폐기하지 못했습니다.",
+    "pendingCount_one": "HEAD에 다시 합치기 전에 화해해야 할 브랜치가 {{count}}개 있습니다.",
+    "pendingCount_other": "HEAD에 다시 합치기 전에 화해해야 할 브랜치가 {{count}}개 있습니다.",
+    "pendingCountAtLeast": "HEAD에 다시 합치기 전에 화해해야 할 브랜치가 최소 {{count}}개 있습니다.",
+    "refresh": "충돌 새로고침",
+    "headAdvanced": "페이지 HEAD가 변경되었습니다. 선택을 자동 재적용하지 않았습니다. 충돌을 새로고친 뒤 다시 선택하세요.",
+    "baseToHead": "기준 v{{base}} → HEAD v{{head}}",
+    "branchVersion": "브랜치 v{{version}}",
+    "branchActorWithName": "브랜치 작성자: {{kind}} · {{name}}",
+    "branchActorKind": "브랜치 작성자: {{kind}}",
+    "headAdvanceCount_one": "HEAD가 {{count}}번 변경됨",
+    "headAdvanceCount_other": "HEAD가 {{count}}번 변경됨",
+    "blockStrip": "화해 블록",
+    "tableRow": "표 {{row}}행",
+    "progress": "충돌 {{total}}개 중 {{resolved}}개 해결",
+    "head": "현재 HEAD",
+    "yours": "내 브랜치",
+    "headGapEffect": "현재 삽입 위치에 있는 전체 블록",
+    "branchInsertEffect": "브랜치에서 삽입할 전체 내용",
+    "emptyInsertionGap": "현재 이 삽입 위치를 차지하는 블록이 없습니다.",
+    "base": "공통 기반 보기",
+    "choose": "해결 방법 선택",
+    "keepHead": "HEAD 유지",
+    "restoreYours": "내 브랜치 복원",
+    "custom": "새 블록 작성",
+    "customLabel": "블록 Markdown",
+    "startFromHead": "HEAD에서 시작",
+    "startFromYours": "내 브랜치에서 시작",
+    "retiredIdentity": "이 블록 식별자는 폐기되었습니다. 복원 또는 직접 작성 시 새 블록 연산을 만듭니다.",
+    "deleted": "이 버전에서 삭제됨",
+    "noBlocks": "화해할 블록이 없습니다.",
+    "reason": "화해 사유",
+    "reasonPlaceholder": "선택한 해결 방법이 의도한 변경을 보존하는 이유를 설명하세요.",
+    "zeroConflictReason": "남은 충돌이 없음을 확인하여 가지를 병합합니다.",
+    "preview": "병합 초안 미리보기",
+    "previewing": "미리보는 중",
+    "previewTitle": "서버 미리보기",
+    "previewHint": "초안을 만들 때와 동일한 서버 검증 경로에서 생성한 미리보기입니다.",
+    "submit": "화해 초안 만들기",
+    "submitting": "초안 만드는 중",
+    "discardTitle": "브랜치 폐기",
+    "discardReason": "폐기 사유",
+    "discard": "브랜치 폐기",
+    "discarding": "폐기 중",
+    "cancelDiscard": "취소",
+    "confirmDiscard": "브랜치 영구 폐기",
+    "cleanChangesTitle": "브랜치에만 있는 변경",
+    "cleanChangesHint": "이 변경은 기본으로 포함됩니다. 화해 초안에서 제외하려면 선택을 해제하세요.",
+    "includeCleanChange": "{{label}} 포함",
+    "blockStates": {
+      "same": "동일",
+      "head_only": "HEAD에만 있음",
+      "branch_only": "브랜치에만 있음",
+      "conflict": "충돌"
+    },
+    "blockDescriptions": {
+      "same": "양쪽에서 변경되지 않은 블록입니다.",
+      "head_only": "HEAD에만 있는 블록이며 그대로 포함됩니다.",
+      "branch_only": "브랜치에만 있는 블록이며 화해 초안에 기본으로 포함됩니다.",
+      "conflict": "직접 해결해야 하는 블록입니다."
+    }
+  },
+  "pendingReview": {
+    "label": "검토 대기 중인 초안",
+    "countLoading": "대기 중인 리뷰 수를 확인하는 중",
+    "countUnavailable": "대기 중인 리뷰 수를 확인할 수 없음",
+    "pagePendingCount_one": "이 페이지에는 대기 중인 리뷰가 {{count}}건 있습니다.",
+    "pagePendingCount_other": "이 페이지에는 대기 중인 리뷰가 {{count}}건 있습니다.",
+    "changesRequested": "변경 요청된 초안",
+    "risk": "위험도 {{risk}}",
+    "viewChanges": "변경 내용 보기",
+    "approve": "승인",
+    "requestChanges": "변경 요청",
+    "reasonPlaceholder": "승인 전 무엇을 바꿔야 하나요?",
+    "submitChanges": "요청 보내기",
+    "error": "결정을 기록하지 못했습니다.",
+    "warnings_one": "린트 경고 {{count}}건",
+    "warnings_other": "린트 경고 {{count}}건",
+    "approveImpact_one": "승인하면 이 버전이 게시됩니다. 함께 대기 중인 이전 리뷰 {{count}}건도 정리됩니다.",
+    "approveImpact_other": "승인하면 이 버전이 게시됩니다. 함께 대기 중인 이전 리뷰 {{count}}건도 정리됩니다.",
+    "reconciliationPublishWarning_one": "화해 대기 중인 가지가 {{count}}건 있습니다. 그래도 이 버전을 게시하시겠습니까?",
+    "reconciliationPublishWarning_other": "화해 대기 중인 가지가 {{count}}건 있습니다. 그래도 이 버전을 게시하시겠습니까?",
+    "viewPageReviews_one": "대기 중인 리뷰를 큐에서 보기",
+    "viewPageReviews_other": "대기 중인 리뷰 {{count}}건을 큐에서 모두 보기",
+    "openQueue": "리뷰 큐 열기",
+    "impactLoadError": "승인 시 정리될 리뷰를 불러오지 못했습니다. 안전하게 결정하려면 리뷰 큐를 여세요.",
+    "approveSuccess": "이 버전을 게시했습니다.",
+    "approveSuccessSettled_one": "이 버전을 게시했습니다. 함께 대기 중이던 이전 리뷰 {{count}}건도 정리했습니다.",
+    "approveSuccessSettled_other": "이 버전을 게시했습니다. 함께 대기 중이던 이전 리뷰 {{count}}건도 정리했습니다.",
+    "approveError": "이 버전을 승인·게시하지 못했습니다. 이전 대기 리뷰도 정리되지 않았습니다."
+  }
+}

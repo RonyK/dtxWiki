@@ -1,0 +1,122 @@
+.library-preview-pane {
+  min-width: 0;
+}
+
+/* Segmented Original/Converted toggle -- same shape as
+   .diff-viewer-mode-toggle (styles/03-editor.css) so the two switches in the
+   app read as one convention. Only rendered when both renditions have a
+   candidate (doc §3-C), so it never appears as a dead control. */
+.library-preview-rendition-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.library-preview-rendition-toggle button {
+  min-height: 36px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.library-preview-rendition-toggle button:last-child {
+  border-right: 0;
+}
+
+.library-preview-rendition-toggle button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.library-preview-notice,
+.library-preview-error {
+  padding: 0.75rem;
+}
+
+.library-preview-state {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 8px;
+  background: var(--surface-subtle, var(--surface));
+}
+
+.library-preview-state p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.library-preview-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.library-preview-download {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.library-preview-state .icon-button,
+.library-preview-download .icon-button {
+  min-height: 44px;
+}
+
+.library-preview-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.library-preview-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.library-preview-table th,
+.library-preview-table td {
+  border: 1px solid var(--border-subtle, #d5d9e0);
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.library-image-preview {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+/* Centred, not left-aligned: a still or a clip narrower than the reading
+   pane used to sit against its left edge with the rest of the row empty. */
+.library-image-preview img,
+.library-preview-pane video {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.library-image-preview figcaption {
+  max-width: 100%;
+  margin-top: 0.5rem;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.library-preview-pane audio {
+  max-width: 100%;
+  width: 100%;
+}

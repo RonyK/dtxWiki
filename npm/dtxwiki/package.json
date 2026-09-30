@@ -1,0 +1,38 @@
+{
+  "name": "@dtxsuite/dtxwiki",
+  "version": "0.1.1",
+  "description": "Run dtxWiki, the local-first MCP-native Markdown wiki for AI tools, with npx",
+  "license": "AGPL-3.0-only OR Elastic-2.0",
+  "author": "dtxSuite",
+  "homepage": "https://www.dtxwiki.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dtxSuite/dtxWiki.git",
+    "directory": "npm/dtxwiki"
+  },
+  "bugs": {
+    "url": "https://github.com/dtxSuite/dtxWiki/issues"
+  },
+  "keywords": [
+    "wiki",
+    "markdown",
+    "mcp",
+    "ai"
+  ],
+  "bin": {
+    "dtxwiki": "bin/dtxwiki.js"
+  },
+  "files": [
+    "bin/",
+    "LICENSE-AGPL-3.0",
+    "LICENSE-ELv2",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

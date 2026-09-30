@@ -1,0 +1,600 @@
+{
+  "schemaMajor": 1,
+  "catalogRevision": "2026-09-13.1",
+  "apps": [
+    {
+      "id": "claude-code",
+      "labels": {"en": "Claude Code", "ko": "Claude Code"},
+      "aliases": ["claude", "anthropic"],
+      "icon": {
+        "assetPath": "icons/claude-code.svg",
+        "sha256": "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219",
+        "mediaType": "image/svg+xml"
+      },
+      "vendor": "Anthropic",
+      "runtimeBrand": "claude",
+      "localConfigAdapterId": "claude-json",
+      "featuredRank": 1,
+      "lifecycle": "active",
+      "verification": {
+        "tier": "verified",
+        "verifiedAt": "2026-09-13",
+        "provenance": [
+          {
+            "sourceUrl": "https://docs.anthropic.com/en/docs/claude-code/mcp",
+            "checkedAt": "2026-09-13"
+          }
+        ]
+      },
+      "variants": [
+        {
+          "id": "claude-code-cli-oauth",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "oauth",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {"serverOAuth": true},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["claude-code-cli-oauth-r1"],
+          "priority": 10
+        },
+        {
+          "id": "claude-code-cli-access-key",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "access-key",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["claude-code-cli-access-key-r1"],
+          "priority": 20
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "labels": {"en": "Codex CLI", "ko": "Codex CLI"},
+      "aliases": ["openai"],
+      "icon": {
+        "assetPath": "icons/codex-cli.svg",
+        "sha256": "75c1e9fffa5e8c437bec1d67197a73992bca45d166c6ff23215185dea8fae92a",
+        "mediaType": "image/svg+xml"
+      },
+      "vendor": "OpenAI",
+      "runtimeBrand": "codex",
+      "localConfigAdapterId": "codex-toml",
+      "featuredRank": 2,
+      "lifecycle": "active",
+      "verification": {
+        "tier": "verified",
+        "verifiedAt": "2026-08-04",
+        "provenance": [
+          {
+            "sourceUrl": "https://developers.openai.com/codex/mcp/",
+            "checkedAt": "2026-08-04"
+          }
+        ]
+      },
+      "variants": [
+        {
+          "id": "codex-cli-oauth",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "oauth",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {"serverOAuth": true},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["codex-cli-oauth-r1"],
+          "priority": 10
+        },
+        {
+          "id": "codex-cli-access-key",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "access-key",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["codex-cli-access-key-r1"],
+          "priority": 20
+        }
+      ]
+    },
+    {
+      "id": "gemini-cli",
+      "labels": {"en": "Gemini CLI", "ko": "Gemini CLI"},
+      "aliases": ["gemini"],
+      "icon": {
+        "assetPath": "icons/gemini-cli.svg",
+        "sha256": "d6c30349364931f944e2d0f3a92acc2d7e372356995f9be02b88ecc1305ea7f0",
+        "mediaType": "image/svg+xml"
+      },
+      "vendor": "Google",
+      "runtimeBrand": "gemini",
+      "localConfigAdapterId": "gemini-json",
+      "featuredRank": 3,
+      "lifecycle": "active",
+      "verification": {
+        "tier": "verified",
+        "verifiedAt": "2026-08-21",
+        "provenance": [
+          {
+            "sourceUrl": "https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md",
+            "checkedAt": "2026-08-21"
+          },
+          {
+            "sourceUrl": "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md",
+            "checkedAt": "2026-08-21"
+          }
+        ]
+      },
+      "variants": [
+        {
+          "id": "gemini-cli-oauth",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "oauth",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {"serverOAuth": true},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["gemini-cli-oauth-r1"],
+          "priority": 10
+        },
+        {
+          "id": "gemini-cli-access-key",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "access-key",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["gemini-cli-access-key-r1"],
+          "priority": 20
+        }
+      ]
+    },
+    {
+      "id": "antigravity",
+      "labels": {"en": "Google Antigravity", "ko": "Google Antigravity"},
+      "aliases": ["agy"],
+      "icon": {
+        "assetPath": "icons/antigravity.svg",
+        "sha256": "98eb7e852bf45b60941957bd9b7fbdf00af5be05c2351727585cdc135b466c82",
+        "mediaType": "image/svg+xml"
+      },
+      "vendor": "Google",
+      "runtimeBrand": "antigravity",
+      "localConfigAdapterId": "antigravity-json",
+      "featuredRank": 4,
+      "lifecycle": "active",
+      "verification": {
+        "tier": "verified",
+        "verifiedAt": "2026-08-21",
+        "provenance": [
+          {
+            "sourceUrl": "https://antigravity.google/docs/mcp/",
+            "checkedAt": "2026-08-21"
+          },
+          {
+            "sourceUrl": "https://antigravity.google/docs/cli/reference/",
+            "checkedAt": "2026-08-21"
+          }
+        ]
+      },
+      "variants": [
+        {
+          "id": "antigravity-cli-oauth",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "oauth",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {"serverOAuth": true},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["antigravity-cli-oauth-r1"],
+          "priority": 10
+        },
+        {
+          "id": "antigravity-cli-access-key",
+          "surface": "cli",
+          "transport": "streamable-http",
+          "auth": "access-key",
+          "endpointReachability": ["loopback", "private-network", "public-https"],
+          "requires": {},
+          "defaultScopePreset": "agent-draft",
+          "recipeIds": ["antigravity-cli-access-key-r1"],
+          "priority": 20
+        }
+      ]
+    }
+  ],
+  "genericProfiles": [
+    {
+      "id": "other-mcp-client",
+      "labels": {"en": "Other MCP client", "ko": "기타 MCP 클라이언트"},
+      "icon": {
+        "assetPath": "icons/generic.svg",
+        "sha256": "c0a2e2f99faf21ef8ae317f2d27fd071724a8ad7920939c4b9f9dad5e2c4a63c",
+        "mediaType": "image/svg+xml"
+      },
+      "variants": [
+        {
+          "id": "other-client-url-oauth",
+          "surface": "web",
+          "transport": "streamable-http",
+          "auth": "oauth",
+          "endpointReachability": ["public-https"],
+          "requires": {"serverOAuth": true},
+          "defaultScopePreset": "read-only",
+          "recipeIds": ["other-client-url-oauth-r1"],
+          "priority": 10
+        },
+        {
+          "id": "other-client-url-access-key",
+          "surface": "web",
+          "transport": "streamable-http",
+          "auth": "access-key",
+          "endpointReachability": ["public-https"],
+          "requires": {},
+          "defaultScopePreset": "read-only",
+          "recipeIds": ["other-client-url-access-key-r1"],
+          "priority": 20
+        }
+      ]
+    }
+  ],
+  "executables": [
+    {"id": "claude", "commandName": "claude", "invocation": "direct-argv"},
+    {"id": "codex", "commandName": "codex", "invocation": "direct-argv"},
+    {"id": "gemini", "commandName": "gemini", "invocation": "direct-argv"},
+    {"id": "agy", "commandName": "agy", "invocation": "direct-argv"}
+  ],
+  "recipes": [
+    {
+      "id": "claude-code-cli-oauth-r1",
+      "version": 1,
+      "variantId": "claude-code-cli-oauth",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "step": "register",
+          "executableId": "claude",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"literal": "--scope"}],
+            [{"literal": "user"}],
+            [{"literal": "--transport"}],
+            [{"literal": "http"}],
+            [{"slot": "server-name"}],
+            [{"slot": "mcp-url"}]
+          ]
+        },
+        {
+          "kind": "command",
+          "step": "authenticate",
+          "executableId": "claude",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "login"}],
+            [{"slot": "server-name"}]
+          ]
+        },
+        {
+          "kind": "instruction",
+          "step": "authenticate",
+          "body": {
+            "en": "Verified with Claude Code 2.1.270. On builds without this command, run /mcp inside Claude Code and pick Authenticate.",
+            "ko": "Claude Code 2.1.270에서 검증했습니다. 이 명령이 없는 버전은 Claude Code 안에서 /mcp를 실행해 Authenticate를 선택하세요."
+          }
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Approve dtxWiki in the browser, then run one dtxWiki MCP read.",
+          "ko": "브라우저에서 dtxWiki를 승인한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "claude-code-cli-access-key-r1",
+      "version": 1,
+      "variantId": "claude-code-cli-access-key",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "executableId": "claude",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"literal": "--scope"}],
+            [{"literal": "user"}],
+            [{"literal": "--transport"}],
+            [{"literal": "http"}],
+            [{"slot": "server-name"}],
+            [{"slot": "mcp-url"}],
+            [{"literal": "--header"}],
+            [{"literal": "Authorization: Bearer "}, {"slot": "access-token"}]
+          ]
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Run one dtxWiki MCP read with the new key before revoking an older credential.",
+          "ko": "기존 자격증명을 폐기하기 전에 새 키로 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "codex-cli-oauth-r1",
+      "version": 1,
+      "variantId": "codex-cli-oauth",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "executableId": "codex",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"slot": "server-name"}],
+            [{"literal": "--url"}],
+            [{"slot": "mcp-url"}]
+          ]
+        },
+        {
+          "kind": "command",
+          "step": "authenticate",
+          "executableId": "codex",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "login"}],
+            [{"slot": "server-name"}]
+          ]
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Authorize when prompted, then run one dtxWiki MCP read.",
+          "ko": "요청 시 인증한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "codex-cli-access-key-r1",
+      "version": 1,
+      "variantId": "codex-cli-access-key",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "executableId": "codex",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"slot": "server-name"}],
+            [{"literal": "--url"}],
+            [{"slot": "mcp-url"}],
+            [{"literal": "--bearer-token-env-var"}],
+            [{"literal": "DTXWIKI_MCP_PAT"}]
+          ],
+          "env": {"DTXWIKI_MCP_PAT": [{"slot": "access-token-env"}]}
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Export the one-time key locally, then run one dtxWiki MCP read.",
+          "ko": "일회성 키를 로컬 환경 변수로 설정한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "gemini-cli-oauth-r1",
+      "version": 1,
+      "variantId": "gemini-cli-oauth",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "step": "register",
+          "executableId": "gemini",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"literal": "--scope"}],
+            [{"literal": "user"}],
+            [{"literal": "--transport"}],
+            [{"literal": "http"}],
+            [{"slot": "server-name"}],
+            [{"slot": "mcp-url"}]
+          ]
+        },
+        {
+          "kind": "app-command",
+          "step": "authenticate",
+          "value": [{"literal": "/mcp auth "}, {"slot": "server-name"}]
+        },
+        {
+          "kind": "instruction",
+          "step": "authenticate",
+          "body": {
+            "en": "Gemini CLI signs in from its own prompt: start gemini, type the command above, then approve dtxWiki in the browser.",
+            "ko": "Gemini CLI는 자체 프롬프트에서 로그인합니다. gemini를 실행하고 위 명령을 입력한 뒤 브라우저에서 dtxWiki를 승인하세요."
+          }
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Approve dtxWiki in the browser, then run one dtxWiki MCP read.",
+          "ko": "브라우저에서 dtxWiki를 승인한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "gemini-cli-access-key-r1",
+      "version": 1,
+      "variantId": "gemini-cli-access-key",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "executableId": "gemini",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"literal": "--scope"}],
+            [{"literal": "user"}],
+            [{"literal": "--transport"}],
+            [{"literal": "http"}],
+            [{"literal": "--header"}],
+            [{"literal": "Authorization: Bearer $DTXWIKI_MCP_PAT"}],
+            [{"slot": "server-name"}],
+            [{"slot": "mcp-url"}]
+          ],
+          "env": {"DTXWIKI_MCP_PAT": [{"slot": "access-token-env"}]}
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Export DTXWIKI_MCP_PAT locally, then run one dtxWiki MCP read.",
+          "ko": "DTXWIKI_MCP_PAT를 로컬 환경 변수로 설정한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "antigravity-cli-oauth-r1",
+      "version": 1,
+      "variantId": "antigravity-cli-oauth",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "command",
+          "step": "register",
+          "executableId": "agy",
+          "argv": [
+            [{"literal": "mcp"}],
+            [{"literal": "add"}],
+            [{"literal": "--type"}],
+            [{"literal": "http"}],
+            [{"slot": "server-name"}],
+            [{"slot": "mcp-url"}]
+          ]
+        },
+        {
+          "kind": "app-command",
+          "step": "authenticate",
+          "value": [{"literal": "/mcp"}]
+        },
+        {
+          "kind": "instruction",
+          "step": "authenticate",
+          "body": {
+            "en": "Antigravity signs in from its own UI: open /mcp in the CLI or Settings > Customizations, press Authenticate, then paste the browser code back.",
+            "ko": "Antigravity는 자체 UI에서 로그인합니다. CLI에서 /mcp를 열거나 설정 > Customizations에서 Authenticate를 누른 뒤 브라우저 코드를 붙여넣으세요."
+          }
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Finish Authenticate in Antigravity, then run one dtxWiki MCP read.",
+          "ko": "Antigravity에서 Authenticate를 완료한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "antigravity-cli-access-key-r1",
+      "version": 1,
+      "variantId": "antigravity-cli-access-key",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "json-config",
+          "label": {
+            "en": "Antigravity MCP server entry",
+            "ko": "Antigravity MCP 서버 엔트리"
+          },
+          "value": {
+            "serverUrl": {"slot": "mcp-url"},
+            "headers": {
+              "Authorization": {"slot": "authorization-bearer"}
+            }
+          }
+        },
+        {
+          "kind": "instruction",
+          "body": {
+            "en": "Place under mcpServers using the chosen name. Antigravity stores the header in local JSON; protect the file and prefer OAuth.",
+            "ko": "mcpServers 아래에 선택한 이름으로 넣으세요. Antigravity는 헤더를 로컬 JSON에 저장하므로 파일을 보호하고 OAuth를 우선하세요."
+          }
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Run one dtxWiki MCP read before revoking any older credential.",
+          "ko": "기존 자격증명을 폐기하기 전에 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "other-client-url-oauth-r1",
+      "version": 1,
+      "variantId": "other-client-url-oauth",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "copy-mcp-url",
+          "label": {"en": "MCP server URL", "ko": "MCP 서버 URL"},
+          "value": [{"slot": "mcp-url"}]
+        },
+        {
+          "kind": "instruction",
+          "step": "authenticate",
+          "body": {
+            "en": "Paste the URL into the app, choose OAuth, then approve dtxWiki in the browser window the app opens.",
+            "ko": "앱에 URL을 붙여넣고 OAuth를 선택한 뒤 앱이 여는 브라우저 창에서 dtxWiki를 승인하세요."
+          }
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Complete OAuth in the app, then run one dtxWiki MCP read.",
+          "ko": "앱에서 OAuth를 완료한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    },
+    {
+      "id": "other-client-url-access-key-r1",
+      "version": 1,
+      "variantId": "other-client-url-access-key",
+      "selectors": {},
+      "artifacts": [
+        {
+          "kind": "json-config",
+          "label": {"en": "Generic MCP configuration", "ko": "일반 MCP 설정"},
+          "value": {
+            "transport": "streamable-http",
+            "url": {"slot": "mcp-url"},
+            "bearerToken": {"slot": "access-token"}
+          }
+        }
+      ],
+      "verify": {
+        "kind": "first-mcp-call",
+        "instruction": {
+          "en": "Save the configuration locally, then run one dtxWiki MCP read.",
+          "ko": "설정을 로컬에 저장한 다음 dtxWiki MCP 읽기를 한 번 실행하세요."
+        }
+      }
+    }
+  ]
+}

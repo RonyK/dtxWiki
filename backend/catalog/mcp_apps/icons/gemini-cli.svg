@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Gemini CLI compatible client">
+  <rect width="64" height="64" rx="14" fill="#2563eb"/>
+  <path d="M17 23l9 9-9 9" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M31 42h16" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="46" cy="20" r="4" fill="#bfdbfe"/>
+</svg>

@@ -1,0 +1,97 @@
+{
+  "version": 2,
+  "rule_doc": "doc/sw-design/06_mcp_and_agent_contracts.md#appendix-a-content_hash-normalization-rule",
+  "vectors": [
+    {
+      "id": "v01",
+      "label": "empty",
+      "input": "",
+      "expected_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "v02",
+      "label": "single line no newline",
+      "input": "hello",
+      "expected_hex": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "equivalent_inputs": [
+        "hello\n"
+      ]
+    },
+    {
+      "id": "v03",
+      "label": "crlf normalized",
+      "input": "a\r\nb\r\n",
+      "expected_hex": "7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78",
+      "equivalent_inputs": [
+        "a\nb",
+        "a\r\nb"
+      ]
+    },
+    {
+      "id": "v04",
+      "label": "trailing whitespace stripped",
+      "input": "a   \nb\t\n",
+      "expected_hex": "7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78"
+    },
+    {
+      "id": "v05",
+      "label": "multiple trailing blanks",
+      "input": "a\n\n\n\n",
+      "expected_hex": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+      "equivalent_inputs": [
+        "a"
+      ]
+    },
+    {
+      "id": "v06",
+      "label": "nfc and nfd hangul",
+      "input": "\uac01",
+      "expected_hex": "45ec909f30174e6585c67833638ece2b73752a2e17b142f2071d058792f16c89",
+      "equivalent_inputs": [
+        "\uac00\u11a8"
+      ]
+    },
+    {
+      "id": "v07",
+      "label": "emoji zwj sequence",
+      "input": "a\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67b",
+      "expected_hex": "b3e18ca7f153d8ff54541dbe4c38f23f556b317bad781b93d11815ba6ec40990"
+    },
+    {
+      "id": "v08",
+      "label": "frontmatter version_no-shaped field included (not stripped)",
+      "input": "---\ntitle: T\nlast_modified_at: 2026-05-04T00:00:00Z\n---\nbody",
+      "expected_hex": "74d9872833a0b13b96600f37ec0ce135a4c0a30b6bc55ac8da175b73c0944168"
+    },
+    {
+      "id": "v08b",
+      "label": "same frontmatter without the field hashes differently than v08 -- proves the field is not excluded",
+      "input": "---\ntitle: T\n---\nbody",
+      "expected_hex": "2f4f2c68d3fa526cbf68ff8b4fb26a2cba020778e6f5f721cf257b606083d87c"
+    },
+    {
+      "id": "v09",
+      "label": "frontmatter user field included",
+      "input": "---\ntitle: A\ntags:\n  - x\n---\nbody",
+      "expected_hex": "e98aa683e4b32b9a7b032b7309a210c9565505814b4dfbd193e16eab64465483"
+    },
+    {
+      "id": "v10",
+      "label": "frontmatter without user tag differs",
+      "input": "---\ntitle: A\n---\nbody",
+      "expected_hex": "a4aa5dc91fde0edffe64467af6f0f61a612a45e71db20962f320a0bf098af7ff"
+    },
+    {
+      "id": "v11",
+      "label": "mixed line endings",
+      "input": "a\rb\r\nc\nd",
+      "expected_hex": "f729ae0cbcc8241ebb6918af712a88d5ca2c13f7fbe08f809aa297bfdf99fbe4"
+    },
+    {
+      "id": "v12",
+      "label": "nbsp preserved",
+      "input": "a\u00a0b",
+      "expected_hex": "9507017c6d887511a5a6ac28ea7e3a438882576e1bd76fe3df27a336f49c263b"
+    }
+  ]
+}

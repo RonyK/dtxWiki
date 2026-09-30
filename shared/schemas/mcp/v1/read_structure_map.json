@@ -1,0 +1,795 @@
+{
+  "input": {
+    "$defs": {
+      "ContextOutlineTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page Id"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id"
+          }
+        },
+        "title": "ContextOutlineTarget",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "conversation_token": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
+        "title": "Conversation Token"
+      },
+      "cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Resume token. Resumes at a block boundary, or mid-table at a row.",
+        "title": "Cursor"
+      },
+      "max_blocks": {
+        "default": 200,
+        "maximum": 2000,
+        "minimum": 1,
+        "title": "Max Blocks",
+        "type": "integer"
+      },
+      "max_rows_per_block": {
+        "default": 200,
+        "description": "Independent of max_blocks on purpose: a one-megabyte table is a SINGLE block, so a block cap alone bounds nothing for it.",
+        "maximum": 2000,
+        "minimum": 1,
+        "title": "Max Rows Per Block",
+        "type": "integer"
+      },
+      "target": {
+        "$ref": "#/$defs/ContextOutlineTarget"
+      },
+      "version": {
+        "default": "visible",
+        "description": "Which version to read: 'visible' (default; what this caller sees), 'draft', 'published', or 'my_edit' -- your own open editing row, the exact body patch_context_edit edits (not_found when you have none; it never opens one). An explicit target.version_id overrides this.",
+        "enum": [
+          "visible",
+          "draft",
+          "published",
+          "my_edit"
+        ],
+        "title": "Version",
+        "type": "string"
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "title": "Workspace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_id",
+      "target"
+    ],
+    "title": "ReadStructureMapInput",
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "EnvelopeWarning": {
+        "additionalProperties": false,
+        "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
+        "properties": {
+          "code": {
+            "description": "Stable warning code; must be drawn from WARNING_CODES.",
+            "enum": [
+              "stale",
+              "permission_limited",
+              "citation_missing",
+              "citation_weak",
+              "citation_stale",
+              "token_budget",
+              "workflow_sequence_incomplete",
+              "draft_not_injectable",
+              "expired_context",
+              "archived",
+              "unsupported_retrieval_mode_fallback",
+              "deprecated_tool",
+              "conversation_token_not_supplied",
+              "unresolved_diverged_branch",
+              "conversation_read_stale",
+              "lint_publish_blocked",
+              "published_with_findings",
+              "draft_unpublished",
+              "text_occurrence_mismatch",
+              "text_not_found",
+              "unsupported_filter_tag",
+              "unsupported_filter_date",
+              "disambiguation_required",
+              "semantic_fallback_used",
+              "keyword_lane_unavailable",
+              "coverage_gap_recorded",
+              "evidence_not_citable",
+              "mrtr_preview_unavailable",
+              "borrowed_rerank_applied",
+              "borrowed_query_rewrite_applied",
+              "llm_provider_unavailable",
+              "llm_composer_failed",
+              "job_fanout_incomplete"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "MCPActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "mcp_client",
+              "agent",
+              "system"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPErrorDetail": {
+        "additionalProperties": false,
+        "description": "One actionable defect in a rejected tool call.\n\nShaped for a caller that has to repair its own request: `field` locates the\nproblem, `message` states it, and `fix` says what to send instead. Never\necho the offending value here \u2014 a rejected `body_markdown` can be a\nmegabyte, and reflecting client input back into a response (and into the\nstored trace) is both wasteful and an injection vector.",
+        "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextMatchCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidates"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fix"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_index": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Index"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPResultEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ref": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Activity Ref"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MCPActor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human",
+                  "mcp_client",
+                  "agent",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Kind"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audit Event Id"
+          },
+          "client_self_reported": {
+            "default": false,
+            "title": "Client Self Reported",
+            "type": "boolean"
+          },
+          "conversation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Opaque MCP conversation token. Echo this value on the next tool call to append to the same dtxWiki MCP chat.",
+            "title": "Conversation Token"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_details": {
+            "items": {
+              "$ref": "#/$defs/MCPErrorDetail"
+            },
+            "title": "Error Details",
+            "type": "array"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Meta"
+          },
+          "model_id": {
+            "default": "unknown",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Version"
+          },
+          "params_summary": {
+            "additionalProperties": true,
+            "title": "Params Summary",
+            "type": "object"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result_status": {
+            "enum": [
+              "accepted",
+              "succeeded",
+              "failed",
+              "partial",
+              "rejected_by_policy",
+              "needs_review",
+              "conflict"
+            ],
+            "title": "Result Status",
+            "type": "string"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retryable"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "schema_version": {
+            "const": "llmwiki.mcp.v1",
+            "default": "llmwiki.mcp.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "result_status"
+        ],
+        "title": "MCPResultEnvelope",
+        "type": "object"
+      },
+      "StructureMapBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "line_span": {
+            "description": "[start, end) 1-indexed line range, computed fresh at serve time -- not a persisted field (design doc section 2.1).",
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Line Span",
+            "type": "array"
+          },
+          "preview": {
+            "description": "The block's first raw line, truncated -- untrusted content.",
+            "title": "Preview",
+            "type": "string"
+          },
+          "row_offset": {
+            "default": 0,
+            "description": "Index of the first returned row within the block, so a row-continuation page is unambiguous.",
+            "title": "Row Offset",
+            "type": "integer"
+          },
+          "row_total": {
+            "default": 0,
+            "description": "This block's true row count, not the page's.",
+            "title": "Row Total",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/$defs/StructureMapRow"
+            },
+            "maxItems": 2000,
+            "title": "Rows",
+            "type": "array"
+          },
+          "rows_omitted_count": {
+            "default": 0,
+            "description": "Rows of this block not on this page.",
+            "title": "Rows Omitted Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "hash",
+          "line_span",
+          "preview"
+        ],
+        "title": "StructureMapBlock",
+        "type": "object"
+      },
+      "StructureMapDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "block_count": {
+            "description": "The document's TOTAL block count -- NOT the number of blocks returned. Use len(blocks) for that, and follow next_cursor for the rest.",
+            "title": "Block Count",
+            "type": "integer"
+          },
+          "editing_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "For an 'editing' row: the revision to send as patch_context_edit.expected_editing_revision. null otherwise.",
+            "title": "Editing Revision"
+          },
+          "map_repaired": {
+            "default": false,
+            "description": "True when the stored block map described an older body and was rebuilt for this read. The ids returned are the ones patch_context_edit accepts for this row.",
+            "title": "Map Repaired",
+            "type": "boolean"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "resolved_version_source": {
+            "default": "visible",
+            "description": "How version_id was chosen: the requested `version` mode, or exact_version when target.version_id was given.",
+            "enum": [
+              "visible",
+              "draft",
+              "published",
+              "my_edit",
+              "exact_version"
+            ],
+            "title": "Resolved Version Source",
+            "type": "string"
+          },
+          "root_hash": {
+            "description": "The version's content_hash. It identifies the body these block ids and hashes describe; patch_context_edit's concurrency check is editing_revision, not this hash.",
+            "title": "Root Hash",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "title": "Version Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "version_id",
+          "version_status",
+          "root_hash",
+          "block_count"
+        ],
+        "title": "StructureMapDocument",
+        "type": "object"
+      },
+      "StructureMapRow": {
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "hash"
+        ],
+        "title": "StructureMapRow",
+        "type": "object"
+      },
+      "TextMatchCandidate": {
+        "additionalProperties": false,
+        "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
+        "properties": {
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Block Id"
+          },
+          "line_end": {
+            "minimum": 1,
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "minimum": 1,
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "match_kind": {
+            "enum": [
+              "exact",
+              "normalized",
+              "fuzzy"
+            ],
+            "title": "Match Kind",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "line_start",
+          "line_end",
+          "similarity",
+          "match_kind"
+        ],
+        "title": "TextMatchCandidate",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "blocks": {
+        "items": {
+          "$ref": "#/$defs/StructureMapBlock"
+        },
+        "maxItems": 2000,
+        "title": "Blocks",
+        "type": "array"
+      },
+      "blocks_omitted_count": {
+        "default": 0,
+        "description": "Blocks after this page's last one, within the document.",
+        "title": "Blocks Omitted Count",
+        "type": "integer"
+      },
+      "content_trust": {
+        "const": "untrusted_user_content",
+        "default": "untrusted_user_content",
+        "title": "Content Trust",
+        "type": "string"
+      },
+      "document": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StructureMapDocument"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "envelope": {
+        "$ref": "#/$defs/MCPResultEnvelope"
+      },
+      "next_cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Next Cursor"
+      }
+    },
+    "required": [
+      "envelope"
+    ],
+    "title": "ReadStructureMapOutput",
+    "type": "object"
+  }
+}

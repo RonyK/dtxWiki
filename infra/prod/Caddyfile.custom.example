@@ -1,0 +1,56 @@
+# infra/prod/Caddyfile.custom.example
+# Bring-your-own certificate. Caddy terminates TLS with the cert + key files you
+# provide (corporate PKI, mkcert, or an openssl self-signed cert — e.g. one with
+# an IP SAN, which avoids Caddy's `tls internal` IP quirks). Clients must already
+# trust the issuing CA (corporate root, or the mkcert root you distribute).
+# `dtxwiki setup production --tls custom --tls-cert <path> --tls-key <path>`
+# writes this for you; to edit by hand, replace 'wiki.example.com' and the two
+# certificate paths below.
+
+wiki.example.com {
+	tls /path/to/fullchain.pem /path/to/privkey.pem
+	encode gzip zstd
+
+	# Transport cap: above the largest application upload policy (50,000,000
+	# bytes) plus multipart framing. dtxWiki still enforces its own, lower
+	# per-route limits. Same value as client_max_body_size in the nginx example.
+	request_body {
+		max_size 64MB
+	}
+
+	reverse_proxy 127.0.0.1:21080 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+
+	# dtxWiki sends these headers itself, including a per-path CSP (OAuth
+	# consent nonce, loopback form-action, sandboxed documents) and HSTS.
+	# `header ?Name` only fills in a header the response lacks (for example an
+	# error Caddy generates while the app restarts), so the app's values always
+	# win. Keep one directive per header: Caddy applies the `?` fields of one
+	# block only when ALL of them are missing.
+	header ?Strict-Transport-Security "max-age=31536000"
+	header ?X-Content-Type-Options "nosniff"
+	header ?X-Frame-Options "DENY"
+	header ?Referrer-Policy "strict-origin-when-cross-origin"
+	header ?Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'"
+
+	# Access log without credentials: legacy password-reset and email
+	# verification links carried a one-time ?token=, and the Referer of a page
+	# opened from such a link repeats it.
+	log {
+		output file /var/log/caddy/wiki.example.com.log
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete token
+					delete access_token
+				}
+				request>headers>Referer delete
+			}
+		}
+	}
+}

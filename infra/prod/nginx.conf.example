@@ -1,0 +1,95 @@
+# infra/prod/nginx.conf.example
+# nginx + certbot reverse proxy for dtxWiki. The Caddy templates are the
+# recommended path (Caddy obtains and renews certificates by itself); use this
+# when nginx already serves the host. Replace wiki.example.com everywhere, and
+# put the file where nginx includes it in the http context (sites-enabled/ or
+# conf.d/).
+#
+# nginx refuses to load a server block whose certificate files do not exist
+# yet, so the file is enabled in two steps:
+#
+#   1. Before the certificate exists only the port-80 block below is active. It
+#      answers the ACME HTTP-01 challenge from a webroot and redirects
+#      everything else to HTTPS:
+#        sudo mkdir -p /var/www/certbot
+#        sudo nginx -t && sudo systemctl reload nginx
+#        sudo certbot certonly --webroot -w /var/www/certbot -d wiki.example.com \
+#            --agree-tos -m admin@example.com --no-eff-email \
+#            --deploy-hook "systemctl reload nginx"
+#   2. Uncomment the HTTPS server block at the end of this file, then run
+#        sudo nginx -t && sudo systemctl reload nginx
+#
+# Renewals reuse the webroot and the deploy hook, so keep the port-80 block.
+#
+# Security headers: dtxWiki sends its own (a per-path CSP for the OAuth consent
+# nonce and the loopback form-action, X-Frame-Options, nosniff, Referrer-Policy
+# and HSTS). Do not add_header them to proxied locations: nginx would append a
+# second copy, and browsers enforce every CSP they receive, which breaks the
+# per-path policy. Only the error response nginx generates itself sets them.
+
+# Access log without query strings: legacy password-reset and email
+# verification links carried a one-time ?token=, and a log must never keep it.
+log_format dtxwiki_no_query '$remote_addr - $remote_user [$time_local] '
+                            '"$request_method $uri $server_protocol" '
+                            '$status $body_bytes_sent "$http_user_agent"';
+
+server {
+    listen 80;
+    server_name wiki.example.com;
+    access_log /var/log/nginx/dtxwiki.access.log dtxwiki_no_query;
+
+    # ACME HTTP-01 challenge (certbot --webroot -w /var/www/certbot).
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- Step 2: uncomment once certbot has issued the certificate --------------
+#server {
+#    listen 443 ssl http2;
+#    server_name wiki.example.com;
+#
+#    ssl_certificate     /etc/letsencrypt/live/wiki.example.com/fullchain.pem;
+#    ssl_certificate_key /etc/letsencrypt/live/wiki.example.com/privkey.pem;
+#    ssl_protocols       TLSv1.2 TLSv1.3;
+#
+#    access_log /var/log/nginx/dtxwiki.access.log dtxwiki_no_query;
+#
+#    # Keep transport admission above the application policy maximum
+#    # (50,000,000 bytes) plus multipart framing overhead. The application still
+#    # enforces the lower Workspace/category/format/converter limits.
+#    client_max_body_size 64m;
+#
+#    location / {
+#        proxy_pass         http://127.0.0.1:21080;
+#        proxy_http_version 1.1;
+#        proxy_set_header   Host              $host;
+#        proxy_set_header   X-Real-IP         $remote_addr;
+#        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+#        proxy_set_header   X-Forwarded-Proto $scheme;
+#        proxy_set_header   X-Forwarded-Host  $host;
+#        proxy_read_timeout 90s;
+#        # SSE / streamable HTTP (MCP) must not be buffered.
+#        proxy_buffering    off;
+#    }
+#
+#    # Responses nginx generates itself (dtxWiki is down or restarting) never
+#    # pass through the app, so they get its baseline headers here. The app's
+#    # own 5xx responses are passed through untouched (proxy_intercept_errors
+#    # stays off).
+#    error_page 502 503 504 = @dtxwiki_unavailable;
+#    location @dtxwiki_unavailable {
+#        add_header Strict-Transport-Security "max-age=31536000" always;
+#        add_header X-Content-Type-Options "nosniff" always;
+#        add_header X-Frame-Options "DENY" always;
+#        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+#        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'" always;
+#        default_type text/plain;
+#        return 503 "dtxWiki is temporarily unavailable. Try again shortly.\n";
+#    }
+#}

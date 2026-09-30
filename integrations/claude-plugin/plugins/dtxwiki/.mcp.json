@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dtxwiki": {
+      "type": "http",
+      "url": "${DTXWIKI_MCP_URL}"
+    }
+  }
+}

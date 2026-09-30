@@ -1,0 +1,144 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Read-only by default. publish-pypi, publish-npm and github-release each state
+# the one extra permission they need, and nothing else in this workflow can
+# write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      # PyPI never accepts the same version twice, so a tag that disagrees
+      # with pyproject.toml has to stop the release before anything is built:
+      # `v0.1.1` pushed on a tree that still says 0.1.0 would otherwise
+      # publish 0.1.0, permanently, under the wrong tag.
+      - name: Verify the tag matches the package version
+        run: |
+          version=$(.venv/bin/python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject.toml version $version (expected v$version)"
+            exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+      - run: npm ci
+      # bundle-frontend runs $(PYTHON), not $(VENV_PYTHON): the VENV_PYTHON
+      # override this step used to pass never reached it, so the bundler ran
+      # under the runner's system python3 instead of the synced environment.
+      - run: make bundle-frontend PYTHON=.venv/bin/python
+      - run: .venv/bin/python -m build
+      # This tag can point at a commit ci.yml never built -- it runs only on
+      # pull requests and pushes to main -- so these two steps are the whole
+      # precondition for publishing to PyPI.
+      #
+      # The verifier is handed the same `dist` the upload step uploads, not a
+      # glob out of it: `pypa/gh-action-pypi-publish` publishes every file in
+      # that directory, so verifying only `$(ls dist/dtxwiki-*.whl)` shipped
+      # the sdist unchecked.
+      - name: Verify the artifacts that will be published
+        run: .venv/bin/python scripts/verify_wheel_artifact.py dist
+      # The npm launcher runs dtxwiki==<its version> from PyPI. The script
+      # refuses a package.json whose version is not pyproject's and a tarball
+      # holding anything but the launcher and the license texts. It writes to
+      # dist-npm, not dist: pypa/gh-action-pypi-publish uploads all of dist.
+      - name: Build the npm launcher package
+        run: .venv/bin/python scripts/build_npm_package.py dist-npm
+      # test_wheel_and_sdist_include_operator_artifacts is deselected here, and
+      # only here: it shells out to a second `python -m build --wheel --sdist`
+      # under build isolation, which on a tag means a second network-dependent
+      # build of artifacts nobody publishes. The step above already verified
+      # the real dist/ this job produced, which is the stronger check. ci.yml
+      # still runs it on every pull request.
+      - name: Run packaging and static contract tests
+        run: >-
+          .venv/bin/python -m pytest tests/packaging tests/static -q
+          --deselect tests/packaging/test_distribution_includes_infra_prod.py::test_wheel_and_sdist_include_operator_artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: dist-npm/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # The launcher on npm starts dtxwiki==<its version> from PyPI, so it is
+  # published only once PyPI has that version. npm's trusted publishing
+  # exchanges this job's OIDC token for a publish token and attaches a
+  # provenance statement. npm accepts a trusted publisher only for a package
+  # that already exists, so the first version is published with NPM_TOKEN, a
+  # secret of the npm environment that is deleted afterwards (DEVELOPMENT.md).
+  publish-npm:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist-npm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          registry-url: "https://registry.npmjs.org"
+      # Node 22 ships npm 10; trusted publishing needs npm 11.5.1 or newer.
+      - name: Install an npm that supports trusted publishing
+        run: npm install --global npm@11.20.0
+      - name: Publish the launcher to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: >-
+          npm publish "dist-npm/dtxsuite-dtxwiki-${GITHUB_REF_NAME#v}.tgz"
+          --access public --provenance
+
+  # Runs only once PyPI and npm have accepted the upload, and attaches the very
+  # files publish-pypi uploaded, so the GitHub Release never announces a
+  # version either registry does not have. Desktop installers are not part of
+  # this release; see release-desktop.yml.
+  github-release:
+    needs: [publish-pypi, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Create the GitHub Release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "dtxWiki $version" \
+            --notes "dtxWiki $version is on PyPI: https://pypi.org/project/dtxwiki/$version/ (pipx install dtxwiki==$version). The wheel and sdist attached here are the files published there. The launcher package @dtxsuite/dtxwiki $version, which runs this release, is on npmjs.com: https://www.npmjs.com/package/@dtxsuite/dtxwiki/v/$version. Changes: https://github.com/$GH_REPO/blob/$GITHUB_REF_NAME/CHANGELOG.md"

@@ -1,0 +1,19 @@
+{
+  "description": "Migration files published in dtxWiki 0.1.1. They are frozen: a released revision is never edited in place; schema changes go into a new revision that descends from 0002_epic1. tests/packaging/test_migration_chain.py and scripts/verify_wheel_artifact.py fail when any of these bytes change.",
+  "released_in": "0.1.1",
+  "sha256": {
+    "revision_0002/__init__.py": "71f7a5d9f393e0b419d91f0fd9227cb27e3624785b42c2c7ddab609c80d8aee6",
+    "revision_0002/context_data.py": "075906a2ad4ea9008233509031c73ffde600043ab3894673b631d7b53426bd5d",
+    "revision_0002/context_schema.py": "e452ac330100653c4a05a1bb279954bee83d6f3aee1f70d8a554834ceb297137",
+    "revision_0002/identity_access_schema.py": "7bd29b29460f7b144b5a2f453ae3a83ba764288f8a796693ba7c8fc50bf4dd32",
+    "revision_0002/library_media_schema.py": "d3e2b5666a06219e60bb6a8294d7843db2fc556a9b7b1336c56ec61dce26b532",
+    "revision_0002/library_policy.py": "e850a8316e11c83ada328dba0721efc862b4097a23a3e050aff2345598dd5cf8",
+    "revision_0002/operations_schema.py": "0b7dc03d8fb784c891b1da555e56b1586022590696ee1027b452b76dd1de7d91",
+    "revision_0002/search_schema.py": "64eb67015b20a7569c5e977744b555eb78901bf16c5a26e15f9d8f33db224e94",
+    "revision_0002/tenancy_schema.py": "55426d1c3f84c7a1611f660b3b541181435d76d5674aa93e36c2ab2dd3b0272b",
+    "revision_0002/unique_key_prepass.py": "6d564b038d785c0d551ee103908ec3f61f0c08a3ff6d325053e629b3519e1cec",
+    "revision_0002/workspace_schema.py": "f75ad4453b33a014bec4c40c0042a43e062c2b0f3ac825a81a928c5734461bff",
+    "versions/0001_initial_release.py": "dc68c40730f8ef83544c5c7fb59589806cd6e80b869617eda68cf5757995c9ac",
+    "versions/0002_epic1.py": "1e104864f9d31a51d51906fe7e0f49c37e9605b7f5c675d057b44166f3ffd55d"
+  }
+}
