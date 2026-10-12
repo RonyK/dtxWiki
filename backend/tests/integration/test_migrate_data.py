@@ -30,7 +30,7 @@ from backend.scripts.migrate_data import _resolve_order, migrate_data
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.utils.postgres_reset import reset_postgres_test_database
 
-TEST_REVISION = "0002_epic1"
+TEST_REVISION = "efcbcf724889"
 
 
 def _create_schema(url: str) -> None:

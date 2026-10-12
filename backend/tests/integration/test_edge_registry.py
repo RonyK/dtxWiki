@@ -83,8 +83,7 @@ _NON_EDGE_RELATION_SOURCES = {
     # Composite FK component that proves the ready version belongs to the item;
     # it is an integrity guard for the pointer above, not a second graph edge.
     "library_item.id->library_item_version.library_item_id",
-    # A-1 (doc/design/api-surface-redesign.md §6): conversion and
-    # preview_generation now share one physical Run/Attempt table,
+    # Conversion and preview_generation share one physical Run/Attempt table,
     # stage-discriminated -- same "processing bookkeeping for one exact
     # version, not a knowledge edge" reasoning as the two per-stage tables
     # (library_conversion_run/attempt, library_preview_run/attempt) this
@@ -165,9 +164,7 @@ _NON_EDGE_RELATION_SOURCES = {
     # read, EDITED for a patch). This FK is bookkeeping for that link's
     # freshness, not a second relation.
     "mcp_chat_artifact_link.last_read_version_id->context_page_version.id",
-    # Workspace tenancy contract
-    # (doc/design/workspace-tenancy-contract.md §3): every
-    # composite FK added to enforce "child.workspace_id == parent.
+    # Every composite FK enforcing "child.workspace_id == parent.
     # workspace_id" contributes a workspace_id->workspace_id column pair
     # alongside its real local-id->id pair (already classified above or in
     # EDGE_RELATION_SOURCES). That pair is the same kind of integrity-guard

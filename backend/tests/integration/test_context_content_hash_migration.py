@@ -23,20 +23,24 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.services.library_storage import inline_text_ref
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
-epic1 = import_module("backend.migrations.versions.0002_epic1")
+epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
 )
-mcp_phase = import_module("backend.migrations.revision_0002.identity_access_schema")
-media_phase = import_module("backend.migrations.revision_0002.library_media_schema")
+mcp_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.identity_access_schema"
+)
+media_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.library_media_schema"
+)
 public_phase = import_module(
-    "backend.migrations.revision_0002.context_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.context_schema"
 )
 library_phase = import_module(
-    "backend.migrations.revision_0002.library_policy"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.library_policy"
 )
 content_hash_phase = import_module(
-    "backend.migrations.revision_0002.context_data"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.context_data"
 )
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
@@ -72,7 +76,7 @@ def _run_steps(engine, *steps) -> None:
 
 
 def _upgrade_to_content_hash_boundary(config: Config, database_url: str):
-    command.upgrade(config, "0001_initial_release")
+    command.upgrade(config, "bd62193d5cf6")
     engine = create_engine(database_url)
     _run_steps(
         engine,

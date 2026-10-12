@@ -56,7 +56,7 @@ def resolve_context_concept(
     if not norm:
         return ConceptReadResult(status="not_found")
     # page_name_index is write-synced by every mutation seam and backfilled by
-    # 0002_epic1 (and by reindex), so an index miss IS not_found — no O(N)
+    # efcbcf724889 (and by reindex), so an index miss IS not_found — no O(N)
     # page scan.
     matches = visible_page_name_matches(
         session,
@@ -100,6 +100,8 @@ def resolve_context_concept(
         canonical_path=canonical_path,
         redirect_target_path=canonical_path,
     )
+
+
 def _best_match(
     matches: list[VisiblePageNameMatch],
 ) -> VisiblePageNameMatch:

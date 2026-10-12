@@ -347,11 +347,18 @@ def test_a_grant_already_consumed_once_cannot_be_reused(page_service):
     assert still_there.status_code == 200
 
 
-def test_an_expired_grant_is_refused(page_service):
+def test_an_expired_grant_is_refused(page_service, monkeypatch):
     """T-6: expiry is the conditional DELETE's own ``expires_at > now``
     clause, not a separate check -- backdate the row directly rather than
-    waiting out the real 5-minute TTL."""
+    waiting out the real 5-minute TTL.
 
+    The grant is backdated one second before a pinned "now", and the DELETE's
+    clause is judged against that same "now". Backdating against one read of
+    the host clock and judging against another lets a clock step (NTP, a
+    resumed VM) put the grant on either side of its own deadline."""
+
+    now = utc_now()
+    monkeypatch.setattr("backend.services.workspace_purge_grant.utc_now", lambda: now)
     owner = _client(page_service, "purge-t6@example.com")
     owner_id = _user_id(page_service, "purge-t6@example.com")
     workspace_id = _workspace_with_blocker(owner, "T6 Workspace")
@@ -360,7 +367,7 @@ def test_an_expired_grant_is_refused(page_service):
     with page_service.session_factory.begin() as session:
         row = session.get(WorkspacePurgeGrant, (owner_id, UUID(workspace_id)))
         assert row is not None
-        row.expires_at = utc_now() - timedelta(seconds=1)
+        row.expires_at = now - timedelta(seconds=1)
 
     expired = owner.delete(
         f"/api/v1/workspaces/{workspace_id}?purge=true",

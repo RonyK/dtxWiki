@@ -80,6 +80,15 @@ test("creates, reads, edits, and shows stale conflict in the browser @cross-brow
   await expect(page.getByRole("main").getByRole("heading", { name: "Hello PoC" }))
     .toBeVisible();
   await expect(page.getByRole("article")).toContainText("rendered");
+  await expect(page).toHaveTitle("Hello PoC - dtxWiki");
+  const favicon = page.locator('link[rel="icon"]');
+  await expect(favicon).toHaveAttribute("type", "image/svg+xml");
+  const faviconUrl = await favicon.getAttribute("href");
+  expect(faviconUrl).toMatch(/^\/assets\/dtx-dock-icon-[^/]+\.svg$/);
+  const faviconResponse = await request.get(faviconUrl!);
+  expect(faviconResponse.ok()).toBeTruthy();
+  expect(faviconResponse.headers()["content-type"]).toContain("image/svg+xml");
+  expect(await faviconResponse.text()).toContain('viewBox="0 0 256 256"');
 
   // The former ambient-workspace /pages/{slug} route was deliberately removed.
   // Exercise the stable, workspace-qualified Context permalink instead.
@@ -95,9 +104,11 @@ test("creates, reads, edits, and shows stale conflict in the browser @cross-brow
     .toBeVisible();
   const article = page.getByRole("article");
   await expect(article.getByText("rendered")).toBeVisible();
+  await expect(page).toHaveTitle("Hello PoC - dtxWiki");
 
   await page.goto(`/context/${createdPage.slug}/edit`);
   await expect(page.getByLabel("Title")).toHaveValue("Hello PoC");
+  await expect(page).toHaveTitle("dtxWiki");
 
   const readResponse = await request.get(
     `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}`,

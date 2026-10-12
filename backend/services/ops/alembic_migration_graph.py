@@ -23,7 +23,9 @@ def code_revisions() -> frozenset[str]:
 
     return frozenset(
         revision.revision
-        for revision in ScriptDirectory(str(_MIGRATIONS_DIR)).walk_revisions()
+        for revision in ScriptDirectory(
+            str(_MIGRATIONS_DIR), recursive_version_locations=True
+        ).walk_revisions()
     )
 
 

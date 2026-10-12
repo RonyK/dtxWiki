@@ -20,9 +20,8 @@ from backend.worker.runtime import OneShotWorker
 def test_overlay_assembly_surface_signatures_are_pinned():
     """Public overlay surface: changes require an explicit changelog entry."""
 
-    # D-5 (doc/design/workspace-database-separation-plan.md): assemble() gained
-    # blob_store_provider, the same injection point directory already has --
-    # a deliberate, reviewed public-surface change, not a silent drift.
+    # assemble() exposes the blob_store_provider injection point alongside
+    # the workspace directory provider.
     assert str(inspect.signature(assemble)) == (
         "(settings: 'Settings', *, db: 'DatabaseProvider | None' = None, "
         "session_factory: 'sessionmaker[Session] | None' = None, page_service: "
@@ -40,10 +39,8 @@ def test_overlay_assembly_surface_signatures_are_pinned():
         "= None, include_llms_txt: bool = True) -> "
         "fastapi.applications.FastAPI"
     )
-    # Epic-2 Phase 5c (orphaned Context-media reclamation, doc/design/
-    # workspace-database-separation-plan.md D-7): gained
-    # context_media_orphan_sweep_service, the same lazily-resolved injection
-    # point media_install_reconciler already has -- a deliberate, reviewed
+    # context_media_orphan_sweep_service uses the same lazily resolved injection
+    # point as media_install_reconciler -- a deliberate, reviewed
     # public-surface change, not a silent drift.
     assert str(inspect.signature(OneShotWorker)) == (
         "(job_queue: 'JobQueueService | None' = None, library_service: "

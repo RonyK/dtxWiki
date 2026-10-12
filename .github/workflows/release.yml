@@ -115,7 +115,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: >-
-          npm publish "dist-npm/dtxsuite-dtxwiki-${GITHUB_REF_NAME#v}.tgz"
+          npm publish "./dist-npm/dtxsuite-dtxwiki-${GITHUB_REF_NAME#v}.tgz"
           --access public --provenance
 
   # Runs only once PyPI and npm have accepted the upload, and attaches the very

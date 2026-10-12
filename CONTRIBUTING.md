@@ -139,7 +139,7 @@ git show cla-v1:CONTRIBUTING.md > "$v1/CONTRIBUTING.md" &&
 printf '{\n  "signedContributors": []\n}\n' > "$v1/cla.json" &&
 git -C "$seed" init -q -b main &&
 git -C "$seed" add signatures &&
-git -C "$seed" commit -q --signoff -m "chore(cla): seed CLA v1 records" &&
+git -C "$seed" commit -q -m "chore(cla): seed CLA v1 records" &&
 git -C "$seed" push git@github.com:dtxSuite/dtxwiki-cla-signatures.git main
 ```
 
@@ -167,20 +167,11 @@ change as `cla-v1-YYYY-MM-DD`, add the CONTRIBUTING.md of that commit to
 CLA version gets a new `cla-vN` tag, a new `signatures/versionN` directory, a
 new acceptance statement and new acceptances.
 
-## Developer Certificate of Origin
-
-In addition to the CLA, every commit must include a `Signed-off-by:` line
-certifying the DCO:
-
-```text
-Signed-off-by: Your Name <you@example.com>
-```
-
-Use `git commit -s` when creating commits. To fix an existing commit, use
-`git commit --amend --signoff` for the latest commit or `git rebase --signoff`
-for a branch.
-
-The DCO text is available at <https://developercertificate.org/>.
+The maintainer does not accept their own CLA. The check reads both the pull
+request author's account and every commit author's linked GitHub account
+before using the signature repository. Only a pull request whose participants
+are all exempt skips signature processing; contributions from any other
+account still require acceptance.
 
 ## Development setup and tests
 

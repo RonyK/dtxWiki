@@ -13,7 +13,12 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
-REVISION_DIRECTORY = REPO_ROOT / "backend" / "migrations" / "revision_0002"
+REVISION_DIRECTORY = (
+    REPO_ROOT
+    / "backend"
+    / "migrations"
+    / "revision_modules/v0_1/efcbcf724889_core_schema"
+)
 REVISION_MODULES = len(
     [path for path in REVISION_DIRECTORY.glob("*.py") if path.name != "__init__.py"]
 )
@@ -158,34 +163,38 @@ def _write_revision(stage, revision, down_revision):
 
 
 def _write_stray_revision(stage):
-    _write_revision(stage, "0003_stray", "0002_epic1")
+    _write_revision(stage, "0003_stray", "efcbcf724889")
 
 
 def _write_branch_revision(stage):
     """A second head: a revision that forks off the released base."""
 
-    _write_revision(stage, "0003_branch", "0001_initial_release")
+    _write_revision(stage, "0003_branch", "bd62193d5cf6")
 
 
 def _write_merge_revision(stage):
-    _write_revision(stage, "0003_one", "0002_epic1")
-    _write_revision(stage, "0003_two", "0002_epic1")
+    _write_revision(stage, "0003_one", "efcbcf724889")
+    _write_revision(stage, "0003_two", "efcbcf724889")
     _write_revision(stage, "0004_merge", ("0003_one", "0003_two"))
 
 
-def _detach_epic1_from_the_baseline(stage):
+def _detach_core_schema_from_the_baseline(stage):
     """Leave both revision files in place but break the edge between them.
 
     The versions/ file-name check cannot see this; only resolving the graph out
     of the extracted artifact can.
     """
 
-    revision = stage / "backend" / "migrations" / "versions" / "0002_epic1.py"
+    revision = (
+        stage
+        / "backend"
+        / "migrations"
+        / "versions"
+        / "v0_1/efcbcf724889_core_schema.py"
+    )
     source = revision.read_text(encoding="utf-8")
     revision.write_text(
-        source.replace(
-            'down_revision = "0001_initial_release"', "down_revision = None"
-        ),
+        source.replace('down_revision = "bd62193d5cf6"', "down_revision = None"),
         encoding="utf-8",
     )
 
@@ -252,17 +261,17 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     # The success line is the evidence a human reads off a release run, so it
-    # is pinned whole -- the revision-module count included. Epic-1's boundary
+    # is pinned whole -- the revision-module count included. The core schema
     # ships nine revision-owned domain modules plus unique_key_prepass.py, the
     # shared helper that publishes a reciprocal FK pair's parent unique key in
-    # the form each dialect needs. 0002_epic1 reaches every one of them, so a
+    # the form each dialect needs. efcbcf724889 reaches every one of them, so a
     # count that drifts is a release-contract change, not a cosmetic one.
     assert REVISION_MODULES == 10
     for name in (WHEEL_NAME, SDIST_NAME):
         assert (
-            f"{name}: alembic head 0002_epic1, "
-            f"{REVISION_MODULES} packaged 0002 revision modules, "
-            "13 frozen migration files intact, "
+            f"{name}: alembic head efcbcf724889, "
+            f"{REVISION_MODULES} packaged core revision modules, "
+            "15 frozen migration files intact, "
             "frontend bundle intact"
         ) in result.stdout
 
@@ -274,7 +283,7 @@ def test_verifier_rejects_a_wheel_missing_a_0002_revision_module(tmp_path):
             stage
             / "backend"
             / "migrations"
-            / "revision_0002"
+            / "revision_modules/v0_1/efcbcf724889_core_schema"
             / "library_media_schema.py"
         ).unlink(),
     )
@@ -290,7 +299,7 @@ def test_verifier_rejects_an_artifact_that_imports_backend_it_does_not_carry(
 ):
     """A dropped `backend/models` must not be papered over by the checkout.
 
-    0002_epic1 imports backend.models.base through its revision modules, so the
+    efcbcf724889 imports backend.models.base through its revision modules, so the
     editable install's finder can resolve it from the repository and hand the
     release a green head for an artifact that cannot import its own migration.
     """
@@ -330,7 +339,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     assert probe.returncode == 0, probe.stdout + probe.stderr
     resolved = json.loads(probe.stdout)
-    assert resolved["heads"] == ["0002_epic1"], "cwd bought no isolation at all"
+    assert resolved["heads"] == ["efcbcf724889"], "cwd bought no isolation at all"
     leaked = {
         name: origin
         for name, origin in resolved["foreign"].items()
@@ -347,7 +356,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
     [
         (
             _write_branch_revision,
-            "packaged Alembic heads are ['0002_epic1', '0003_branch'], expected "
+            "packaged Alembic heads are ['0003_branch', 'efcbcf724889'], expected "
             "exactly one",
         ),
         (
@@ -356,15 +365,19 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
         ),
         (
             lambda stage: (
-                stage / "backend" / "migrations" / "versions" / "0002_epic1.py"
+                stage
+                / "backend"
+                / "migrations"
+                / "versions"
+                / "v0_1/efcbcf724889_core_schema.py"
             ).unlink(),
-            "backend/migrations/versions/0002_epic1.py is missing",
+            "backend/migrations/versions/v0_1/efcbcf724889_core_schema.py is missing",
         ),
-        (_detach_epic1_from_the_baseline, "it must start with"),
+        (_detach_core_schema_from_the_baseline, "it must start with"),
     ],
-    ids=["second-head", "merge", "missing-epic1", "detached-baseline"],
+    ids=["second-head", "merge", "missing-core-schema", "detached-baseline"],
 )
-def test_verifier_rejects_an_artifact_whose_chain_is_not_linear_from_epic1(
+def test_verifier_rejects_an_artifact_whose_chain_is_not_linear_from_core_schema(
     tmp_path, mutate, expected
 ):
     # Each expectation is one check's own wording: the frozen-file check, the
@@ -400,10 +413,10 @@ def _append_to(relative):
 @pytest.mark.parametrize(
     "relative",
     [
-        "versions/0001_initial_release.py",
-        "versions/0002_epic1.py",
-        "revision_0002/search_schema.py",
-        "revision_0002/__init__.py",
+        "versions/v0_0/bd62193d5cf6_initial_schema.py",
+        "versions/v0_1/efcbcf724889_core_schema.py",
+        "revision_modules/v0_1/efcbcf724889_core_schema/search_schema.py",
+        "revision_modules/v0_1/efcbcf724889_core_schema/__init__.py",
     ],
 )
 def test_verifier_rejects_an_edited_released_migration(
@@ -425,16 +438,21 @@ def test_verifier_rejects_an_edited_released_migration(
 
 def test_verifier_rejects_a_module_added_to_the_frozen_revision(tmp_path):
     def add_module(stage):
-        (stage / "backend" / "migrations" / "revision_0002" / "late.py").write_text(
-            "def upgrade() -> None:\n    pass\n", encoding="utf-8"
-        )
+        (
+            stage
+            / "backend"
+            / "migrations"
+            / "revision_modules/v0_1/efcbcf724889_core_schema"
+            / "late.py"
+        ).write_text("def upgrade() -> None:\n    pass\n", encoding="utf-8")
 
     result = _run_verifier(_dist(tmp_path, mutate=add_module))
 
     assert result.returncode == 1
     assert (
-        "backend/migrations/revision_0002/late.py is not part of the frozen 0.1.1 "
-        "revision"
+        "backend/migrations/revision_modules/v0_1/"
+        "efcbcf724889_core_schema/late.py is not part of the frozen "
+        "canonical baseline revision"
     ) in result.stdout + result.stderr
 
 
@@ -443,8 +461,20 @@ def _rehash_manifest(stage):
 
     manifest = stage / "backend" / "migrations" / "frozen_revisions.json"
     payload = json.loads(manifest.read_text(encoding="utf-8"))
-    payload["sha256"]["versions/0002_epic1.py"] = "0" * 64
+    payload["sha256"]["versions/v0_1/efcbcf724889_core_schema.py"] = "0" * 64
     manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_verifier_rejects_rewritten_historical_release_mapping(tmp_path):
+    def rewrite(stage):
+        path = stage / "backend/migrations/release_manifest.json"
+        payload = json.loads(path.read_text())
+        payload["schema_releases"]["0.1.1"]["head"] = "bd62193d5cf6"
+        path.write_text(json.dumps(payload))
+
+    result = _run_verifier(_dist(tmp_path, mutate=rewrite))
+    assert result.returncode == 1
+    assert "release_manifest.json is missing or invalid" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -459,7 +489,7 @@ def _rehash_manifest(stage):
         (
             _rehash_manifest,
             "backend/migrations/frozen_revisions.json does not record the frozen "
-            "0.1.1 migration digests",
+            "canonical baseline migration digests",
         ),
     ],
     ids=["missing", "rehashed"],
@@ -521,17 +551,16 @@ def test_verifier_accepts_env_templates(tmp_path):
 
 @pytest.mark.parametrize(
     "relative",
-    ["backend/alembic.ini", "backend/migrations/revision_0002/__init__.py"],
+    [
+        "backend/alembic.ini",
+        "backend/migrations/release_manifest.json",
+        "backend/migrations/revision_modules/v0_1/efcbcf724889_core_schema/__init__.py",
+    ],
 )
 def test_verifier_rejects_an_artifact_missing_alembic_packaging_files(
     tmp_path, relative
 ):
-    """Neither file breaks head resolution, so nothing else can see them gone.
-
-    `Config()` is built without a file and a `revision_0002` directory still
-    imports as a namespace package, yet an artifact shipping either shape is
-    not what `run_alembic_upgrade` was tested against.
-    """
+    """Required configuration, release mapping and module packages must ship."""
 
     dist = _dist(tmp_path, mutate=lambda stage: (stage / relative).unlink())
 

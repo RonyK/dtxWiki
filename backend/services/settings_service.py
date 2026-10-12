@@ -1,5 +1,6 @@
 import base64
 import binascii
+import copy
 import hashlib
 import hmac
 import json
@@ -753,7 +754,13 @@ class SettingsService:
             for key, value in changes.items():
                 self._update_lint_policy(workspace, key, value)
         elif group in POLICY_GROUP_ATTRS:
-            policy = dict(getattr(workspace, POLICY_GROUP_ATTRS[group]) or {})
+            # Deep copy: _set_path mutates nested dicts in place (for example
+            # category_inclusion_policy.memory). The column is plain JSON, not a
+            # mutable type, so with a shallow copy that nested dict is the very
+            # object the ORM holds as the committed value; the assignment below
+            # then compares equal to it, no UPDATE is emitted, and the response
+            # shows a value that was never stored.
+            policy = copy.deepcopy(getattr(workspace, POLICY_GROUP_ATTRS[group]) or {})
             previous_library_policy: dict[str, object] | None = None
             if group == "library":
                 policy = normalized_library_policy(

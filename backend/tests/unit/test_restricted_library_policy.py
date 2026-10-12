@@ -1,14 +1,7 @@
-"""Workspace tenancy contract (doc/design/workspace-tenancy-contract.md §2):
-``resolve_restricted_library_target`` is the function the plan names by name
-as needing this exact fix -- it must resolve a target only within the
-requested workspace, never discover and trust some OTHER workspace the
-target actually belongs to (a reverse lookup D-5 explicitly forbids).
+"""Restricted Library targets must belong to the requested workspace.
 
-An earlier pass fixed ``_mcp_read_library_target``'s session routing (route
-by the request's own workspace_id) but left this function trusting whatever
-workspace_id the target actually belonged to instead of verifying it
-matched the request -- found during the Epic-3 Phase D audit, not by a
-targeted search for this specific function.
+``resolve_restricted_library_target`` must verify that the target's workspace
+matches the request before applying its policy.
 """
 
 from datetime import UTC, datetime

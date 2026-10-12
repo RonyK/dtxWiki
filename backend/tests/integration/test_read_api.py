@@ -1,11 +1,15 @@
+import os
+import sys
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
+from backend.converters.external_protocol import ExternalProcessConverter
 from backend.models.agent import AgentPage
 from backend.models.audit import AuditEvent
 from backend.models.bundle import AgentInputBundle, AgentInputBundleItem
@@ -18,6 +22,53 @@ from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
 from backend.services.public_page_exposure import grant_public_page_exposure
 from backend.tests.conftest import authenticate_test_client_in_workspace
+
+_CONVERTER_HEALTH_READY: set = set()
+# Mirrors the inherited-environment allowlist in ``_run_bounded``.
+_CONVERTER_ENV_NAMES = ("LANG", "LC_ALL", "SYSTEMROOT", "WINDIR")
+
+
+def _is_bundled_host(command) -> bool:
+    return (
+        len(command) == 5
+        and command[0] == sys.executable
+        and command[1:4] == ("-m", "backend.worker.converter_host", "--converter")
+    )
+
+
+@pytest.fixture
+def cached_converter_health(monkeypatch):
+    """Run each bundled converter's health handshake once per module and worker.
+
+    Every per-test container builds a fresh ``ConverterRegistry`` whose first
+    readiness check spawns the converter subprocess (~0.26 s). Tests that only
+    consume the readiness result opt in; handshake, mismatch and failure
+    behavior stays covered, uncached, by ``test_converter_adapters.py``. Only
+    the first-party bundled host (``<python> -m backend.worker.converter_host
+    --converter <id>``) is cached, and only a ready result is remembered, keyed
+    by command, descriptor, timeout and the environment values the subprocess
+    inherits. Every other provider runs the real healthcheck unchanged.
+    """
+
+    real = ExternalProcessConverter.healthcheck
+
+    def _healthcheck(self, *, timeout_seconds=5.0):
+        if not _is_bundled_host(self._command):
+            return real(self, timeout_seconds=timeout_seconds)
+        key = (
+            self._command,
+            self._descriptor,
+            timeout_seconds,
+            tuple(os.environ.get(name) for name in _CONVERTER_ENV_NAMES),
+        )
+        if key in _CONVERTER_HEALTH_READY:
+            return True, None
+        result = real(self, timeout_seconds=timeout_seconds)
+        if result == (True, None):
+            _CONVERTER_HEALTH_READY.add(key)
+        return result
+
+    monkeypatch.setattr(ExternalProcessConverter, "healthcheck", _healthcheck)
 
 
 def make_client(page_service, email: str = "test@example.com") -> TestClient:
@@ -549,44 +600,51 @@ def test_diff_versions_eager_loads_body_markdown(page_service):
     body_markdown as deferred or switches to lazy-loaded relations would
     raise the count to 5+.
     """
-    from sqlalchemy import event
+    from sqlalchemy import event, select
 
+    from backend.models.workspace import Workspace
+    from backend.schemas.agent import AgentPageDraftRequest
     from backend.services.agent_page_service import AgentPageService
 
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-    created = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages",
-        json={
-            "category": "persona",
-            "title": "Query Count Persona",
-            "slug": "query-count-persona",
-            "body_markdown": "# Query Count\n\nfirst body",
-            "reason": "create v1 for query-count test",
-        },
-    )
-    assert created.status_code == 201
-    created_data = created.json()["data"]
-    page_id = UUID(created_data["agent_page_id"])
-    v1 = UUID(created_data["draft_version_id"])
-
-    updated = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/{page_id}/draft",
-        json={
-            "base_version_id": str(v1),
-            "category": "persona",
-            "title": "Query Count Persona",
-            "slug": "query-count-persona",
-            "body_markdown": "# Query Count\n\nsecond body",
-            "reason": "create v2 for query-count test",
-        },
-    )
-    assert updated.status_code == 200
-    v2 = UUID(updated.json()["data"]["draft_version_id"])
-
     service = AgentPageService()
+
+    def _write_draft(session, workspace_id, **request):
+        return service.write_draft(
+            session=session,
+            workspace_id=workspace_id,
+            request=AgentPageDraftRequest(
+                category="persona",
+                title="Query Count Persona",
+                slug="query-count-persona",
+                **request,
+            ),
+            actor_kind="human",
+            actor_id="tester",
+            actor_provenance="browser_session",
+        )
+
+    with page_service.session_factory.begin() as session:
+        workspace_id = session.scalar(
+            select(Workspace.id).where(Workspace.slug == "default")
+        )
+        first = _write_draft(
+            session,
+            workspace_id,
+            body_markdown="# Query Count\n\nfirst body",
+            reason="create v1 for query-count test",
+        )
+        page_id = first.agent_page_id
+        v1 = first.draft_version_id
+        second = _write_draft(
+            session,
+            workspace_id,
+            base_version_id=v1,
+            body_markdown="# Query Count\n\nsecond body",
+            reason="create v2 for query-count test",
+        )
+        v2 = second.draft_version_id
+    workspace_id = str(workspace_id)
+
     select_count = 0
 
     def _count_selects(conn, cursor, statement, parameters, context, executemany):
@@ -1596,6 +1654,7 @@ def test_read_api_rejects_reordering_system_tree_node(page_service):
     assert res.json()["error_code"] == "system_tree_node_protected"
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_deletes_unreferenced_library_item(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
@@ -1651,6 +1710,7 @@ def test_read_api_library_summary_includes_current_processing_status(page_servic
     assert item["processing_status"] == "converting"
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_deletes_referenced_library_item_with_tombstone(page_service):
     from uuid import uuid4
 
@@ -1877,6 +1937,7 @@ def test_read_api_deletes_referenced_library_item_with_tombstone(page_service):
         assert notices[0].status == "approved"
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_uploads_library_item(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
@@ -1929,6 +1990,7 @@ def test_read_api_uploads_library_item(page_service):
     )
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_upload_places_item_under_parent(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
@@ -1961,6 +2023,7 @@ def test_read_api_upload_places_item_under_parent(page_service):
     assert item_node["parent_id"] == folder_id
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_uses_library_policy_upload_limit(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
@@ -1995,6 +2058,7 @@ def test_read_api_uses_library_policy_upload_limit(page_service):
     assert "1 KB" in body["message"]
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_rejects_library_upload_for_workspace_viewer(page_service):
     from sqlalchemy import select
 
@@ -2400,6 +2464,7 @@ def test_read_api_agent_pages_recency_order_and_envelope(page_service):
     assert body["next_cursor"]
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_rejects_malformed_pdf_and_docx_library_uploads(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
@@ -2430,6 +2495,7 @@ def test_read_api_rejects_malformed_pdf_and_docx_library_uploads(page_service):
     assert accepted.json()["data"]["format_hint"] == "text"
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_read_api_rejects_extensionless_and_dotfile_library_uploads(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][

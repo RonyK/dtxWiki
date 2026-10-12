@@ -17,18 +17,18 @@ from backend.services.ops.filesystem_backup_evidence import (
 
 
 class FixedMigrationGraph:
-    def __init__(self, heads=("0002_epic1",)):
+    def __init__(self, heads=("efcbcf724889",)):
         self.heads = heads
 
     def current_heads(self):
         return self.heads
 
     def known_revisions(self):
-        return frozenset({"0001_initial_release", "0002_epic1"})
+        return frozenset({"bd62193d5cf6", "efcbcf724889"})
 
 
 def _collect(request, *, probe, now=None, heads=None):
-    selected_heads = ("0002_epic1",) if heads is None else heads
+    selected_heads = ("efcbcf724889",) if heads is None else heads
     return inventory.collect_inventory(
         request,
         probe=probe,
@@ -49,7 +49,7 @@ def _marker(state: str = "absent") -> inventory.MarkerSnapshot:
 
 def _snapshot(
     *,
-    revisions=("0001_initial_release",),
+    revisions=("bd62193d5cf6",),
     library="absent",
     context_0005="absent",
     context_0006="absent",
@@ -77,7 +77,7 @@ def _snapshot(
 
 def _final_snapshot(**overrides):
     values = {
-        "revisions": ("0002_epic1",),
+        "revisions": ("efcbcf724889",),
         "library": "complete",
         "context_0005": "complete",
         "context_0006": "complete",
@@ -108,9 +108,10 @@ class FakeProbe:
             database_target = request.checkpoint.path
             contents = database_target.read_bytes()
             assert request.checkpoint.expected_main.byte_size == len(contents)
-            assert request.checkpoint.expected_main.hexdigest == hashlib.sha256(
-                contents
-            ).hexdigest()
+            assert (
+                request.checkpoint.expected_main.hexdigest
+                == hashlib.sha256(contents).hexdigest()
+            )
         else:
             assert isinstance(request, inventory.LiveProbeRequest)
             database_target = request.target
@@ -134,16 +135,14 @@ def _request():
 
 def test_clean_inventory_is_deterministic_and_never_approves_start():
     now = datetime(2026, 8, 5, tzinfo=UTC)
-    result = _collect(
-        _request(), probe=FakeProbe(_snapshot()), now=now
-    )
+    result = _collect(_request(), probe=FakeProbe(_snapshot()), now=now)
     payload = result.to_dict()
     assert result.exit_code == 0
     assert payload["schema_version"] == 1
     assert payload["generated_at"] == "2026-08-05T00:00:00Z"
     assert payload["summary"]["implementation_start_evidence_complete"] is False
     assert payload["code"] == {
-        "alembic_heads": ["0002_epic1"],
+        "alembic_heads": ["efcbcf724889"],
         "known_alternate_revisions": [
             "0005_library_multiformat_conversion",
             "0012_graph_view_observations",
@@ -153,9 +152,7 @@ def test_clean_inventory_is_deterministic_and_never_approves_start():
 
 
 def test_partial_markers_and_multiple_rows_are_exit_4():
-    partial = _collect(
-        _request(), probe=FakeProbe(_snapshot(library="partial"))
-    )
+    partial = _collect(_request(), probe=FakeProbe(_snapshot(library="partial")))
     assert partial.exit_code == 4
     assert partial.targets[0].consistency == "partial_schema"
 
@@ -186,7 +183,7 @@ def test_final_0002_requires_every_historical_and_final_marker():
 def test_old_or_incomplete_database_stamped_0002_is_a_marker_conflict():
     old_shape = _collect(
         _request(),
-        probe=FakeProbe(_snapshot(revisions=("0002_epic1",))),
+        probe=FakeProbe(_snapshot(revisions=("efcbcf724889",))),
     )
     assert old_shape.exit_code == 4
     assert old_shape.targets[0].consistency == "stamp_marker_conflict"
@@ -196,18 +193,15 @@ def test_old_or_incomplete_database_stamped_0002_is_a_marker_conflict():
         probe=FakeProbe(_final_snapshot(final_epic1_0002="partial")),
     )
     assert incomplete_final_shape.exit_code == 4
-    assert (
-        incomplete_final_shape.targets[0].consistency
-        == "stamp_marker_conflict"
-    )
+    assert incomplete_final_shape.targets[0].consistency == "stamp_marker_conflict"
 
 
-def test_0001_with_any_epic1_schema_evidence_is_not_safe_to_upgrade():
+def test_initial_revision_with_any_core_schema_evidence_is_not_safe_to_upgrade():
     result = _collect(
         _request(),
         probe=FakeProbe(
             _snapshot(
-                revisions=("0001_initial_release",),
+                revisions=("bd62193d5cf6",),
                 library="complete",
             )
         ),
@@ -252,7 +246,7 @@ def test_removed_revision_stamps_remain_unknown_regardless_of_markers(revision):
     assert result.targets[0].consistency == "unknown_revision"
 
 
-def test_sqlite_probe_detects_complete_final_epic1_fingerprint(
+def test_sqlite_probe_detects_complete_core_schema_fingerprint(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "final-epic1.sqlite"
@@ -269,13 +263,9 @@ def test_sqlite_probe_detects_complete_final_epic1_fingerprint(
     connection.execute(
         "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
     )
-    connection.execute(
-        "INSERT INTO alembic_version VALUES ('0002_epic1')"
-    )
+    connection.execute("INSERT INTO alembic_version VALUES ('efcbcf724889')")
     for table, columns in table_columns.items():
-        definitions = ", ".join(
-            f'"{column}" TEXT' for column in sorted(columns)
-        )
+        definitions = ", ".join(f'"{column}" TEXT' for column in sorted(columns))
         definitions = definitions or '"_marker" TEXT'
         connection.execute(f'CREATE TABLE "{table}" ({definitions})')
     connection.commit()
@@ -290,9 +280,7 @@ def test_sqlite_probe_detects_complete_final_epic1_fingerprint(
 
 
 def test_unversioned_database_is_inconclusive_exit_4():
-    result = _collect(
-        _request(), probe=FakeProbe(_snapshot(revisions=()))
-    )
+    result = _collect(_request(), probe=FakeProbe(_snapshot(revisions=())))
     assert result.exit_code == 4
     assert result.targets[0].consistency == "unversioned"
 
@@ -337,7 +325,7 @@ def test_multiple_code_heads_are_exit_4():
 
 
 def test_manifest_is_positive_evidence_only(tmp_path: Path):
-    revision = "0001_initial_release"
+    revision = "bd62193d5cf6"
     database = tmp_path / "dtxwiki.sqlite"
     database.write_bytes(b"integrity-bound test checkpoint")
     manifest = tmp_path / "manifest.json"
@@ -385,7 +373,7 @@ def test_manifest_checkpoint_digest_binding_rejects_same_inode_aba(
     connection.execute(
         "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
     )
-    connection.execute("INSERT INTO alembic_version VALUES ('0001_initial_release')")
+    connection.execute("INSERT INTO alembic_version VALUES ('bd62193d5cf6')")
     connection.commit()
     connection.close()
     original = database.read_bytes()
@@ -471,9 +459,10 @@ def test_manifest_checkpoint_digest_binding_rejects_same_inode_aba(
     assert evidence.consistency == "manifest_snapshot_incomplete"
     assert evidence.errors == ("manifest_database_checkpoint_digest_mismatch",)
     assert inspect_called is False
-    assert hashlib.sha256(database.read_bytes()).digest() == hashlib.sha256(
-        original
-    ).digest()
+    assert (
+        hashlib.sha256(database.read_bytes()).digest()
+        == hashlib.sha256(original).digest()
+    )
 
 
 def test_manifest_rewrite_during_database_probe_is_unsafe(tmp_path: Path):
@@ -535,7 +524,7 @@ def test_nonconforming_manifest_probe_failure_category_fails_closed(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -583,7 +572,7 @@ def test_manifest_is_reverified_after_a_probe_failure(tmp_path: Path):
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -880,7 +869,7 @@ def test_postgres_first_statement_pins_read_only_repeatable_read(monkeypatch):
         "postgresql+pg8000://user:secret@example.invalid/dtx"
     )
 
-    assert snapshot.alembic_revisions == ("0001_initial_release",)
+    assert snapshot.alembic_revisions == ("bd62193d5cf6",)
     assert statements[0] == (
         "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
     )

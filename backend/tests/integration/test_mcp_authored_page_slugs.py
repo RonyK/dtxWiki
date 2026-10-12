@@ -98,13 +98,13 @@ def test_migration_truncates_and_disambiguates_slugs_with_tree_sync(
         for page_id, slug in zip(page_ids, (reserved, long_x, long_y), strict=True):
             session.get(ContextPage, page_id).slug = slug
             node = session.scalar(
-                select(WorkspaceTreeNode).where(
-                    WorkspaceTreeNode.target_id == page_id
-                )
+                select(WorkspaceTreeNode).where(WorkspaceTreeNode.target_id == page_id)
             )
             node.slug = slug
 
-    migration = importlib.import_module("backend.migrations.versions.0002_epic1")
+    migration = importlib.import_module(
+        "backend.migrations.versions.v0_1.efcbcf724889_core_schema"
+    )
     engine = session_factory.kw["bind"]
     with engine.begin() as connection:
         migration._truncate_overlength_page_slugs(connection)

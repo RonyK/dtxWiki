@@ -1,9 +1,10 @@
-"""Tests for the squashed Alembic baseline and its 0.1.1 freeze."""
+"""Canonical release layout, linear graph and frozen migration code contracts."""
 
 import ast
 import hashlib
 import importlib.util
 import json
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -12,17 +13,22 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.services.ops.alembic_migration_graph import code_revisions
 from backend.services.ops.db_revision_inventory import RETIRED_REVISION_IDS
+from backend.services.ops.revision_rename import LEGACY_REVISION_ALIASES
+from scripts.new_migration import create_revision
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS_DIR = REPO_ROOT / "backend" / "migrations" / "versions"
-REVISION_0002_DIR = MIGRATIONS_DIR.parent / "revision_0002"
+CORE_REVISION_DIR = (
+    MIGRATIONS_DIR.parent / "revision_modules/v0_1/efcbcf724889_core_schema"
+)
 FRAGMENTS_DIR = MIGRATIONS_DIR.parent / "fragments"
 FREEZE_MANIFEST = MIGRATIONS_DIR.parent / "frozen_revisions.json"
 RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
-INITIAL_REVISION = "0001_initial_release"
-# The last revision 0.1.1 published; later revisions continue after it.
-EPIC1_REVISION = "0002_epic1"
+INITIAL_REVISION = "bd62193d5cf6"
+# Canonical head of the 0.1 schema release group.
+CORE_REVISION = "efcbcf724889"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -66,57 +72,41 @@ def _base_first_chain(script: ScriptDirectory) -> list[tuple[str, object]]:
     ]
 
 
-def test_the_script_directory_has_exactly_one_head():
-    script = _script_directory()
-
-    assert len(script.get_heads()) == 1
-
-
-def test_initial_release_has_no_down_revision():
-    script = _script_directory()
-    revision = script.get_revision(INITIAL_REVISION)
-
-    assert revision.down_revision is None
-
-
-def test_epic1_revision_is_direct_child_of_initial_release():
-    script = _script_directory()
-    revision = script.get_revision(EPIC1_REVISION)
-
-    assert revision.down_revision == INITIAL_REVISION
-
-
 def test_the_chain_is_linear_and_starts_with_the_released_revisions():
-    """C11: later revisions extend the chain; none branches, merges or forks."""
+    """The shipped graph has the two canonical release boundaries only."""
 
-    chain = _base_first_chain(_script_directory())
+    script = _script_directory()
+    chain = _base_first_chain(script)
+    assert script.get_heads() == [CORE_REVISION]
+    assert code_revisions() == {revision for revision, _ in chain}
+    assert code_revisions().isdisjoint(RETIRED_REVISION_IDS)
 
-    assert chain[:2] == [
+    assert chain == [
         (INITIAL_REVISION, None),
-        (EPIC1_REVISION, INITIAL_REVISION),
+        (CORE_REVISION, INITIAL_REVISION),
     ]
-    for (previous, _), (revision, down_revision) in zip(
-        chain, chain[1:], strict=False
-    ):
-        assert down_revision == previous, (
-            f"{revision} descends from {down_revision!r}, not {previous}"
-        )
+
+    manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
+    assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES
+    for release, entry in manifest["schema_releases"].items():
+        major, minor = release.split(".")[:2]
+        assert entry["group"] == f"v{major}_{minor}"
+        revision = script.get_revision(entry["head"])
+        assert Path(revision.path).parent.name == entry["group"]
 
 
 def test_versions_directory_holds_only_chain_revisions():
     chain = {revision for revision, _ in _base_first_chain(_script_directory())}
-    migration_files = {path.stem for path in MIGRATIONS_DIR.glob("*.py")}
+    migration_files = {
+        path.stem.split("_", 1)[0] for path in MIGRATIONS_DIR.rglob("*.py")
+    }
 
-    assert {"0001_initial_release", "0002_epic1"} <= migration_files
+    assert {"bd62193d5cf6", "efcbcf724889"} <= migration_files
     assert migration_files == chain
-
-
-def test_no_revision_reuses_a_retired_identifier():
-    """The preflight refuses retired stamps; reusing one would launder them."""
-
-    chain = {revision for revision, _ in _base_first_chain(_script_directory())}
-
-    assert chain.isdisjoint(RETIRED_REVISION_IDS)
+    for path in MIGRATIONS_DIR.rglob("*.py"):
+        assert path.parent.parent == MIGRATIONS_DIR
+        assert path.parent.name.startswith("v")
+        assert path.stem.split("_", 1)[0] in chain
 
 
 def _frozen_digests() -> dict[str, str]:
@@ -138,16 +128,21 @@ def test_released_migration_files_match_the_freeze_manifest():
         relative for relative in frozen if actual[relative] != frozen[relative]
     )
     assert changed == [], (
-        "released migration files changed after 0.1.1; revert them and put the "
+        "frozen canonical migration files changed; revert them and put the "
         f"schema change in a new revision: {changed}"
     )
 
 
 def test_the_freeze_covers_every_released_migration_file():
     released = {
-        "versions/0001_initial_release.py",
-        "versions/0002_epic1.py",
-        *(f"revision_0002/{path.name}" for path in REVISION_0002_DIR.glob("*.py")),
+        "revision_modules/__init__.py",
+        "revision_modules/v0_1/__init__.py",
+        "versions/v0_0/bd62193d5cf6_initial_schema.py",
+        "versions/v0_1/efcbcf724889_core_schema.py",
+        *(
+            f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
+            for path in CORE_REVISION_DIR.glob("*.py")
+        ),
     }
 
     assert set(_frozen_digests()) == released
@@ -167,8 +162,8 @@ def test_the_release_gate_pins_the_same_digests_as_the_manifest():
     assert module.FROZEN_MIGRATIONS == _frozen_digests()
 
 
-def test_0002_domain_modules_are_not_alembic_revisions():
-    revision_files = sorted(REVISION_0002_DIR.glob("*.py"))
+def test_core_domain_modules_are_not_alembic_revisions():
+    revision_files = sorted(CORE_REVISION_DIR.glob("*.py"))
 
     assert revision_files
     for revision_file in revision_files:
@@ -191,10 +186,10 @@ def test_0002_domain_modules_are_not_alembic_revisions():
         )
 
 
-def test_0002_uses_revision_owned_domain_modules():
+def test_core_uses_revision_owned_domain_modules():
     assert {
         path.name
-        for path in REVISION_0002_DIR.glob("*.py")
+        for path in CORE_REVISION_DIR.glob("*.py")
         if path.name != "__init__.py"
     } == EXPECTED_REVISION_MODULES
 
@@ -229,8 +224,8 @@ def _literal_table_ddl_owners(sources) -> dict[str, set[str]]:
 
     Names in the transient `_dtxwiki_0002_` namespace are excluded. Those are
     migration scaffolding, not feature tables -- see the module docstring of
-    revision_0002/unique_key_prepass.py -- and
-    `test_epic1_leaves_no_migration_scaffolding` is what holds them to account.
+    revision_modules/v0_1/efcbcf724889_core_schema/unique_key_prepass.py -- and
+    `test_core_leaves_no_migration_scaffolding` checks their removal.
     """
 
     owners: dict[str, set[str]] = defaultdict(set)
@@ -260,7 +255,7 @@ def _literal_table_ddl_owners(sources) -> dict[str, set[str]]:
     return owners
 
 
-def test_0002_literal_table_ddl_has_one_feature_owner():
+def test_core_literal_table_ddl_has_one_feature_owner():
     """Do not reintroduce multiple historical feature owners per table.
 
     ``tenancy_schema`` is the one deliberate cross-table finalizer: existing
@@ -271,7 +266,10 @@ def test_0002_literal_table_ddl_has_one_feature_owner():
     """
 
     owners = _literal_table_ddl_owners(
-        [MIGRATIONS_DIR / "0002_epic1.py", *REVISION_0002_DIR.glob("*.py")]
+        [
+            MIGRATIONS_DIR / "v0_1/efcbcf724889_core_schema.py",
+            *CORE_REVISION_DIR.glob("*.py"),
+        ]
     )
 
     duplicates = {
@@ -282,7 +280,7 @@ def test_0002_literal_table_ddl_has_one_feature_owner():
     assert duplicates == {}
 
 
-def test_0002_owned_tables_declare_routing_columns_at_creation():
+def test_core_owned_tables_declare_routing_columns_at_creation():
     """A table born in 0002 must not gain workspace_id from a later module."""
 
     expected = {
@@ -292,7 +290,10 @@ def test_0002_owned_tables_declare_routing_columns_at_creation():
         "page_provenance",
         "proposal_source_item",
     }
-    sources = [MIGRATIONS_DIR / "0002_epic1.py", *REVISION_0002_DIR.glob("*.py")]
+    sources = [
+        MIGRATIONS_DIR / "v0_1/efcbcf724889_core_schema.py",
+        *CORE_REVISION_DIR.glob("*.py"),
+    ]
     declared: set[str] = set()
     for source in sources:
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=source.name)
@@ -325,3 +326,30 @@ def test_0002_owned_tables_declare_routing_columns_at_creation():
 
 def test_consolidated_revision_has_no_generic_fragments_package():
     assert not FRAGMENTS_DIR.exists()
+
+
+def test_generated_revisions_group_patch_versions_and_link_in_order(tmp_path):
+    """The developer helper creates linked scripts without opening a database."""
+
+    target = tmp_path / "backend"
+    target.mkdir()
+    shutil.copy2(REPO_ROOT / "backend/alembic.ini", target / "alembic.ini")
+    shutil.copytree(
+        REPO_ROOT / "backend/migrations",
+        target / "migrations",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    first = create_revision("0.2.0", "add workspace settings", root=tmp_path)
+    second = create_revision("0.2.1", "add search index", root=tmp_path)
+    assert first.down_revision == CORE_REVISION
+    assert second.down_revision == first.revision
+    assert first.revision != second.revision
+    assert (
+        Path(first.path).parent
+        == Path(second.path).parent
+        == target / "migrations/versions/v0_2"
+    )
+    assert Path(first.path).name.endswith("_add_workspace_settings.py")
+    assert ScriptDirectory(
+        str(target / "migrations"), recursive_version_locations=True
+    ).get_heads() == [second.revision]

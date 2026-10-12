@@ -87,7 +87,7 @@ def test_distribution_surfaces_declare_dual_license():
 def test_documents_point_browsers_at_the_served_third_party_notices():
     # The route itself is covered by backend/tests/unit/test_spa_fallback.py;
     # this pins that the documents name the path a browser can actually reach.
-    for document in ("LICENSE", "README.md", "DEPLOYMENT.md"):
+    for document in ("LICENSE", "DEVELOPMENT.md", "DEPLOYMENT.md"):
         assert "/THIRD_PARTY_NOTICES.txt" in _read(document), document
 
 
@@ -101,6 +101,24 @@ def test_cla_is_wired_to_the_pull_request_check():
     )
     cla = _read("CLA.md")
     contributing = _read("CONTRIBUTING.md")
+
+    participants = next(
+        item for item in job["steps"] if item.get("id") == "participants"
+    )
+    signature_token = next(
+        item for item in job["steps"] if item.get("id") == "signature-token"
+    )
+    author_check = next(
+        item
+        for item in job["steps"]
+        if item.get("name") == "Require the pull request author's acceptance"
+    )
+    for gated in (signature_token, step, author_check):
+        assert gated["if"] == "steps.participants.outputs.requires-signatures == 'true'"
+    exemption = "${{ env.CLA_EXEMPT }}"
+    assert participants["env"]["EXEMPT"] == exemption
+    assert author_check["env"]["EXEMPT"] == exemption
+    assert step["with"]["allowlist"] == exemption
 
     # The statement, the document tag and the signature paths name the version
     # CLA.md declares, so a new version can neither reuse old acceptances nor
@@ -133,6 +151,90 @@ def test_cla_is_wired_to_the_pull_request_check():
         assert f"git show cla-v{version}:{frozen}" in contributing, frozen
     assert "[Open decision]" not in cla
     assert "being prepared" not in contributing
+
+
+@pytest.mark.counterexample(
+    "the actual CLA participant guard keeps foreign submitters and commit authors "
+    "on the signature path and rejects unlinked, oversized or changing commit lists"
+)
+@pytest.mark.parametrize(
+    "submitter,authors,count,required,error",
+    [
+        pytest.param("RonyK", ("ronyk",), 1, "false", None, id="maintainer-only"),
+        pytest.param(
+            "new-contributor", ("RonyK",), 1, "true", None, id="foreign-submitter"
+        ),
+        pytest.param(
+            "RonyK",
+            ("RonyK", "new-contributor"),
+            2,
+            "true",
+            None,
+            id="foreign-commit-author",
+        ),
+        pytest.param(
+            "RonyK", (None,), 1, None, "not linked", id="unlinked-commit-author"
+        ),
+        pytest.param(
+            "RonyK", ("RonyK",), 101, None, "reads 1 to 100", id="over-100-commits"
+        ),
+        pytest.param(
+            "RonyK", ("RonyK",), 2, None, "changed while reading", id="count-changed"
+        ),
+    ],
+)
+def test_cla_participant_guard_uses_every_participant_and_refuses_unsafe_lists(
+    tmp_path, monkeypatch, capsys, submitter, authors, count, required, error
+):
+    job = yaml.safe_load(_read(".github/workflows/cla.yml"))["jobs"]["cla"]
+    participants = next(
+        step for step in job["steps"] if step.get("id") == "participants"
+    )
+    source = re.search(
+        r"^python3 - <<'PY'\n(.*?)^PY$", participants["run"], re.M | re.S
+    ).group(1)
+    pull_path = "repos/dtxSuite/dtxWiki/pulls/42"
+    commits_path = f"{pull_path}/commits?per_page=100"
+    responses = {
+        pull_path: {"commits": count, "user": {"login": submitter}},
+        commits_path: [
+            {
+                "sha": f"synthetic-commit-{index}",
+                "author": {"login": login} if login is not None else None,
+            }
+            for index, login in enumerate(authors)
+        ],
+    }
+    calls = []
+
+    def github_response(command, *, text):
+        assert command[:2] == ["gh", "api"] and len(command) == 3
+        assert text is True
+        calls.append(command[2])
+        return json.dumps(responses[command[2]])
+
+    output = tmp_path / "github-output"
+    for name, value in {
+        "REPO": "dtxSuite/dtxWiki",
+        "PR": "42",
+        "EXEMPT": job["env"]["CLA_EXEMPT"],
+        "GITHUB_OUTPUT": str(output),
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(subprocess, "check_output", github_response)
+    executable = compile(source, ".github/workflows/cla.yml:participants", "exec")
+    if error is None:
+        exec(executable, {})
+        assert output.read_text() == f"requires-signatures={required}\n"
+    else:
+        with pytest.raises(SystemExit) as rejected:
+            exec(executable, {})
+        assert rejected.value.code == 1
+        assert error in capsys.readouterr().out
+        assert not output.exists()
+    assert calls == (
+        [pull_path] if count > 100 else [pull_path, commits_path]
+    )
 
 
 def _seeding_sandbox(tmp_path, committed):

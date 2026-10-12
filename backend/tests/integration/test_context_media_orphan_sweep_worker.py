@@ -1,7 +1,6 @@
-"""Epic-2 Phase 5c worker wiring: the ``context_media_orphan_sweep`` job_type
-is seeded per workspace like ``media_install_reconcile``
-(doc/design/workspace-database-separation-plan.md D-7), dispatched through
-the registered handler, and reports its retention setting correctly."""
+"""The orphan-sweep job is seeded per workspace, dispatched by its registered
+handler, and reports its retention setting correctly.
+"""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4

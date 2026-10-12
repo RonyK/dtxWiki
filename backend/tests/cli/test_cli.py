@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from click import unstyle
 from sqlalchemy import select
 from typer.testing import CliRunner
 
@@ -25,6 +26,7 @@ from backend.services.session_service import (
     SessionService,
     SessionTokenCodec,
 )
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 from backend.tests.utils.environment import child_env_without_dtxwiki_config
 
 
@@ -375,7 +377,7 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
 
 
 def test_users_add_reports_duplicate_email(tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'users.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "users.db")
     runner = CliRunner()
     args = [
         "users",
@@ -406,11 +408,11 @@ def test_workspace_member_commands_require_explicit_workspace(arguments):
     result = CliRunner().invoke(cli_main.app, arguments)
 
     assert result.exit_code == 2
-    assert "--workspace" in result.output
+    assert "--workspace" in unstyle(result.output)
 
 
 def test_workspace_members_add_list_and_remove(tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'members.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "members.db")
     runner = CliRunner()
     created = runner.invoke(
         cli_main.app,

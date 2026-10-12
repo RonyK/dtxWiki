@@ -329,7 +329,7 @@ def test_release_gate_check_rejects_readme_legacy_mcp_command(tmp_path):
     result = _run_gate(
         tmp_path,
         readme_replacements={
-            "See doc/setup/remote-mcp-clients.md.": (
+            "A shared knowledge base for people and connected AI tools.": (
                 "Legacy setup: dtxwiki mcp register-remote --remote https://example.test/mcp"
             ),
         },
@@ -409,7 +409,7 @@ def test_release_gate_check_rejects_phase5_overview_stale_codex_windows_path(
     assert "stale client config path" in result.stderr
 
 
-def test_release_gate_check_rejects_sprint5_overview_stale_claude_paths(
+def test_release_gate_check_rejects_operator_overview_stale_claude_paths(
     tmp_path,
 ):
     _write_evidence(tmp_path, remote_result="8 passed in 12.34s")
@@ -426,7 +426,7 @@ def test_release_gate_check_rejects_sprint5_overview_stale_claude_paths(
     assert "stale Sprint 5 overview Phase 5 contract" in result.stderr
 
 
-def test_release_gate_check_rejects_sprint5_overview_stale_oauth_node(
+def test_release_gate_check_rejects_operator_overview_stale_oauth_node(
     tmp_path,
 ):
     _write_evidence(tmp_path, remote_result="8 passed in 12.34s")
@@ -444,7 +444,7 @@ def test_release_gate_check_rejects_sprint5_overview_stale_oauth_node(
     assert "stale Sprint 5 overview Phase 5 contract" in result.stderr
 
 
-def test_release_gate_check_rejects_sprint5_overview_stale_remote_command(
+def test_release_gate_check_rejects_operator_overview_stale_remote_command(
     tmp_path,
 ):
     _write_evidence(tmp_path, remote_result="8 passed in 12.34s")
@@ -555,15 +555,7 @@ def _write_gate_docs(root: Path) -> tuple[Path, Path, Path, Path]:
             [
                 "# dtxWiki",
                 "",
-                "## 원격 서버 배포와 팀 MCP 연결",
-                "See doc/setup/remote-mcp-clients.md.",
-                "Streamable HTTP endpoint authentication uses PAT or OAuth.",
-                "DTXWIKI_WORKSPACE_SLUG is retired.",
-                (
-                    "dtxwiki mcp register-http "
-                    "--url https://example.test/mcp --client codex"
-                ),
-                "dtxwiki mcp doctor --http https://example.test/mcp",
+                "A shared knowledge base for people and connected AI tools.",
                 "",
             ]
         ),

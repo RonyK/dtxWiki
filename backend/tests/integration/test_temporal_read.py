@@ -1,13 +1,13 @@
 """Bitemporal reads: publish timeline, as_of, what_changed (C2-T8/T9)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import event, select
 
 from backend.mcp.router import dispatch
-from backend.models.change import ChangeSet
-from backend.models.context import ContextPage
+from backend.models.change import ChangeOperation, ChangeSet
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.workspace import Workspace
 from backend.schemas.context_write import (
     ReviewDecisionRequest,
@@ -26,6 +26,69 @@ def _workspace_id(session):
 
 def _now():
     return datetime.now(UTC)
+
+
+_TEMPORAL_EPOCH = datetime(2020, 1, 1, tzinfo=UTC)
+
+
+def _at(seconds):
+    return _TEMPORAL_EPOCH + timedelta(seconds=seconds)
+
+
+def _pin_version_times(
+    session_factory,
+    page_id,
+    version_id,
+    created_at,
+    *,
+    published_at=None,
+):
+    # Production history uses wall-clock ChangeSet timestamps; clock steps
+    # can reorder or omit events. These tests supply an explicit chronology,
+    # not a guarantee of production clock-step safety.
+    with session_factory.begin() as session:
+        version = session.get(ContextPageVersion, version_id)
+        assert version is not None and version.page_id == page_id
+        rows = session.execute(
+            select(ChangeOperation, ChangeSet)
+            .join(ChangeSet, ChangeOperation.change_set_id == ChangeSet.id)
+            .where(
+                ChangeOperation.target_type == "context_page",
+                ChangeOperation.target_id == page_id,
+                ChangeOperation.diff_ref == f"context_page_version:{version_id}",
+                ChangeOperation.operation.in_(
+                    ("create_draft", "create", "update", "publish")
+                ),
+            )
+        ).all()
+        assert rows
+        if published_at is not None:
+            assert published_at > created_at
+            assert any(op.operation == "publish" for op, _ in rows)
+        version.created_at = created_at
+        for operation, change_set in rows:
+            instant = (
+                published_at
+                if operation.operation == "publish" and published_at is not None
+                else created_at
+            )
+            change_set.created_at = instant
+            operation.created_at = instant
+
+
+def _pin_archive_time(session_factory, page_id, archived_at):
+    with session_factory.begin() as session:
+        operation, change_set = session.execute(
+            select(ChangeOperation, ChangeSet)
+            .join(ChangeSet, ChangeOperation.change_set_id == ChangeSet.id)
+            .where(
+                ChangeOperation.target_type == "context_page",
+                ChangeOperation.target_id == page_id,
+                ChangeOperation.operation == "archive",
+            )
+        ).one()
+        change_set.created_at = archived_at
+        operation.created_at = archived_at
 
 
 def _write_and_publish(session, workspace_id, title, body, *, page_id=None):
@@ -67,20 +130,23 @@ def _write_and_publish(session, workspace_id, title, body, *, page_id=None):
 def test_as_of_resolves_superseded_version(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        before_any = _now()
+        before_any = _at(0)
         page_id, v1 = _write_and_publish(
             session, workspace_id, "Temporal Page", "# Temporal\n\nVersion one."
         )
-    between = _now()
+    # Explicit chronology; production clock-step semantics remain unresolved.
+    _pin_version_times(session_factory, page_id, v1, _at(10), published_at=_at(20))
+    between = _at(30)
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _write_and_publish(
+        _, v2 = _write_and_publish(
             session,
             workspace_id,
             "Temporal Page",
             "# Temporal\n\nVersion two.",
             page_id=page_id,
         )
+    _pin_version_times(session_factory, page_id, v2, _at(40), published_at=_at(50))
 
     with session_factory() as session:
         page = session.get(ContextPage, page_id)
@@ -89,8 +155,8 @@ def test_as_of_resolves_superseded_version(session_factory):
         assert resolved is not None and resolved.id == v1
         # before the first publish -> nothing
         assert resolve_version_as_of(session, page, before_any) is None
-        # now -> v2 (the live head)
-        head = resolve_version_as_of(session, page, _now())
+        # after both publishes -> v2 (the live head)
+        head = resolve_version_as_of(session, page, _at(60))
         assert head is not None and head.id == page.current_published_version_id
 
 
@@ -114,7 +180,8 @@ def test_as_of_uses_publish_instant_not_version_created_at(session_factory):
             actor_id="tester",
             actor_role="owner",
         )
-    draft_created_at = _now()
+    # Explicit chronology; production clock-step semantics remain unresolved.
+    draft_created_at = _at(20)
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         if created.review_item_id is not None:
@@ -128,44 +195,51 @@ def test_as_of_uses_publish_instant_not_version_created_at(session_factory):
                 actor_role="owner",
                 actor_provenance="browser_session",
             )
+    _pin_version_times(
+        session_factory,
+        created.page_id,
+        created.draft_version_id,
+        _at(10),
+        published_at=_at(30),
+    )
 
     with session_factory() as session:
         page = session.get(ContextPage, created.page_id)
         # at draft_created_at (after draft creation, before publish) the page
         # was NOT published — version.created_at reasoning would say it was
         assert resolve_version_as_of(session, page, draft_created_at) is None
-        assert resolve_version_as_of(session, page, _now()) is not None
+        assert resolve_version_as_of(session, page, _at(40)) is not None
 
 
 def test_what_changed_delta_flow(session_factory, page_service):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        page_a, _ = _write_and_publish(
+        page_a, v_a1 = _write_and_publish(
             session, workspace_id, "Delta A", "# A\n\nInitial."
         )
-    # DB-anchored boundary (see test_what_changed_first_publish_...): the max
-    # published change-set so far is page_a's; the transaction below is strictly
-    # newer, so `created_at > capture_point` is collision-proof under load.
-    with session_factory() as session:
-        capture_point = session.scalar(
-            select(func.max(ChangeSet.created_at)).where(
-                ChangeSet.workspace_id == _workspace_id(session)
-            )
-        )
+    # Explicit chronology; production clock-step semantics remain unresolved.
+    _pin_version_times(session_factory, page_a, v_a1, _at(10), published_at=_at(20))
+    capture_point = _at(20)  # The since boundary is exclusive.
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        page_b, _ = _write_and_publish(
+        page_b, v_b1 = _write_and_publish(
             session, workspace_id, "Delta B", "# B\n\nNew page."
         )
-        _write_and_publish(
+        _, v_a2 = _write_and_publish(
             session, workspace_id, "Delta A", "# A\n\nRevised.", page_id=page_a
         )
+    _pin_version_times(session_factory, page_b, v_b1, _at(30), published_at=_at(40))
+    _pin_version_times(session_factory, page_a, v_a2, _at(50), published_at=_at(60))
 
     with session_factory() as session:
         workspace_id = _workspace_id(session)
         entries, has_more = what_changed(
             session, workspace_id, since=capture_point, actor=None
         )
+    assert [(entry.page_id, entry.version_id) for entry in entries] == [
+        (page_b, v_b1),
+        (page_a, v_a2),
+    ]
     by_page = {entry.page_id: entry for entry in entries}
     assert by_page[page_b].change_kind == "created"
     assert by_page[page_a].change_kind == "updated"
@@ -190,18 +264,8 @@ def test_what_changed_first_publish_ignores_earlier_draft_create(session_factory
             actor_id="tester",
             actor_role="owner",
         )
-    # Anchor `since` to the draft change-set's own commit instant (read back from
-    # the DB), not a wall-clock _now(): ChangeSet.created_at is stamped by
-    # utc_now(), so under load the later publish's utc_now() can collide with a
-    # wall-clock `since` at clock resolution and the strict `created_at > since`
-    # window would drop the publication. The publish below runs in a later
-    # transaction, so its change-set is strictly newer than this max.
-    with session_factory() as session:
-        since = session.scalar(
-            select(func.max(ChangeSet.created_at)).where(
-                ChangeSet.workspace_id == _workspace_id(session)
-            )
-        )
+    # Explicit chronology; production clock-step semantics remain unresolved.
+    since = _at(20)
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         ReviewService().apply_decision(
@@ -214,6 +278,13 @@ def test_what_changed_first_publish_ignores_earlier_draft_create(session_factory
             actor_role="owner",
             actor_provenance="browser_session",
         )
+    _pin_version_times(
+        session_factory,
+        created.page_id,
+        created.draft_version_id,
+        _at(10),
+        published_at=_at(30),
+    )
 
     with session_factory() as session:
         workspace_id = _workspace_id(session)
@@ -273,11 +344,26 @@ def test_what_changed_mcp_tool_cursor_roundtrip(
     mcp_default_actor,
 ):
 
+    # Explicit chronology; production clock-step semantics remain unresolved.
+    since = _at(0)
+    published = []
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        since = _now()
         for i in range(3):
-            _write_and_publish(session, workspace_id, f"Cursor {i}", f"# C{i}\n\nBody.")
+            published.append(
+                _write_and_publish(
+                    session, workspace_id, f"Cursor {i}", f"# C{i}\n\nBody."
+                )
+            )
+
+    for i, (page_id, version_id) in enumerate(published):
+        _pin_version_times(
+            session_factory,
+            page_id,
+            version_id,
+            _at(10 + 20 * i),
+            published_at=_at(20 + 20 * i),
+        )
 
     actor = mcp_default_actor(
         actor_id="temporal-cursor-pat",
@@ -296,6 +382,9 @@ def test_what_changed_mcp_tool_cursor_roundtrip(
     assert first.envelope.result_status == "succeeded"
     assert len(first.entries) == 2
     assert first.has_more and first.next_cursor
+    assert [(entry.page_id, entry.version_id) for entry in first.entries] == (
+        published[:2]
+    )
     second = dispatch(
         "what_changed",
         {
@@ -310,6 +399,10 @@ def test_what_changed_mcp_tool_cursor_roundtrip(
     assert second.envelope.result_status == "succeeded"
     assert len(second.entries) == 1
     assert not second.has_more
+    assert [(entry.page_id, entry.version_id) for entry in second.entries] == (
+        published[2:]
+    )
+    assert second.next_cursor is None
 
 
 def test_what_changed_rejects_negative_cursor(
@@ -353,7 +446,9 @@ def test_archive_surfaces_as_archived_delta(session_factory, page_service):
         actor_id="tester",
         actor_provenance="browser_session",
     )
-    since = _now()
+    # Explicit chronology; production clock-step semantics remain unresolved.
+    _pin_version_times(session_factory, payload.id, payload.version_id, _at(10))
+    since = _at(20)
     tree = TreeService()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -370,6 +465,7 @@ def test_archive_surfaces_as_archived_delta(session_factory, page_service):
             actor_kind="human",
             actor_id="tester",
         )
+    _pin_archive_time(session_factory, payload.id, _at(30))
 
     with session_factory() as session:
         workspace_id = _workspace_id(session)

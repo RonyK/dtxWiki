@@ -15,6 +15,7 @@ from backend.app.db import make_engine
 from backend.models.base import Base
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 
 def _seed_owned_ready_version(
@@ -110,14 +111,18 @@ def test_model_schema_enforces_ready_version_ownership_and_preserves_set_null(
         engine.dispose()
 
 
-def test_epic1_migration_installs_and_removes_ready_version_ownership(tmp_path: Path):
-    database_url = (
-        f"sqlite+pysqlite:///{(tmp_path / 'migration-ready-owner.db').as_posix()}"
-    )
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def test_core_schema_migration_installs_and_removes_ready_version_ownership(
+    tmp_path: Path, sqlite_templates
+):
+    database_url = sqlite_templates.clone("head", tmp_path / "migration-ready-owner.db")
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
-    command.upgrade(config, "head")
 
     engine = make_engine(database_url)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -164,7 +169,7 @@ def test_epic1_migration_installs_and_removes_ready_version_ownership(tmp_path: 
     finally:
         engine.dispose()
 
-    command.downgrade(config, "0001_initial_release")
+    command.downgrade(config, "bd62193d5cf6")
     downgraded_engine = make_engine(database_url)
     try:
         inspector = inspect(downgraded_engine)

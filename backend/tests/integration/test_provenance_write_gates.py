@@ -536,9 +536,20 @@ def _perform_agent_write(
     return response.json()["data"]
 
 
-@pytest.mark.parametrize("token_kind", ["oauth", "pat"])
-@pytest.mark.parametrize("category", ["persona", "memory"])
-@pytest.mark.parametrize("operation", ["create", "update", "restore"])
+# Pairwise cover of operation x category x token kind: every operation meets
+# both categories and both token kinds, and every category meets both token
+# kinds. All three operations share one provenance write path.
+@pytest.mark.parametrize(
+    ("operation", "category", "token_kind"),
+    [
+        ("create", "persona", "pat"),
+        ("create", "memory", "oauth"),
+        ("update", "persona", "oauth"),
+        ("update", "memory", "pat"),
+        ("restore", "persona", "oauth"),
+        ("restore", "memory", "pat"),
+    ],
+)
 def test_rest_agent_page_bearers_create_reviews_for_all_draft_writes(
     page_service,
     token_kind,

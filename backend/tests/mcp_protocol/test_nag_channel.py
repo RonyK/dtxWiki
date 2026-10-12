@@ -1,4 +1,6 @@
 import json
+from datetime import UTC, datetime, timedelta
+from itertools import count
 from uuid import uuid4
 
 import anyio
@@ -7,6 +9,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from backend.app.settings import Settings
+from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.server import create_mcp_server
 from backend.models.change import ChangeSet
 from backend.models.context import ContextPageVersion
@@ -119,7 +122,26 @@ def test_stale_read_warning_is_bounded_scoped_and_clears_after_reread(
     page_service,
     nag_actor,
     mcp_default_actor,
+    monkeypatch,
 ):
+    # A read moves the conversation's read pointer only if it completed no
+    # earlier than the read the pointer already holds (a trace delayed behind a
+    # newer one must not rewind it), and the runner takes that time from the
+    # wall clock. The clock is not monotonic: a step back between the first read
+    # and the re-read leaves the pointer on the old version, and the warning the
+    # re-read is meant to clear stays. Give the reads an explicit chronology, one
+    # tick per sample, so this test covers the warning, not the host clock.
+    # Production still cannot tell a stepped-back read from a delayed one; that
+    # needs an ordering of observations that survives a clock step.
+    # Start from the real time once, so the conversation still counts as active
+    # (an epoch in the past would freeze it as ended during capture).
+    trace_epoch = datetime.now(UTC)
+    trace_ticks = count()
+    monkeypatch.setattr(
+        runner_module,
+        "_utc_now",
+        lambda: trace_epoch + timedelta(seconds=next(trace_ticks)),
+    )
     workspace_id = nag_actor.workspace_id
     assert workspace_id is not None
     different_owner = mcp_default_actor(

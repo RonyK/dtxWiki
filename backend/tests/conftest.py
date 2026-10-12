@@ -1,12 +1,13 @@
 import logging
 import os
+import sqlite3
 from contextlib import contextmanager
 from uuid import uuid4
 
 import pytest
 from argon2 import PasswordHasher, Type
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import Engine, create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -33,12 +34,47 @@ from backend.tests.utils.environment import (
     TEST_CLIENT_ALLOWED_HOSTS,
     TEST_CLIENT_ALLOWED_HOSTS_ENV,
 )
+from backend.tests.utils.postgres import keep_sqlite_foreign_keys_inline
 
 # Starlette's TestClient sends ``Host: testserver``. The suite allows that one
 # name exactly as an operator allows theirs, so the Host allowlist still
 # refuses every other name; tests about the allowlist pass allowed_hosts to
 # Settings explicitly, which takes precedence over the environment.
 os.environ[TEST_CLIENT_ALLOWED_HOSTS_ENV] = TEST_CLIENT_ALLOWED_HOSTS
+
+
+def _disable_test_sqlite_sync(dbapi_connection, _connection_record):
+    """Skip storage synchronization for disposable pytest SQLite databases.
+
+    The suite builds hundreds of file-backed databases, and with the default
+    ``synchronous=FULL`` every autocommitted DDL statement of ``create_all``
+    waits on an fsync: about 1.3 s per 100-table schema, against 0.07 s without
+    it, which made schema construction the largest single cost of the suite.
+    ``synchronous=OFF`` changes durability only, not visibility or locking, so
+    the lock, busy-timeout and race tests keep their meaning. An application
+    crash still leaves the database recoverable; only an OS crash or power
+    loss could corrupt it, which no test exercises.
+
+    Registered on the ``Engine`` class, so it reaches every SQLAlchemy engine
+    this process opens, including the ones ``CliRunner`` commands and
+    in-process Alembic create; raw ``sqlite3`` connections and subprocesses are
+    untouched. Set ``DTXWIKI_TEST_SQLITE_DURABILITY=production`` before starting
+    pytest to keep native settings for a whole invocation.
+    """
+
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA synchronous=OFF")
+    finally:
+        cursor.close()
+
+
+if os.environ.get("DTXWIKI_TEST_SQLITE_DURABILITY") != "production":
+    event.listen(Engine, "connect", _disable_test_sqlite_sync)
+
+event.listen(Base.metadata, "before_create", keep_sqlite_foreign_keys_inline)
 
 # Argon2id at the production cost (t=3, m=64MiB, p=4) takes ~45 ms to hash and
 # ~42 ms to verify. Every TestClient signup/login/PAT call pays it, and the suite
@@ -121,30 +157,71 @@ def reset_page_service_anchor_cache():
     _clear_anchor_resolve_cache()
 
 
-@pytest.fixture
-def session_factory():
+@pytest.fixture(scope="session")
+def _empty_sqlite_schema():
+    """One unseeded in-memory ORM schema per pytest worker.
+
+    ``session_factory`` copies it with the SQLite backup API (~1 ms) instead of
+    running ``create_all`` (~36 ms) for each of the ~2,450 tests that use it.
+    It stays unseeded so every test still seeds fresh random UUIDs: a seeded
+    template would hand every test the same workspace id and let id-keyed
+    process caches (``graph_ppr._subgraph_cache``) leak between tests.
+    """
+
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    with factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        # Production creates MCPClient lifecycle rows only when an authenticated
-        # PAT/OAuth connection first touches a workspace. Service-level tests
-        # that need an FK target receive an explicit fixture-only row instead.
-        session.add(
-            MCPClient(
-                workspace_id=workspace.id,
-                name="fixture-system-client",
-                client_type="system_managed",
-                scopes=["*"],
-                status="active",
-            )
+    try:
+        with engine.begin() as connection:
+            Base.metadata.create_all(connection)
+        raw = engine.raw_connection()
+        try:
+            source = raw.driver_connection
+            assert isinstance(source, sqlite3.Connection)
+            assert not source.in_transaction
+            yield source
+        finally:
+            raw.close()
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def session_factory(_empty_sqlite_schema):
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    engine = None
+    try:
+        _empty_sqlite_schema.backup(connection)
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            creator=lambda: connection,
+            poolclass=StaticPool,
         )
-    return factory
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        with factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            # Production creates MCPClient lifecycle rows only when an
+            # authenticated PAT/OAuth connection first touches a workspace.
+            # Service-level tests that need an FK target receive an explicit
+            # fixture-only row instead.
+            session.add(
+                MCPClient(
+                    workspace_id=workspace.id,
+                    name="fixture-system-client",
+                    client_type="system_managed",
+                    scopes=["*"],
+                    status="active",
+                )
+            )
+        yield factory
+    finally:
+        try:
+            if engine is not None:
+                engine.dispose()
+        finally:
+            connection.close()
 
 
 @pytest.fixture

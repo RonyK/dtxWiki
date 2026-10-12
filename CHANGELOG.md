@@ -1,10 +1,39 @@
 # Changelog
 
-## 0.1.1 — Unreleased
+## 0.1.2 — Unreleased
+
+### Release distribution
+
+- Fix the npm publish command to use an explicit local tarball path. The
+  release workflow publishes PyPI first, then the matching npm launcher,
+  and creates the GitHub Release after both uploads succeed.
+- Version 0.1.1 reached PyPI, but its npm upload failed and no GitHub Release
+  was created. Version 0.1.2 replaces that interrupted distribution; the
+  temporary 0.1.1 recovery workflow is removed.
+- Desktop installers remain outside this release.
+
+### Fixes
+
+- Select the Context publish replay audit by version and change-set identity.
+- Persist changes to nested workspace settings policies.
+- Prevent Settings draft resets from overwriting the user's first edit.
+- Accept OAuth access tokens across backward clock steps while retaining
+  expiration, not-before, signature, issuer, and audience validation.
+- Avoid deleting Preview runs, attempts, and detail rows twice during a
+  Library hard delete.
+
+### Tests
+
+- Replace flaky timing and ordering assumptions with deterministic checks,
+  isolate shared test state, and keep benchmark timing in its separate lane.
+- Reduce backend test setup time through isolated SQLite schema templates.
+
+## 0.1.1 — 2026-10-13
 
 0.1.1 is the first public release of dtxWiki under its current design. The
-date is set when the release is tagged. Releases 0.0.x were an early
-preview; 0.1.0 was never released.
+release date records its Git tag. Its Python package was published, while
+the npm upload failed and the GitHub Release was not created. Releases
+0.0.x were an early preview; 0.1.0 was never released.
 
 ### Licensing
 

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -7,6 +8,7 @@ from sqlalchemy import event, func, select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models import (
+    AuditEvent,
     ChangeOperation,
     ChangeSet,
     ContextPage,
@@ -259,38 +261,37 @@ def test_browser_cannot_publish_another_actors_private_editing_version(page_serv
     assert page_version_and_pointer_snapshot(page_service, page_id) == before
 
 
-@pytest.mark.parametrize(
-    "actor_provenance", ["personal_access_token", "oauth_client", "mcp_client"]
-)
-def test_non_browser_actor_cannot_direct_publish_its_editing_version(
-    page_service,
-    actor_provenance,
-):
+def test_non_browser_actor_cannot_direct_publish_its_editing_version(page_service):
     client = make_client(page_service)
     actor_id = client.get("/api/v1/auth/me").json()["data"]["user_id"]
     created = client.post(
         pages_url(page_service),
         json={
-            "title": f"No direct {actor_provenance} publish",
+            "title": "No direct bearer publish",
             "body_md": "# Bearer-owned private edit\n\nKeep staged.",
         },
     ).json()["data"]
     page_id = UUID(created["id"])
     before = page_version_and_pointer_snapshot(page_service, page_id)
 
-    with pytest.raises(StaleContextDraftError):
-        page_service.publish_draft(
-            page_id=page_id,
-            version_id=UUID(created["version_id"]),
-            reason="non-browser direct publish",
-            publish_despite_findings=False,
-            actor_kind="human",
-            actor_id=actor_id,
-            actor_provenance=actor_provenance,
-            expected_content_hash=created["content_hash"],
-        )
+    # Each refusal leaves the editing version exactly as it was, so one page
+    # serves every non-browser provenance in turn.
+    for actor_provenance in ("personal_access_token", "oauth_client", "mcp_client"):
+        with pytest.raises(StaleContextDraftError):
+            page_service.publish_draft(
+                page_id=page_id,
+                version_id=UUID(created["version_id"]),
+                reason="non-browser direct publish",
+                publish_despite_findings=False,
+                actor_kind="human",
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                expected_content_hash=created["content_hash"],
+            )
 
-    assert page_version_and_pointer_snapshot(page_service, page_id) == before
+        assert page_version_and_pointer_snapshot(page_service, page_id) == before, (
+            actor_provenance
+        )
 
 
 def test_browser_editing_publish_does_not_replace_a_competing_submitted_draft(
@@ -1076,6 +1077,51 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         f"{pages_url(page_service)}/{page_id}"
     ).json()["data"]
     assert everyone_now_sees_it["body_md"] == "# Full Flow Target\n\nEdited body."
+
+
+def test_publish_replay_ignores_backward_audit_timestamps(page_service):
+    """The replay of a page's current published head finds its audit by the
+    version and change set it recorded, never as the page's newest publish
+    audit. `created_at` is wall-clock time, so a backward step (NTP, a resumed
+    VM) between two publishes leaves the later one with the earlier timestamp.
+    The full flow publishes twice; stamp the second audit before the first."""
+
+    origin = datetime(2026, 1, 1, tzinfo=UTC)
+    emitted = []
+
+    def stamp_publish(_mapper, _connection, row):
+        if row.action != "context_page.draft.publish":
+            return
+        row.created_at = origin - timedelta(seconds=len(emitted))
+        emitted.append((row.workspace_id, row.target_id, row.payload["version_id"]))
+
+    event.listen(AuditEvent, "before_insert", stamp_publish)
+    try:
+        test_editing_full_flow_begin_save_submit_publish(page_service)
+    finally:
+        event.remove(AuditEvent, "before_insert", stamp_publish)
+        # Check the stored preconditions even when the replay raises, so a
+        # failure is known to happen with the inversion actually in place.
+        assert len(emitted) == 2
+        assert emitted[0][:2] == emitted[1][:2]
+        assert emitted[0][2] != emitted[1][2]
+        workspace_id, page_id, first_version_id = emitted[0]
+        second_version_id = emitted[1][2]
+        with page_service.session_factory() as session:
+            rows = session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.workspace_id == workspace_id,
+                    AuditEvent.action == "context_page.draft.publish",
+                    AuditEvent.target_kind == "context_page",
+                    AuditEvent.target_id == page_id,
+                )
+            ).all()
+            assert len(rows) == 2
+            stamped = {row.payload["version_id"]: row.created_at for row in rows}
+            assert set(stamped) == {first_version_id, second_version_id}
+            assert stamped[first_version_id] == origin
+            assert stamped[second_version_id] == origin - timedelta(seconds=1)
+            assert stamped[second_version_id] < stamped[first_version_id]
 
 
 def test_page_first_creation_defaults_title_slug_and_allows_empty_body(page_service):
@@ -2531,29 +2577,38 @@ def test_read_page_with_cross_page_version_id_returns_404(page_service):
 
 def test_read_page_by_slug_returns_page_beyond_first_list_page(page_service):
     client = make_client(page_service)
-    oldest_page = None
-    for index in range(55):
-        created = client.post(
-            pages_url(page_service),
-            json={
-                "title": f"Slug Page {index:02d}",
-                "body_md": f"# Slug Page {index:02d}",
-            },
+    actor_id = client.get("/api/v1/auth/me").json()["data"]["user_id"]
+    created = client.post(
+        pages_url(page_service),
+        json={"title": "Slug Page 00", "body_md": "# Slug Page 00"},
+    )
+    assert created.status_code == 201
+    oldest_page = created.json()["data"]
+    # P9.1: `create_page_first` never derives a slug from title
+    # (always `p-{page_id}`) -- write the human-readable slug this
+    # test actually exercises directly onto the row.
+    with page_service.session_factory.begin() as session:
+        oldest = session.get(ContextPage, UUID(oldest_page["id"]))
+        oldest.slug = "slug-page-00"
+        # A page with no published or draft version is ranked by `updated_at`,
+        # so "oldest" holds only while the wall clock never steps back as the 50
+        # newer pages are created. Pin it instead of relying on that.
+        oldest.updated_at = datetime(2000, 1, 1, tzinfo=UTC)
+    oldest_page["slug"] = "slug-page-00"
+    # The default list window is 50 rows: 50 newer pages push the oldest out.
+    for index in range(1, 51):
+        page_service.create_page_first(
+            workspace_slug="default",
+            title=f"Slug Page {index:02d}",
+            body_md=f"# Slug Page {index:02d}",
+            actor_kind="human",
+            actor_id=actor_id,
+            actor_provenance="browser_session",
         )
-        assert created.status_code == 201
-        if index == 0:
-            oldest_page = created.json()["data"]
-            # P9.1: `create_page_first` never derives a slug from title
-            # (always `p-{page_id}`) -- write the human-readable slug this
-            # test actually exercises directly onto the row.
-            with page_service.session_factory.begin() as session:
-                session.get(ContextPage, UUID(oldest_page["id"])).slug = (
-                    "slug-page-00"
-                )
-            oldest_page["slug"] = "slug-page-00"
 
     listed = client.get(pages_url(page_service))
     assert listed.status_code == 200
+    assert len(listed.json()["data"]) == 50
     assert "slug-page-00" not in {page["slug"] for page in listed.json()["data"]}
 
     response = client.get(

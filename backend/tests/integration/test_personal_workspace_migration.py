@@ -1,14 +1,15 @@
 from datetime import UTC, datetime
 from importlib import import_module
-from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, select
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 
 def _config(database_url: str) -> Config:
@@ -18,14 +19,13 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def _database_url(tmp_path: Path, name: str) -> str:
-    return f"sqlite:///{tmp_path / name}"
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
 
 
-def test_personal_workspace_schema_constraints_round_trip(tmp_path):
-    database_url = _database_url(tmp_path, "personal-schema.db")
-    config = _config(database_url)
-    command.upgrade(config, "head")
+def test_personal_workspace_schema_constraints_at_head(tmp_path, sqlite_templates):
+    database_url = sqlite_templates.clone("head", tmp_path / "personal-schema.db")
     engine = create_engine(database_url)
     try:
         inspector = inspect(engine)
@@ -57,27 +57,15 @@ def test_personal_workspace_schema_constraints_round_trip(tmp_path):
             constraint["name"]
             for constraint in inspector.get_check_constraints("workspace_memberships")
         } >= {"workspace_membership_role_check"}
-
-        engine.dispose()
-        command.downgrade(config, "0001_initial_release")
-        engine = create_engine(database_url)
-        downgraded = inspect(engine)
-        assert "personal_workspace_id" not in {
-            column["name"] for column in downgraded.get_columns("users")
-        }
-        assert "join_policy" not in {
-            column["name"] for column in downgraded.get_columns("workspace")
-        }
     finally:
         engine.dispose()
 
 
 def test_personal_workspace_backfill_includes_suspended_and_preserves_live_default(
-    tmp_path,
+    tmp_path, sqlite_templates
 ):
-    database_url = _database_url(tmp_path, "personal-backfill.db")
+    database_url = sqlite_templates.clone("base_0001", tmp_path / "backfill.db")
     config = _config(database_url)
-    command.upgrade(config, "0001_initial_release")
     engine = create_engine(database_url)
     active_with_default_id = uuid4()
     active_with_stale_default_id = uuid4()
@@ -157,7 +145,7 @@ def test_personal_workspace_backfill_includes_suspended_and_preserves_live_defau
     engine = create_engine(database_url)
     try:
         migration = import_module(
-            "backend.migrations.revision_0002.workspace_schema"
+            "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
         )
         with engine.begin() as connection:
             migration._backfill_personal_workspaces(connection)

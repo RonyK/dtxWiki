@@ -1,12 +1,17 @@
 """get_index v2: auto 2-mode, fanout 50, export contract split (C2-T3)."""
 
+import sqlite3
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
+from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.okf import build_workspace_index, render_export_manifest
 from backend.services.page_service import sync_page_projections
 from backend.services.tree_service import TreeService, ensure_primary_tree_placement
@@ -70,12 +75,11 @@ def _bulk_page(session, workspace_id, slug, title, parent_id):
     return page
 
 
-@pytest.fixture
-def large_workspace(session_factory):
+def _build_large_workspace(factory):
     """>200 content nodes: one folder with 60 pages + 150 root-inbox pages."""
 
     tree = TreeService()
-    with session_factory.begin() as session:
+    with factory.begin() as session:
         workspace_id = _workspace_id(session)
         root = _context_root(session, workspace_id)
         folder = tree.create_folder(
@@ -106,6 +110,68 @@ def large_workspace(session_factory):
         return {"workspace_id": workspace_id, "folder_id": folder.id}
 
 
+@pytest.fixture(scope="module")
+def large_workspace_db(_empty_sqlite_schema):
+    """One committed 210-page workspace shared by the read-only index tests.
+
+    Building it costs ~1.6 s, so the module builds it once on its own engine
+    (the function-scoped ``session_factory`` is not available at module scope).
+    Readers open fresh sessions and never write; the one test that writes
+    clones the database first.
+    """
+
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    engine = None
+    try:
+        _empty_sqlite_schema.backup(connection)
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            creator=lambda: connection,
+            poolclass=StaticPool,
+        )
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        with factory.begin() as session:
+            seed_default_workspace(session)
+        yield factory, _build_large_workspace(factory), connection
+    finally:
+        try:
+            if engine is not None:
+                engine.dispose()
+        finally:
+            connection.close()
+
+
+@pytest.fixture
+def large_workspace(large_workspace_db):
+    """Read-only handle on the shared large workspace."""
+
+    factory, ids, _connection = large_workspace_db
+    return factory, ids
+
+
+@pytest.fixture
+def large_workspace_clone(large_workspace_db):
+    """A private, writable copy of the large workspace."""
+
+    _factory, ids, source = large_workspace_db
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    engine = None
+    try:
+        source.backup(connection)
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            creator=lambda: connection,
+            poolclass=StaticPool,
+        )
+        yield sessionmaker(bind=engine, expire_on_commit=False), ids
+    finally:
+        try:
+            if engine is not None:
+                engine.dispose()
+        finally:
+            connection.close()
+
+
 def test_small_workspace_stays_flat(session_factory, page_service):
     page_service.write_page(
         workspace_slug="default",
@@ -126,9 +192,10 @@ def test_small_workspace_stays_flat(session_factory, page_service):
     assert "/context/flat-page.md" in index
 
 
-def test_large_workspace_routes_and_descends(session_factory, large_workspace):
+def test_large_workspace_routes_and_descends(large_workspace):
+    session_factory, ids = large_workspace
     with session_factory() as session:
-        workspace_id = large_workspace["workspace_id"]
+        workspace_id = ids["workspace_id"]
         root_index = build_workspace_index(
             session, workspace_id, actor=None, workspace_slug="default"
         )
@@ -138,6 +205,9 @@ def test_large_workspace_routes_and_descends(session_factory, large_workspace):
         assert "…and" in root_index and "more — narrow via a child folder" in (
             root_index
         )
+        # NULL nav_summary -> render-time heuristic (child rollup + type mix)
+        assert "includes Payment Doc 000" in root_index
+        assert "mostly concept" in root_index
 
         node_index = build_workspace_index(
             session,
@@ -154,14 +224,14 @@ def test_large_workspace_routes_and_descends(session_factory, large_workspace):
         assert "body paragraph." in node_index
 
 
-def test_stored_nav_summary_beats_heuristic(session_factory, large_workspace):
+def test_stored_nav_summary_beats_heuristic(large_workspace_clone):
+    session_factory, ids = large_workspace_clone
     tree = TreeService()
     with session_factory.begin() as session:
-        workspace_id = large_workspace["workspace_id"]
         tree.update_node(
             session=session,
-            workspace_id=workspace_id,
-            node_id=large_workspace["folder_id"],
+            workspace_id=ids["workspace_id"],
+            node_id=ids["folder_id"],
             request=TreeNodeUpdate(
                 display_name="Payments",
                 nav_summary="결제 승인·정산·환불. 정책은 /policy 참조.",
@@ -172,7 +242,7 @@ def test_stored_nav_summary_beats_heuristic(session_factory, large_workspace):
     with session_factory() as session:
         index = build_workspace_index(
             session,
-            large_workspace["workspace_id"],
+            ids["workspace_id"],
             actor=None,
             workspace_slug="default",
         )
@@ -180,26 +250,14 @@ def test_stored_nav_summary_beats_heuristic(session_factory, large_workspace):
     assert "includes Payment Doc" not in index
 
 
-def test_heuristic_summary_renders_when_null(session_factory, large_workspace):
-    with session_factory() as session:
-        index = build_workspace_index(
-            session,
-            large_workspace["workspace_id"],
-            actor=None,
-            workspace_slug="default",
-        )
-    # NULL nav_summary -> render-time heuristic (child rollup + type mix)
-    assert "includes Payment Doc 000" in index
-    assert "mostly concept" in index
-
-
-def test_export_manifest_is_never_truncated(session_factory, large_workspace):
+def test_export_manifest_is_never_truncated(large_workspace):
     """B-6 contract split: navigation truncates, exports never do."""
 
+    session_factory, ids = large_workspace
     with session_factory() as session:
         manifest = render_export_manifest(
             session,
-            large_workspace["workspace_id"],
+            ids["workspace_id"],
             actor=None,
             workspace_slug="default",
             sections=("context",),
@@ -212,14 +270,14 @@ def test_export_manifest_is_never_truncated(session_factory, large_workspace):
     assert "…and" not in manifest
 
 
-def test_unknown_node_raises_not_found(session_factory, large_workspace):
+def test_unknown_node_raises_not_found(session_factory):
     from backend.services.okf_index import IndexNodeNotFoundError
 
     with session_factory() as session:
         with pytest.raises(IndexNodeNotFoundError):
             build_workspace_index(
                 session,
-                large_workspace["workspace_id"],
+                _workspace_id(session),
                 actor=None,
                 workspace_slug="default",
                 node="/context/does-not-exist",

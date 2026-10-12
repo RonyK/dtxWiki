@@ -168,7 +168,11 @@ test("converts multi-uploaded JSON and CSV into durable Library previews", async
 
   for (const fixture of uploaded) {
     await assertPreviewAndOriginalSurviveReload(page, fixture);
+    await expect(page).toHaveTitle(`${fixture.name} - dtxWiki`);
   }
+
+  await page.getByLabel("Breadcrumb").getByRole("link", { name: "Library", exact: true }).click();
+  await expect(page).toHaveTitle("dtxWiki");
 
   for (const fixture of uploaded) {
     const deleted = await page.request.delete(
@@ -290,11 +294,14 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
     return {
       overflowX: documentPane.scrollWidth - documentPane.clientWidth,
       canvasWidth: Math.round(canvas.getBoundingClientRect().width),
+      canvasHeight: Math.round(canvas.getBoundingClientRect().height),
       textLayerWidth: Math.round(textLayer.getBoundingClientRect().width),
+      textLayerHeight: Math.round(textLayer.getBoundingClientRect().height),
     };
   });
   expect(pdfGeometry.overflowX).toBeLessThanOrEqual(1);
   expect(pdfGeometry.textLayerWidth).toBe(pdfGeometry.canvasWidth);
+  expect(pdfGeometry.textLayerHeight).toBe(pdfGeometry.canvasHeight);
 
   // A real click, because the defect was that the bars could not receive one:
   // the text layer above carries pdf.js's `z-index: 2` and spans the whole
@@ -326,6 +333,8 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
   const zoomIn = page.getByRole("button", { name: "Zoom in on the PDF page" });
   await zoomIn.click();
   await expect(page.locator(".library-pdf-zoom-level")).toHaveText("125%");
+  await expect(page.locator(".react-pdf__Page__canvas")).toBeVisible();
+  await expect(page.getByText("Protected Preview PDF", { exact: false })).toBeVisible();
   const zoomedGeometry = await page.evaluate(() => {
     const canvas = document.querySelector(".react-pdf__Page__canvas");
     const textLayer = document.querySelector(".react-pdf__Page .textLayer");
@@ -334,11 +343,14 @@ test("renders protected image, PDF, WAV, and MP4 previews from exact-version sou
     }
     return {
       canvasWidth: Math.round(canvas.getBoundingClientRect().width),
+      canvasHeight: Math.round(canvas.getBoundingClientRect().height),
       textLayerWidth: Math.round(textLayer.getBoundingClientRect().width),
+      textLayerHeight: Math.round(textLayer.getBoundingClientRect().height),
     };
   });
   expect(zoomedGeometry.canvasWidth).toBeGreaterThan(pdfGeometry.canvasWidth);
   expect(zoomedGeometry.textLayerWidth).toBe(zoomedGeometry.canvasWidth);
+  expect(zoomedGeometry.textLayerHeight).toBe(zoomedGeometry.canvasHeight);
   await page.getByRole("button", { name: "Zoom out of the PDF page" }).click();
   await expect(page.locator(".library-pdf-zoom-level")).toHaveText("100%");
 

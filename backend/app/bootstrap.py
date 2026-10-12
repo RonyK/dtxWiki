@@ -105,7 +105,7 @@ def ensure_app_version_synced(settings: Settings, app=None) -> None:
     """ADR A13: compare app_version and the concrete Alembic revision.
 
     - matching version, head, and schema fingerprint: skip upgrade
-    - fresh database or supported ``0001_initial_release``: upgrade to head and
+    - fresh database or supported ``bd62193d5cf6``: upgrade to head and
       verify the result
     - every other stamp/schema pair: refuse automatic migration
     - DB strictly newer than code: refuse startup (downversion fail-safe)
@@ -135,8 +135,7 @@ def ensure_app_version_synced(settings: Settings, app=None) -> None:
 
     if db_version == code_version and db_revision == alembic_head:
         logger.info(
-            "app_version synced (%s) and alembic revision synced (%s); "
-            "alembic skip",
+            "app_version synced (%s) and alembic revision synced (%s); alembic skip",
             code_version,
             alembic_head,
         )
@@ -162,9 +161,7 @@ def ensure_app_version_synced(settings: Settings, app=None) -> None:
         try:
             factory = make_session_factory(engine)
             with factory.begin() as session:
-                session.merge(
-                    AppMetadata(key="dtxwiki_version", value=code_version)
-                )
+                session.merge(AppMetadata(key="dtxwiki_version", value=code_version))
         finally:
             engine.dispose()
 
@@ -346,9 +343,7 @@ def migration_status(settings: Settings) -> MigrationStatus:
         # none at all), so the classification cannot see the drift by itself.
         # A newer recorded version is the exception: it names the cause.
         status = (
-            "downversion"
-            if versioning.is_newer(db_version, code_version)
-            else "drift"
+            "downversion" if versioning.is_newer(db_version, code_version) else "drift"
         )
     return MigrationStatus(
         code_version=code_version,

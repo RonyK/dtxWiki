@@ -20,40 +20,20 @@ from importlib import import_module
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 import sqlalchemy as sa
-from alembic import command
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 
-epic1 = import_module("backend.migrations.versions.0002_epic1")
-workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+final_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.tenancy_schema"
 )
-mcp_phase = import_module("backend.migrations.revision_0002.identity_access_schema")
-media_phase = import_module("backend.migrations.revision_0002.library_media_schema")
-public_phase = import_module(
-    "backend.migrations.revision_0002.context_schema"
-)
-library_phase = import_module(
-    "backend.migrations.revision_0002.library_policy"
-)
-content_hash_phase = import_module(
-    "backend.migrations.revision_0002.context_data"
-)
-final_phase = import_module("backend.migrations.revision_0002.tenancy_schema")
-
-
-def _config(database_url: str) -> Config:
-    config = Config(str(resolve_alembic_ini()))
-    config.set_main_option("script_location", str(resolve_migrations_dir()))
-    config.set_main_option("sqlalchemy.url", database_url)
-    return config
 
 
 def _database_url(tmp_path: Path, name: str) -> str:
@@ -68,18 +48,14 @@ def _run_steps(engine, *steps) -> None:
                 step()
 
 
-def _upgrade_to_pre_final_boundary(config: Config, engine) -> None:
-    command.upgrade(config, "0001_initial_release")
-    _run_steps(
-        engine,
-        epic1._upgrade_base_schema,
-        workspace_phase.upgrade,
-        mcp_phase.upgrade,
-        public_phase.upgrade,
-        media_phase.upgrade,
-        library_phase.upgrade,
-        content_hash_phase.upgrade,
-    )
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def _clone_pre_final_boundary(templates, database_url: str) -> None:
+    """Copy 0001 plus every phase before the final tenancy phase."""
+    templates.clone("boundary_pre_tenancy", Path(make_url(database_url).database))
 
 
 def _insert_workspace(connection, workspaces, *, workspace_id, actor_id, slug, now):
@@ -444,12 +420,11 @@ def _insert_projection_outbox(
 
 
 def test_migration_backfills_workspace_id_from_the_correct_parent_chain(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     database_url = _database_url(tmp_path, "tenancy-columns.db")
-    config = _config(database_url)
     engine = create_engine(database_url)
-    _upgrade_to_pre_final_boundary(config, engine)
+    _clone_pre_final_boundary(sqlite_templates, database_url)
 
     now = datetime.now(UTC)
     actor_id = uuid4()
@@ -499,9 +474,7 @@ def test_migration_backfills_workspace_id_from_the_correct_parent_chain(
             "workspace_media_write_intent", metadata, autoload_with=engine
         )
         stored_blob = sa.Table("stored_blob", metadata, autoload_with=engine)
-        blob_incarnation = sa.Table(
-            "blob_incarnation", metadata, autoload_with=engine
-        )
+        blob_incarnation = sa.Table("blob_incarnation", metadata, autoload_with=engine)
 
         with engine.begin() as connection:
             _insert_workspace(

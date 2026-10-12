@@ -16,10 +16,11 @@ from backend.services.mail_delivery import (
     MailProviderError,
     SMTPMailProvider,
 )
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 
 
 def test_issue_password_reset_auto_reveals_one_link_once(tmp_path, monkeypatch):
-    database_url = f"sqlite:///{tmp_path / 'password-reset-cli.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "password-reset-cli.db")
     monkeypatch.setenv("DTXWIKI_PUBLIC_BASE_URL", "https://wiki.example.com")
     monkeypatch.setattr(cli_main.admin_commands, "cli_stdout_is_tty", lambda: True)
     monkeypatch.setattr(
@@ -70,7 +71,7 @@ def test_issue_password_reset_email_never_falls_back_to_printed_link(
     tmp_path,
     monkeypatch,
 ):
-    database_url = f"sqlite:///{tmp_path / 'password-reset-email.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "password-reset-email.db")
     monkeypatch.setattr(cli_main.admin_commands, "cli_stdout_is_tty", lambda: True)
     result = CliRunner().invoke(
         cli_main.app,
@@ -95,7 +96,7 @@ def test_issue_password_reset_link_rejects_redirected_output_before_issuing(
     tmp_path,
     monkeypatch,
 ):
-    database_url = f"sqlite:///{tmp_path / 'password-reset-redirect.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "password-reset-redirect.db")
     monkeypatch.setattr(cli_main.admin_commands, "cli_stdout_is_tty", lambda: False)
     result = CliRunner().invoke(
         cli_main.app,
@@ -119,7 +120,7 @@ def test_cli_provider_failure_commits_terminal_marker_and_audit(
     tmp_path,
     monkeypatch,
 ):
-    database_url = f"sqlite:///{tmp_path / 'password-reset-provider-failure.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "password-reset-provider-failure.db")
     monkeypatch.setenv("DTXWIKI_PUBLIC_BASE_URL", "https://wiki.example.com")
     monkeypatch.setenv("DTXWIKI_MAIL_PROVIDER", "smtp")
     monkeypatch.setenv("DTXWIKI_MAIL_FROM_ADDRESS", "wiki@example.com")
@@ -209,7 +210,7 @@ def test_cli_render_failure_commits_terminal_marker_and_clears_envelope(
     An expired, consumed or revoked-but-unfenced token, or an unset
     ``mail_from_address``, all reach this branch.
     """
-    database_url = f"sqlite:///{tmp_path / 'password-reset-render-failure.db'}"
+    database_url = copy_migrated_sqlite(tmp_path / "password-reset-render-failure.db")
     monkeypatch.setenv("DTXWIKI_PUBLIC_BASE_URL", "https://wiki.example.com")
     monkeypatch.setenv("DTXWIKI_MAIL_PROVIDER", "smtp")
     monkeypatch.setenv("DTXWIKI_MAIL_FROM_ADDRESS", "wiki@example.com")

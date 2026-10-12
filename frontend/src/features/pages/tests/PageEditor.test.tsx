@@ -10,7 +10,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
 import {
@@ -20,6 +20,7 @@ import {
   RoutedPageEditor,
 } from "../PageEditor";
 import { getMarkdownCommandState } from "../editorCommands";
+import { resetCodeMirrorStyleRegistry } from "./codeMirrorStyleRegistry";
 
 const authState = vi.hoisted(() => ({
   user: {
@@ -33,14 +34,6 @@ const authState = vi.hoisted(() => ({
 vi.mock("../../../shared/auth/AuthContext", () => ({
   useAuth: () => authState,
 }));
-
-// These specs drive a real CodeMirror instance through long keystroke sequences,
-// so several legitimately run 5-6s once the full suite saturates the CPU and
-// overshoot Vitest's 5s default. They pass in isolation; the assertions are not
-// racy, they are simply slow. A file-scoped budget is the honest fix -- unlike a
-// retry it cannot mask a probabilistic regression, which is what the `retry: 0`
-// policy in vite.config.ts exists to protect.
-vi.setConfig({ testTimeout: 20000 });
 
 // A COMPLETE ContextPageDetail. The fields below the first block all carry a
 // schema `default`, which openapi-typescript emits as REQUIRED (the server
@@ -89,6 +82,36 @@ async function advanceAutosaveCheckpoint(): Promise<void> {
   });
 }
 
+// Moves a fake clock that is not advancing on its own to an absolute instant.
+async function advanceFakeClockTo(instant: number): Promise<void> {
+  const remaining = instant - Date.now();
+  expect(remaining).toBeGreaterThanOrEqual(0);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(remaining);
+  });
+}
+
+// Replaces performance.now() with a clock that only moves when the test moves
+// it. Production code that measures a window with performance.now() rather
+// than with a timer (the linked-scroll echo and geometry-authority windows)
+// would otherwise see real time pass whenever the test process is descheduled
+// between two statements. The clock starts at a whole millisecond at or after
+// the real reading, so a timestamp taken before the install never runs ahead
+// of it and every sum and comparison the window arithmetic makes is exact. The
+// real clock is back when the test finishes.
+function installLogicalPerformanceClock() {
+  let instant = Math.ceil(performance.now());
+  const spy = vi.spyOn(performance, "now").mockImplementation(() => instant);
+  onTestFinished(() => spy.mockRestore());
+  return {
+    now: () => instant,
+    advance(ms: number) {
+      expect(ms).toBeGreaterThanOrEqual(0);
+      instant += ms;
+    },
+  };
+}
+
 function renderWithRouter(initialEntry: string, routes: ReactNode) {
   const router = createMemoryRouter(createRoutesFromElements(
     <>
@@ -135,11 +158,24 @@ async function openContextExplorer(): Promise<HTMLElement> {
   return drawer;
 }
 
+// Publish is looked up again after the wait rather than held across it: a
+// handle taken before the save settles can be removed by the re-render that
+// settles it, and clicking a removed button does nothing.
 async function saveDraftAndPublish(): Promise<void> {
-  await typist().click(screen.getByRole("button", { name: "Save draft" }));
-  const publishButton = await screen.findByRole("button", { name: "Publish" });
-  await waitFor(() => expect(publishButton).toBeEnabled());
-  await typist().click(publishButton);
+  await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
+  await waitFor(() =>
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled(),
+  );
+  await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
+}
+
+// Save draft and Publish sit in one labelled group. Scoping the role query to
+// it keeps testing-library from computing the accessible name of every button
+// in the tree rail and toolbar on each lookup, and on each poll of a waitFor.
+function publicationActions() {
+  return within(
+    screen.getByLabelText(i18n.t("pages:editor.publicationActions")),
+  );
 }
 
 function syncStatus(): HTMLElement {
@@ -256,6 +292,10 @@ function mockPublicationFlow({
 
 describe("PageEditor", () => {
   beforeEach(() => {
+    // Every test mounts its own editors; without this the stylesheet that the
+    // earlier tests' editors left in the shared document slows each later
+    // test down (see codeMirrorStyleRegistry.ts).
+    resetCodeMirrorStyleRegistry();
     vi.restoreAllMocks();
     // PageEditor tests exercise the desktop workspace unless a case opts into
     // a responsive breakpoint explicitly. jsdom's 1024px default is itself
@@ -273,6 +313,9 @@ describe("PageEditor", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    // jsdom has no sendBeacon; the tests that need one install a stub. Left in
+    // place it would carry the next test's unload flush away from fetch.
+    Reflect.deleteProperty(window.navigator, "sendBeacon");
   });
 
   it("localizes editor chrome in Korean: title placeholder, mode tabs, shortcuts panel, block menu (I18N-01)", async () => {
@@ -461,7 +504,8 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("button", { name: /Page icon/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Page type")).not.toBeInTheDocument();
     const tagsInput = screen.getByLabelText("Tags");
-    await typist().type(tagsInput, "Migration{Enter}Infra{Enter}");
+    commitChip(tagsInput, "Migration");
+    commitChip(tagsInput, "Infra");
     await openPageProperties();
     const pageType = screen.getByLabelText("Page type");
     expect(within(pageType).getAllByRole("option")).toHaveLength(10);
@@ -479,9 +523,9 @@ describe("PageEditor", () => {
       await i18n.changeLanguage("en");
     });
     expect(screen.queryByLabelText("Aliases")).not.toBeInTheDocument();
-    await typist().click(screen.getByRole("button", { name: "Advanced settings" }));
+    await typist().click(pageProperties().getByRole("button", { name: "Advanced settings" }));
     const aliasesInput = screen.getByLabelText("Aliases");
-    await typist().type(aliasesInput, "Launch Plan{Enter}");
+    commitChip(aliasesInput, "Launch Plan");
     expect(screen.queryByLabelText("Cover URL")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Slug")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
@@ -601,7 +645,7 @@ describe("PageEditor", () => {
     // PUB-09: publicationState is "staged" here (a published head plus a
     // staged draft), so the pill names that instead of a bare "Saved".
     expect(syncStatus()).toHaveTextContent("Unpublished draft saved");
-    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeInTheDocument();
     expect(document.querySelector(".status-banner")).not.toBeInTheDocument();
   });
 
@@ -643,7 +687,11 @@ describe("PageEditor", () => {
     );
 
     await findTitleEditor();
-    replaceEditorSelection(codeMirrorView(), "# Hello\n\n~~~ts\nconst value = 1;");
+    // Publishing leaves the editor route, so the buffer is read through the
+    // view captured here: looking the editor up again after the publish races
+    // the navigation that unmounts it.
+    const view = codeMirrorView();
+    replaceEditorSelection(view, "# Hello\n\n~~~ts\nconst value = 1;");
     await saveDraftAndPublish();
     await typist().click(
       within(
@@ -666,7 +714,7 @@ describe("PageEditor", () => {
       "~~~ts\nconst value = 1;\n~~~\n",
     );
     await waitFor(() => {
-      expect(codeMirrorView().state.doc.toString()).toBe(
+      expect(view.state.doc.toString()).toBe(
         "# Hello\n\n~~~ts\nconst value = 1;\n~~~\n",
       );
     });
@@ -746,9 +794,9 @@ describe("PageEditor", () => {
 
       await findTitleEditor();
       replaceEditorSelection(codeMirrorView(), "# Hello\n\n```ts\nconst value = 1;");
-      await typist().click(screen.getByRole("button", { name: "초안 저장" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "게시" })).toBeEnabled());
-      await typist().click(screen.getByRole("button", { name: "게시" }));
+      await typist().click(publicationActions().getByRole("button", { name: "초안 저장" }));
+      await waitFor(() => expect(publicationActions().getByRole("button", { name: "게시" })).toBeEnabled());
+      await typist().click(publicationActions().getByRole("button", { name: "게시" }));
       await typist().click(
         within(
           await screen.findByRole("dialog", {
@@ -836,9 +884,9 @@ describe("PageEditor", () => {
       );
 
       await setEditorTitle(await findTitleEditor(), "Server-only finding");
-      await typist().click(screen.getByRole("button", { name: "초안 저장" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "게시" })).toBeEnabled());
-      await typist().click(screen.getByRole("button", { name: "게시" }));
+      await typist().click(publicationActions().getByRole("button", { name: "초안 저장" }));
+      await waitFor(() => expect(publicationActions().getByRole("button", { name: "게시" })).toBeEnabled());
+      await typist().click(publicationActions().getByRole("button", { name: "게시" }));
 
       const dialog = await screen.findByRole("dialog", {
         name: "게시하기 전에 코드 펜스를 확인하세요",
@@ -889,7 +937,7 @@ describe("PageEditor", () => {
     );
 
     await setEditorTitle(await findTitleEditor(), "Published title");
-    await typist().click(screen.getByRole("button", { name: "Save draft" }));
+    await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/autosave"))).toBe(true);
     });
@@ -898,7 +946,12 @@ describe("PageEditor", () => {
       pathname: "/context/hello/edit",
       search: "",
     });
-    await typist().click(screen.getByRole("button", { name: "Publish" }));
+    // Publish stays disabled while the draft is in flight and then publishes
+    // the version that save returned, so wait for the save to settle.
+    await waitFor(() =>
+      expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled(),
+    );
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish")),
@@ -939,8 +992,8 @@ describe("PageEditor", () => {
 
     await setEditorTitle(await findTitleEditor(), "Published directly");
 
-    expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
-    const publishButton = screen.getByRole("button", { name: "Publish" });
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeEnabled();
+    const publishButton = publicationActions().getByRole("button", { name: "Publish" });
     expect(publishButton).toBeEnabled();
 
     await typist().click(publishButton);
@@ -986,10 +1039,10 @@ describe("PageEditor", () => {
     );
 
     await setEditorTitle(await findTitleEditor(), "Publish without draft");
-    expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeEnabled();
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled();
 
-    await typist().click(screen.getByRole("button", { name: "Publish" }));
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some(
@@ -1002,9 +1055,11 @@ describe("PageEditor", () => {
         fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish")),
       ).toBe(true);
     });
-    expect(router.state.location).toMatchObject({
-      pathname: "/context",
-      search: "?target=p1",
+    await waitFor(() => {
+      expect(router.state.location).toMatchObject({
+        pathname: "/context",
+        search: "?target=p1",
+      });
     });
   });
 
@@ -1016,7 +1071,7 @@ describe("PageEditor", () => {
     );
 
     await setEditorTitle(await findTitleEditor(), "Cannot stage this edit");
-    await typist().click(screen.getByRole("button", { name: "Publish" }));
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
 
     expect(
       await screen.findByText(
@@ -1045,7 +1100,7 @@ describe("PageEditor", () => {
     );
 
     await setEditorTitle(await findTitleEditor(), "Version being published");
-    await typist().click(screen.getByRole("button", { name: "Publish" }));
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish")),
@@ -1084,7 +1139,7 @@ describe("PageEditor", () => {
 
     await setEditorTitle(await findTitleEditor(), "Honest label");
     expect(syncStatus()).toHaveTextContent("Editing");
-    expect(screen.getByRole("button", { name: "Save draft" })).toHaveClass("primary");
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toHaveClass("primary");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     await waitFor(() => {
       expect(
@@ -1166,7 +1221,7 @@ describe("PageEditor", () => {
     await findTitleEditor();
     expect(syncStatus()).toHaveTextContent(/draft saved · not published yet/i);
     expect(screen.queryAllByText(/publish now/i)).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeInTheDocument();
   });
 
   it("keeps the create editor unavailable until its workspace context is loaded", async () => {
@@ -1400,7 +1455,7 @@ describe("PageEditor", () => {
 
     await screen.findByLabelText("Markdown body");
     await openPageProperties();
-    await typist().click(screen.getByRole("button", { name: "Advanced settings" }));
+    await typist().click(pageProperties().getByRole("button", { name: "Advanced settings" }));
     const aliasesInput = screen.getByLabelText("Aliases");
     // Commit one valid alias first: it makes the draft dirty, so the Ctrl+S
     // below actually writes and can prove which aliases reached the payload.
@@ -1581,8 +1636,8 @@ describe("PageEditor", () => {
 
     await setEditorTitle(await findTitleEditor(), "Hello revised");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
-    await typist().click(screen.getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled());
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
 
     await waitFor(() => {
       expect(
@@ -1616,7 +1671,12 @@ describe("PageEditor", () => {
           ? resolve
           : () => reject(new Error("review service unavailable"));
       });
+      let resolvePublish!: (response: Response) => void;
+      const pendingPublish = new Promise<Response>((resolve) => {
+        resolvePublish = resolve;
+      });
       const fetchMock = mockPublicationFlow({
+        publishResponse: pendingPublish,
         reviewDecisionResponse: pendingDecision,
       });
       const router = renderWithRouter(
@@ -1628,20 +1688,53 @@ describe("PageEditor", () => {
       );
 
       await setEditorTitle(await findTitleEditor(), "Hello revised");
-      await typist().click(screen.getByRole("button", { name: "Publish" }));
+      await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
       await waitFor(() => {
         expect(
-          fetchMock.mock.calls.some(
-            ([input, init]) =>
-              String(input).endsWith("/reviews/review-1/decision") &&
-              init?.method === "POST",
-          ),
+          fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish")),
         ).toBe(true);
       });
 
+      // Handling the publish response requests the review decision in the same
+      // turn, but the render that records "published", and the effects that give
+      // the router a guard that lets the route go, are left to the scheduler.
+      // Outside act the decision can be seen before they have run, and leaving
+      // then is refused as unsaved work. Inside act they have run by the time
+      // it returns, with the decision still pending.
+      await act(async () => {
+        resolvePublish(jsonResponse({
+          data: {
+            ...page,
+            content_hash: "b".repeat(64),
+            current_version_id: "v2",
+            parent_version_id: "v1",
+            version_id: "v2",
+          },
+        }));
+        await vi.waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input, init]) =>
+                String(input).endsWith("/reviews/review-1/decision") &&
+                init?.method === "POST",
+            ),
+          ).toBe(true);
+        });
+      });
+      // The page shows nothing for that render -- the sync pill reads "Saving…"
+      // until the decision settles -- but the beforeunload handler is
+      // re-registered in the same commit as the router's guard, and stops
+      // asking to keep the page once that commit's effects have run.
+      expect(
+        window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
+      ).toBe(true);
+
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
       await act(async () => {
         await router.navigate("/settings");
       });
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(router.state.location.pathname).toBe("/settings");
       expect(await screen.findByText("Settings destination")).toBeInTheDocument();
 
       await act(async () => {
@@ -1840,7 +1933,7 @@ describe("PageEditor", () => {
     expect(destination).toHaveAttribute("title", "Context / Inbox");
     expect(screen.getByText("Server Tag")).toBeInTheDocument();
     expect(screen.getByText("R&D")).toBeInTheDocument();
-    await typist().click(screen.getByRole("button", { name: "Advanced settings" }));
+    await typist().click(pageProperties().getByRole("button", { name: "Advanced settings" }));
     expect(screen.getByText("API Alias")).toBeInTheDocument();
   });
 
@@ -1881,9 +1974,9 @@ describe("PageEditor", () => {
     expect(drawer).toHaveAttribute("inert", "");
 
     await openPageProperties();
-    await typist().click(screen.getByRole("button", { name: "Destination" }));
+    await typist().click(pageProperties().getByRole("button", { name: "Destination" }));
 
-    expect(screen.getByRole("treeitem", { name: /Inbox/ })).toBeInTheDocument();
+    expect(await screen.findByRole("treeitem", { name: /Inbox/ })).toBeInTheDocument();
     expect(screen.queryByRole("treeitem", { name: /Hello Page/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("treeitem", { name: /Nested Folder/ })).not.toBeInTheDocument();
   });
@@ -2036,7 +2129,7 @@ describe("PageEditor", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     await typist().click(toggle);
-    const popover = screen.getByRole("region", { name: "Page properties" });
+    const popover = await screen.findByRole("region", { name: "Page properties" });
     expect(popover).toBeInTheDocument();
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     await waitFor(() => {
@@ -2051,64 +2144,16 @@ describe("PageEditor", () => {
     expect(toggle).toHaveFocus();
 
     await typist().click(toggle);
-    expect(screen.getByRole("region", { name: "Page properties" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Page properties" })).toBeInTheDocument();
     fireEvent.pointerDown(screen.getByTestId("page-title-editor"));
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
   });
 
   it("keeps a portaled Destination picker owned by page properties while expanding branches", async () => {
-    vi.stubGlobal("innerWidth", 1440);
-    vi.stubGlobal("innerHeight", 900);
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function getMockRect(this: HTMLElement) {
-        if (this === document.documentElement || this === document.body) {
-          return domRect({ height: 900, left: 0, top: 0, width: 1440 });
-        }
-        if (this.classList.contains("editor-properties-button")) {
-          return domRect({ height: 28, left: 1260, top: 104, width: 32 });
-        }
-        if (this.classList.contains("editor-properties-popover")) {
-          return domRect({ height: 300, left: 0, top: 0, width: 340 });
-        }
-        if (this.classList.contains("tree-picker-trigger")) {
-          return domRect({ height: 38, left: 980, top: 180, width: 260 });
-        }
-        return domRect({ height: 0, left: 0, top: 0, width: 0 });
-      },
-    );
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return workspaceResponse();
-      }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodesWithPageBranch() });
-      }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
-        return jsonResponse({ data: [] });
-      }
-      // P9.1 deleted the top-level /api/v1/pages* family; the audit branch
-      // this test came from predates that. Left stale, the canonical calls
-      // fell through to the catch-all below and got an object where a list
-      // was expected, so the editor never finished mounting.
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags")) {
-        return jsonResponse({ data: [] });
-      }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
-        return jsonResponse({ data: [], next_cursor: null });
-      }
-      return jsonResponse({ data: page });
-    });
-
-    renderWithRouter(
-      "/pages/new?from=context",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
-    );
-
-    await screen.findByLabelText("Markdown body");
+    const fetchMock = await renderDestinationPickerEditor();
     const propertiesToggle = screen.getByRole("button", { name: "Page properties" });
     await typist().click(propertiesToggle);
-    const properties = screen.getByRole("region", { name: "Page properties" });
+    const properties = await screen.findByRole("region", { name: "Page properties" });
     const destination = within(properties).getByRole("button", { name: "Destination" });
     const originalDestination = destination.textContent;
 
@@ -2146,6 +2191,14 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("tree", { name: "Destination tree" })).not.toBeInTheDocument();
     expect(destination).toHaveTextContent(/Hello Page/);
     expect(destination).toHaveFocus();
+  });
+
+  it("dismisses the Destination picker and Page properties one layer at a time", async () => {
+    await renderDestinationPickerEditor();
+    const propertiesToggle = screen.getByRole("button", { name: "Page properties" });
+    await typist().click(propertiesToggle);
+    const properties = await screen.findByRole("region", { name: "Page properties" });
+    const destination = within(properties).getByRole("button", { name: "Destination" });
 
     await typist().click(destination);
     await screen.findByRole("tree", { name: "Destination tree" });
@@ -2159,7 +2212,7 @@ describe("PageEditor", () => {
     expect(propertiesToggle).toHaveFocus();
 
     await typist().click(propertiesToggle);
-    const reopenedProperties = screen.getByRole("region", { name: "Page properties" });
+    const reopenedProperties = await screen.findByRole("region", { name: "Page properties" });
     const reopenedDestination = within(reopenedProperties).getByRole("button", {
       name: "Destination",
     });
@@ -2311,10 +2364,12 @@ describe("PageEditor", () => {
       base_version_id: "v2",
       base_content_hash: "b".repeat(64),
     });
-    expect(document.querySelector(".page-workspace")).toHaveAttribute(
-      "data-save-state",
-      "clean",
-    );
+    await waitFor(() => {
+      expect(document.querySelector(".page-workspace")).toHaveAttribute(
+        "data-save-state",
+        "clean",
+      );
+    });
   });
 
   it("shows a conflict banner on stale updates and blocks stale retry saves", async () => {
@@ -2393,11 +2448,11 @@ describe("PageEditor", () => {
     expect(await screen.findByText(/Someone else updated this page/)).toBeInTheDocument();
     await typist().click(screen.getByRole("button", { name: "View their changes" }));
     const serverChanges = await screen.findByLabelText("Server changes");
-    expect(within(serverChanges).getByLabelText("Diff v1 to v2"))
+    expect(await within(serverChanges).findByLabelText("Diff v1 to v2"))
       .toHaveTextContent("New server text");
     expect(within(serverChanges).getByText("+1 / -1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload latest" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeDisabled();
 
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     const staleAutosaveCalls = fetchMock.mock.calls.filter(
@@ -2584,8 +2639,8 @@ describe("PageEditor", () => {
     // publish step regardless of publicationState.
     await setEditorTitle(await findTitleEditor(), "Staged edit");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
-    await typist().click(screen.getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled());
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
 
     await waitFor(() => {
       expect(
@@ -2600,7 +2655,7 @@ describe("PageEditor", () => {
       screen.queryByRole("button", { name: "Reload latest" }),
     ).not.toBeInTheDocument();
     await screen.findByText(/no longer the latest one for this page/);
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeDisabled();
     expect(
       fetchMock.mock.calls.filter((call) =>
         String(call[0]).endsWith("/publish"),
@@ -2672,7 +2727,7 @@ describe("PageEditor", () => {
     titleEditor.focus();
     fireEvent.change(titleEditor, { target: { value: "Autosaved title" } });
     expect(document.activeElement).toBe(titleEditor);
-    expect(screen.getByRole("button", { name: "Save draft" })).toBeInTheDocument();
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(AUTOSAVE_CHECKPOINT_MS - 1);
@@ -2698,7 +2753,7 @@ describe("PageEditor", () => {
     // "staged" (save()'s edit branch), so the clean-state pill names that
     // instead of the generic "Saved just now".
     expect(syncStatus()).toHaveTextContent("Unpublished draft saved");
-    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeInTheDocument();
     expect(document.activeElement).toBe(titleEditor);
     expect(
       fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish")),
@@ -2845,10 +2900,12 @@ describe("PageEditor", () => {
     await advanceAutosaveCheckpoint();
     expect(autosaveCalls(fetchMock)).toHaveLength(1);
     expect(screen.queryByText(/newer edits are not yet staged/i)).not.toBeInTheDocument();
-    expect(document.querySelector(".page-workspace")).toHaveAttribute(
-      "data-save-state",
-      "clean",
-    );
+    await waitFor(() => {
+      expect(document.querySelector(".page-workspace")).toHaveAttribute(
+        "data-save-state",
+        "clean",
+      );
+    });
   });
 
   it("accepts new tags typed while an autosave is still in flight", async () => {
@@ -2984,8 +3041,6 @@ describe("PageEditor", () => {
   });
 
   it("does not postpone the first checkpoint while typing continuously", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date("2026-05-20T00:00:00Z"));
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -3020,43 +3075,38 @@ describe("PageEditor", () => {
     );
 
     const titleEditor = await findTitleEditor();
-    await setEditorTitle(titleEditor, "Burst title 1");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
-    });
-    await setEditorTitle(titleEditor, "Burst title 2");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
-    });
-    await setEditorTitle(titleEditor, "Burst title 3");
+    // The assertions below are exact to the millisecond, so the clock may only
+    // move when this test moves it. `shouldAdvanceTime` would also add a tick
+    // for every ~20ms of real time the host spends rendering and polling, and
+    // user-event/waitFor would then be waiting on those ticks. Edits are single
+    // change events under act and every advance goes to an absolute instant
+    // measured from the first edit, never by an amount that assumes how much
+    // time the steps in between took.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T00:00:00Z"));
+    const editTitle = (value: string) => {
+      fireEvent.change(titleEditor, { target: { value } });
+    };
+
+    editTitle("Burst title 1");
+    const firstEditAt = Date.now();
+    await advanceFakeClockTo(firstEditAt + 400);
+    editTitle("Burst title 2");
+    await advanceFakeClockTo(firstEditAt + 800);
+    editTitle("Burst title 3");
     // The checkpoint remains anchored to the first edit rather than sliding
-    // forward after either later edit.
-    expect(
-      fetchMock.mock.calls.filter(
-        (call) =>
-          call[1]?.method === "POST" &&
-          String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
-      ),
-    ).toHaveLength(0);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(AUTOSAVE_CHECKPOINT_MS - 801);
-    });
+    // forward after either later edit. (A title edited through clear-and-type
+    // would not show that: emptying the title blocks saving, which cancels the
+    // armed timer, so every such edit would legitimately start a new one.)
     expect(autosaveCalls(fetchMock)).toHaveLength(0);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
 
-    await waitFor(() => {
-      const autosaveCalls = fetchMock.mock.calls.filter(
-        (call) =>
-          call[1]?.method === "POST" &&
-          String(call[0]).endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave"),
-      );
-      expect(autosaveCalls).toHaveLength(1);
-      expect(JSON.parse(String(autosaveCalls[0][1]?.body))).toMatchObject({
-        title: "Burst title 3",
-      });
+    await advanceFakeClockTo(firstEditAt + AUTOSAVE_CHECKPOINT_MS - 1);
+    expect(autosaveCalls(fetchMock)).toHaveLength(0);
+    await advanceFakeClockTo(firstEditAt + AUTOSAVE_CHECKPOINT_MS);
+
+    expect(autosaveCalls(fetchMock)).toHaveLength(1);
+    expect(JSON.parse(String(autosaveCalls(fetchMock)[0][1]?.body))).toMatchObject({
+      title: "Burst title 3",
     });
   });
 
@@ -3616,7 +3666,7 @@ describe("PageEditor", () => {
     );
 
     await setEditorTitle(await findTitleEditor(), "Broken save title");
-    await typist().click(screen.getByRole("button", { name: "Save draft" }));
+    await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
     await screen.findByRole("button", { name: /Couldn't save/ });
     expect(syncStatus()).toHaveTextContent("Couldn't save or publish · Retry");
     expect(document.querySelectorAll(".status-banner")).toHaveLength(1);
@@ -3656,7 +3706,7 @@ describe("PageEditor", () => {
     await advanceAutosaveCheckpoint();
 
     expect(fetchMock.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Save draft" })).toBeInTheDocument();
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeInTheDocument();
   });
 
   it("disables Save draft without a title and names the blocker on click and Ctrl+S", async () => {
@@ -3693,7 +3743,7 @@ describe("PageEditor", () => {
     const titleInput = await findTitleEditor();
     replaceEditorSelection(codeMirrorView(), "Body without a title");
 
-    const saveButton = await screen.findByRole("button", { name: "Save draft" });
+    const saveButton = await publicationActions().findByRole("button", { name: "Save draft" });
     expect(saveButton).toHaveAttribute("aria-disabled", "true");
     expect(saveButton).toHaveAttribute("title", "Add a title before saving.");
 
@@ -3708,11 +3758,11 @@ describe("PageEditor", () => {
 
     await setEditorTitle(titleInput, "Now titled");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Save draft" })).not.toHaveAttribute(
+      expect(publicationActions().getByRole("button", { name: "Save draft" })).not.toHaveAttribute(
         "aria-disabled",
       );
     });
-    expect(screen.getByRole("button", { name: "Save draft" })).not.toHaveAttribute("title");
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).not.toHaveAttribute("title");
   });
 
   it("preserves edits made while a new page create is in flight", async () => {
@@ -3724,6 +3774,10 @@ describe("PageEditor", () => {
     const followUpAutosave = new Promise<Response>((resolve) => {
       resolveFollowUp = resolve;
     });
+    // What the server holds once the last autosave lands: a staged draft of a
+    // page that was never published, read by the editor that loads the page by
+    // slug after the author is moved to its edit URL.
+    let savedDraft: typeof page = page;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -3738,6 +3792,15 @@ describe("PageEditor", () => {
       if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/workspace-1/context/pages`) {
         return createPromise;
       }
+      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/first-title")) {
+        return jsonResponse({
+          data: {
+            ...savedDraft,
+            version_status: "draft",
+            current_published_version_id: null,
+          },
+        });
+      }
       if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
         const autosaveCount = fetchMock.mock.calls.filter(
           (call) => String(call[0]).endsWith("/autosave"),
@@ -3746,17 +3809,16 @@ describe("PageEditor", () => {
           return followUpAutosave;
         }
         const body = JSON.parse(String(init.body));
-        return jsonResponse({
-          data: {
-            ...page,
-            slug: "first-title",
-            title: body.title,
-            body_md: body.body_md,
-            version_id: body.session_version_id,
-            current_version_id: body.session_version_id,
-            content_hash: "c".repeat(64),
-          },
-        });
+        savedDraft = {
+          ...page,
+          slug: "first-title",
+          title: body.title,
+          body_md: body.body_md,
+          version_id: body.session_version_id,
+          current_version_id: body.session_version_id,
+          content_hash: "c".repeat(64),
+        };
+        return jsonResponse({ data: savedDraft });
       }
       return jsonResponse({ data: page });
     });
@@ -3778,7 +3840,7 @@ describe("PageEditor", () => {
 
     await setEditorTitle(getTitleEditor(), "Second title");
     await openPageProperties();
-    await typist().click(screen.getByRole("button", { name: "Advanced settings" }));
+    await typist().click(pageProperties().getByRole("button", { name: "Advanced settings" }));
     expect(screen.getByLabelText("Slug")).toHaveValue("first-title");
     resolveCreate(jsonResponse({
       data: {
@@ -3831,7 +3893,19 @@ describe("PageEditor", () => {
     expect(getTitleEditor()).toHaveValue("Third title");
     expect(getTitleEditor()).toHaveFocus();
 
-    await saveDraftAndPublish();
+    // This save settles with no newer edits behind it, so it also moves the
+    // author from /pages/new to the page's edit URL and remounts the editor
+    // there. Publish from the editor that takes over: a Publish button taken
+    // from the one being replaced would be clicked after it has been removed.
+    await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
+    await waitFor(() => {
+      expect(liveTitleEditor).not.toBeInTheDocument();
+    });
+    await expectEditorTitle("Third title");
+    await waitFor(() =>
+      expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled(),
+    );
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
     await waitFor(() => {
       expect(writeCalls(fetchMock)).toHaveLength(4);
     });
@@ -3849,7 +3923,7 @@ describe("PageEditor", () => {
         search: "?target=p1",
       });
     });
-    expect(screen.getByTestId("published-context-destination")).toHaveTextContent(
+    expect(await screen.findByTestId("published-context-destination")).toHaveTextContent(
       "/context?target=p1",
     );
   });
@@ -3882,7 +3956,7 @@ describe("PageEditor", () => {
     );
 
     await setEditorTitle(await findTitleEditor(), "Save without leakage");
-    await typist().click(screen.getByRole("button", { name: "Save draft" }));
+    await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
 
     expect(
       await screen.findByText("Could not save changes. Try again."),
@@ -4183,7 +4257,7 @@ describe("PageEditor", () => {
     const drawer = await openContextExplorer();
     const tree = within(drawer).getByLabelText("Context tree");
     expect(document.querySelector(".page-list")).not.toBeInTheDocument();
-    expect(within(tree).getByRole("treeitem", { name: "Inbox" })).toBeInTheDocument();
+    expect(await within(tree).findByRole("treeitem", { name: "Inbox" })).toBeInTheDocument();
   });
 
   it("guards programmatic navigation when the editor has unsaved changes", async () => {
@@ -4480,29 +4554,8 @@ describe("PageEditor", () => {
     expect(helloBodies[0]).toMatchObject({ title: "Hello pending" });
   });
 
-  it("switches editor modes with a three-way segmented control and inserts toolbar markup", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return workspaceResponse();
-      }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodes() });
-      }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
-        return jsonResponse({ data: [page], next_cursor: null });
-      }
-      return jsonResponse({ data: page });
-    });
-
-    renderWithRouter(
-      "/pages/hello/edit",
-      <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
-      </>,
-    );
-
-    await screen.findByLabelText("Markdown body");
+  it("switches to split mode with a resizable separator", async () => {
+    await renderEditorOnHello();
     expect(screen.getByRole("navigation", { name: "Page location" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /Edit Hello/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Split" })).toBeInTheDocument();
@@ -4570,10 +4623,14 @@ describe("PageEditor", () => {
 
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
     expect(document.querySelector(".preview-pane")).not.toBeInTheDocument();
+  });
+
+  it("toggles focus mode and the keyboard shortcuts dialog", async () => {
+    await renderEditorOnHello();
 
     expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
     await openPageProperties();
-    expect(screen.getByRole("region", { name: "Page properties" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Page properties" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "o", ctrlKey: true, shiftKey: true });
     expect(screen.queryByLabelText("Context tree")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
@@ -4606,6 +4663,10 @@ describe("PageEditor", () => {
     expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
     await typist().click(screen.getByRole("button", { name: "Close keyboard shortcuts" }));
     expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+  });
+
+  it("cycles source, reading and split with Ctrl+E and inserts toolbar markup", async () => {
+    await renderEditorOnHello();
 
     fireEvent.keyDown(window, { key: "e", ctrlKey: true });
     expect(screen.getByLabelText("Markdown body")).toBeInTheDocument();
@@ -4642,10 +4703,7 @@ describe("PageEditor", () => {
       expect(document.querySelector(".cm-content")?.textContent)
         .toContain("@cite{bold text}");
     });
-    // Mounts CodeMirror, cycles all three editor modes and types through
-    // the toolbar. It clears 5s alone but not while the whole suite runs
-    // in parallel, so the budget is explicit rather than a race.
-  }, 20000);
+  });
 
   it("syncs both panes once per frame, preserves user takeover, invalidates, and toggles off", async () => {
     const body = [
@@ -4687,6 +4745,18 @@ describe("PageEditor", () => {
       unobserve() {}
     }
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
+
+    // The sync reads two windows from performance.now(): the 160 ms during
+    // which a scroll event is taken for the echo of the sync's own write
+    // (programmaticScroll), and the 250 ms during which a geometry
+    // invalidation leaves the authority with the pane the user moved last
+    // (invalidateAnchors). The test owns that clock from before Split is
+    // activated, so a pause between two statements can neither close a window
+    // the test still means to be inside nor leave one open.
+    const ANIMATION_FRAME_MS = 16;
+    const ECHO_WINDOW_MS = 160;
+    const GEOMETRY_AUTHORITY_MS = 250;
+    const clock = installLogicalPerformanceClock();
 
     await typist().click(screen.getByRole("tab", { name: "Split" }));
     expect(screen.getByRole("button", { name: "Linked scrolling" })).toHaveAttribute(
@@ -4772,9 +4842,12 @@ describe("PageEditor", () => {
     const lineBlockAtSpy = vi.spyOn(view, "lineBlockAt")
       .mockImplementation(normalBlockAt);
 
+    // A requested frame runs one display frame later, and its callback gets
+    // the instant that production reads from performance.now().
     function flushFrame() {
       const callbacks = animationFrames.splice(0);
-      act(() => callbacks.forEach((callback) => callback(performance.now())));
+      clock.advance(ANIMATION_FRAME_MS);
+      act(() => callbacks.forEach((callback) => callback(clock.now())));
     }
 
     flushFrame();
@@ -4895,6 +4968,89 @@ describe("PageEditor", () => {
     expect(previewPane.scrollTop).toBe(previewTopBeforeLayoutShift);
     testImage.remove();
 
+    // Both windows are read from the logical clock, so their edges can be
+    // pinned exactly. Every case starts from user input on the pane that
+    // drives the sync (which claims that pane and drops any earlier
+    // authority), opens a window of its own, lets exactly `elapsed` ms pass,
+    // and then delivers the one event the window has to classify. Plain line
+    // geometry is restored so that the positions below do not depend on the
+    // fold above; it maps source 100 to preview 400, source 126 to preview 500
+    // and source 140 to preview 540.
+    lineBlockAtHeightSpy.mockImplementation(normalBlockAtHeight);
+    lineBlockAtSpy.mockImplementation(normalBlockAt);
+
+    function scrollByUser(pane: HTMLElement, top: number) {
+      fireEvent.wheel(pane);
+      pane.scrollTop = top;
+      fireEvent.scroll(pane);
+      flushFrame();
+    }
+
+    // The sync writes the pane the user did not move, which opens its echo
+    // window; after `elapsed` ms that pane reports its own, unchanged position.
+    function deliverEchoAfter(
+      elapsed: number,
+      userPane: HTMLElement,
+      userTop: number,
+      echoPane: HTMLElement,
+    ) {
+      const echoTopBeforeWrite = echoPane.scrollTop;
+      scrollByUser(userPane, userTop);
+      expect(echoPane.scrollTop).not.toBe(echoTopBeforeWrite);
+      clock.advance(elapsed);
+      requestFrame.mockClear();
+      fireEvent.scroll(echoPane);
+    }
+
+    // The echo window is inclusive: at its deadline the event is still the
+    // write's own echo, one millisecond later it is user input.
+    deliverEchoAfter(ECHO_WINDOW_MS, sourcePane, 100, previewPane);
+    expect(requestFrame).not.toHaveBeenCalled();
+    deliverEchoAfter(ECHO_WINDOW_MS + 1, sourcePane, 120, previewPane);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    deliverEchoAfter(ECHO_WINDOW_MS, previewPane, 500, sourcePane);
+    expect(requestFrame).not.toHaveBeenCalled();
+    deliverEchoAfter(ECHO_WINDOW_MS + 1, previewPane, 300, sourcePane);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    flushFrame();
+
+    // A geometry invalidation hands the pane the user moved the authority for
+    // 250 ms. After `elapsed` ms the other pane reports a scroll to
+    // `shiftedTop`, and the frame the invalidation requested runs.
+    function shiftLayoutAfter(
+      elapsed: number,
+      ownerPane: HTMLElement,
+      ownerTop: number,
+      shiftedPane: HTMLElement,
+      shiftedTop: number,
+    ) {
+      scrollByUser(ownerPane, ownerTop);
+      requestFrame.mockClear();
+      act(() => resizeCallback?.([], {} as ResizeObserver));
+      expect(requestFrame).toHaveBeenCalledTimes(1);
+      clock.advance(elapsed);
+      shiftedPane.scrollTop = shiftedTop;
+      fireEvent.scroll(shiftedPane);
+      flushFrame();
+    }
+
+    // Authority is inclusive as well. At the deadline the shifted pane is
+    // layout moving under the owner, so the owner stays and the shifted pane
+    // is put back; one millisecond later it is a takeover, so the owner
+    // follows the shifted pane and the shifted pane stays where it was moved.
+    shiftLayoutAfter(GEOMETRY_AUTHORITY_MS, sourcePane, 100, previewPane, 500);
+    expect(sourcePane.scrollTop).toBe(100);
+    expect(previewPane.scrollTop).toBeCloseTo(400, 5);
+    shiftLayoutAfter(GEOMETRY_AUTHORITY_MS + 1, sourcePane, 100, previewPane, 500);
+    expect(sourcePane.scrollTop).toBeCloseTo(126, 5);
+    expect(previewPane.scrollTop).toBe(500);
+    shiftLayoutAfter(GEOMETRY_AUTHORITY_MS, previewPane, 500, sourcePane, 140);
+    expect(previewPane.scrollTop).toBe(500);
+    expect(sourcePane.scrollTop).toBeCloseTo(126, 5);
+    shiftLayoutAfter(GEOMETRY_AUTHORITY_MS + 1, previewPane, 500, sourcePane, 140);
+    expect(sourcePane.scrollTop).toBe(140);
+    expect(previewPane.scrollTop).toBeCloseTo(540, 5);
+
     await typist().click(screen.getByRole("button", { name: "Linked scrolling" }));
     expect(screen.getByRole("button", { name: "Linked scrolling" })).toHaveAttribute(
       "aria-pressed",
@@ -4915,19 +5071,7 @@ describe("PageEditor", () => {
   });
 
   it("does not offer Split and renders one pane at 390px", async () => {
-    vi.stubGlobal("innerWidth", 390);
-    window.localStorage.setItem(
-      "dtxwiki:editor:default:hello",
-      JSON.stringify({ mode: "split" }),
-    );
-    mockEditorPage("# Hello\n\nBody");
-
-    renderWithRouter(
-      "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
-    );
-
-    expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
+    await renderMobileEditor();
     expect(screen.queryByRole("tab", { name: "Split" })).not.toBeInTheDocument();
     expect(document.querySelectorAll(".source-pane, .preview-pane")).toHaveLength(1);
     expect(document.querySelector(".preview-pane")).not.toBeInTheDocument();
@@ -4941,22 +5085,30 @@ describe("PageEditor", () => {
       .toBeInTheDocument();
     expect(imageUploadInput()).toHaveAttribute("aria-hidden", "true");
     expect(imageUploadInput()).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("keeps tags in the Page properties popover at 390px", async () => {
+    await renderMobileEditor();
 
     expect(screen.queryByLabelText("Tags")).not.toBeInTheDocument();
     const propertiesButton = screen.getByRole("button", { name: "Page properties" });
     await typist().click(propertiesButton);
-    const properties = screen.getByRole("region", { name: "Page properties" });
+    const properties = await screen.findByRole("region", { name: "Page properties" });
     const mobileTags = within(properties).getByLabelText("Tags");
     expect(mobileTags).toHaveAttribute("id", "editor-mobile-tags");
-    await typist().type(mobileTags, "Mobile{Enter}");
+    commitChip(mobileTags, "Mobile");
     expect(within(properties).getByText("Mobile")).toBeInTheDocument();
     await typist().click(within(properties).getByRole("button", { name: "Close properties" }));
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
     expect(propertiesButton).toHaveFocus();
     await typist().click(propertiesButton);
-    expect(within(screen.getByRole("region", { name: "Page properties" })).getByText("Mobile"))
+    expect(within(await screen.findByRole("region", { name: "Page properties" })).getByText("Mobile"))
       .toBeInTheDocument();
     await typist().click(screen.getByRole("button", { name: "Close properties" }));
+  });
+
+  it("opens the Context explorer as a modal drawer at 390px and closes it on Escape", async () => {
+    await renderMobileEditor();
 
     const railToggle = screen.getByRole("button", {
       name: "Open Context explorer",
@@ -4979,6 +5131,10 @@ describe("PageEditor", () => {
     expect(railToggle).toHaveAttribute("aria-expanded", "false");
     expect(closedRail).toHaveAttribute("aria-hidden", "true");
     expect(closedRail).toHaveAttribute("inert");
+  });
+
+  it("moves between the Source and Reading tabs with the keyboard at 390px", async () => {
+    await renderMobileEditor();
 
     const sourceTab = screen.getByRole("tab", { name: "Source" });
     sourceTab.focus();
@@ -5207,10 +5363,7 @@ describe("PageEditor", () => {
     );
     expect(within(menu).getByRole("option", { name: "Heading 2" }))
       .toHaveAttribute("data-command-id", "heading");
-    await typist().type(
-      within(menu).getByLabelText("Filter block commands"),
-      "decision",
-    );
+    fillField(within(menu).getByLabelText("Filter block commands"), "decision");
     await typist().click(
       within(menu).getByRole("option", { name: "Decision block" }),
     );
@@ -5293,11 +5446,11 @@ describe("PageEditor", () => {
 
     await screen.findByLabelText("Markdown body");
     const menu = await openBlockMenuFromEditor();
-    await typist().type(within(menu).getByLabelText("Filter block commands"), "emoji");
+    fillField(within(menu).getByLabelText("Filter block commands"), "emoji");
     await typist().click(within(menu).getByRole("option", { name: "Emoji" }));
 
     const picker = await screen.findByRole("dialog", { name: "Emoji picker" });
-    await typist().type(within(picker).getByLabelText("Search emoji"), "rocket");
+    fillField(within(picker).getByLabelText("Search emoji"), "rocket");
     await typist().click(within(picker).getByRole("option", { name: "Insert emoji Rocket" }));
 
     await waitFor(() => {
@@ -5332,10 +5485,7 @@ describe("PageEditor", () => {
       expect(document.querySelector(".cm-content")?.textContent).toContain("# Hello");
     });
     const menu = await openBlockMenuFromEditor();
-    await typist().type(
-      within(menu).getByLabelText("Filter block commands"),
-      "summarize",
-    );
+    fillField(within(menu).getByLabelText("Filter block commands"), "summarize");
 
     expect(within(menu).queryByRole("option", { name: "Summarize selection" }))
       .not.toBeInTheDocument();
@@ -5571,10 +5721,7 @@ describe("PageEditor", () => {
 
     const commentDialog = await screen.findByRole("dialog", { name: "Comment preview" });
     expect(within(commentDialog).getByLabelText("Selected text")).toHaveTextContent("Hello");
-    await typist().type(
-      within(commentDialog).getByLabelText("Note"),
-      "Needs a source.",
-    );
+    fillField(within(commentDialog).getByLabelText("Note"), "Needs a source.");
     expect(within(commentDialog).getByLabelText("Note")).toHaveValue("Needs a source.");
     expect(within(commentDialog).getByRole("button", { name: "Create" })).toBeEnabled();
     expect(within(commentDialog).getByRole("status"))
@@ -5701,8 +5848,8 @@ describe("PageEditor", () => {
     });
     fireEvent.keyDown(view.contentDOM, { key: "k", ctrlKey: true });
     const linkDialog = await screen.findByRole("dialog", { name: "Insert link" });
-    await typist().type(within(linkDialog).getByLabelText("Text"), "Read more");
-    await typist().type(within(linkDialog).getByLabelText("URL"), "https://example.com/read-more");
+    fillField(within(linkDialog).getByLabelText("Text"), "Read more");
+    fillField(within(linkDialog).getByLabelText("URL"), "https://example.com/read-more");
     await typist().click(within(linkDialog).getByRole("button", { name: "Insert" }));
 
     await waitFor(() => {
@@ -6117,7 +6264,7 @@ describe("PageEditor", () => {
 
     await screen.findByLabelText("Markdown body");
     const menu = await openBlockMenuFromEditor();
-    await typist().type(within(menu).getByLabelText("Filter block commands"), "image");
+    fillField(within(menu).getByLabelText("Filter block commands"), "image");
     await typist().click(within(menu).getByRole("option", { name: "Image" }));
 
     const uploadInput = imageUploadInput();
@@ -6210,7 +6357,7 @@ describe("PageEditor", () => {
     );
 
     const menu = await openBlockMenuFromEditor();
-    await typist().type(within(menu).getByLabelText("Filter block commands"), "image");
+    fillField(within(menu).getByLabelText("Filter block commands"), "image");
     await typist().click(within(menu).getByRole("option", { name: "Image" }));
     fireEvent.change(uploadInput, {
       target: {
@@ -6692,8 +6839,11 @@ describe("PageEditor", () => {
     });
 
     const queue = await screen.findByRole("region", { name: "Image upload queue" });
-    expect(within(queue).getByText("Uploading")).toBeInTheDocument();
-    expect(within(queue).getByText(/0 of 1 files finished \(5 B total\).*indeterminate/))
+    // The region appears as soon as either its entries or its batches have an
+    // item, and an entry's status and the aggregate summary come from separate
+    // state, so either can reach the page before the other.
+    expect(await within(queue).findByText("Uploading")).toBeInTheDocument();
+    expect(await within(queue).findByText(/0 of 1 files finished \(5 B total\).*indeterminate/))
       .toBeInTheDocument();
     expect(within(queue).getByRole("progressbar", {
       name: "Aggregate upload progress",
@@ -6707,7 +6857,7 @@ describe("PageEditor", () => {
       "Replay each outcome-unknown upload or remove it before saving.",
     )).toBeInTheDocument();
     expect(editor.textContent).not.toMatch(/Uploading retry\.png|\u200b|<!--/);
-    expect(screen.getByRole("button", { name: "Save draft" })).toHaveAttribute(
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toHaveAttribute(
       "title",
       "Retry or remove every unresolved image upload before saving.",
     );
@@ -6724,7 +6874,7 @@ describe("PageEditor", () => {
         "![retry.png](dtx-media://asset/00000000-0000-4000-8000-000000000789)",
       );
     });
-    expect(within(queue).getByText("Succeeded")).toBeInTheDocument();
+    expect(await within(queue).findByText("Succeeded")).toBeInTheDocument();
     expect(screen.queryByText(/Image upload failed for retry.png/)).toBeNull();
     expect(
       fetchMock.mock.calls.filter(
@@ -7042,7 +7192,13 @@ describe("PageEditor", () => {
       ),
     ).toHaveLength(0);
 
-    await typist().click(screen.getByRole("button", { name: "Save draft" }));
+    // Save draft is refused while the pasted image's upload is still settling.
+    await waitFor(() => {
+      const saveDraft = publicationActions().getByRole("button", { name: "Save draft" });
+      expect(saveDraft).toBeEnabled();
+      expect(saveDraft).not.toHaveAttribute("aria-disabled");
+    });
+    await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
     const autosaveCall = await waitFor(() => {
       const call = fetchMock.mock.calls.find(
         (candidate) =>
@@ -7067,7 +7223,7 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/context/media-brief/edit");
     });
-    expect(screen.getByText("editing persisted page")).toBeInTheDocument();
+    expect(await screen.findByText("editing persisted page")).toBeInTheDocument();
   });
 
   it("opens the page media manager for a persisted page", async () => {
@@ -7225,7 +7381,7 @@ describe("PageEditor", () => {
 
     await setEditorTitle(await findTitleEditor(), "Release notes");
 
-    const saveButton = await screen.findByRole("button", { name: "Save draft" });
+    const saveButton = await publicationActions().findByRole("button", { name: "Save draft" });
     fireEvent.click(saveButton);
     fireEvent.click(saveButton);
     fireEvent.click(saveButton);
@@ -7237,7 +7393,7 @@ describe("PageEditor", () => {
     expect(saveButton).toBeDisabled();
     expect(syncStatus()).toHaveTextContent("Saving…");
     await openPageProperties();
-    await typist().click(screen.getByRole("button", { name: "Advanced settings" }));
+    await typist().click(pageProperties().getByRole("button", { name: "Advanced settings" }));
     expect(screen.getByLabelText("Slug")).toBeDisabled();
     expect(screen.getByLabelText("Destination")).toBeDisabled();
     const unloadEvent = new Event("beforeunload", { cancelable: true });
@@ -7291,28 +7447,7 @@ describe("PageEditor", () => {
   });
 
   it("percent-encodes link dialog URLs and rejects unsafe schemes", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return workspaceResponse();
-      }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodes() });
-      }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
-        return jsonResponse({ data: [page], next_cursor: null });
-      }
-      return jsonResponse({ data: page });
-    });
-
-    renderWithRouter(
-      "/pages/hello/edit",
-      <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
-      </>,
-    );
-
-    await screen.findByLabelText("Markdown body");
+    await renderEditorOnHello();
     const editor = document.querySelector(".cm-content") as HTMLElement;
     await waitFor(() => {
       expect(editor.textContent).toContain("# Hello");
@@ -7320,14 +7455,19 @@ describe("PageEditor", () => {
     const view = codeMirrorView();
     mockEditorGeometry(view);
 
-    act(() => {
-      view.dispatch({ selection: { anchor: 0, head: 0 } });
-      view.focus();
-    });
-    fireEvent.keyDown(view.contentDOM, { key: "k", ctrlKey: true });
-    let linkDialog = await screen.findByRole("dialog", { name: "Insert link" });
-    await typist().type(within(linkDialog).getByLabelText("Text"), "Wiki");
-    await typist().type(
+    // Ctrl+K with the caret at the start of the document.
+    async function openLinkDialog() {
+      act(() => {
+        view.dispatch({ selection: { anchor: 0, head: 0 } });
+        view.focus();
+      });
+      fireEvent.keyDown(view.contentDOM, { key: "k", ctrlKey: true });
+      return screen.findByRole("dialog", { name: "Insert link" });
+    }
+
+    const linkDialog = await openLinkDialog();
+    fillField(within(linkDialog).getByLabelText("Text"), "Wiki");
+    fillField(
       within(linkDialog).getByLabelText("URL"),
       "https://en.wikipedia.org/wiki/Foo (disambiguation)",
     );
@@ -7339,25 +7479,19 @@ describe("PageEditor", () => {
       );
     });
 
-    act(() => {
-      view.dispatch({ selection: { anchor: 0, head: 0 } });
-      view.focus();
-    });
-    fireEvent.keyDown(view.contentDOM, { key: "k", ctrlKey: true });
-    linkDialog = await screen.findByRole("dialog", { name: "Insert link" });
-    await typist().type(within(linkDialog).getByLabelText("Text"), "Nope");
-    await typist().type(
-      within(linkDialog).getByLabelText("URL"),
-      "javascript:alert(1)",
-    );
+    // Open the dialog again in the same editor. fillField replaces whatever a
+    // field holds, so a value left over from the first insertion would go
+    // unseen unless both fields are checked to start empty.
+    const reopenedDialog = await openLinkDialog();
+    expect(within(reopenedDialog).getByLabelText("Text")).toHaveValue("");
+    expect(within(reopenedDialog).getByLabelText("URL")).toHaveValue("");
+    fillField(within(reopenedDialog).getByLabelText("Text"), "Nope");
+    fillField(within(reopenedDialog).getByLabelText("URL"), "javascript:alert(1)");
 
-    expect(within(linkDialog).getByRole("button", { name: "Insert" })).toBeDisabled();
-    fireEvent.submit(linkDialog);
+    expect(within(reopenedDialog).getByRole("button", { name: "Insert" })).toBeDisabled();
+    fireEvent.submit(reopenedDialog);
     expect(editor.textContent).not.toContain("javascript:");
-    // Mounts CodeMirror, opens a dialog, and types two full URLs a key at a
-    // time. It clears the default 5s budget on its own but not when the whole
-    // suite runs in parallel, so the timeout is explicit rather than a race.
-  }, 20000);
+  });
 
   it("blocks autosave and the unload beacon while an image upload is pending", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -7468,7 +7602,7 @@ describe("PageEditor", () => {
     ).toHaveLength(0);
     replaceEditorSelection(codeMirrorView(), pendingBody);
 
-    const saveButton = screen.getByRole("button", { name: "Save draft" });
+    const saveButton = publicationActions().getByRole("button", { name: "Save draft" });
     expect(saveButton).toHaveAttribute("aria-disabled", "true");
     expect(saveButton).toHaveAttribute(
       "title",
@@ -7495,7 +7629,7 @@ describe("PageEditor", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Save draft" })).not.toHaveAttribute(
+      expect(publicationActions().getByRole("button", { name: "Save draft" })).not.toHaveAttribute(
         "title",
       );
     });
@@ -7537,10 +7671,14 @@ function EditOtherButton() {
 
 // One keyboard session for the whole file. `delay: null` drops the timer wait
 // user-event inserts between keystrokes: every key still dispatches the real
-// keydown/input/keyup sequence -- which is the only reason these tests type
-// instead of firing a change event -- but 31 call sites no longer pay a tick
-// per character. Without it this file runs ~4x slower and the link-dialog test
-// blows the 5s per-test timeout.
+// keydown/input/keyup sequence, which is why the tests whose subject is typing
+// (or the focus a typed-into field keeps) still type, but they no longer pay a
+// tick per character.
+//
+// Every other test only needs a field to hold a value, and typing it costs one
+// render of the whole editor per character -- plus a CodeMirror reconfigure
+// each, see codeMirrorStyleRegistry.ts -- so those use setEditorTitle,
+// commitChip and fillField, which deliver the value in a single change event.
 let keyboard: ReturnType<typeof userEvent.setup> | null = null;
 
 function typist() {
@@ -7550,13 +7688,25 @@ function typist() {
   return keyboard;
 }
 
+// Fixture edit: the title becomes `value` in one change event. The field is
+// focused first, as typing into it would have left it.
 async function setEditorTitle(element: HTMLElement, value: string) {
-  if (/[\r\n\t]/.test(value)) {
-    fireEvent.change(element, { target: { value } });
-    return;
-  }
-  await typist().clear(element);
-  await typist().type(element, value);
+  act(() => {
+    element.focus();
+  });
+  fireEvent.change(element, { target: { value } });
+}
+
+// Fixture edit for a plain field: `value` arrives in one change event.
+function fillField(element: HTMLElement, value: string) {
+  fireEvent.change(element, { target: { value } });
+}
+
+// Fixture edit for a chip input: the text arrives in one change event and
+// Enter commits it, as the alias test above does.
+function commitChip(element: HTMLElement, value: string) {
+  fillField(element, value);
+  fireEvent.keyDown(element, { key: "Enter" });
 }
 
 async function findTitleEditor() {
@@ -7572,11 +7722,117 @@ async function openBlockMenuFromEditor() {
   return screen.findByRole("dialog", { name: "Insert block" });
 }
 
+// A new page opened from the Context rail at desktop width, with a page branch
+// in the Context tree and the geometry stubbed so the Page properties popover
+// and the portaled Destination picker can position themselves. Returns the
+// fetch mock so a test can assert that nothing was written.
+async function renderDestinationPickerEditor() {
+  vi.stubGlobal("innerWidth", 1440);
+  vi.stubGlobal("innerHeight", 900);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function getMockRect(this: HTMLElement) {
+      if (this === document.documentElement || this === document.body) {
+        return domRect({ height: 900, left: 0, top: 0, width: 1440 });
+      }
+      if (this.classList.contains("editor-properties-button")) {
+        return domRect({ height: 28, left: 1260, top: 104, width: 32 });
+      }
+      if (this.classList.contains("editor-properties-popover")) {
+        return domRect({ height: 300, left: 0, top: 0, width: 340 });
+      }
+      if (this.classList.contains("tree-picker-trigger")) {
+        return domRect({ height: 38, left: 980, top: 180, width: 260 });
+      }
+      return domRect({ height: 0, left: 0, top: 0, width: 0 });
+    },
+  );
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === `${BASE}/api/v1/workspaces`) {
+      return workspaceResponse();
+    }
+    if (url === `${BASE}/api/v1/workspaces/workspace-1/tree?section=context`) {
+      return jsonResponse({ data: contextTreeNodesWithPageBranch() });
+    }
+    if (url === `${BASE}/api/v1/workspaces/workspace-1/library/items?limit=100`) {
+      return jsonResponse({ data: [] });
+    }
+    // P9.1 deleted the top-level /api/v1/pages* family; the audit branch
+    // this test came from predates that. Left stale, the canonical calls
+    // fell through to the catch-all below and got an object where a list
+    // was expected, so the editor never finished mounting.
+    if (url.includes("/api/v1/workspaces/workspace-1/context/pages/tags")) {
+      return jsonResponse({ data: [] });
+    }
+    if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
+      return jsonResponse({ data: [], next_cursor: null });
+    }
+    return jsonResponse({ data: page });
+  });
+
+  renderWithRouter(
+    "/pages/new?from=context",
+    <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+  );
+
+  await screen.findByLabelText("Markdown body");
+  return fetchMock;
+}
+
+// Mounts the editor at a 390px viewport with a stored Split preference, which
+// that width must not honour.
+async function renderMobileEditor() {
+  vi.stubGlobal("innerWidth", 390);
+  window.localStorage.setItem(
+    "dtxwiki:editor:default:hello",
+    JSON.stringify({ mode: "split" }),
+  );
+  mockEditorPage("# Hello\n\nBody");
+
+  renderWithRouter(
+    "/pages/hello/edit",
+    <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+  );
+
+  expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
+}
+
+// Mounts the editor on "# Hello" in its default Source mode.
+async function renderEditorOnHello() {
+  mockEditorPage("# Hello");
+  renderWithRouter(
+    "/pages/hello/edit",
+    <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+  );
+  await screen.findByLabelText("Markdown body");
+}
+
+// The Page properties controls live in one popover. Scoping the role query to
+// it keeps testing-library from computing the accessible name of every button
+// in the tree rail, toolbar and header on each lookup.
+function pageProperties() {
+  return within(screen.getByRole("region", { name: "Page properties" }));
+}
+
+function pagePropertiesToggle() {
+  const toggle = document.querySelector<HTMLElement>(".editor-properties-button");
+  if (!toggle) {
+    throw new Error("Expected the Page properties toggle");
+  }
+  return toggle;
+}
+
+// The popover is rendered hidden until its floating position has been
+// computed, and testing-library treats a hidden region as absent, so a lookup
+// made right after the click races that position. Waiting for the region here
+// (and with findByRole where a test clicks the toggle itself) removes the race.
 async function openPageProperties() {
-  if (screen.queryByRole("region", { name: "Page properties" })) {
+  const toggle = pagePropertiesToggle();
+  if (toggle.getAttribute("aria-expanded") === "true") {
     return;
   }
-  await typist().click(screen.getByRole("button", { name: "Page properties" }));
+  await typist().click(toggle);
+  await screen.findByRole("region", { name: "Page properties" });
 }
 
 async function expectEditorTitle(value: string) {

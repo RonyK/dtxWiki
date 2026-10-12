@@ -1518,6 +1518,17 @@ def test_search_service_entity_lane_uses_page_name_index_and_warnings():
         "permission_limited",
     ]
 
+    # The raw query is echoed back exactly, padding included.
+    with session_factory.begin() as session:
+        padded = search_service.search(
+            session=session,
+            workspace_id=workspace.id,
+            query="  Padded Query  ",
+            scope="context_page",
+        )
+    assert padded.raw_query == "  Padded Query  "
+    assert padded.normalized_query == "padded query"
+
 
 def test_exact_entity_hit_short_circuits_fallback_retrieval():
     """§6.2: one exact hit returns immediately (no retriever cost); multiple
@@ -1593,23 +1604,6 @@ def test_exact_entity_hit_short_circuits_fallback_retrieval():
         )
         assert counting.calls == 1
         assert miss.tried_lanes == ["entity", "trigram", "keyword"]
-
-
-def test_search_preserves_exact_raw_query():
-    session_factory = make_session_factory()
-    search_service = SearchService()
-
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        results = search_service.search(
-            session=session,
-            workspace_id=workspace.id,
-            query="  Padded Query  ",
-            scope="context_page",
-        )
-
-    assert results.raw_query == "  Padded Query  "
-    assert results.normalized_query == "padded query"
 
 
 def test_zero_hit_payload_includes_low_confidence_nearest_candidates(monkeypatch):
@@ -1853,18 +1847,17 @@ def test_search_result_carries_okf_concept_pointer():
 
 
 def test_search_service_rejects_unsupported_retrieval_mode():
-    session_factory = make_session_factory()
-    search_service = SearchService()
+    class _NoDatabase:
+        def __getattr__(self, name):
+            raise AssertionError(f"mode check must precede session use: {name}")
 
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        with pytest.raises(UnsupportedRetrievalModeError):
-            search_service.search(
-                session=session,
-                workspace_id=workspace.id,
-                query="anything",
-                retrieval_mode="semantic",
-            )
+    with pytest.raises(UnsupportedRetrievalModeError):
+        SearchService().search(
+            session=_NoDatabase(),
+            workspace_id=uuid4(),
+            query="anything",
+            retrieval_mode="semantic",
+        )
 
 
 def test_search_service_paginates_ranked_results_with_cursor():

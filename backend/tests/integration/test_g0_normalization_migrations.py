@@ -1,5 +1,5 @@
 """G0 relationship normalization inside the consolidated Epic-1 migration
-(0002_epic1): legacy-shape data laid down at the 0001 baseline must land in
+(efcbcf724889): legacy-shape data laid down at the 0001 baseline must land in
 the join tables, and downgrade must reproduce the JSON encodings."""
 
 from uuid import UUID, uuid4
@@ -9,13 +9,21 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
+
 pytestmark = pytest.mark.integration
 
-BASELINE = "0001_initial_release"
+BASELINE = "bd62193d5cf6"
 
 
-def _config(tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'g0.db'}"
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def _config(tmp_path, templates):
+    """A config on a fresh copy of the 0001 baseline."""
+    database_url = templates.clone("base_0001", tmp_path / "g0.db")
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
     return config, database_url
@@ -149,9 +157,8 @@ def _seed_proposal(connection, *, workspace_id, turn_id, source_kind, item_ids):
     return proposal_id
 
 
-def test_backfills_and_drops_citation_arrays(tmp_path):
-    config, database_url = _config(tmp_path)
-    command.upgrade(config, BASELINE)
+def test_backfills_and_drops_citation_arrays(tmp_path, sqlite_templates):
+    config, database_url = _config(tmp_path, sqlite_templates)
 
     page_a, page_b, artifact = str(uuid4()), str(uuid4()), str(uuid4())
     engine = create_engine(database_url)
@@ -200,9 +207,8 @@ def test_backfills_and_drops_citation_arrays(tmp_path):
     assert artifact.lower() in restored[1].lower()
 
 
-def test_backfills_proposal_sources(tmp_path):
-    config, database_url = _config(tmp_path)
-    command.upgrade(config, BASELINE)
+def test_backfills_proposal_sources(tmp_path, sqlite_templates):
+    config, database_url = _config(tmp_path, sqlite_templates)
 
     engine = create_engine(database_url)
     item_a, item_b = str(uuid4()), str(uuid4())
@@ -280,9 +286,8 @@ def test_backfills_proposal_sources(tmp_path):
     assert str(UUID(ask_proposal)) in restored_turn.lower()
 
 
-def test_backfills_page_provenance(tmp_path):
-    config, database_url = _config(tmp_path)
-    command.upgrade(config, BASELINE)
+def test_backfills_page_provenance(tmp_path, sqlite_templates):
+    config, database_url = _config(tmp_path, sqlite_templates)
 
     engine = create_engine(database_url)
     turn_a, turn_b = str(uuid4()), str(uuid4())
@@ -337,9 +342,8 @@ def test_backfills_page_provenance(tmp_path):
     assert turn_b.lower() in restored.lower()
 
 
-def test_backfills_sync_run_lineage(tmp_path):
-    config, database_url = _config(tmp_path)
-    command.upgrade(config, BASELINE)
+def test_backfills_sync_run_lineage(tmp_path, sqlite_templates):
+    config, database_url = _config(tmp_path, sqlite_templates)
 
     engine = create_engine(database_url)
     item_id, version_id, run_id = uuid4().hex, uuid4().hex, uuid4().hex
@@ -410,9 +414,8 @@ def test_backfills_sync_run_lineage(tmp_path):
     assert version_id.lower() in restored.lower().replace("-", "")
 
 
-def test_raises_on_broken_pairing(tmp_path):
-    config, database_url = _config(tmp_path)
-    command.upgrade(config, BASELINE)
+def test_raises_on_broken_pairing(tmp_path, sqlite_templates):
+    config, database_url = _config(tmp_path, sqlite_templates)
 
     engine = create_engine(database_url)
     with engine.begin() as connection:

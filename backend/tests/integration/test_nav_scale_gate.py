@@ -200,28 +200,30 @@ def test_golden_pages_reachable_within_three_hops(
     session_factory = session_factory_module
     with session_factory() as session:
         workspace_id = scale_workspace["workspace_id"]
-        for slug, hops in scale_workspace["golden"]:
-            assert len(hops) <= 3
-            # each hop's folder appears in the parent hop's render
-            for parent_ref, child_ref in zip(hops, hops[1:], strict=False):
-                parent_render = build_workspace_index(
+        renders: dict[str, str] = {}
+
+        def render(node_ref):
+            # No writes happen between golden paths, so ancestors render once.
+            if node_ref not in renders:
+                renders[node_ref] = build_workspace_index(
                     session,
                     workspace_id,
                     actor=None,
                     workspace_slug="default",
-                    node=parent_ref,
+                    node=node_ref,
                 )
+            return renders[node_ref]
+
+        for slug, hops in scale_workspace["golden"]:
+            assert len(hops) <= 3
+            # each hop's folder appears in the parent hop's render
+            for parent_ref, child_ref in zip(hops, hops[1:], strict=False):
+                parent_render = render(parent_ref)
                 assert f"(node:{child_ref})" in parent_render, (
                     f"{child_ref} missing from {parent_ref} render"
                 )
             # the page itself appears in the leaf render
-            leaf_render = build_workspace_index(
-                session,
-                workspace_id,
-                actor=None,
-                workspace_slug="default",
-                node=hops[-1],
-            )
+            leaf_render = render(hops[-1])
             assert f"/context/{slug}.md" in leaf_render
 
 
@@ -264,19 +266,30 @@ def test_multilingual_summaries_are_truncated_to_token_budget(
                 ContextPage.id.in_(page_ids)
             )
         ).all()
+        originals = {}
         for version in session.scalars(
             select(ContextPageVersion).where(ContextPageVersion.id.in_(version_ids))
         ).all():
+            originals[version.id] = version.nav_description
             version.nav_description = "\uac00" * 160
 
-    with session_factory_module() as session:
-        render = build_workspace_index(
-            session,
-            scale_workspace["workspace_id"],
-            actor=None,
-            workspace_slug="default",
-            node="/context/domain-0/area-0-0",
-        )
+    try:
+        with session_factory_module() as session:
+            render = build_workspace_index(
+                session,
+                scale_workspace["workspace_id"],
+                actor=None,
+                workspace_slug="default",
+                node="/context/domain-0/area-0-0",
+            )
+    finally:
+        # The fixture is module-scoped: undo the mutation so the other tests
+        # do not depend on definition order.
+        with session_factory_module.begin() as session:
+            for version_id, description in originals.items():
+                session.get(
+                    ContextPageVersion, version_id
+                ).nav_description = description
 
     assert estimate_index_tokens(render) <= GET_INDEX_NODE_TOKEN_BUDGET
     assert "…and" in render

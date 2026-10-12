@@ -1,25 +1,10 @@
-"""P10.3 GAP-2: request-time ceiling ∩ desired ∩ granted intersection.
+"""Request-time credential scopes intersect ceiling, desired and granted scopes.
 
-R11 (.claude/plan/260909-p10-3-multi-workspace-credential.md section 5):
-"복제본 fan-out: B 확장 직후 복제본 생성 전 요청 -> grant_replica_missing, 생성 후 ->
-허용. B 축소 직후(fan-out 전) -> 즉시 거부. fan-out 실패 주입 -> control
-sync_state=failed + 감사 이벤트 + chip 상태. 복제본 granted_scopes가 desired보다
-넓게 조작돼도 유효 scope는 교집합."
-
-``backend.tests.unit.test_credential_replica_service`` proves the REPLICA
-gets written/tombstoned/marked-failed correctly (T4.5's own scope). This
-file proves the OTHER half: that ``backend.policy.rbac.require_workspace_
-role``'s new ``_effective_scopes_from_workspace_grant`` check (GAP-2) reads
-that replica back correctly and enforces it -- end to end, through the REAL
-issuance and authentication paths (``ApiTokenService.create_token`` /
-``backend.policy.auth._authenticate_api_token``, ``OAuthService.issue_
-authorization_code`` + ``exchange_authorization_code`` / ``_authenticate_
-oauth_token``), not hand-built ``ActorContext.token_id`` values. That is
-deliberate: it is the only way to actually prove the credential_id
-identity-space claim in ``_effective_scopes_from_workspace_grant``'s own
-docstring -- that the id ``credential_replica_service`` writes a replica
-under is the EXACT id a real authenticated actor's ``token_id`` carries, not
-merely an id that happens to look right in a hand-built fixture.
+Missing replicas deny access, scope reductions apply immediately, and a broad
+replica cannot expand the request's effective scopes. Real token issuance and
+authentication verify that the replica's credential ID matches ``token_id``.
+Replica creation and synchronization are covered by
+``backend.tests.unit.test_credential_replica_service``.
 """
 
 from __future__ import annotations

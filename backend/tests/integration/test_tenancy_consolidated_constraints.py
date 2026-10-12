@@ -9,31 +9,19 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
-from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
-epic1 = import_module("backend.migrations.versions.0002_epic1")
-workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+final_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.tenancy_schema"
 )
-mcp_phase = import_module("backend.migrations.revision_0002.identity_access_schema")
-media_phase = import_module("backend.migrations.revision_0002.library_media_schema")
-public_phase = import_module(
-    "backend.migrations.revision_0002.context_schema"
-)
-library_phase = import_module(
-    "backend.migrations.revision_0002.library_policy"
-)
-content_hash_phase = import_module(
-    "backend.migrations.revision_0002.context_data"
-)
-final_phase = import_module("backend.migrations.revision_0002.tenancy_schema")
 
 
 def _config(database_url: str) -> Config:
@@ -51,22 +39,15 @@ def _run_steps(engine, *steps) -> None:
                 step()
 
 
-def _upgrade_to_published_boundary(config: Config) -> None:
-    command.upgrade(config, "0001_initial_release")
-    engine = create_engine(config.get_main_option("sqlalchemy.url"))
-    try:
-        _run_steps(
-            engine,
-            epic1._upgrade_base_schema,
-            workspace_phase.upgrade,
-            mcp_phase.upgrade,
-            public_phase.upgrade,
-            media_phase.upgrade,
-            library_phase.upgrade,
-            content_hash_phase.upgrade,
-        )
-    finally:
-        engine.dispose()
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def _clone_published_boundary(config: Config, templates) -> None:
+    """Start from a copy of 0001 plus every phase before the tenancy phase."""
+    database = make_url(config.get_main_option("sqlalchemy.url")).database
+    templates.clone("boundary_pre_tenancy", Path(database))
 
 
 def _upgrade_tenancy_schema(config: Config) -> None:
@@ -213,10 +194,12 @@ def _seed_two_workspaces(engine):
     return ws_a, ws_b, item_a, item_b, version_a, version_b, blob_b
 
 
-def test_final_constraints_reject_cross_workspace_pointers(tmp_path: Path):
+def test_final_constraints_reject_cross_workspace_pointers(
+    tmp_path: Path, sqlite_templates
+):
     database_url = f"sqlite:///{tmp_path / 'tenancy-final-constraints.db'}"
     config = _config(database_url)
-    _upgrade_to_published_boundary(config)
+    _clone_published_boundary(config, sqlite_templates)
     engine = create_engine(database_url)
     ws_a, ws_b, _, item_b, version_a, _, blob_b = _seed_two_workspaces(engine)
 
@@ -353,11 +336,11 @@ def test_final_constraints_reject_cross_workspace_pointers(tmp_path: Path):
 
 
 def test_final_preflight_rejects_existing_cross_workspace_current_pointer(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     database_url = f"sqlite:///{tmp_path / 'tenancy-current-pointer-preflight.db'}"
     config = _config(database_url)
-    _upgrade_to_published_boundary(config)
+    _clone_published_boundary(config, sqlite_templates)
     engine = create_engine(database_url)
     _, _, _, item_b, version_a, _, _ = _seed_two_workspaces(engine)
     with engine.begin() as connection:
@@ -375,11 +358,11 @@ def test_final_preflight_rejects_existing_cross_workspace_current_pointer(
 
 
 def test_final_preflight_rejects_existing_blob_workspace_mismatch(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     database_url = f"sqlite:///{tmp_path / 'tenancy-blob-preflight.db'}"
     config = _config(database_url)
-    _upgrade_to_published_boundary(config)
+    _clone_published_boundary(config, sqlite_templates)
     engine = create_engine(database_url)
     _, ws_b, _, _, version_a, _, blob_b = _seed_two_workspaces(engine)
     with engine.begin() as connection:
@@ -405,10 +388,10 @@ def test_final_preflight_rejects_existing_blob_workspace_mismatch(
         _upgrade_tenancy_schema(config)
 
 
-def test_final_downgrade_removes_added_constraints(tmp_path: Path):
+def test_final_downgrade_removes_added_constraints(tmp_path: Path, sqlite_templates):
     database_url = f"sqlite:///{tmp_path / 'tenancy-final-downgrade.db'}"
     config = _config(database_url)
-    _upgrade_to_published_boundary(config)
+    _clone_published_boundary(config, sqlite_templates)
     _upgrade_tenancy_schema(config)
     _downgrade_tenancy_schema(config)
 
@@ -478,7 +461,7 @@ def test_final_downgrade_removes_added_constraints(tmp_path: Path):
 
 
 def test_workspace_scoped_set_null_fk_does_not_null_the_tenant_column(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     """Reviewer-caught (79420555..3ea8580d review, handoff #2): a composite
     (workspace_id, pointer) FK with ON DELETE SET NULL nulls EVERY column of
@@ -497,8 +480,11 @@ def test_workspace_scoped_set_null_fk_does_not_null_the_tenant_column(
     from backend.models.agent import AgentPage, AgentPageVersion
     from backend.scripts.seed_dev import seed_default_workspace
 
-    database_url = f"sqlite+pysqlite:///{tmp_path / 'set-null-fk.sqlite'}"
-    settings = Settings(database_url=database_url)
+    # A migrated head schema (not create_all, whose FKs differ) with no version
+    # marker yet, so bootstrap() only has to record it.
+    database = tmp_path / "set-null-fk.sqlite"
+    sqlite_templates.clone("head", database)
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database}")
     bootstrap(settings)
     factory = make_session_factory_from_settings(settings)
 

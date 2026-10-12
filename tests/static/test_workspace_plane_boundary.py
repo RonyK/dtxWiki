@@ -1,4 +1,4 @@
-"""Phase 3 (doc/design/workspace-database-separation-plan.md §4) gate.
+"""Guard control-plane session access at known calls and dependency annotations.
 
 Pins "no domain-table access via the shared control plane" as an enforced
 invariant. It ships as TWO allowlists, because "acquire the control-plane
@@ -27,8 +27,8 @@ site can reach back onto the control plane and nothing would notice once an
 overlay actually shards the database.
 
 This is a file-level gate, not a call-site or data-flow gate (tracing which
-ORM model a session ends up reading is not tractable as a static check — see
-plan §4 Phase 3). A file can legitimately mix an allowed identity-plane read
+ORM model a session ends up reading is not tractable as a static check).
+A file can legitimately mix an allowed identity-plane read
 with a not-yet-fixed domain read; where that happens the allowlist reason
 below says so explicitly and the finding is also reported out-of-band,
 because the point of this gate is to make *future* violations loud, not to
@@ -55,8 +55,8 @@ named, greppable things) and rules out, deliberately:
   backend/api/deps.py), but nothing here would catch one if it existed;
   doing so needs the same alias-definition resolution as the point above.
 
-All three are the identical "tractable vs. not" line plan §4 Phase 3 already
-drew for the original `.control_session_factory()` check; SessionFactoryDep
+All three require resolving aliases or tracing data flow beyond these checks;
+SessionFactoryDep
 detection widens WHAT counts as "the control session" without moving that
 line.
 """
@@ -73,11 +73,9 @@ from tests.static.test_architecture_boundaries import (
 )
 
 # file (relative to repo root, posix) -> one-line reason this file is allowed
-# to call `.control_session_factory()`. Every entry was individually read and
-# classified against doc/design/workspace-database-separation-plan.md §3 D-1 /
-# D-2 / D-4 — see the Phase 3 report for the reasoning behind each.
+# to call `.control_session_factory()`. Each entry records the allowed routing.
 CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
-    # -- WorkspaceDirectory thin-lookup pattern (plan §3 D-1's reference shape):
+    # -- WorkspaceDirectory thin-lookup pattern:
     # resolve workspace_id + membership role on the control session, then do
     # the actual page read/write through session_for(workspace_id).
     "backend/api/context_pages.py": (
@@ -123,7 +121,7 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "(WorkspaceMembership) for an already-resolved workspace_id."
     ),
     "backend/api/public.py": (
-        "WorkspaceDirectory thin-lookup pattern (plan §3 D-1), same shape as "
+        "WorkspaceDirectory thin-lookup pattern, same shape as "
         "backend/api/context_pages.py above. read_public_workspace (Workspace table "
         "only, identity-plane) and get_page_service (WorkspaceDirectory + "
         "session_for) were already fine. The former Phase 3 FINDING here is "
@@ -136,15 +134,13 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "backend/services/context_media_access.py."
     ),
     "backend/app/container.py": (
-        "FINDING, not fixed here (Phase 5a fixed the Context-media aggregate "
-        "-- see context_media_session_for and D-7, "
-        "doc/design/workspace-database-separation-plan.md). Remaining call: "
+        "The Context-media aggregate uses workspace sessions. Remaining call: "
         "get_page_service() binds its cached PageService singleton to "
         "control_session_factory() permanently (never workspace-scoped). "
         "Currently inert -- no MCP tool handler reads ctx.page_service; the "
         "handlers that need one build a session_for(workspace_id)-scoped "
         "PageService of their own -- but it is a latent trap for any future "
-        "handler that uses ctx.page_service directly. See Phase 3 report."
+        "handler that uses ctx.page_service directly."
     ),
     "backend/app/state.py": (
         "get_page_service_from_app/get_session_factory_from_app are thin "
@@ -152,9 +148,8 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "container.db.control_session_factory() -- same finding as "
         "app/container.py's get_page_service() above, not a separate one."
     ),
-    # -- Phase 2 (media seam completion, plan §4 Phase 2) landed
-    # ContextMediaAccessPolicy(db, directory) mid-Phase-3 in this same
-    # worktree: require_page/require_page_version/require_session/
+    # ContextMediaAccessPolicy(db, directory):
+    # require_page/require_page_version/require_session/
     # assert_page_not_archived resolve workspace_id via WorkspaceDirectory on
     # the control session (identity-plane role check) and read ContextPage/
     # ContextPageVersion via session_for(workspace_id). backend/api/
@@ -166,8 +161,7 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
     # control_session_factory() anymore and both are removed from this
     # allowlist (see the stale-entry gate below).
     "backend/services/context_media_access.py": (
-        "WorkspaceDirectory thin-lookup pattern (plan §3 D-1, landed "
-        "concurrently with this gate by a parallel Phase 2 session): every "
+        "WorkspaceDirectory thin-lookup pattern: every "
         "ContextMediaAccessPolicy public method resolves workspace_id via "
         "self._directory on self._db.control_session_factory() (plus the "
         "identity-plane require_workspace_role/WorkspaceMembership check), "
@@ -181,9 +175,8 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "then ContextPage/ContextPageVersion read via "
         "db.session_for(workspace.id)."
     ),
-    # -- Phase 6a (job queue fan-out, plan §4 Phase 6) landed: Job's claim,
-    # both failure branches, and completion all moved off control onto
-    # session_for(workspace_id) (plan §3 D-2 points 1 and 3). What is left on
+    # Job claim, failure and completion use session_for(workspace_id).
+    # What is left on
     # control_session_factory() in these two files is deliberately
     # identity-plane: the workspace roster read that the round-robin claim
     # and periodic reclaim/seed sweeps fan out from (Workspace is
@@ -225,7 +218,7 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "data, same category as the WorkspaceDirectory index D-1 already "
         "accepts on the control plane."
     ),
-    # -- Phase 6b (advisory job hints, plan §3 D-2, §4 Phase 6): the only
+    # -- Advisory job hints: the only
     # producer of a control-plane write outside worker/runtime.py's existing
     # reads. record_workspace_job_hint upserts WorkspaceJobHint -- a
     # workspace_id -> hinted_at routing aid ("this workspace may have work"),
@@ -238,10 +231,9 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "database_provider.control_session_factory() to upsert "
         "WorkspaceJobHint, a control-plane routing table (workspace_id -> "
         "hinted_at), not domain data -- see backend/models/job.py's "
-        "WorkspaceJobHint docstring and plan §3 D-2."
+        "WorkspaceJobHint docstring."
     ),
-    # -- P10.3 T4.5 (control->workspace credential-replica fan-out,
-    # .claude/plan/260909-p10-3-multi-workspace-credential.md section 2.6):
+    # -- Control-to-workspace credential-replica synchronization:
     # a DIFFERENT shape from every entry above. Every other allowlisted file
     # either reads control only, or resolves an id on control THEN reads
     # the workspace's own plane through session_for(workspace_id) for the
@@ -402,9 +394,7 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # via injection rather than a call expression -- see
 # session_factory_dep_call_sites' docstring for why this is a second,
 # separate allowlist rather than folded into CONTROL_SESSION_FACTORY_
-# ALLOWLIST above). Every entry was individually read against
-# doc/design/workspace-database-separation-plan.md §2 the same way the first
-# allowlist's entries were.
+# ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
     "backend/api/deps.py": (
         "Defines SessionFactoryDep itself. Its own use, in "
@@ -584,8 +574,7 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
     "backend/api/admin.py": (
         "admin_deployment_status/admin_search_users are identity-plane "
         "(deployment config, User search). admin_jobs_summary/"
-        "admin_list_jobs are the Phase 6a fan-out pattern (doc/design/"
-        "workspace-database-separation-plan.md §4, same as backend/worker/"
+        "admin_list_jobs use workspace fan-out (same as backend/worker/"
         "runtime.py above): SessionFactoryDep reads only the Workspace "
         "roster, paired with the required db: DatabaseProviderDep so every "
         "actual Job row comes from db.session_for(workspace_id) inside "
@@ -684,8 +673,7 @@ def test_control_session_factory_call_sites_are_allowlisted():
         "control_session_factory() called outside the reviewed allowlist -- "
         "domain data must be read via session_for(workspace_id). Add a "
         "reviewed entry to CONTROL_SESSION_FACTORY_ALLOWLIST only if this "
-        "call site is genuinely identity-plane (see "
-        "doc/design/workspace-database-separation-plan.md §2): "
+        "call site reads identity-plane data only: "
         f"{violations}"
     )
 
@@ -761,8 +749,7 @@ def test_session_factory_dep_call_sites_are_allowlisted():
         "db.session_for(workspace_id)), not the control-plane "
         "SessionFactoryDep. Add a reviewed entry to "
         "SESSION_FACTORY_DEP_ALLOWLIST only if this parameter genuinely "
-        "backs an identity-plane read (see "
-        "doc/design/workspace-database-separation-plan.md §2): "
+        "backs an identity-plane read: "
         f"{violations}"
     )
 

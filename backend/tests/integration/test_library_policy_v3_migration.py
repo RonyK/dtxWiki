@@ -14,17 +14,21 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models.workspace import Workspace
 from backend.services.library_formats import DEFAULT_FORMATS
 
-epic1 = import_module("backend.migrations.versions.0002_epic1")
+epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
 )
-mcp_phase = import_module("backend.migrations.revision_0002.identity_access_schema")
-media_phase = import_module("backend.migrations.revision_0002.library_media_schema")
+mcp_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.identity_access_schema"
+)
+media_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.library_media_schema"
+)
 public_phase = import_module(
-    "backend.migrations.revision_0002.context_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.context_schema"
 )
 policy_migration = import_module(
-    "backend.migrations.revision_0002.library_policy"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.library_policy"
 )
 
 
@@ -167,9 +171,7 @@ def test_v4_aliases_upgrade_to_v5_with_an_immutable_preset_baseline():
     upgraded = policy_migration._upgrade_policy(
         {
             "policy_schema_version": 4,
-            "builtin_format_overrides": {
-                "docx": {"extensions": [" WORD "]}
-            },
+            "builtin_format_overrides": {"docx": {"extensions": [" WORD "]}},
             "format_families": [
                 {
                     "family_id": "documents",
@@ -185,9 +187,7 @@ def test_v4_aliases_upgrade_to_v5_with_an_immutable_preset_baseline():
     )
 
     assert upgraded["policy_schema_version"] == 5
-    assert upgraded["builtin_format_overrides"] == {
-        "docx": {"extensions": [".word"]}
-    }
+    assert upgraded["builtin_format_overrides"] == {"docx": {"extensions": [".word"]}}
     assert upgraded["format_families"][0]["preset_baseline"] == {
         "preset_id": "document",
         "preset_revision": 1,
@@ -250,7 +250,7 @@ def test_alembic_upgrade_sanitizes_an_existing_v3_workspace_row(tmp_path):
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
-    command.upgrade(config, "0001_initial_release")
+    command.upgrade(config, "bd62193d5cf6")
 
     engine = create_engine(database_url)
     try:

@@ -86,6 +86,7 @@ import {
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { isAbortError } from "../../shared/lib/abortError";
@@ -989,6 +990,11 @@ export function LibraryScreen() {
     setExpandedNodeIds(nodeIds);
     writeExpandedNodeIdsToStorage("library", nodeIds);
   }
+
+  useDocumentTitle(
+    state?.detail ? libraryItemDisplayTitle(state.detail) : null,
+    " - ",
+  );
 
   if (!state) {
     return <RouteLoading label={t("loading")} />;

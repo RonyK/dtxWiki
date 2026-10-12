@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -197,6 +198,18 @@ def test_member_list_cursor_filters_normalize_without_read_audit_noise(
         endpoint,
         json={"email": member.email, "confirm_first_share": True},
     ).status_code == 201
+    # The list is ordered by (joined_at, user id) and joined_at is stamped from
+    # the wall clock, so a backward clock step (or a tie, broken by the random
+    # user id) can swap the pages asserted below. Pin the join order; the
+    # sub-second parts keep the cursor's timestamp round trip exercised.
+    with page_service.session_factory.begin() as session:
+        for user_id, joined_at in (
+            (owner.id, datetime(2026, 1, 1, 9, 0, 0, 250000, tzinfo=UTC)),
+            (member.id, datetime(2026, 1, 1, 9, 0, 1, 250000, tzinfo=UTC)),
+        ):
+            membership = session.get(WorkspaceMembership, (user_id, workspace.id))
+            assert membership is not None
+            membership.joined_at = joined_at
 
     first_response = owner_client.get(
         endpoint,

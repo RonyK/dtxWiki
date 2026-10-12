@@ -47,7 +47,7 @@ npm install --global @dtxsuite/dtxwiki@latest
 ```
 
 To go back, restore the backup and run the version it belongs to, for example
-`npx @dtxsuite/dtxwiki@0.1.1`.
+`npx @dtxsuite/dtxwiki@0.1.2`.
 
 ## Documentation and license
 

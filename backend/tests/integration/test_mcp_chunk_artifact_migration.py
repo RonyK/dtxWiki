@@ -16,7 +16,7 @@ from backend.models.workspace import MCPClient, Workspace
 
 def test_migration_repairs_chunk_ids_in_mcp_artifact_links(session_factory):
     migration = import_module(
-        "backend.migrations.versions.0002_epic1"
+        "backend.migrations.versions.v0_1.efcbcf724889_core_schema"
     )
     page_id = uuid4()
     chunk_id = uuid4()
@@ -90,9 +90,7 @@ def test_migration_repairs_chunk_ids_in_mcp_artifact_links(session_factory):
             resource_id=chunk_id,
             verb="referenced",
         )
-        session.add_all(
-            [clean_link, contaminated_link, clean_edge, contaminated_edge]
-        )
+        session.add_all([clean_link, contaminated_link, clean_edge, contaminated_edge])
         session.flush()
 
         migration._repair_mcp_chunk_artifact_links(session.connection())

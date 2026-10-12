@@ -407,18 +407,17 @@ check_release_evidence() {
 check_public_release_surface() {
   # Every path below is tracked at HEAD, so this half runs on a clean clone.
   if require_file "$README_FILE"; then
-    require_grep "^## 원격 서버 배포와 팀 MCP 연결$" "$README_FILE" "README remote MCP section"
-    require_grep "Streamable HTTP" "$README_FILE" "README Streamable HTTP contract"
-    require_grep "PAT.*OAuth|OAuth.*PAT" "$README_FILE" "README PAT/OAuth authentication contract"
-    require_grep "mcp register-http" "$README_FILE" "README register-http command"
-    require_grep "mcp doctor" "$README_FILE" "README doctor command"
-    require_grep "DTXWIKI_WORKSPACE_SLUG.*(폐기|retired)" "$README_FILE" "README retired workspace slug warning"
+    # The introductory README may be translated or shortened. Operator
+    # instructions belong to DEPLOYMENT, rather than a duplicated prose block.
     reject_grep "stdio|dtxwiki-mcp|backend\.mcp\.stdio_server|dtxwiki[[:space:]]+(claude|cursor|codex|gemini|antigravity)[[:space:]]+(install|uninstall)|mcp[[:space:]]+register-remote|mcp[[:space:]]+register[[:space:]]+--|%APPDATA%\\\\codex" "$README_FILE" "README legacy MCP transport/setup"
   fi
 
   if require_file "$DEPLOYMENT_FILE"; then
     require_heading_count_ge "$DEPLOYMENT_FILE" 5 "DEPLOYMENT runbook headings"
     require_grep "Streamable HTTP" "$DEPLOYMENT_FILE" "DEPLOYMENT Streamable HTTP contract"
+    require_grep "PAT.*OAuth|OAuth.*PAT" "$DEPLOYMENT_FILE" "DEPLOYMENT PAT/OAuth authentication contract"
+    require_grep "mcp register-http" "$DEPLOYMENT_FILE" "DEPLOYMENT register-http command"
+    require_grep "mcp doctor" "$DEPLOYMENT_FILE" "DEPLOYMENT doctor command"
     require_grep "DTXWIKI_WORKSPACE_SLUG.*폐기" "$DEPLOYMENT_FILE" "DEPLOYMENT retired workspace slug warning"
     reject_grep "stdio|dtxwiki-mcp|backend\.mcp\.stdio_server|mcp[[:space:]]+register-remote|%APPDATA%\\\\codex" "$DEPLOYMENT_FILE" "DEPLOYMENT legacy MCP transport/setup"
   fi

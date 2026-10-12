@@ -64,13 +64,10 @@ def test_reset_empties_a_schema_that_metadata_drop_all_cannot_sort():
         Base.metadata.create_all(engine)
         with engine.begin() as connection:
             connection.execute(
-                text(
-                    "CREATE TABLE alembic_version "
-                    "(version_num VARCHAR(64) NOT NULL)"
-                )
+                text("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)")
             )
             connection.execute(
-                text("INSERT INTO alembic_version VALUES ('0002_epic1')")
+                text("INSERT INTO alembic_version VALUES ('efcbcf724889')")
             )
         # Populate the cycle in both directions: a user whose default
         # workspace is owned by that same user.

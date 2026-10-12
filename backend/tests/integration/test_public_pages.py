@@ -123,6 +123,7 @@ def _make_page(page_service, slug: str, *, published: bool, public: bool):
 
 
 def test_public_read_returns_published_head_without_auth(page_service):
+    # Structural RBAC isolation: no Authorization header and no session cookie.
     created = _make_page(page_service, "public-intro", published=True, public=True)
     anon = _anon_client(page_service)
 
@@ -262,15 +263,6 @@ def test_public_read_ignores_client_version_param(page_service):
     )
     assert resp.status_code == 200
     assert "Published body for version-locked." in resp.json()["data"]["body_md"]
-
-
-def test_public_read_works_with_no_authorization_header(page_service):
-    # Explicitly assert structural RBAC isolation: a public page resolves with
-    # NO Authorization header and NO session cookie.
-    _make_page(page_service, "no-auth-needed", published=True, public=True)
-    anon = _anon_client(page_service)
-    resp = anon.get("/api/v1/public/w/default/pages/no-auth-needed")
-    assert resp.status_code == 200
 
 
 # --------------------------------------------------------------------------

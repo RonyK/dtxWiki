@@ -2,6 +2,7 @@ import base64
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -13,7 +14,7 @@ from backend.models.job import Job
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.review import ReviewItem
 from backend.models.user import User
-from backend.models.workspace import MCPClient
+from backend.models.workspace import MCPClient, Workspace
 from backend.policy.rbac import grant_workspace_membership
 from backend.services.activity_service import _decode_activity_cursor
 from backend.services.library_service import LibraryService
@@ -201,11 +202,14 @@ def test_activity_hides_pending_reviews_outside_viewer_audience(page_service):
     )
 
 
-def test_activity_limit_prioritizes_review_decisions_over_failed_jobs(page_service):
+def test_activity_limit_budget_reserves_review_decisions_but_not_failed_jobs(
+    page_service,
+):
     # The pending lane is fed by two sources: review decisions (review_item_id
-    # set) and failed jobs (review_item_id None, via lane_for_job). When the
-    # merged pending queue exceeds `limit`, review decisions must win the budget
-    # over NEWER failed jobs, and the whole response must still honor `limit`.
+    # set) and failed jobs (review_item_id None, via lane_for_job). Only review
+    # decisions get reserved priority; failed jobs are pending-lane but compete
+    # with non-pending rows by recency. The same two failed jobs are queried
+    # twice, first older and then newer than the draft's review decision.
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
@@ -215,25 +219,52 @@ def test_activity_limit_prioritizes_review_decisions_over_failed_jobs(page_servi
         client, workspace_id, title="Decision Draft"
     )
 
-    # Two failed jobs strictly NEWER than the review decision. A recency-only cap
-    # would keep both jobs at limit=2 and drop the older review decision; the
-    # priority budget must keep the review decision instead.
+    # Two failed jobs OLDER than the draft's review + history rows.
     with page_service.session_factory.begin() as session:
         review = session.scalar(
             select(ReviewItem).where(ReviewItem.workspace_id == UUID(workspace_id))
         )
         assert review is not None
         base_time = review.created_at
+        old = base_time - timedelta(hours=1)
+        job_ids = []
         for index in range(2):
-            session.add(
-                Job(
-                    workspace_id=UUID(workspace_id),
-                    job_type="library_extraction",
-                    trigger_type="manual",
-                    status="failed",
-                    updated_at=base_time + timedelta(minutes=index + 1),
-                )
+            job = Job(
+                workspace_id=UUID(workspace_id),
+                job_type="library_extraction",
+                trigger_type="manual",
+                status="failed",
+                updated_at=old - timedelta(minutes=index),
             )
+            session.add(job)
+            session.flush()
+            job_ids.append(job.id)
+
+    activity = client.get(
+        f"/api/v1/workspaces/{workspace_id}/activity?period=all&limit=2",
+    )
+    assert activity.status_code == 200
+    items = activity.json()["data"]["items"]
+    assert len(items) == 2
+    # The review decision is reserved.
+    assert any(item["review_item_id"] is not None for item in items)
+    # The newer non-pending row survives; the older failed jobs are crowded out
+    # (a recency-blind budget would have kept the two failed jobs instead).
+    assert any(item["lane"] != "pending" for item in items)
+    assert not any(item["target"]["target_kind"] == "job" for item in items)
+    # API order contract: survivors are returned newest-first (the recency
+    # budget orders the final page), not in source/insertion order.
+    created_ats = [item["created_at"] for item in items]
+    assert created_ats == sorted(created_ats, reverse=True)
+
+    # Now make both failed jobs strictly NEWER than the review decision. A
+    # recency-only cap would keep both jobs at limit=2 and drop the older review
+    # decision; the priority budget must keep the review decision instead.
+    with page_service.session_factory.begin() as session:
+        for index, job_id in enumerate(job_ids):
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.updated_at = base_time + timedelta(minutes=index + 1)
 
     activity = client.get(
         f"/api/v1/workspaces/{workspace_id}/activity?period=all&limit=2",
@@ -254,55 +285,6 @@ def test_activity_limit_prioritizes_review_decisions_over_failed_jobs(page_servi
     assert len(review_rows) == 1
     assert review_rows[0]["target"]["target_kind"] == "change_set"
     assert len(job_rows) == 1
-
-
-def test_activity_limit_does_not_let_failed_jobs_crowd_out_newer_rows(page_service):
-    # Only review decisions get reserved priority. Failed jobs are pending-lane
-    # but have NO priority — they compete with non-pending rows by recency. So
-    # OLDER failed jobs must not drop a NEWER non-pending row out of the budget.
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-
-    _create_context_page_with_pending_review(
-        client, workspace_id, title="Newer Draft"
-    )
-
-    # Two failed jobs OLDER than the draft's review + history rows.
-    with page_service.session_factory.begin() as session:
-        review = session.scalar(
-            select(ReviewItem).where(ReviewItem.workspace_id == UUID(workspace_id))
-        )
-        assert review is not None
-        old = review.created_at - timedelta(hours=1)
-        for index in range(2):
-            session.add(
-                Job(
-                    workspace_id=UUID(workspace_id),
-                    job_type="library_extraction",
-                    trigger_type="manual",
-                    status="failed",
-                    updated_at=old - timedelta(minutes=index),
-                )
-            )
-
-    activity = client.get(
-        f"/api/v1/workspaces/{workspace_id}/activity?period=all&limit=2",
-    )
-    assert activity.status_code == 200
-    items = activity.json()["data"]["items"]
-    assert len(items) == 2
-    # The review decision is reserved.
-    assert any(item["review_item_id"] is not None for item in items)
-    # The newer non-pending row survives; the older failed jobs are crowded out
-    # (a recency-blind budget would have kept the two failed jobs instead).
-    assert any(item["lane"] != "pending" for item in items)
-    assert not any(item["target"]["target_kind"] == "job" for item in items)
-    # API order contract: survivors are returned newest-first (the recency
-    # budget orders the final page), not in source/insertion order.
-    created_ats = [item["created_at"] for item in items]
-    assert created_ats == sorted(created_ats, reverse=True)
 
 
 def test_activity_kind_classifies_jobs_and_lint_as_system(page_service):
@@ -416,44 +398,54 @@ def test_settings_change_appears_under_system_settings_activity(page_service):
     )
 
 
-def test_activity_kind_workspace_keeps_audit_row_under_system_audit_flood(page_service):
-    # Within the audit SOURCE itself: a workspace audit row must survive even
-    # when newer auth/oauth audit rows would fill the audit page, because
-    # kind=workspace is applied in the audit QUERY (before its limit), not only
-    # after the merge. A post-merge-only filter could never recover a workspace
-    # audit row the source never fetched.
+def test_activity_kind_filter_applies_before_the_audit_limit(page_service):
+    # Within the audit SOURCE itself: kind=workspace and kind=system are applied
+    # in the audit QUERY (before its limit), not only after the merge. A
+    # post-merge-only filter could never recover a row the source never fetched
+    # because three newer rows of the other kind filled the audit page. Each
+    # direction is staged right before its request, with its flood strictly newer
+    # than everything already present.
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
 
-    base = datetime.now(UTC) + timedelta(hours=2)
-    with page_service.session_factory.begin() as session:
-        session.add(
-            AuditEvent(
-                workspace_id=UUID(workspace_id),
-                actor_kind="user",
-                actor_id="tester",
-                action="context_page.updated",
-                target_kind="context_page",
-                target_id=uuid4(),
-                created_at=base,
-            )
-        )
-        # Three NEWER system sign-in audit rows that would fill a small page.
-        for index in range(3):
+    def target_kind_of(action):
+        return "session" if action.startswith("auth.") else "context_page"
+
+    def stage_audit_rows(target_action, flood_action, base):
+        with page_service.session_factory.begin() as session:
             session.add(
                 AuditEvent(
                     workspace_id=UUID(workspace_id),
                     actor_kind="user",
                     actor_id="tester",
-                    action="auth.session.created",
-                    target_kind="session",
+                    action=target_action,
+                    target_kind=target_kind_of(target_action),
                     target_id=uuid4(),
-                    created_at=base + timedelta(minutes=index + 1),
+                    created_at=base,
                 )
             )
+            # Three NEWER rows of the other kind that would fill a small page.
+            for index in range(3):
+                session.add(
+                    AuditEvent(
+                        workspace_id=UUID(workspace_id),
+                        actor_kind="user",
+                        actor_id="tester",
+                        action=flood_action,
+                        target_kind=target_kind_of(flood_action),
+                        target_id=uuid4(),
+                        created_at=base + timedelta(minutes=index + 1),
+                    )
+                )
 
+    # A workspace audit row under three newer system sign-in audit rows.
+    stage_audit_rows(
+        "context_page.updated",
+        "auth.session.created",
+        datetime.now(UTC) + timedelta(hours=2),
+    )
     items = client.get(
         f"/api/v1/workspaces/{workspace_id}/activity?period=all&kind=workspace&limit=2"
     ).json()["data"]["items"]
@@ -461,6 +453,23 @@ def test_activity_kind_workspace_keeps_audit_row_under_system_audit_flood(page_s
     # auth row leaks into the workspace view.
     assert any(item["body"] == "context_page.updated" for item in items)
     assert not any(item["body"].startswith("auth.") for item in items)
+
+    # Mirror: an older auth row under three newer WORKSPACE audit rows. (Without
+    # the kind=="system" SQL filter the newest rows fetched would be the
+    # workspace ones, then dropped post-merge, so no auth row would surface.)
+    stage_audit_rows(
+        "auth.session.created",
+        "context_page.updated",
+        datetime.now(UTC) + timedelta(hours=4),
+    )
+    items = client.get(
+        f"/api/v1/workspaces/{workspace_id}/activity?period=all&kind=system&limit=2"
+    ).json()["data"]["items"]
+    # Only system (auth) rows are returned despite three newer workspace rows; no
+    # workspace audit row leaks into the system view.
+    assert items
+    assert all(item["body"].startswith("auth.") for item in items)
+    assert not any(item["body"] == "context_page.updated" for item in items)
 
 
 def test_activity_excludes_library_observation_events_before_the_page_limit(
@@ -514,56 +523,7 @@ def test_activity_excludes_library_observation_events_before_the_page_limit(
     assert [item["body"] for item in items] == ["library.item.version.create"]
 
 
-def test_activity_kind_system_keeps_audit_row_under_workspace_audit_flood(page_service):
-    # Mirror of the workspace case, proving the SYSTEM side of the query-time
-    # split: an older auth/oauth audit row must survive even when newer WORKSPACE
-    # audit rows would fill the audit page, because kind=system is applied in the
-    # audit QUERY before its limit. (Without the kind=="system" SQL filter the
-    # newest rows fetched would be the workspace ones, then dropped post-merge,
-    # so the older auth row would never surface.)
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-
-    base = datetime.now(UTC) + timedelta(hours=4)
-    with page_service.session_factory.begin() as session:
-        session.add(
-            AuditEvent(
-                workspace_id=UUID(workspace_id),
-                actor_kind="user",
-                actor_id="tester",
-                action="auth.session.created",
-                target_kind="session",
-                target_id=uuid4(),
-                created_at=base,
-            )
-        )
-        # Three NEWER workspace audit rows that would fill a small page.
-        for index in range(3):
-            session.add(
-                AuditEvent(
-                    workspace_id=UUID(workspace_id),
-                    actor_kind="user",
-                    actor_id="tester",
-                    action="context_page.updated",
-                    target_kind="context_page",
-                    target_id=uuid4(),
-                    created_at=base + timedelta(minutes=index + 1),
-                )
-            )
-
-    items = client.get(
-        f"/api/v1/workspaces/{workspace_id}/activity?period=all&kind=system&limit=2"
-    ).json()["data"]["items"]
-    # Only system (auth) rows are returned despite three newer workspace rows; no
-    # workspace audit row leaks into the system view.
-    assert items
-    assert all(item["body"].startswith("auth.") for item in items)
-    assert not any(item["body"] == "context_page.updated" for item in items)
-
-
-def test_activity_lane_page_paginates_with_cursor(page_service):
+def test_activity_lane_pagination_cursor_tolerance_and_kind_validation(page_service):
     # The dedicated lane page paginates by recency via cursor/next_cursor; the
     # overview (no lane) keeps next_cursor None.
     client = make_client(page_service)
@@ -609,31 +569,7 @@ def test_activity_lane_page_paginates_with_cursor(page_service):
     ).json()["data"]
     assert overview["next_cursor"] is None
 
-
-def test_activity_lane_cursor_is_tolerant_and_clamped(page_service):
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
-
-    base = datetime.now(UTC) + timedelta(hours=3)
-    with page_service.session_factory.begin() as session:
-        for index in range(3):
-            session.add(
-                AuditEvent(
-                    workspace_id=UUID(workspace_id),
-                    actor_kind="user",
-                    actor_id="tester",
-                    action=f"context_page.updated.{index}",
-                    target_kind="context_page",
-                    target_id=uuid4(),
-                    created_at=base + timedelta(minutes=index),
-                )
-            )
-
-    base_url = (
-        f"/api/v1/workspaces/{workspace_id}/activity?period=all&lane=history&limit=2"
-    )
+    # A malformed cursor is tolerated as the first page; a huge one is clamped.
     bad_cursor_page = client.get(f"{base_url}&cursor=not-a-valid-cursor!").json()[
         "data"
     ]
@@ -650,25 +586,35 @@ def test_activity_lane_cursor_is_tolerant_and_clamped(page_service):
     assert huge_cursor_page["items"] == []
     assert huge_cursor_page["next_cursor"] is None
 
-
-def test_activity_rejects_unknown_kind(page_service):
     # kind is a constrained Literal; a typo is a 422, never a silent fall-through
     # to unfiltered "all" (which would leak system rows into a workspace view).
-    client = make_client(page_service)
-    workspace_id = client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
     resp = client.get(
         f"/api/v1/workspaces/{workspace_id}/activity?period=all&kind=workspce"
     )
     assert resp.status_code == 422
 
 
-def test_settings_policy_patch_updates_workspace_and_literal_values(page_service):
+@pytest.mark.parametrize("personal_offset", [0, -1], ids=["tie", "reversed"])
+def test_settings_policy_patch_updates_workspace_and_literal_values(
+    page_service, personal_offset
+):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
+    # GET /workspaces orders by created_at, then slug. The seeded workspace
+    # selected above and the Personal one signup created are stamped a fraction
+    # of a second apart, so their order is whatever the wall clock did between
+    # the two inserts (a backward step lists Personal first). Pin a tie and a
+    # reversal so the rename check below cannot lean on list position.
+    with page_service.session_factory.begin() as session:
+        target = session.get(Workspace, UUID(workspace_id))
+        user = session.scalar(select(User).where(User.email == "test@example.com"))
+        assert target is not None
+        assert user is not None
+        personal = session.get(Workspace, user.personal_workspace_id)
+        assert personal is not None
+        personal.created_at = target.created_at + timedelta(seconds=personal_offset)
 
     language = client.patch(
         f"/api/v1/workspaces/{workspace_id}/settings/policies",
@@ -685,7 +631,13 @@ def test_settings_policy_patch_updates_workspace_and_literal_values(page_service
     assert slug.json()["data"]["workspace"]["policy"]["slug"] == "research-space-v2"
     listed = client.get("/api/v1/workspaces")
     assert listed.status_code == 200
-    assert listed.json()["data"]["workspaces"][0]["slug"] == "research-space-v2"
+    # By id, never by position: both pinned orders list Personal first. The
+    # rename must also show on exactly one listed workspace, so it cannot have
+    # reached the user's other one as well.
+    workspaces = listed.json()["data"]["workspaces"]
+    matching_slugs = [item["slug"] for item in workspaces if item["id"] == workspace_id]
+    assert matching_slugs == ["research-space-v2"]
+    assert sum(item["slug"] == "research-space-v2" for item in workspaces) == 1
 
     strictness = client.patch(
         f"/api/v1/workspaces/{workspace_id}/settings/policies",
@@ -705,6 +657,16 @@ def test_settings_policy_patch_updates_workspace_and_literal_values(page_service
     assert agent_literal.status_code == 200
     assert (
         agent_literal.json()["data"]["agent_injection"]["policy"][
+            "category_inclusion_policy"
+        ]["memory"]
+        == "never"
+    )
+    # The response above is built from the session that just mutated the row;
+    # only a fresh read proves the nested change was actually stored.
+    persisted = client.get(f"/api/v1/workspaces/{workspace_id}/settings/policies")
+    assert persisted.status_code == 200
+    assert (
+        persisted.json()["data"]["agent_injection"]["policy"][
             "category_inclusion_policy"
         ]["memory"]
         == "never"

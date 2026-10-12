@@ -1,4 +1,4 @@
-.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
+.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build test-backend test-backend-serial test-backend-benchmarks test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -13,6 +13,11 @@ PYTEST_WORKERS ?= 4
 # `make test-backend` invocation runs this SQLite media lane sequentially.
 SQLITE_MEDIA_SERIAL_TESTS := backend/tests/integration/test_media_blob_gc.py backend/tests/integration/test_media_install_workflow.py
 SQLITE_MEDIA_PARALLEL_IGNORES := $(foreach test,$(SQLITE_MEDIA_SERIAL_TESTS),--ignore=$(test))
+# Modules holding wall-clock budgets (design §19.5.7). Each budget is a
+# `*_benchmark_*` test that skips unless DTXWIKI_TEST_BENCHMARKS=1 and refuses
+# to run under xdist; `test-backend-benchmarks` below is the only place that
+# opts in. A new benchmark's module belongs on this list.
+BENCHMARK_TESTS := backend/tests/integration/test_graph_service.py backend/tests/integration/test_graph_analytics_regressions.py
 VENV_PYTHON := $(VENV)/bin/python
 COMPOSE := docker compose --env-file infra/local/.env.example -f infra/local/docker-compose.yml
 DOCKER ?= docker
@@ -99,9 +104,16 @@ test-backend:
 # Parity canary. `--dist loadgroup` keeps the PostgreSQL suites -- which reset
 # the database they are pointed at -- on one worker, but distribution should
 # never be the only way the suite is run. This target proves the same tests
-# pass with no workers at all.
+# pass with no workers at all. It runs the functional suite only: the
+# wall-clock budgets are `test-backend-benchmarks`, kept apart on purpose.
 test-backend-serial:
 	$(VENV_PYTHON) -m pytest backend/tests -q
+
+# A latency measured on a shared runner, or beside xdist workers, cannot tell a
+# slow host from a slow change, so the functional lanes assert counted work
+# instead and the budgets run here: serially, on request, never in `make test`.
+test-backend-benchmarks:
+	DTXWIKI_TEST_BENCHMARKS=1 $(VENV_PYTHON) -m pytest $(BENCHMARK_TESTS) -q -k benchmark
 
 test-frontend:
 	npm --workspace frontend run test -- --run

@@ -671,16 +671,9 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-// Epic-2 Phase 6a fan-out (doc/design/workspace-database-separation-plan.md
-// §4): the real server-admin summary/list responses always carry an
-// envelope (every RESTResponseBase does) and always carry
-// unreachable_workspace_ids on their data (Phase 6a made both fan out).
-// These wrap a test's response body in that real shape so
-// adminJobs.ts's `response.envelope.warnings` / `.unreachable_workspace_ids`
-// reads exercise the actual contract instead of a pre-Phase-6a fixture that
-// happens not to have those fields. `unreachable_workspace_ids` defaults to
-// [] (nothing unreachable) unless a test overrides it to exercise the
-// incomplete-fan-out banner.
+// Server-admin summary/list responses include warnings and unreachable workspaces.
+// These helpers preserve that response shape; tests override the empty workspace
+// list when exercising the incomplete fan-out banner.
 function adminSummaryResponse(data: {
   queued_count: number;
   running_count: number;

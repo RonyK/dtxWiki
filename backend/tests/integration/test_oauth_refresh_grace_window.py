@@ -8,6 +8,13 @@ from that rotation was itself already explicitly revoked, still revokes the
 whole family as before. See backend/services/oauth_service.py
 (_refresh_access_token_locked) for the implementation and
 REFRESH_REUSE_GRACE_WINDOW_SECONDS for the exact window length.
+
+The service measures the window on its own clock, which these tests move by
+assignment (``oauth_clock``), so every reuse lands at an exact distance from
+the rotation and no host-clock margin is involved: a host clock step cannot
+carry a reuse across the window's edge. The 30 seconds are pinned here, not
+read from the constant, so that changing the window in the service fails the
+tests instead of moving them along with it.
 """
 
 from __future__ import annotations
@@ -15,21 +22,28 @@ from __future__ import annotations
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
-from backend.models.base import utc_now
 from backend.models.oauth import OAuthRefreshToken
 from backend.services.oauth_service import (
     _DCR_BUCKET,
-    REFRESH_REUSE_GRACE_WINDOW_SECONDS,
     challenge_s256,
     token_hash,
 )
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.oauth_clock import oauth_clock_fixture  # noqa: F401
+
+# The reuse-grace window's documented length (P10.3 T3 section 2.3, ADR A5
+# amendment). Pinned here, not read from ``REFRESH_REUSE_GRACE_WINDOW_SECONDS``,
+# so that widening or narrowing the window in the service fails these tests
+# instead of moving them along with it.
+_GRACE_WINDOW = timedelta(seconds=30)
+_ONE_MICROSECOND = timedelta(microseconds=1)
 
 
 def _client(page_service) -> TestClient:
@@ -129,8 +143,13 @@ def _refresh(client: TestClient, *, refresh_token: str, client_id: str):
     )
 
 
+@pytest.mark.parametrize(
+    "reuse_age",
+    [timedelta(0), _GRACE_WINDOW - _ONE_MICROSECOND, _GRACE_WINDOW],
+    ids=["at-rotation", "just-inside", "at-window"],
+)
 def test_reuse_within_grace_window_mints_new_pair_without_revoking_family(
-    page_service,
+    page_service, oauth_clock, reuse_age
 ):
     client = _client(page_service)
     issued = _issue_token_pair(client, state="grace-single-reuse")
@@ -143,8 +162,11 @@ def test_reuse_within_grace_window_mints_new_pair_without_revoking_family(
     assert rotate.status_code == 200, rotate.text
     first_child_refresh = rotate.json()["refresh_token"]
 
-    # Reuse the ORIGINAL (already-rotated) refresh token immediately -- well
-    # inside the 30s window -- and expect a NEW pair, not invalid_grant.
+    # Reuse the ORIGINAL (already-rotated) refresh token ``reuse_age`` after
+    # its rotation -- from that very instant to the window's last, which is
+    # inclusive -- and expect a NEW pair, not invalid_grant. The OAuth clock
+    # has not moved since the rotation, so it still stands at that instant.
+    oauth_clock.value += reuse_age
     reuse = _refresh(
         client,
         refresh_token=issued["refresh_token"],
@@ -199,7 +221,7 @@ def test_reuse_within_grace_window_mints_new_pair_without_revoking_family(
         assert grace_event.payload["first_child_refresh_id"] == str(first_child_row.id)
 
 
-def test_two_reuses_within_grace_window_both_succeed(page_service):
+def test_two_reuses_within_grace_window_both_succeed(page_service, oauth_clock):
     """No cap on how many times a reuse can happen within the window -- the
     window itself is the only limit (section 2.3)."""
 
@@ -210,10 +232,15 @@ def test_two_reuses_within_grace_window_both_succeed(page_service):
     )
     assert rotate.status_code == 200, rotate.text
 
+    # Both reuses are measured from the one rotation: the first lands a
+    # microsecond before the window's end, the second on its last instant.
+    rotated_at = oauth_clock.value
+    oauth_clock.value = rotated_at + _GRACE_WINDOW - _ONE_MICROSECOND
     first_reuse = _refresh(
         client, refresh_token=issued["refresh_token"], client_id=issued["client_id"]
     )
     assert first_reuse.status_code == 200, first_reuse.text
+    oauth_clock.value = rotated_at + _GRACE_WINDOW
     second_reuse = _refresh(
         client, refresh_token=issued["refresh_token"], client_id=issued["client_id"]
     )
@@ -240,7 +267,7 @@ def test_two_reuses_within_grace_window_both_succeed(page_service):
 
 
 def test_reuse_after_first_child_explicitly_revoked_still_revokes_family(
-    page_service,
+    page_service, oauth_clock
 ):
     """Condition (c): an explicitly-revoked family must not be resurrected
     by a grace reuse, even within the 30s window."""
@@ -253,6 +280,10 @@ def test_reuse_after_first_child_explicitly_revoked_still_revokes_family(
     assert rotate.status_code == 200, rotate.text
     first_child_refresh = rotate.json()["refresh_token"]
 
+    # The revoke and the reuse both land on the window's last instant, which is
+    # still inside it, so the revoked first child is the only thing left that
+    # can refuse the reuse -- not an elapsed window.
+    oauth_clock.value += _GRACE_WINDOW
     revoke = client.post(
         "/oauth/revoke",
         data={
@@ -287,7 +318,9 @@ def test_reuse_after_first_child_explicitly_revoked_still_revokes_family(
         assert len(siblings) == 1
 
 
-def test_reuse_after_grace_window_expires_revokes_the_whole_family(page_service):
+def test_reuse_after_grace_window_expires_revokes_the_whole_family(
+    page_service, oauth_clock
+):
     """Reuse outside the window still triggers the existing family-revoke
     path, keyed by grant_id, so every branched child dies (section 2.3)."""
 
@@ -299,25 +332,20 @@ def test_reuse_after_grace_window_expires_revokes_the_whole_family(page_service)
     assert rotate.status_code == 200, rotate.text
     first_child_refresh = rotate.json()["refresh_token"]
 
-    # Also mint a grace-reissued sibling before the window "expires", to
-    # confirm the eventual family revoke catches every branched child.
+    # Also mint a grace-reissued sibling before the window "expires" (halfway
+    # through it), to confirm the eventual family revoke catches every
+    # branched child.
+    rotated_at = oauth_clock.value
+    oauth_clock.value = rotated_at + timedelta(seconds=15)
     grace_reuse = _refresh(
         client, refresh_token=issued["refresh_token"], client_id=issued["client_id"]
     )
     assert grace_reuse.status_code == 200, grace_reuse.text
     grace_child_refresh = grace_reuse.json()["refresh_token"]
 
-    with page_service.session_factory.begin() as session:
-        parent = session.scalar(
-            select(OAuthRefreshToken).where(
-                OAuthRefreshToken.token_lookup_hash
-                == token_hash(issued["refresh_token"])
-            )
-        )
-        parent.rotated_at = utc_now() - timedelta(
-            seconds=REFRESH_REUSE_GRACE_WINDOW_SECONDS + 1
-        )
-
+    # The window runs from the rotation itself, not from the sibling just
+    # minted: one microsecond past its end the same token is a replay.
+    oauth_clock.value = rotated_at + _GRACE_WINDOW + _ONE_MICROSECOND
     stale_reuse = _refresh(
         client, refresh_token=issued["refresh_token"], client_id=issued["client_id"]
     )

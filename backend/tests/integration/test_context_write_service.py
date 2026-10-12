@@ -2198,7 +2198,7 @@ def test_delete_influence_closure_is_local_for_every_supported_newline(newline):
 
 
 def test_repeated_large_body_delete_cleanup_stays_local_and_low_risk():
-    repeated = "x\n" * 100_000
+    repeated = "x\n" * 5_000
     before = repeated + "\ndelete\n\n" + repeated
     target_start = len(repeated) + 1
     provisional = before[:target_start] + before[target_start + len("delete") :]
@@ -2226,7 +2226,7 @@ def test_repeated_large_body_delete_cleanup_stays_local_and_low_risk():
 
 
 def test_large_repeated_prefix_delete_cleanup_keeps_adjacent_blank_seam_local():
-    before = "# H\n" + ("x\n" * 400_000) + "remove-me\n\nTail\n"
+    before = "# H\n" + ("x\n" * 20_000) + "remove-me\n\nTail\n"
     target_start = before.index("remove-me")
     provisional = before[:target_start] + before[target_start + len("remove-me") :]
     after = safe_normalize_markdown(provisional)

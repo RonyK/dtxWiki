@@ -1,7 +1,7 @@
 import json
 import shutil
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -76,6 +76,20 @@ def token_service(session_factory, credential_hasher) -> ApiTokenService:
         credential_hasher=credential_hasher,
         cursor_secret="test-access-key-cursor-secret",
     )
+
+
+@pytest.fixture
+def api_token_clock(monkeypatch) -> list[datetime]:
+    # Expiry is judged against the service's current UTC time, not a durable
+    # "expired" state, so a wall clock that steps backwards can make an expired
+    # token live again. Keep that evaluation clock explicit here. Preventing the
+    # reactivation in production needs a separate clock/expiration policy.
+    clock = [datetime(2026, 1, 1, 12, tzinfo=UTC)]
+    monkeypatch.setattr(
+        "backend.services.api_token_service.utc_now",
+        lambda: clock[0],
+    )
+    return clock
 
 
 @pytest.fixture
@@ -419,14 +433,14 @@ def test_invalid_scope_name_and_unknown_revoke_are_rejected(
 
 
 def test_expired_token_is_rejected(
-    signed_up_user, signed_up_workspace_id, token_service
+    signed_up_user, signed_up_workspace_id, token_service, api_token_clock
 ):
     issued = token_service.create_token(
         user_id=signed_up_user.user_id,
         workspace_grants=_grant(signed_up_workspace_id),
         name="expired",
         scopes=["mcp:read"],
-        expires_at=utc_now() - timedelta(seconds=1),
+        expires_at=api_token_clock[0] - timedelta(seconds=1),
     )
 
     with pytest.raises(InvalidApiTokenError, match="expired"):
@@ -770,8 +784,10 @@ def test_user_list_uses_status_facets_and_query_bound_cursor(
     signed_up_user,
     signed_up_workspace_id,
     token_service,
+    session_factory,
+    api_token_clock,
 ):
-    now = utc_now()
+    now = api_token_clock[0]
     active_ids = []
     for name in ("Alpha one", "Alpha two", "Beta active"):
         issued = token_service.create_token(
@@ -800,6 +816,19 @@ def test_user_list_uses_status_facets_and_query_bound_cursor(
         token_id=revoked.api_token.id,
     )
 
+    # Exercise both creation-time ordering and an ID tie across the page edge.
+    # ORM defaults still use wall time, so pin the committed ordering keys.
+    token_ids = [*active_ids, expired.api_token.id, revoked.api_token.id]
+    with session_factory.begin() as session:
+        for index, token_id in enumerate(token_ids):
+            model = session.get(ApiToken, token_id)
+            assert model is not None
+            model.created_at = now - timedelta(seconds=min(index, 1))
+    expected_active_ids = [
+        active_ids[0],
+        *sorted(active_ids[1:], reverse=True),
+    ]
+
     first = token_service.list_user_tokens(
         user_id=signed_up_user.user_id,
         status="active",
@@ -814,6 +843,8 @@ def test_user_list_uses_status_facets_and_query_bound_cursor(
     assert first.next_cursor is not None
     assert all(item.status == "active" for item in first.data)
 
+    # The cursor must retain page one's evaluation time even as time advances.
+    api_token_clock[0] += timedelta(seconds=10)
     second = token_service.list_user_tokens(
         user_id=signed_up_user.user_id,
         status="active",
@@ -824,6 +855,9 @@ def test_user_list_uses_status_facets_and_query_bound_cursor(
     assert len(second.data) == 1
     assert second.next_cursor is None
     assert {item.api_token.id for item in first.data + second.data} == set(active_ids)
+    assert [
+        item.api_token.id for item in first.data + second.data
+    ] == expected_active_ids
 
     alpha_inactive = token_service.list_user_tokens(
         user_id=signed_up_user.user_id,
@@ -1038,6 +1072,7 @@ def test_record_delete_accepts_expired_token_without_requiring_revoke_first(
     signed_up_user,
     signed_up_workspace_id,
     token_service,
+    api_token_clock,
 ):
     """T4: DELETE /auth/tokens/{id}/record is the only REST deletion path
     left after the workspace-scoped access-keys surface was removed, and
@@ -1048,7 +1083,7 @@ def test_record_delete_accepts_expired_token_without_requiring_revoke_first(
         workspace_grants=_grant(signed_up_workspace_id),
         name="expired not revoked",
         scopes=["mcp:read"],
-        expires_at=utc_now() - timedelta(seconds=1),
+        expires_at=api_token_clock[0] - timedelta(seconds=1),
     )
 
     deleted_id = token_service.delete_revoked_token(

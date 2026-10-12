@@ -38,6 +38,8 @@ jobs:
     # issue_comment both resolve to the default branch). No reviewers and no
     # wait timer: either would stall every pull request.
     environment: cla-signatures
+    env:
+      CLA_EXEMPT: RonyK
     # Runs for one pull request go one at a time, so a burst of `recheck`
     # comments cannot write the signature repository in parallel or use up
     # this repository's 1,000 requests per hour. Nothing is cancelled while it
@@ -58,6 +60,7 @@ jobs:
         contains(github.event.comment.body, 'I have read the dtxWiki CLA Version 1 and I hereby sign it')))
     steps:
       - name: Refuse pull requests the CLA check cannot fully read
+        id: participants
         # The pinned action reads only the first 100 commits, and for a commit
         # whose author email is linked to no GitHub account it falls back to the
         # committer or to the free-text author name, which anyone can set. Such
@@ -66,20 +69,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EXEMPT: ${{ env.CLA_EXEMPT }}
         run: |
           set -euo pipefail
-          commits=$(gh api "repos/$REPO/pulls/$PR" --jq .commits)
-          if [ "$commits" -gt 100 ]; then
-            echo "::error::$commits commits: the CLA check reads only 100. Squash or split the pull request."
-            exit 1
-          fi
-          unlinked=$(gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[] | select(.author == null) | .sha')
-          if [ -n "$unlinked" ]; then
-            echo "::error::Commit authors not linked to a GitHub account: $(echo $unlinked). Add the email to your GitHub account or re-author the commits."
-            exit 1
-          fi
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+
+          def api(path):
+              return json.loads(subprocess.check_output(["gh", "api", path], text=True))
+
+          path = f"repos/{os.environ['REPO']}/pulls/{os.environ['PR']}"
+          pull = api(path)
+          count = pull["commits"]
+          if not 1 <= count <= 100:
+              print(f"::error::{count} commits: the CLA check reads 1 to 100. Squash or split the pull request.")
+              sys.exit(1)
+          commits = api(f"{path}/commits?per_page=100")
+          if len(commits) != count:
+              print("::error::The pull request changed while reading its commits. Run the CLA check again.")
+              sys.exit(1)
+          unlinked = [commit["sha"] for commit in commits if commit.get("author") is None]
+          if unlinked:
+              print(f"::error::Commit authors not linked to a GitHub account: {', '.join(unlinked)}. Add the email to your GitHub account or re-author the commits.")
+              sys.exit(1)
+          exempt = {name.strip().lower() for name in os.environ["EXEMPT"].split(",")}
+          participants = [pull["user"]["login"], *(commit["author"]["login"] for commit in commits)]
+          required = any(login.lower() not in exempt for login in participants)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"requires-signatures={str(required).lower()}\n")
+          PY
       - name: Mint a token for the signature repository
         id: signature-token
+        if: steps.participants.outputs.requires-signatures == 'true'
         # A GitHub App installed only on the signature repository, with
         # contents read and write and nothing else. The token is scoped to that
         # one repository and revoked when the job ends. Pinned to the commit
@@ -92,6 +113,7 @@ jobs:
           repositories: dtxwiki-cla-signatures
           permission-contents: write
       - name: Check signatures
+        if: steps.participants.outputs.requires-signatures == 'true'
         # Pinned to the commit v2.6.1 points at, not the movable tag: this
         # step runs on pull_request_target with write-scoped tokens.
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
@@ -119,9 +141,10 @@ jobs:
           # request: the step "Require the pull request author's acceptance"
           # still needs the author of the pull request itself, and exempts only
           # the maintainer's own pull requests. No bot names.
-          allowlist: RonyK
+          allowlist: ${{ env.CLA_EXEMPT }}
           lock-pullrequest-aftermerge: false
       - name: Require the pull request author's acceptance
+        if: steps.participants.outputs.requires-signatures == 'true'
         # The action examines commit authors only, and a commit author is
         # whatever email the committer chose: the maintainer's public email or
         # a signed contributor's makes GitHub link the commit to that account.
@@ -131,7 +154,7 @@ jobs:
         env:
           SIG_TOKEN: ${{ steps.signature-token.outputs.token }}
           SIG_REPO: ${{ github.repository_owner }}/dtxwiki-cla-signatures
-          EXEMPT: RonyK
+          EXEMPT: ${{ env.CLA_EXEMPT }}
         run: |
           set -euo pipefail
           python3 - <<'PY'

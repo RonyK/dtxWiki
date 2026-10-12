@@ -6,7 +6,7 @@ import backend.services.context_editing as context_editing_module
 import backend.services.context_write_service as context_write_service_module
 import backend.utils.block_identity as block_identity_module
 from backend.mcp.router import dispatch
-from backend.models.context import ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.workspace import Workspace
 from backend.schemas.context_edit import PatchDraftRequest
 from backend.schemas.page import BODY_MD_MAX_LENGTH
@@ -52,28 +52,6 @@ def _patch_draft(page_service, actor, workspace_id, **payload):
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
         )
-
-
-def _all_structure_map_blocks(workspace_id, page_id, actor, page_service):
-    """Every block of a document, followed across pages.
-
-    read_structure_map caps `blocks` (MCP-02) -- a 5,000-block document arrives
-    200 at a time -- so a consumer that wants the whole map has to follow
-    `next_cursor`. Reading `blocks[4_100]` off a single response used to work
-    and now raises IndexError. Returns (document, every block in order).
-    """
-
-    blocks = []
-    cursor = None
-    while True:
-        overrides = {"cursor": cursor} if cursor is not None else {}
-        page = _structure_map(workspace_id, page_id, actor, page_service, **overrides)
-        assert page.envelope.result_status == "succeeded", page.envelope
-        blocks.extend(page.blocks)
-        cursor = page.next_cursor
-        if cursor is None:
-            assert len(blocks) == page.document.block_count
-            return page.document, blocks
 
 
 def test_replace_block_via_patch_draft_lands_and_updates_the_structure_map(
@@ -271,10 +249,17 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
     )
-    document, all_blocks = _all_structure_map_blocks(
-        workspace_id, page.id, actor, page_service
-    )
-    targets = [all_blocks[index] for index in range(100, 4_100, 200)]
+    # Take the base version and its block map from the same persisted row:
+    # paging read_structure_map re-parses the whole body per page, and the
+    # ids/hashes it returns are exactly this stored map.
+    with page_service.session_factory() as session:
+        page_row = session.get(ContextPage, page.id)
+        base_version = session.get(ContextPageVersion, page_row.current_version_id)
+        base_version_id = base_version.id
+        entries = list(base_version.block_map)
+    assert len(entries) == 5_000
+    targets = [entries[index] for index in range(100, 4_100, 200)]
+    assert all(entry["kind"] != "table" for entry in targets)
     parser_inputs: list[int] = []
     map_analysis_inputs: list[int] = []
     real_compute_blocks = block_identity_module.compute_blocks
@@ -332,13 +317,13 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
             actor,
             workspace_id,
             page_id=page.id,
-            base=str(document.version_id),
+            base=str(base_version_id),
             reason="bounded one-megabyte batch",
             operations=[
                 {
                     "op": "insert_after",
-                    "block": target.id,
-                    "expected": target.hash,
+                    "block": target["id"],
+                    "expected": target["hash"],
                     "content": f"inserted-{index}",
                 }
                 for index, target in enumerate(targets)

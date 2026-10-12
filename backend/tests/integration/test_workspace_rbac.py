@@ -41,6 +41,13 @@ def make_client(page_service, email: str) -> TestClient:
     return client
 
 
+def make_peer_client(client: TestClient, email: str) -> TestClient:
+    """Second actor on the same app: separate cookie jar, no extra create_app."""
+    peer = TestClient(client.app)
+    authenticate_test_client(peer, email=email)
+    return peer
+
+
 def test_workspace_list_filters_to_actor_memberships(page_service):
     client = make_client(page_service, "owner@example.com")
     with page_service.session_factory.begin() as session:
@@ -62,7 +69,7 @@ def test_workspace_list_filters_to_actor_memberships(page_service):
 
 def test_viewer_write_is_rejected_and_editor_write_is_allowed(page_service):
     owner = make_client(page_service, "owner@example.com")
-    viewer = make_client(page_service, "viewer@example.com")
+    viewer = make_peer_client(owner, "viewer@example.com")
     workspace_id = owner.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
@@ -715,7 +722,7 @@ def test_claim_and_second_claimer_conflicts(page_service):
     """T15/B6: claim succeeds for an editor; a second editor claiming the live
     claim gets 409 review_already_claimed; release frees it."""
     owner = make_client(page_service, "claim-owner@example.com")
-    second = make_client(page_service, "claim-second@example.com")
+    second = make_peer_client(owner, "claim-second@example.com")
     workspace_id = owner.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]

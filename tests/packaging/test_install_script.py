@@ -184,9 +184,11 @@ apt-cache() {
 add-apt-repository() { echo "add-apt-repository $*" >> "$CALLS"; }
 curl() { echo "curl $*" >> "$CALLS"; printf 'ARMORED-KEY'; }
 gpg() {
-    echo "gpg $*" >> "$CALLS"
     local out="${*: -1}"
     { printf 'DEARMORED:'; cat; } > "$out"
+    # Logged only after stdin closes: `curl | gpg` runs both fakes at once,
+    # and curl has written its own line before it closes the pipe.
+    echo "gpg $*" >> "$CALLS"
 }
 has_python312() { [[ "$FAKE_HAS_PYTHON312" == 1 ]]; }
 """

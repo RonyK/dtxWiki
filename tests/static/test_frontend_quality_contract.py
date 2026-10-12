@@ -16,7 +16,7 @@ def read_app_styles() -> str:
     )
 
 
-def test_sprint3_async_load_hook_is_used_by_route_screens():
+def test_async_load_hook_is_used_by_route_screens():
     feature_root = ROOT / "frontend/src/features"
     hook_uses = [
         path

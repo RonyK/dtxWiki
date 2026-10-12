@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from sqlalchemy import create_engine, select
@@ -7,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
-from backend.app.bootstrap import bootstrap
+from backend.app.bootstrap import ensure_data_dirs
 from backend.app.container import DatabaseProvider
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
@@ -43,11 +44,24 @@ from backend.services.mail_delivery import (
     SMTPMailProvider,
 )
 from backend.services.password_recovery_service import PasswordRecoveryService
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 from backend.worker import entry as worker_entry
 from backend.worker.entry import app as worker_cli
 from backend.worker.registry import registered_handlers
 from backend.worker.runtime import OneShotWorker
 from backend.worker.tick import seed_due_jobs
+
+
+def _prepare_database(database_url: str) -> None:
+    """Leave an unseeded database at the head schema at ``database_url``.
+
+    The same state ``bootstrap`` produces, from a copy of a once-built template:
+    these tests drive the worker over jobs they seed themselves and do not test
+    migration. The CLI invocations below still pass ``--skip-bootstrap`` as before.
+    """
+
+    ensure_data_dirs()
+    copy_migrated_sqlite(Path(database_url.removeprefix("sqlite+pysqlite:///")))
 
 
 def _clear_job_backoff(session_factory):
@@ -305,7 +319,7 @@ def test_worker_dispatches_registered_media_install_reconciler():
 
 def test_worker_run_once_does_not_seed_periodic_jobs(tmp_path, monkeypatch):
     database_url = f"sqlite+pysqlite:///{tmp_path / 'worker-once.db'}"
-    bootstrap(Settings(database_url=database_url))
+    _prepare_database(database_url)
 
     def _unexpected_seed(*_args, **_kwargs):
         raise AssertionError("run-once must not seed periodic jobs")
@@ -834,7 +848,7 @@ def test_dispatch_once_records_failure_when_business_error_poisons_session():
 def test_worker_run_cli_processes_extraction_job(tmp_path):
     database_url = f"sqlite+pysqlite:///{tmp_path / 'worker-run.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     session_factory = make_session_factory_from_settings(settings)
 
     with session_factory.begin() as session:
@@ -1388,7 +1402,7 @@ def test_round_robin_claim_does_not_starve_a_workspace_behind_a_continuously_bus
     """
     database_url = f"sqlite+pysqlite:///{tmp_path / 'round-robin.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     database_provider = DatabaseProvider(settings)
     control_factory = database_provider.control_session_factory()
     queue = JobQueueService()
@@ -1461,7 +1475,7 @@ def test_dropped_hint_costs_latency_not_correctness(tmp_path, monkeypatch):
 
     database_url = f"sqlite+pysqlite:///{tmp_path / 'dropped-hint.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     database_provider = DatabaseProvider(settings)
     control_factory = database_provider.control_session_factory()
     queue = JobQueueService()
@@ -1497,7 +1511,7 @@ def test_hint_causes_hinted_workspace_claimed_before_an_unhinted_one(tmp_path):
     first -- pinning that the hint changes ORDER, not just "eventually"."""
     database_url = f"sqlite+pysqlite:///{tmp_path / 'hint-priority.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     database_provider = DatabaseProvider(settings)
     control_factory = database_provider.control_session_factory()
     queue = JobQueueService()
@@ -1562,7 +1576,7 @@ def test_stale_hint_is_cleared_without_spinning(tmp_path):
     round-robin fallback still finds real work elsewhere."""
     database_url = f"sqlite+pysqlite:///{tmp_path / 'stale-hint.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     database_provider = DatabaseProvider(settings)
     control_factory = database_provider.control_session_factory()
     queue = JobQueueService()
@@ -1648,7 +1662,7 @@ def test_bypass_hint_skips_the_hint_fast_path_entirely(tmp_path, monkeypatch):
     """
     database_url = f"sqlite+pysqlite:///{tmp_path / 'bypass-hint.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     database_provider = DatabaseProvider(settings)
     control_factory = database_provider.control_session_factory()
     queue = JobQueueService()
@@ -1705,7 +1719,7 @@ def test_bypass_hint_skips_the_hint_fast_path_entirely(tmp_path, monkeypatch):
 def test_worker_run_cli_reclaims_stale_job_before_dispatch(tmp_path):
     database_url = f"sqlite+pysqlite:///{tmp_path / 'worker-reclaim.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     session_factory = make_session_factory_from_settings(settings)
     queue = JobQueueService()
 
@@ -1767,7 +1781,7 @@ def test_worker_run_cli_survives_transient_dispatch_error(tmp_path, monkeypatch)
     keeps polling until the next dispatch succeeds."""
     database_url = f"sqlite+pysqlite:///{tmp_path / 'worker-resilient.db'}"
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     session_factory = make_session_factory_from_settings(settings)
 
     with session_factory.begin() as session:
@@ -1848,7 +1862,7 @@ def test_two_phase_dispatch_returns_none_when_no_job():
     assert result is None
 
 
-def test_repeated_email_sweeps_commit_the_private_audit_once():
+def test_repeated_email_sweeps_commit_the_private_audit_once(monkeypatch):
     """INVERTED by MAIL-02: this used to dispatch the email_delivery Job three
     times and assert the JOB row carried the retry budget (queued, queued,
     failed). That Job is gone -- the budget lives on the outbox row now
@@ -1859,6 +1873,16 @@ def test_repeated_email_sweeps_commit_the_private_audit_once():
     class FailingProvider:
         def send(self, message: OutboundMail) -> None:
             raise MailProviderError("provider echoed recipient@example.com")
+
+    # Every deadline in this test is the delivery service's own: the sweep's
+    # due predicate and the failure backoff read ``mail_delivery.utc_now``, the
+    # reset token's lifetime reads the recovery service's ``now``. The host
+    # clock steps back (NTP, VM resume) and jumps forward (host sleep), so a
+    # test that backdates a row against it, or measures a backoff around a
+    # sweep, is right only while no step lands inside it. Both services read
+    # this one clock instead, and time passes by assignment.
+    clock = [datetime.now(UTC)]
+    monkeypatch.setattr("backend.services.mail_delivery.utc_now", lambda: clock[0])
 
     session_factory = make_session_factory()
     settings = Settings(
@@ -1876,7 +1900,7 @@ def test_repeated_email_sweeps_commit_the_private_audit_once():
             password_hash=CredentialHasher().hash_password("original-password"),
             display_name="Worker email",
             status="active",
-            email_verified_at=datetime.now(UTC),
+            email_verified_at=clock[0],
         )
         session.add(user)
         session.flush()
@@ -1886,6 +1910,9 @@ def test_repeated_email_sweeps_commit_the_private_audit_once():
         credential_hasher=CredentialHasher(),
         public_base_url=settings.public_base_url,
         mail_delivery_service=delivery,
+        # ``now`` is bound when the class is defined, so patching the module's
+        # ``utc_now`` would not reach it.
+        now=lambda: clock[0],
     ).issue_password_reset(
         email="worker-email@example.com",
         delivery="email",
@@ -1900,19 +1927,27 @@ def test_repeated_email_sweeps_commit_the_private_audit_once():
             outbox = session.get(EmailOutbox, issued.outbox_id)
             assert outbox is not None and outbox.status == "failed"
             attempt_counts.append(outbox.attempt_count)
-            if outbox.next_attempt_at is not None:
-                retry_delays.append(
-                    (outbox.next_attempt_at - datetime.now(UTC)).total_seconds()
-                )
-                # Elapse the backoff so the next sweep sees the row as due.
-                # It has to be a PAST timestamp, not NULL: on a failed row
-                # NULL is the terminal marker the due predicate refuses,
-                # which is what bounds the retries at all.
-                outbox.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+            retry_at = outbox.next_attempt_at
+            if retry_at is not None:
+                retry_delays.append((retry_at - clock[0]).total_seconds())
+
+        # Before its deadline, or once the retry budget is spent, another
+        # sweep must not consume another attempt.
+        assert delivery.sweep_due(session_factory=session_factory) == 0
+        with session_factory() as session:
+            outbox = session.get(EmailOutbox, issued.outbox_id)
+            assert outbox is not None
+            assert outbox.attempt_count == attempt_counts[-1]
+
+        if retry_at is not None:
+            # Elapse the backoff so the next sweep sees the row as due. Only a
+            # deadline can make a failed row due: NULL is the terminal marker
+            # the due predicate refuses, which is what bounds the retries at
+            # all.
+            clock[0] = retry_at
 
     assert attempt_counts == [1, 2, 3]
-    assert 29 <= retry_delays[0] <= 30
-    assert 59 <= retry_delays[1] <= 60
+    assert retry_delays == [30.0, 60.0]
     with session_factory() as session:
         outbox = session.get(EmailOutbox, issued.outbox_id)
         events = list(
@@ -2090,7 +2125,7 @@ def test_worker_run_once_sweeps_the_email_outbox(tmp_path, monkeypatch):
     monkeypatch.setenv("DTXWIKI_MAIL_FROM_ADDRESS", "wiki@example.com")
     monkeypatch.setenv("DTXWIKI_SMTP_HOST", "smtp.example.com")
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     session_factory = make_session_factory_from_settings(settings)
     with session_factory.begin() as session:
         user = User(
@@ -2144,7 +2179,7 @@ def test_worker_run_loop_sweeps_the_email_outbox_each_iteration(tmp_path, monkey
     monkeypatch.setenv("DTXWIKI_MAIL_FROM_ADDRESS", "wiki@example.com")
     monkeypatch.setenv("DTXWIKI_SMTP_HOST", "smtp.example.com")
     settings = Settings(database_url=database_url)
-    bootstrap(settings)
+    _prepare_database(database_url)
     session_factory = make_session_factory_from_settings(settings)
     with session_factory.begin() as session:
         user = User(

@@ -176,7 +176,7 @@ def test_direct_publication_supersedes_v1_and_normalizes_all_published_rows(
         assert page.current_published_version_id == v3.version_id
 
 
-def test_epic_migration_normalizes_only_same_page_published_pointer_lineage(
+def test_core_schema_migration_normalizes_only_same_page_published_pointer_lineage(
     page_service,
 ):
     first = _published_page(page_service, slug="migration-lifecycle")
@@ -193,7 +193,7 @@ def test_epic_migration_normalizes_only_same_page_published_pointer_lineage(
     )
     orphan = _published_page(page_service, slug="migration-orphan")
     migration = import_module(
-        "backend.migrations.revision_0002.workspace_schema"
+        "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
     )
 
     with page_service.session_factory.begin() as session:
@@ -348,7 +348,7 @@ def test_migration_preserves_rejected_restartable_draft_after_unrelated_publish(
         assert rejected_row.graph_status == "linear"
 
     migration = import_module(
-        "backend.migrations.revision_0002.workspace_schema"
+        "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
     )
     with page_service.session_factory.begin() as session:
         connection = session.connection()
@@ -962,7 +962,7 @@ def test_history_audit_accepts_supported_current_and_draft_pointer_shapes(
 
         report = audit_context_history(session)
         migration_counts = import_module(
-            "backend.migrations.revision_0002.workspace_schema"
+            "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
         )._context_history_preflight_counts(session.connection())
 
     assert report.violations == ()
@@ -1024,7 +1024,7 @@ def test_history_audit_reports_edit_head_pointer_integrity_violations(page_servi
 
         report = audit_context_history(session)
         migration = import_module(
-            "backend.migrations.revision_0002.workspace_schema"
+            "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
         )
         migration_counts = migration._context_history_preflight_counts(
             session.connection()

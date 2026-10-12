@@ -3,13 +3,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, delete, select, text
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-from backend.migrations.revision_0002.search_schema import (
-    reclassify_search_matches,
+from backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema import (
+    search_schema,
 )
 from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.graph import KnowledgeNodeStat
@@ -25,16 +26,23 @@ from backend.models.workspace import MCPClient, Workspace
 from backend.services.indexing.edge_registry import refresh_co_access_edge_projection
 from backend.services.mcp_chat_service import McpChatService
 from backend.services.trail_analysis import recompute_authority
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 NOW = datetime(2026, 9, 12, 3, 0, tzinfo=UTC)
 
 
-def test_epic1_upgrade_reclassifies_rows_from_the_initial_release(tmp_path: Path):
-    database_url = f"sqlite:///{tmp_path / 'search-match-upgrade.db'}"
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
+    tmp_path: Path, sqlite_templates
+):
+    database_url = sqlite_templates.clone("base_0001", tmp_path / "search-match.db")
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
-    command.upgrade(config, "0001_initial_release")
     engine = create_engine(database_url)
     workspace_id = uuid4()
     client_id = uuid4()
@@ -180,7 +188,7 @@ def test_epic1_upgrade_reclassifies_rows_from_the_initial_release(tmp_path: Path
             },
         )
 
-    command.upgrade(config, "0002_epic1")
+    command.upgrade(config, "efcbcf724889")
 
     with engine.connect() as connection:
         assert connection.execute(
@@ -190,15 +198,17 @@ def test_epic1_upgrade_reclassifies_rows_from_the_initial_release(tmp_path: Path
             ),
             {"chat_id": chat_id.hex},
         ).all() == [("search_match", 1)]
-        assert connection.scalar(
-            text(
-                "SELECT verb FROM mcp_chat_tool_call_artifact "
-                "WHERE id = :edge_id"
-            ),
-            {"edge_id": edge_id.hex},
-        ) == "search_match"
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT verb FROM mcp_chat_tool_call_artifact WHERE id = :edge_id"
+                ),
+                {"edge_id": edge_id.hex},
+            )
+            == "search_match"
+        )
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0002_epic1"
+            "efcbcf724889"
         )
     engine.dispose()
 
@@ -493,12 +503,15 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
                 KnowledgeNodeStat.entity_id == page_a.id,
             )
         ) in {0, 1}
-        assert session.scalar(
-            select(EdgeProjection.id).where(
-                EdgeProjection.workspace_id == workspace.id,
-                EdgeProjection.edge_kind == "co_access",
+        assert (
+            session.scalar(
+                select(EdgeProjection.id).where(
+                    EdgeProjection.workspace_id == workspace.id,
+                    EdgeProjection.edge_kind == "co_access",
+                )
             )
-        ) is not None
+            is not None
+        )
         workspace_id = workspace.id
         page_a_id = page_a.id
         finding_id = finding.id
@@ -507,18 +520,24 @@ def test_reclassification_refreshes_authority_and_dismisses_invalid_hot_path(
 
     assert result["dismissed_hot_paths"] == 1
     with session_factory() as session:
-        assert session.scalar(
-            select(EdgeProjection.id).where(
-                EdgeProjection.workspace_id == workspace_id,
-                EdgeProjection.edge_kind == "co_access",
+        assert (
+            session.scalar(
+                select(EdgeProjection.id).where(
+                    EdgeProjection.workspace_id == workspace_id,
+                    EdgeProjection.edge_kind == "co_access",
+                )
             )
-        ) is None
-        assert session.scalar(
-            select(KnowledgeNodeStat.in_degree).where(
-                KnowledgeNodeStat.workspace_id == workspace_id,
-                KnowledgeNodeStat.entity_id == page_a_id,
+            is None
+        )
+        assert (
+            session.scalar(
+                select(KnowledgeNodeStat.in_degree).where(
+                    KnowledgeNodeStat.workspace_id == workspace_id,
+                    KnowledgeNodeStat.entity_id == page_a_id,
+                )
             )
-        ) == 0
+            == 0
+        )
         repaired_finding = session.get(LintFinding, finding_id)
         assert repaired_finding.status == "dismissed"
         assert repaired_finding.resolved_at == NOW
@@ -602,7 +621,7 @@ def _add_call(
 def _run_reclassification(session_factory):
     engine = session_factory.kw["bind"]
     with engine.begin() as connection:
-        return reclassify_search_matches(connection, now=NOW)
+        return search_schema.reclassify_search_matches(connection, now=NOW)
 
 
 def _rollups(session, chat_id: UUID):

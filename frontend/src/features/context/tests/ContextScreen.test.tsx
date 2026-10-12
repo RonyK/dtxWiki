@@ -494,6 +494,7 @@ describe("ContextScreen", () => {
   // its own budget over the same fixture.
   it("renders the tree and hides the Details rail before any selection", async () => {
     await renderDecisionLog();
+    expect(document.title).toBe("dtxWiki");
     expect(screen.getByText("2 items")).toHaveTextContent(/^2\s*items$/);
     expect(
       screen.getByRole("treeitem", { name: "Decision Log" }),
@@ -871,6 +872,7 @@ describe("ContextScreen", () => {
     );
 
     expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Decision Log - dtxWiki"));
     const editAction = screen.getByRole("link", { name: /^Edit$/ });
     const moreAction = screen.getByRole("button", {
       name: "More page actions",

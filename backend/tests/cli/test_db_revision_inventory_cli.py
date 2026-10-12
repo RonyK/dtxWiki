@@ -15,7 +15,7 @@ from backend.services.ops import db_revision_inventory as inventory
 from backend.services.ops import read_only_database
 
 
-def _db(path: Path, revisions=("0001_initial_release",)) -> None:
+def _db(path: Path, revisions=("bd62193d5cf6",)) -> None:
     connection = sqlite3.connect(path)
     connection.execute(
         "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
@@ -90,14 +90,14 @@ def test_sqlite_probe_does_not_create_sidecars_or_change_bytes_or_mtime(tmp_path
     assert _fingerprint(db) == before
     payload = json.loads(result.stdout)
     assert payload["code"] == {
-        "alembic_heads": ["0002_epic1"],
+        "alembic_heads": ["efcbcf724889"],
         "known_alternate_revisions": [
             "0005_library_multiformat_conversion",
             "0012_graph_view_observations",
         ],
     }
     assert payload["targets"][0]["read_only"]["verified"] is True
-    assert payload["targets"][0]["alembic"]["revisions"] == ["0001_initial_release"]
+    assert payload["targets"][0]["alembic"]["revisions"] == ["bd62193d5cf6"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="question mark is not a Windows path char")
@@ -113,7 +113,7 @@ def test_sqlite_path_with_url_delimiter_is_not_reparsed(tmp_path: Path):
     assert result.exit_code == 0, result.output
     target = json.loads(result.stdout)["targets"][0]
     assert target["locator"]["path"] == str(database.absolute())
-    assert target["alembic"]["revisions"] == ["0001_initial_release"]
+    assert target["alembic"]["revisions"] == ["bd62193d5cf6"]
 
 
 def test_missing_sqlite_is_not_created(tmp_path: Path):
@@ -143,7 +143,17 @@ def test_existing_unversioned_sqlite_is_inconclusive_and_unchanged(tmp_path: Pat
     assert _fingerprint(db) == before
 
 
-def test_exclusive_locked_sqlite_fails_bounded_and_safely(tmp_path: Path):
+def test_exclusive_locked_sqlite_fails_bounded_and_safely(tmp_path: Path, monkeypatch):
+    from backend.services.ops import read_only_database
+
+    # The lock below is real and held throughout; only the busy-wait bound the
+    # probe would otherwise sit out (5s) is shortened.
+    probe_sqlite_path = read_only_database._probe_sqlite_path
+
+    def short_wait(path, **kwargs):
+        return probe_sqlite_path(path, **{**kwargs, "timeout_seconds": 0.2})
+
+    monkeypatch.setattr(read_only_database, "_probe_sqlite_path", short_wait)
     db = tmp_path / "locked.sqlite"
     _db(db)
     locker = sqlite3.connect(db)
@@ -198,7 +208,7 @@ def test_old_schema_stamped_current_0002_is_a_nonmutating_conflict(
     tmp_path: Path,
 ):
     database = tmp_path / "old-0002.sqlite"
-    _db(database, ("0002_epic1",))
+    _db(database, ("efcbcf724889",))
     before = _fingerprint(database)
 
     result = CliRunner().invoke(
@@ -254,7 +264,7 @@ def test_wal_visible_stamp_without_sidecar_change(tmp_path: Path):
     writer.execute("PRAGMA journal_mode=WAL")
     writer.execute("PRAGMA wal_autocheckpoint=0")
     writer.execute("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)")
-    writer.execute("INSERT INTO alembic_version VALUES ('0001_initial_release')")
+    writer.execute("INSERT INTO alembic_version VALUES ('bd62193d5cf6')")
     writer.commit()
     sidecars = [Path(f"{db}-wal"), Path(f"{db}-shm")]
     before_names = sorted(path.name for path in tmp_path.iterdir())
@@ -268,7 +278,7 @@ def test_wal_visible_stamp_without_sidecar_change(tmp_path: Path):
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["targets"][0]["alembic"]["revisions"] == [
-        "0001_initial_release"
+        "bd62193d5cf6"
     ]
     # WAL readers necessarily coordinate through the existing -shm mapping;
     # its transient lock bytes or mtime may change. Durable DB/WAL content and
@@ -286,10 +296,8 @@ def test_wal_probe_pins_one_read_snapshot(tmp_path: Path, monkeypatch):
     writer = sqlite3.connect(db)
     writer.execute("PRAGMA journal_mode=WAL")
     writer.execute("PRAGMA wal_autocheckpoint=0")
-    writer.execute(
-        "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
-    )
-    writer.execute("INSERT INTO alembic_version VALUES ('0001_initial_release')")
+    writer.execute("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)")
+    writer.execute("INSERT INTO alembic_version VALUES ('bd62193d5cf6')")
     writer.execute("CREATE TABLE snapshot_probe (value INTEGER NOT NULL)")
     writer.execute("INSERT INTO snapshot_probe VALUES (1)")
     writer.commit()
@@ -327,7 +335,7 @@ def test_closed_wal_database_does_not_create_missing_sidecars(tmp_path: Path):
     connection.execute(
         "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
     )
-    connection.execute("INSERT INTO alembic_version VALUES ('0001_initial_release')")
+    connection.execute("INSERT INTO alembic_version VALUES ('bd62193d5cf6')")
     connection.commit()
     connection.close()
     before = sorted(path.name for path in tmp_path.iterdir())
@@ -436,7 +444,7 @@ def test_backup_manifest_is_bound_to_its_integrity_checked_database(tmp_path: Pa
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -464,7 +472,7 @@ def test_backup_manifest_is_bound_to_its_integrity_checked_database(tmp_path: Pa
     assert evidence["integrity_verified"] is True
     assert evidence["database_checkpoint_included"] is True
     assert evidence["database_stamp_verified"] is True
-    assert evidence["database_revisions"] == ["0001_initial_release"]
+    assert evidence["database_revisions"] == ["bd62193d5cf6"]
 
 
 def test_manifest_checkpoint_hashes_once_before_inspection(tmp_path: Path, monkeypatch):
@@ -477,7 +485,7 @@ def test_manifest_checkpoint_hashes_once_before_inspection(tmp_path: Path, monke
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -535,7 +543,7 @@ def test_manifest_checkpoint_blocks_normal_delete_writer_during_inspection(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -588,7 +596,7 @@ def test_manifest_checkpoint_blocks_normal_delete_writer_during_inspection(
     assert _fingerprint(database) == before
     assert not Path(f"{database}-journal").exists()
     evidence = json.loads(result.stdout)["manifest_evidence"][0]
-    assert evidence["database_revisions"] == ["0001_initial_release"]
+    assert evidence["database_revisions"] == ["bd62193d5cf6"]
     assert evidence["database_stamp_verified"] is True
 
 
@@ -604,7 +612,7 @@ def test_manifest_checkpoint_digest_failure_is_unsafe_and_sanitized(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -644,9 +652,7 @@ def test_manifest_checkpoint_digest_failure_is_unsafe_and_sanitized(
     assert evidence["integrity_verified"] is True
     assert evidence["database_stamp_verified"] is False
     assert evidence["consistency"] == "manifest_snapshot_incomplete"
-    assert evidence["errors"] == [
-        "manifest_database_checkpoint_digest_unverifiable"
-    ]
+    assert evidence["errors"] == ["manifest_database_checkpoint_digest_unverifiable"]
     assert "sha256" not in result.output.lower()
 
 
@@ -662,7 +668,7 @@ def test_manifest_unsafe_failure_survives_connection_cleanup_failure(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -772,7 +778,7 @@ def test_schema_v1_manifest_checkpoint_rejects_any_adjacent_sidecar(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -833,7 +839,7 @@ def test_manifest_checkpoint_rechecks_sidecars_inside_read_transaction(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -886,7 +892,7 @@ def test_manifest_checkpoint_rechecks_sidecars_when_probe_fails(
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -938,7 +944,7 @@ def test_manifest_directory_with_url_delimiter_probes_verified_file(tmp_path: Pa
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -965,7 +971,7 @@ def test_manifest_directory_with_url_delimiter_probes_verified_file(tmp_path: Pa
     assert result.exit_code == 0, result.output
     evidence = json.loads(result.stdout)["manifest_evidence"][0]
     assert evidence["database_stamp_verified"] is True
-    assert evidence["database_revisions"] == ["0001_initial_release"]
+    assert evidence["database_revisions"] == ["bd62193d5cf6"]
 
 
 def test_manifest_database_invalid_revision_is_unsafe_and_sanitized(tmp_path: Path):
@@ -1012,7 +1018,7 @@ def test_hash_valid_wal_main_only_manifest_is_inconclusive(tmp_path: Path):
     connection.execute(
         "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
     )
-    connection.execute("INSERT INTO alembic_version VALUES ('0001_initial_release')")
+    connection.execute("INSERT INTO alembic_version VALUES ('bd62193d5cf6')")
     connection.commit()
     connection.close()
     manifest = backup / "manifest.json"
@@ -1020,7 +1026,7 @@ def test_hash_valid_wal_main_only_manifest_is_inconclusive(tmp_path: Path):
         json.dumps(
             {
                 "schema": 1,
-                "alembic_revision": "0001_initial_release",
+                "alembic_revision": "bd62193d5cf6",
                 "files": [
                     {
                         "name": "dtxwiki.sqlite",
@@ -1042,9 +1048,7 @@ def test_hash_valid_wal_main_only_manifest_is_inconclusive(tmp_path: Path):
     evidence = json.loads(result.stdout)["manifest_evidence"][0]
     assert evidence["database_stamp_verified"] is False
     assert evidence["consistency"] == "manifest_snapshot_incomplete"
-    assert evidence["errors"] == [
-        "manifest_database_wal_snapshot_unverifiable"
-    ]
+    assert evidence["errors"] == ["manifest_database_wal_snapshot_unverifiable"]
     assert sorted(path.name for path in backup.iterdir()) == before
 
 
@@ -1063,12 +1067,12 @@ def test_schema_v1_manifest_cannot_launder_a_wal_only_revision(
         writer.execute(
             "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
         )
-        writer.execute("INSERT INTO alembic_version VALUES ('0001_initial_release')")
+        writer.execute("INSERT INTO alembic_version VALUES ('bd62193d5cf6')")
         writer.commit()
         writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
         main_sha256 = hashlib.sha256(database.read_bytes()).hexdigest()
-        writer.execute("UPDATE alembic_version SET version_num='0002_epic1'")
+        writer.execute("UPDATE alembic_version SET version_num='efcbcf724889'")
         writer.commit()
         assert hashlib.sha256(database.read_bytes()).hexdigest() == main_sha256
         assert database.read_bytes()[18:20] == b"\x02\x02"
@@ -1098,7 +1102,7 @@ def test_schema_v1_manifest_cannot_launder_a_wal_only_revision(
             json.dumps(
                 {
                     "schema": 1,
-                    "alembic_revision": "0002_epic1",
+                    "alembic_revision": "efcbcf724889",
                     "files": files,
                 }
             ),
@@ -1134,9 +1138,7 @@ def test_schema_v1_manifest_cannot_launder_a_wal_only_revision(
         assert evidence["database_stamp_verified"] is False
         assert evidence["database_revisions"] == []
         assert evidence["consistency"] == "manifest_snapshot_incomplete"
-        assert evidence["errors"] == [
-            "manifest_database_wal_snapshot_unverifiable"
-        ]
+        assert evidence["errors"] == ["manifest_database_wal_snapshot_unverifiable"]
         assert evidence["historical_application"] == "unknown"
         assert sorted(path.name for path in backup.iterdir()) == before_names
         assert {

@@ -1,4 +1,4 @@
-"""Read-only database operator commands."""
+"""Database revision evidence and explicit compatibility conversion commands."""
 
 from __future__ import annotations
 
@@ -25,11 +25,37 @@ from backend.services.ops.filesystem_backup_evidence import (
 from backend.services.ops.read_only_database import SqlAlchemyRevisionInventoryProbe
 
 db_app = typer.Typer(
-    help="Inspect database revision evidence without applying migrations."
+    help="Inspect database revisions or explicitly convert legacy revision IDs."
 )
 
 _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
+
+
+@db_app.command(name="rename-revisions")
+def rename_revisions(
+    apply: bool = typer.Option(
+        False, "--apply", help="Apply the previewed ID conversion; back up first."
+    ),
+) -> None:
+    """Preview the configured DB's legacy ID conversion without replaying DDL."""
+
+    from backend.services.ops.revision_rename import (
+        RevisionRenameError,
+        rename_database_revisions,
+    )
+
+    try:
+        result = rename_database_revisions(Settings().database_url, apply=apply)
+    except RevisionRenameError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from None
+    except Exception:
+        # Driver/configuration exceptions can contain credential-bearing URLs.
+        typer.echo("revision_rename_failed: database/configuration error", err=True)
+        raise typer.Exit(1) from None
+    status = "applied" if result.changed else "unchanged" if apply else "preview"
+    typer.echo(f"{status}: {result.old_revision} -> {result.new_revision}")
 
 
 @db_app.command(name="revision-inventory")

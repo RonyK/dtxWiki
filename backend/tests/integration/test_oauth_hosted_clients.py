@@ -17,6 +17,7 @@ from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
 from backend.services.oauth_service import challenge_s256, redirect_uri_matches
 from backend.tests.conftest import authenticate_test_client
+from backend.tests.integration.test_oauth_mcp_http import module_scoped_page_service
 
 pytestmark = pytest.mark.oauth_flow
 
@@ -25,8 +26,8 @@ CLAUDE_REDIRECT = "https://claude.ai/api/mcp/auth_callback"
 CHATGPT_REDIRECT = "https://chatgpt.com/connector/oauth/hosted-client-test"
 
 
-def make_client(page_service, *, public_base_url: str = ISSUER) -> TestClient:
-    client = TestClient(
+def make_app_client(page_service, *, public_base_url: str = ISSUER) -> TestClient:
+    return TestClient(
         create_app(
             settings=Settings(
                 database_url="sqlite+pysqlite:///:memory:",
@@ -38,8 +39,24 @@ def make_client(page_service, *, public_base_url: str = ISSUER) -> TestClient:
             page_service=page_service,
         )
     )
+
+
+def make_client(page_service, *, public_base_url: str = ISSUER) -> TestClient:
+    client = make_app_client(page_service, public_base_url=public_base_url)
     authenticate_test_client(client)
     return client
+
+
+@pytest.fixture(scope="module")
+def shared_client(_empty_sqlite_schema):
+    """One signed-in client for the redirect-matching cases.
+
+    They register clients under their own names and redirects, so no case can
+    inherit another's consent, and none counts rows or audit events.
+    """
+
+    with module_scoped_page_service(_empty_sqlite_schema) as page_service:
+        yield make_client(page_service)
 
 
 def register_client(
@@ -177,13 +194,20 @@ def listed_tool_names(client: TestClient, access_token: str) -> set[str]:
     ],
 )
 def test_dcr_and_code_exchange_accept_hosted_and_loopback_redirects(
-    page_service,
+    shared_client,
+    request,
     registered_redirect: str,
     runtime_redirect: str,
 ):
-    client = make_client(page_service)
+    client = shared_client
 
-    registration = register_client(client, registered_redirect)
+    # A distinct registration identity per case, so consent granted to one
+    # case cannot be inherited by another.
+    registration = register_client(
+        client,
+        registered_redirect,
+        name=f"Hosted OAuth {request.node.callspec.id}",
+    )
     assert registration["redirect_uris"] == [registered_redirect]
 
     tokens = authorize_and_exchange(
@@ -226,10 +250,10 @@ UNSAFE_REDIRECT_URIS = [
 
 @pytest.mark.parametrize("redirect_uri", UNSAFE_REDIRECT_URIS)
 def test_dcr_and_runtime_matcher_reject_the_same_unsafe_redirects(
-    page_service,
+    shared_client,
     redirect_uri: str,
 ):
-    client = make_client(page_service)
+    client = shared_client
 
     registration = client.post(
         "/oauth/register",
@@ -248,9 +272,9 @@ def test_dcr_and_runtime_matcher_reject_the_same_unsafe_redirects(
 
 
 def test_runtime_loopback_port_relaxation_cannot_bypass_userinfo_rejection(
-    page_service,
+    shared_client,
 ):
-    client = make_client(page_service)
+    client = shared_client
     registration = register_client(
         client,
         "http://127.0.0.1:49152/callback",
@@ -278,8 +302,8 @@ def test_runtime_loopback_port_relaxation_cannot_bypass_userinfo_rejection(
     ) is False
 
 
-def test_runtime_https_redirect_port_must_match_exactly(page_service):
-    client = make_client(page_service)
+def test_runtime_https_redirect_port_must_match_exactly(shared_client):
+    client = shared_client
     registration = register_client(
         client,
         "https://claude.ai:443/api/mcp/auth_callback",
@@ -322,7 +346,8 @@ def test_protected_resource_metadata_preserves_public_base_url_path(
     public_base_url: str,
     expected_resource: str,
 ):
-    client = make_client(page_service, public_base_url=public_base_url)
+    # The metadata route is unauthenticated: no sign-in needed.
+    client = make_app_client(page_service, public_base_url=public_base_url)
 
     response = client.get("/.well-known/oauth-protected-resource")
 

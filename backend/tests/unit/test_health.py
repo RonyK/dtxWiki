@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from functools import cache
 from importlib.metadata import version
 from pathlib import Path
 
@@ -38,18 +39,7 @@ def test_extra_lifespan_composes_with_mcp_lifespan(tmp_path):
     assert events == ["overlay-start", "overlay-stop"]
 
 
-def test_live_root_path_200(tmp_path):
-    client = TestClient(create_app(settings=_settings(tmp_path)))
-
-    response = client.get("/health/live")
-
-    assert response.status_code == 200
-    # The installed distribution's version, read independently of the app's
-    # settings plumbing, so a release bump never has to edit this test.
-    assert response.json() == {"status": "alive", "version": version("dtxwiki")}
-
-
-def test_live_no_db_call(monkeypatch, tmp_path):
+def test_live_root_path_200_without_a_database_check(monkeypatch, tmp_path):
     def fail_if_called(_session_factory):
         raise AssertionError("liveness must not check DB")
 
@@ -59,6 +49,9 @@ def test_live_no_db_call(monkeypatch, tmp_path):
     response = client.get("/health/live")
 
     assert response.status_code == 200
+    # The installed distribution's version, read independently of the app's
+    # settings plumbing, so a release bump never has to edit this test.
+    assert response.json() == {"status": "alive", "version": version("dtxwiki")}
 
 
 def test_ready_root_path_happy_200(tmp_path):
@@ -152,6 +145,9 @@ def test_ready_app_version_unsynced_503(tmp_path):
     assert response.status_code == 503
     assert response.json()["status"] == "unhealthy"
     assert response.json()["components"]["app_version"] == "unsynced"
+    # A readiness answer is JSON, never the SPA index page.
+    assert response.headers["content-type"].startswith("application/json")
+    assert "text/html" not in response.headers["content-type"]
 
 
 def test_ready_app_version_drift_503(tmp_path):
@@ -237,16 +233,6 @@ def test_ready_response_shape_matches_adr_a7(tmp_path):
     assert set(body["components"]) == {"db", "app_version", "mcp", "oauth_jwk"}
 
 
-def test_ready_does_not_return_index_html(tmp_path):
-    client = TestClient(create_app(settings=_settings(tmp_path)))
-
-    response = client.get("/health/ready")
-
-    assert response.status_code == 503
-    assert response.headers["content-type"].startswith("application/json")
-    assert "text/html" not in response.headers["content-type"]
-
-
 def _settings(tmp_path: Path, **overrides) -> Settings:
     values = {
         "database_url": f"sqlite+pysqlite:///{tmp_path / 'ready.sqlite'}",
@@ -257,6 +243,7 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
     return Settings(**values)
 
 
+@cache
 def _private_key_pem() -> str:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     return key.private_bytes(

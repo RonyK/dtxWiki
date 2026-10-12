@@ -3787,7 +3787,7 @@ def test_actor_bound_detail_and_export_redact_unlinked_error_calls(
             ),
         )
         chat = None
-        for status, tool_name, id_field, target_id, marker in specs:
+        for index, (status, tool_name, id_field, target_id, marker) in enumerate(specs):
             call = _tool_call(
                 client_id=client.id,
                 workspace_id=workspace.id,
@@ -3803,6 +3803,11 @@ def test_actor_bound_detail_and_export_redact_unlinked_error_calls(
             )
             call.result_status = status
             call.result_summary = f"result {marker}"
+            # The timeline is ordered by start time, and the assertions below
+            # read it position by position against ``specs``. Left to the
+            # column default each call would take the host clock at its INSERT,
+            # and a step back between two of them reorders the rows.
+            call.started_at = datetime(2026, 1, 1, 0, 0, index, tzinfo=UTC)
             session.add(call)
             session.flush()
             chat = service.upsert_session_from_tool_call(

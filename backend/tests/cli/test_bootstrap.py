@@ -6,32 +6,27 @@ from backend.app.bootstrap import bootstrap
 from backend.app.db import make_engine, make_session_factory
 from backend.app.settings import Settings
 from backend.models.workspace import Workspace
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 
 
 def test_bootstrap_creates_sqlite_db_without_a_global_workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "dtxwiki"))
     settings = Settings()
 
-    bootstrap(settings)
-
-    assert (tmp_path / "dtxwiki" / "data" / "dtxwiki.sqlite").is_file()
+    database = tmp_path / "dtxwiki" / "data" / "dtxwiki.sqlite"
     factory = make_session_factory(make_engine(settings.database_url))
-    with factory.begin() as session:
-        workspaces = session.scalars(select(Workspace)).all()
-    assert workspaces == []
 
-
-def test_bootstrap_is_idempotent(tmp_path, monkeypatch):
-    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "dtxwiki"))
-    settings = Settings()
+    def workspaces():
+        with factory.begin() as session:
+            return session.scalars(select(Workspace)).all()
 
     bootstrap(settings)
-    bootstrap(settings)
+    assert database.is_file()
+    assert workspaces() == []
 
-    factory = make_session_factory(make_engine(settings.database_url))
-    with factory.begin() as session:
-        workspaces = session.scalars(select(Workspace)).all()
-    assert workspaces == []
+    # A second bootstrap on the migrated database is a no-op.
+    bootstrap(settings)
+    assert workspaces() == []
 
 
 def test_bootstrap_disabled_verifies_instead_of_creating_anything(
@@ -53,7 +48,7 @@ def test_bootstrap_disabled_accepts_a_database_the_operator_bootstrapped(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "dtxwiki"))
-    bootstrap(Settings())
+    copy_migrated_sqlite(tmp_path / "dtxwiki" / "data" / "dtxwiki.sqlite")
     calls = []
     monkeypatch.setattr(
         bootstrap_module, "run_alembic_upgrade", lambda url: calls.append(url)
@@ -113,10 +108,21 @@ def test_bootstrap_accepts_real_session_secret_for_team_mode(tmp_path, monkeypat
         app_mode="team",
         session_secret="a-real-secret-that-is-not-default",
     )
+    synced = []
+    dirs_ensured = []
+    monkeypatch.setattr(
+        bootstrap_module,
+        "ensure_app_version_synced",
+        lambda received, app=None: synced.append((received, app)),
+    )
+    monkeypatch.setattr(
+        bootstrap_module, "ensure_data_dirs", lambda: dirs_ensured.append(True)
+    )
 
     bootstrap(settings)
 
-    assert (tmp_path / "dtxwiki" / "data" / "dtxwiki.sqlite").is_file()
+    assert dirs_ensured == [True]
+    assert synced == [(settings, None)]
 
 
 def test_a_served_app_holds_the_runtime_lock_until_its_lifespan_ends(
@@ -130,6 +136,7 @@ def test_a_served_app_holds_the_runtime_lock_until_its_lifespan_ends(
 
     data_dir = tmp_path / "dtxwiki"
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(data_dir))
+    copy_migrated_sqlite(data_dir / "data" / "dtxwiki.sqlite")
 
     app = create_app(settings=Settings(), bootstrap_on_startup=True)
 
@@ -183,7 +190,19 @@ def test_bootstrap_without_an_app_takes_no_runtime_lock(tmp_path, monkeypatch):
 
     data_dir = tmp_path / "dtxwiki"
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(data_dir))
+    settings = Settings()
+    synced = []
+    dirs_ensured = []
+    monkeypatch.setattr(
+        bootstrap_module,
+        "ensure_app_version_synced",
+        lambda received, app=None: synced.append((received, app)),
+    )
+    monkeypatch.setattr(
+        bootstrap_module, "ensure_data_dirs", lambda: dirs_ensured.append(True)
+    )
     with runtime_lock.acquire_exclusive(data_dir):
-        bootstrap(Settings())
+        bootstrap(settings)
 
-    assert (data_dir / "data" / "dtxwiki.sqlite").is_file()
+    assert dirs_ensured == [True]
+    assert synced == [(settings, None)]

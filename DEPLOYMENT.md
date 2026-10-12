@@ -823,8 +823,9 @@ ceiling ∩ desired ∩ granted의 교집합이라 동기화 지연이나 드리
 `credential_replica.sync_failed`가 기록된다. 성공적인 분 단위 reconcile은 Activity를 채우지 않도록
 숨김 처리되며, 종료 실패만 workspace job 목록과 owner 실패 메일에 노출된다.
 
-등록·연결 추가·회전의 구체적인 절차는 [README.md](README.md)의 인증된 MCP HTTP endpoint와
-팀원 PC 연결 안내를 따른다.
+서버의 dtxWiki CLI에서 `dtxwiki mcp doctor --http https://<host>/mcp`로 endpoint와
+인증 metadata를 점검한다. 팀원은 native client 설정 또는 위의 `mcp register-http`
+명령으로 연결하고, Settings에서 발급한 PAT 또는 OAuth 동의를 사용한다.
 
 실제 DB 물리 분리는 이 릴리스에 포함되지 않는다.
 
@@ -868,92 +869,200 @@ endpoint를 사용한다.
 | /health/ready 503 oauth_jwk=ephemeral_unsafe | JWT PEM path 가 비어있거나 invalid | step 3 재수행 |
 | /health/ready 503 app_version=unsynced | bootstrap/migration 미수행 | prod env를 source하고 `dtxwiki bootstrap` 실행 후 재시작 |
 | Worker unit 즉시 종료 | `--idle-exit-after 0` 사용 | dtxwiki-worker.service 의 ExecStart 점검 |
-| bootstrap/alembic 이 `migration_preflight_refused` 로 중단 | DB stamp 가 자기 schema 를 설명하지 못함(폐기된 `0003`–`0015` stamp, laundered `0002_epic1`, stamp 없는 완성 schema, 손상된 stamp) | 아래 "Blocked database 복구" 절차 수행. `alembic stamp` 로 덮어쓰지 않는다 |
+| bootstrap/alembic 이 `migration_preflight_refused` 로 중단 | DB revision 기록과 실제 스키마가 일치하지 않거나, 기록을 읽고 검증할 수 없음 | 아래 "Blocked database 복구" 절차 수행. `alembic stamp` 로 덮어쓰지 않는다 |
 | refusal 메시지가 `unversioned_populated` | table 은 있는데 stamp 가 없음 — 외부 database 를 가리켰거나, 공유 PostgreSQL schema 이거나, 부분 복원된 backup | `dtxwiki db revision-inventory` 로 정체를 확인한다. dtxWiki database 가 아니면 `DTXWIKI_DATABASE_URL` 을 고친다. 맞다면 backup 후 재구축한다. 공유 schema 는 operator 가 검증된 revision 으로 stamp 해야 한다 |
 | refusal 메시지가 `partial_schema` | migration 이 중단되었거나 backup 이 부분만 복원됨 | backup 에서 전체 복원하거나, 새 database 를 만들고 `dtxwiki migrate-data` 로 이관한다 |
 | refusal 메시지가 `stamp_marker_conflict` | stamp 가 자기 schema 를 설명하지 못함(laundered stamp, `alembic_version` 이 삭제된 완성 schema) | backup 후 재구축한다. blind `alembic stamp` 는 Alembic 이 양방향으로 거부한다 |
 | `dtxwiki serve` 가 "bootstrap 이 필요하다"며 시작을 거부 | `DTXWIKI_AUTO_BOOTSTRAP=false` 에서 DB 가 최신 revision 이 아님 | 서비스를 멈추고 backup 한 뒤 `sudo dtxwiki bootstrap` 을 실행하고 다시 시작한다 |
 | `dtxwiki update`/`rollback`/`migrate-data` 가 "stop dtxWiki (server and worker) first" 로 거부 | server 또는 worker 가 runtime lock 을 쥐고 있음 | `sudo systemctl stop dtxwiki-worker dtxwiki`(Docker: `docker compose stop app worker`) 후 다시 실행 |
 | refusal 메시지가 `invalid_alembic_revision` / `probe_error` | `alembic_version` 값이 revision 식별자가 아니거나, file 이 SQLite database 가 아니거나 읽을 수 없음 | file 경로와 권한을 확인하고 backup 에서 복원한다. preflight 는 이 file 을 열어 쓰지 않았으므로 원본 그대로다 |
-| `dtxwiki migrate-data` 가 `stamp/schema evidence is ...` 로 거부 | source 또는 target 이 `ready` 가 아님 | 양쪽 모두 `ready` 가 될 때까지 rebuild 후 재실행 |
+| `dtxwiki migrate-data` 가 `stamp/schema evidence is ...` 로 거부 | source 또는 target이 `ready`가 아님 | 원인을 확인하고 복구한 뒤, 양쪽 모두 `ready`인 상태에서 재실행 |
 
-## Blocked database 복구
+## DB Migration — 0.1.2 이후
 
-모든 migration 진입점(bootstrap, 직접 `alembic upgrade`, `dtxwiki migrate-data`)은
-동일한 read-only preflight 를 거쳐 세 가지 verdict 중 하나를 받는다.
+0.1.2부터 DB migration은 **릴리스 그룹**, **revision ID**, **변경 내용 이름**을 구분해
+관리합니다. 이 개편은 migration의 식별자와 파일 배치를 정리한 것으로, 테이블 변경이나
+데이터 변환을 수행하는 새로운 revision을 추가하지 않았습니다. 현재 배포본에는 아래 두
+revision이 있으며, 최신 DB 스키마를 나타내는 head는 `efcbcf724889`입니다.
 
-| Verdict | 근거 | 동작 |
-| --- | --- | --- |
-| `fresh` | database file 이 아직 없거나(`database_absent`), 존재하지만 자기 table 도 view 도 하나도 없음이 증명됨(`proven_empty`) | base → head 로 migration |
-| `ready` | 단일 stamp 가 자기 schema 를 증명함(`0001_initial_release` 또는 `0002_epic1`) | head 까지 migration, 이미 head 면 skip |
-| `blocked` | 그 외 전부 — stamp/schema 불일치, 폐기된 `0003`–`0015`, 손상되거나 읽을 수 없는 stamp(`invalid_alembic_revision`, `probe_error`), multiple heads, stamp 없는 완성/부분 schema, 그리고 **table 은 있으나 유효한 stamp 가 없는 모든 database**(`unversioned_populated`) | 거부. 메시지에 `migration_preflight_refused` 와 verdict 세부값 포함 |
+```text
+base → bd62193d5cf6 (initial_schema) → efcbcf724889 (core_schema, head)
+```
 
-stamp 가 없다는 사실만으로는 fresh install 의 근거가 되지 않는다. 근거는 "비어 있음"
-이다. 자기 table 과 view 가 하나도 없는 database 만 adopt 되어 in-place migration 된다.
-table 이 이미 있는데 stamp 가 없는 database — 외부 SQLite file, 부분 복원된 backup,
-다른 application 과 공유하는 PostgreSQL schema — 는 `blocked` 이며, 이를 migration 하면
-재시작마다 남의 data 위에 dtxWiki schema 를 덮어쓰게 된다. 공유 PostgreSQL schema 는
-operator 가 검증된 revision 으로 직접 stamp 한 뒤에야 migration 대상이 된다.
+`initial_schema`는 DB의 기본 테이블을 생성하고, `core_schema`는 workspace,
+identity/access, Context, Library, 검색, 작업 처리와 tenancy 제약을 포함한 현재
+스키마로 올립니다. 새 DB를 설치하면 두 revision을 순서대로 적용합니다. 이후 DB 변경은
+이 head 뒤에 새로운 revision을 연결합니다.
 
-Preflight 는 application engine 의 `journal_mode=WAL` 설정 없이 DB 를 연다. 따라서
-거부된 database 는 byte 단위로 그대로 남는다 — 거부한 파일을 WAL 로 변환하지 않는다.
-아직 존재하지 않는 database file 은 열지 않은 채로 판정하므로, preflight 가 검사 대상
-file 을 새로 만들어 두는 일도 없다.
+### 이전 DB의 revision ID 변환
 
-폐기된 `0003`–`0011` stamp 에서 in-place upgrade 하는 경로는 **존재하지 않으며**, 이
-release 에는 converter 도 포함되지 않는다. `blocked` database 는 변환이 아니라 backup 후
-재구축한다.
+0.1.2 이전 형식의 revision ID가 DB에 기록되어 있으면,
+새 버전을 시작하기 전에 `dtxwiki db rename-revisions`로 revision ID를 명시적으로
+변환해야 합니다. 이 명령은 실제 스키마가 지원되는 상태인지 검사한 뒤 revision 기록만
+변경하며, 테이블 변경이나 데이터 변환을 다시 실행하지 않습니다. 지원되지 않는 이전
+스키마는 변환을 거부합니다.
 
-1. backend와 worker를 정지하고 MCP client가 `/mcp`에서 연결 해제됐는지 확인한다.
-2. `-wal`/`-shm` sidecar 를 포함한 data directory 전체를
-   `~/.dtxwiki/backups/pre-rebuild-<date>/` 로 backup 하고 복원 검증한다.
-3. `dtxwiki db revision-inventory` 로 read-only evidence 를 수집해 backup 과 함께 보관한다.
-4. 기존 database 를 옮겨 두고 bootstrap 이 `0001_initial_release -> 0002_epic1` 로
-   새 database 를 만들게 한다.
-5. 양쪽이 모두 `ready` 일 때만 `dtxwiki migrate-data` 로 user data 를 이관한다. laundered
-   stamp 는 새 backend 로 복사되지 않고 precheck 에서 거부된다.
-
-### 폐기된 `0003`–`0015` stamp 인 기존 배포본 (데이터 이관 불가)
-
-**5 단계는 이 경우에 적용되지 않는다.** `backend/scripts/migrate_data.py` 는 source 의
-preflight verdict 가 `ready` 일 것을 요구하는데, `0003`–`0015` stamp 는 정의상 영구히
-`blocked` 이고 `ready` 로 바뀔 방법이 없다. converter 도 이 release 에 없다. 따라서:
-
-> 이 release 에는 폐기된 stamp 를 쓰는 기존 배포본의 **user data 를 새 database 로
-> 옮기는 수단이 하나도 없다.** `dtxwiki migrate-data` 도, in-place upgrade 도, 자동
-> 변환도 없다.
-
-위 1–4 단계를 그대로 따르면 4 단계에서 기존 database 를 옮긴 뒤 5 단계에서 거부당한다.
-그러므로 **1 단계를 시작하기 전에** 아래를 결정한다.
-
-| 상황 | 조치 |
-| --- | --- |
-| data 보존 불필요 (staging, 테스트 인스턴스, 폐기 예정 배포본) | 1–4 단계만 수행한다. 5 단계는 건너뛴다. 새 database 는 빈 상태로 시작한다 |
-| data 보존 필요 (운영 배포본) | **업그레이드하지 않는다.** 폐기된 revision 별 입력 fingerprint 와 변환 후 schema/data invariant 를 갖춘 one-shot converter 를 먼저 설계·검증해야 한다. 그 converter 는 이 release 의 범위 밖이다 |
-
-두 경우 모두 backup(2 단계)과 read-only inventory(3 단계)는 건너뛰지 않는다. converter
-를 나중에 만들더라도 그 입력은 이 backup 이며, `dtxwiki db revision-inventory` 의
-출력이 그 backup 이 무엇이었는지에 대한 유일한 기록이다.
-
-업그레이드 전에 대상 배포본의 stamp 를 먼저 읽는다. 이 명령은 database 를 열어 쓰지
-않으므로 운영 중에도 안전하다.
+서버와 worker를 중지하고 복원이 검증된 백업을 확보한 뒤, 변환할 DB의 환경 설정을
+로드합니다. 먼저 변경 없이 결과를 확인합니다.
 
 ```bash
-# 이름은 임의 label 이다. 인자 없이 호출하면 target 이 없다며 거부한다.
+dtxwiki db rename-revisions
+```
+
+대상 DB와 출력된 변환 내용을 확인한 뒤에만 적용합니다.
+
+```bash
+dtxwiki db rename-revisions --apply
+```
+
+변환이 완료되면 아래 "배포 시 DB 적용과 상태 확인" 절차를 따라 DB를 확인하고
+서비스를 시작합니다. 앱 시작 과정은 이 ID 변환을 자동으로 수행하지 않습니다.
+
+### 이름 규칙과 실행 순서
+
+실행 파일의 경로는 다음 형식입니다.
+
+```text
+backend/migrations/versions/v<major>_<minor>/<revision_id>_<description>.py
+```
+
+| 요소 | 의미 | 예시 |
+| --- | --- | --- |
+| `v<major>_<minor>` | DB 변경이 포함된 릴리스의 Major/Minor 그룹. Patch는 생략 | `v0_1` |
+| `<revision_id>` | Alembic이 생성하는 식별자. 전역 자동 증가 번호를 사용하지 않음 | `efcbcf724889` |
+| `<description>` | 변경 목적을 나타내는 영문 소문자와 밑줄 이름 | `core_schema`, `add_workspace_settings` |
+| `down_revision` | 이 revision을 적용하기 전에 필요한 직전 revision ID | `bd62193d5cf6` |
+
+예를 들어 `efcbcf724889_core_schema.py`는 **식별자가 `efcbcf724889`인 코어 스키마 변경**을
+뜻합니다. 파일명이나 ID의 정렬 순서로 실행 순서를 판단하지 않습니다. Alembic은 파일 안의
+다음 연결 정보를 따라 migration을 실행합니다.
+
+```python
+revision = "efcbcf724889"
+down_revision = "bd62193d5cf6"
+```
+
+앱 릴리스 버전과 DB revision은 별도로 관리합니다. `0.1.2`와 `0.1.3`은 모두 `v0_1` 그룹을
+사용하며, DB 변경이 없는 배포는 같은 DB head를 유지합니다. Patch 배포에서 DB 변경이
+필요하면 같은 그룹 안에 새 revision을 추가합니다. Major/Minor가 달라질 때는 해당 릴리스의
+그룹 디렉터리를 사용합니다. 그룹이 바뀌어도 `down_revision`으로 이전 head와 연결합니다.
+이미 배포한 파일은 기존 그룹에 두고, 새 DB 변경 파일만 해당 릴리스 그룹에 추가합니다.
+
+### 디렉터리 구조
+
+현재 migration의 주요 구조는 다음과 같습니다.
+
+```text
+backend/migrations/
+├── versions/                              # Alembic이 실행할 revision 파일
+│   ├── v0_0/
+│   │   └── bd62193d5cf6_initial_schema.py
+│   └── v0_1/
+│       └── efcbcf724889_core_schema.py
+├── revision_modules/                      # 특정 revision이 사용하는 보조 코드
+│   └── v0_1/
+│       └── efcbcf724889_core_schema/
+│           ├── workspace_schema.py
+│           ├── identity_access_schema.py
+│           ├── context_schema.py
+│           ├── context_data.py
+│           ├── library_media_schema.py
+│           ├── library_policy.py
+│           ├── search_schema.py
+│           ├── operations_schema.py
+│           ├── tenancy_schema.py
+│           └── unique_key_prepass.py
+├── release_manifest.json                  # 스키마 릴리스별 그룹과 head 매핑
+└── frozen_revisions.json                  # 배포된 migration 구현의 해시
+```
+
+`versions/`에는 `revision`과 `down_revision`을 선언하는 실행 파일만 둡니다. 보조 코드는
+`revision_modules/<릴리스 그룹>/<revision_id>_<description>/`에 모아 두므로, 경로만 보고도
+어느 릴리스 그룹과 revision에 속하는지 알 수 있습니다. 이 모듈들은 해당 revision에서
+호출하며, 독립적인 migration 단계로 실행하지 않습니다. Python 패키지 이름이 숫자로
+시작할 때는 import할 수 있도록 앞에 `_`를 붙입니다.
+
+`release_manifest.json`은 DB 변경이 포함된 스키마 릴리스와 head를 연결합니다. DB 변경이
+없는 Patch 배포마다 새 항목을 만들 필요는 없습니다. 배포한 실행 파일과 보조 코드의
+해시는 `frozen_revisions.json`과 패키지 검증기에 고정합니다. 배포된 migration은 수정하거나
+다시 합치지 않고, 변경이 필요할 때 후속 revision을 추가합니다.
+
+### 새 DB 변경 추가
+
+개발 checkout의 저장소 루트에서 다음 helper로 실행 파일을 생성합니다. 아래 `0.2.0`은
+향후 DB 변경의 예시이며, 현재 배포본에 세 번째 revision이 있다는 뜻은 아닙니다.
+
+```bash
+.venv/bin/python scripts/new_migration.py --release 0.2.0 -m "add workspace settings"
+```
+
+이 명령은 `versions/v0_2/<생성된 ID>_add_workspace_settings.py`를 만들고 직전 head와
+연결합니다. 필요하면 같은 이름의 보조 패키지를 `revision_modules/v0_2/`에 추가합니다.
+스키마 변경을 구현한 뒤 릴리스별 head 매핑과 배포 해시를 갱신하고, migration 및 패키지
+검증을 수행합니다. helper는 파일을 생성하는 명령이며 DB 적용은 별도로 수행합니다.
+
+### 배포 시 DB 적용과 상태 확인
+
+설치한 배포본의 Alembic graph가 적용 대상 head를 결정합니다. 이 문서의 ID 예시를
+후속 배포본의 head로 고정해서 사용하지 않습니다. 업그레이드 전에 아래 절차를 따릅니다.
+
+1. 배포본의 코드 head와 대상 DB의 현재 revision을 확인합니다.
+2. 복원 가능한 백업 사본에서 upgrade를 먼저 검증합니다.
+3. 서버와 worker를 중지하고 최신 백업을 확보한 뒤, 대상 DB 설정으로
+   `dtxwiki bootstrap`을 실행합니다.
+4. DB가 코드 head에 도달했는지 확인하고 서비스를 시작합니다.
+
+대상 DB를 변경하지 않고 revision과 스키마의 일관성을 확인할 때는 다음 명령을 사용합니다.
+production wrapper가 배포본의 환경 설정을 로드합니다.
+
+```bash
 sudo dtxwiki db revision-inventory --configured prod
 ```
 
 ```text
 Database revision inventory (evidence only; not migration approval)
-code heads: 0002_epic1
-prod: status=ok revisions=0002_epic1 consistency=consistent
+code heads: efcbcf724889
+prod: status=ok revisions=efcbcf724889 consistency=consistent
 ```
 
-`revisions=` 가 `0001_initial_release` 또는 `0002_epic1` 이고 `consistency=consistent`
-이면 정상 upgrade 대상이다. `0003`–`0015` 중 하나이거나 `consistency=unknown_revision`
-이면 위 표를 따른다.
+`revisions`는 DB에 기록된 revision이고, `code heads`는 설치된 코드의 최신 revision입니다.
+`consistency=consistent`는 기록된 revision과 관찰된 스키마가 일치한다는 뜻입니다. DB가
+이미 head에 있으면 추가 migration을 적용하지 않습니다.
 
-`--configured` 는 배포본 자신의 `DTXWIKI_DATABASE_URL` 을 통해 연다(wrapper 가 production env 를
-로드한다). `--configured` 와 `--sqlite-file NAME=PATH` 모두 WAL sidecar(`-wal`/`-shm`)가 함께
-있을 것을 요구하므로, 정상 종료되어 checkpoint 된 database 에는 `sqlite_wal_sidecars_required` 로
-실패한다. 서비스가 실행 중인 운영 인스턴스에 쓴다.
+`--configured`와 `--sqlite-file NAME=PATH`는 live SQLite 검사에서 WAL sidecar
+(`-wal`/`-shm`)를 요구하므로, 서비스가 실행 중인 인스턴스의 사전 확인에 사용합니다.
+정상 종료되어 checkpoint된 DB는 이 검사에서 `sqlite_wal_sidecars_required`로 거부될 수
+있습니다. 보존된 백업은 Step 4.5의 `--backup-manifest` 방식으로 확인합니다.
+
+### Migration preflight
+
+모든 migration 진입점(bootstrap, 직접 `alembic upgrade`, `dtxwiki migrate-data`)은
+같은 read-only preflight를 거쳐 다음 세 가지 상태 중 하나를 받습니다. DB의 revision
+기록은 `alembic_version` 테이블에 저장되며, 여기서는 이를 stamp라고 부릅니다.
+
+| Verdict | 근거 | 동작 |
+| --- | --- | --- |
+| `fresh` | database file 이 아직 없거나(`database_absent`), 존재하지만 자기 table 도 view 도 하나도 없음이 증명됨(`proven_empty`) | base → head 로 migration |
+| `ready` | 설치된 migration graph에 속한 단일 stamp와 실제 스키마가 일치함 | head까지 migration, 이미 head면 skip |
+| `blocked` | 알 수 없는 revision, stamp/schema 불일치, 손상되거나 읽을 수 없는 stamp, multiple heads, 또는 table이 있으나 유효한 stamp가 없음 | 거부. 메시지에 `migration_preflight_refused`와 상태 세부값 포함 |
+
+stamp가 없는 DB도 table이나 view가 있으면 `blocked`입니다. 새 설치로 처리하려면 DB가
+실제로 비어 있어야 합니다. 사용 중인 스키마를 검증 없이 새 설치 대상으로 취급하지 않습니다.
+
+Preflight는 application engine의 `journal_mode=WAL` 설정을 적용하지 않고 DB를 검사합니다.
+검사를 거부한 DB는 원본 상태로 보존하며, 아직 없는 database file을 새로 생성하지 않습니다.
+
+### Blocked database 복구
+
+`blocked`이면 migration을 적용하기 전에 원인을 확인합니다. `alembic stamp`로 기록만
+덮어쓰면 스키마 불일치를 해결할 수 없습니다.
+
+1. 서버와 worker를 중지하고 DB writer를 모두 종료합니다.
+2. SQLite sidecar를 포함한 data directory 전체를 백업하고 복원 가능 여부를 확인합니다.
+3. preflight 메시지와 사전 확인한 read-only inventory 결과를 백업과 함께 보관합니다.
+4. 검증된 백업으로 전체 복원한 뒤 revision과 스키마를 다시 확인합니다. 새 DB가 필요하면
+   별도 경로에 생성하고, 기존 DB와 백업은 보존합니다.
+
+`dtxwiki migrate-data`는 source와 target이 모두 `ready`일 때만 user data를 이관합니다.
+source가 계속 `blocked`라면 먼저 해당 스키마에 맞는 복구 또는 변환 방법을 검증해야 합니다.
+데이터 보존이 필요한 경우 이관 방법을 확보하기 전에 기존 DB를 교체하지 않습니다.

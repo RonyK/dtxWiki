@@ -26,7 +26,7 @@ import pytest
 from fastapi import APIRouter, Response
 from fastapi.testclient import TestClient
 from pydantic import AnyUrl
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import OperationalError
 
 from backend.app.container import (
@@ -611,12 +611,21 @@ def test_cloud_overlay_composition_boot(tmp_path):
     assert workspace_id in provider.session_for_calls
 
 
-def test_list_agent_page_refs_respects_bounded_limit(tmp_path):
+def test_list_agent_page_refs_respects_bounded_limit():
     # M-05: the MCP resources/prompts LIST must advertise a bounded number of
     # per-page entry points instead of the whole catalog.
     from backend.services.mcp_surface_service import list_agent_page_refs
 
-    engine = make_engine(f"sqlite+pysqlite:///{tmp_path / 'agent-limit.sqlite'}")
+    engine = make_engine("sqlite+pysqlite:///:memory:")
+
+    # make_engine() only enables foreign keys for file-backed SQLite, so turn
+    # them on here to keep the AgentPage -> workspace FK enforced as before.
+    @event.listens_for(engine, "connect")
+    def _enable_foreign_keys(dbapi_connection, _record):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
     Base.metadata.create_all(engine)
     factory = make_session_factory(engine)
     with factory.begin() as session:
@@ -662,10 +671,9 @@ def test_protocol_only_provider_boots_without_state_backdoors(tmp_path):
     assert resolved_factory is factory
 
 
-def test_overlay_assembly_rejects_ambiguous_inputs_and_preserves_overrides(tmp_path):
-    engine = make_engine(f"sqlite+pysqlite:///{tmp_path / 'assembly.sqlite'}")
-    Base.metadata.create_all(engine)
-    factory = make_session_factory(engine)
+def test_overlay_assembly_rejects_ambiguous_inputs_and_preserves_overrides():
+    # assemble() only wires objects, so an unconnected factory is enough.
+    factory = make_session_factory(make_engine("sqlite+pysqlite:///:memory:"))
     settings = Settings(database_url="sqlite+pysqlite:///:memory:")
     provider = ProtocolOnlyProvider(factory)
     services = ServiceRegistry()
@@ -692,22 +700,10 @@ def test_overlay_assembly_rejects_ambiguous_inputs_and_preserves_overrides(tmp_p
 
 
 def test_blob_store_provider_survives_composition_and_routes_by_real_workspace_id():
-    """D-5: BlobStoreProvider is the DatabaseProvider's blob-storage analogue.
-    Pins (1) an injected provider is preserved end to end (never re-wrapped),
-    mirroring the ``container.db is provider`` check above for DatabaseProvider,
-    and (2) Epic-2 Phase 6c: the seam is actually connected now -- a media
-    installer factory (the shared primitive every durable upload/conversion/
-    preview/context-media path builds its installer through, see
-    backend/app/container.py's ``_new_validated_media_installer``) calls
-    ``store_for`` with the REAL workspace_id it was building for.
+    """Composition preserves the injected blob provider and routes by workspace.
 
-    Revert-fail: before Phase 6c every one of these factories called
-    ``store_for(None)`` regardless of which workspace it was building an
-    installer for -- the seam existed but routed nothing (doc/design/
-    workspace-database-separation-plan.md §3 D-5 finding). This pins the
-    specific workspace_id, not just "store_for was called", so a regression
-    back to ``store_for(None)`` fails this assertion even though a call to
-    store_for still happens.
+    A durable media installer must call ``store_for`` with its own workspace ID.
+    Passing ``None`` would leave uploads on the unscoped storage route.
     """
 
     fake_store = object()
@@ -1884,9 +1880,8 @@ def _split_upload_surface(tmp_path):
         )
         session.flush()
         seed_default_workspace(session, slug="split", title="Split Upload Data")
-    # ContextPage is a workspace-plane domain table (D-1,
-    # doc/design/workspace-database-separation-plan.md); the media
-    # authorization checks now read it via session_for(workspace_id), so it
+    # ContextPage is a workspace-plane domain table. Media authorization
+    # reads it via session_for(workspace_id), so it
     # must live in the data DB, not the control DB.
     page = PageService(data_factory).write_page(
         workspace_slug="split",
@@ -1897,9 +1892,7 @@ def _split_upload_surface(tmp_path):
         actor_id="00000000-0000-0000-0000-000000000021",
         actor_provenance="browser_session",
     )
-    # Upload registration (ContextMediaService.ingest) is now routed to
-    # session_for(workspace_id) (D-7,
-    # doc/design/workspace-database-separation-plan.md): the media session,
+    # Upload registration is routed to session_for(workspace_id): the media session,
     # its assets, and their blobs land in the same data DB as the page they
     # are claimed against, so no control-DB mirror of the page is needed
     # anymore -- ContextMediaSession's FK to ContextPage now resolves within
@@ -2024,21 +2017,10 @@ def test_split_provider_library_upload_installs_on_workspace_data_db(tmp_path):
 def test_split_provider_context_media_lifecycle_state_control_auth_workspace(
     tmp_path,
 ):
-    """Context media asset/blob state now lives only on the workspace (data)
-    plane -- D-7 (doc/design/workspace-database-separation-plan.md) moved the
-    whole aggregate off the control plane, closing the plane question the
-    PLANE WARNING docstring in backend/services/context_media_claim.py used
-    to describe as open. That module -- and the media-session claim mechanism
-    it guarded -- is gone under the page-first P2/P3 contract: every upload
-    now names its own page_id and the caller's own open editing_version_id
-    directly, so there is only one upload surface to exercise here.
+    """Media authorization and lifecycle state use the same workspace database.
 
-    D-1 already routed the ContextMediaAccessPolicy checks that gate every
-    route below (ContextPage/ContextMediaAsset are workspace-plane domain
-    tables; require_page/require_page_version/require_workspace_asset resolve
-    workspace_id via the control-plane directory and then authorize on
-    session_for(workspace_id)). D-7 aligns the state writes/reads with that
-    same routing, so both authorization and state now agree on one plane.
+    The control-plane directory resolves the workspace; page-bound uploads,
+    media access checks and lifecycle writes use ``session_for(workspace_id)``.
     """
     surface = _split_upload_surface(tmp_path)
     surface.provider.session_for_calls.clear()
@@ -2413,22 +2395,22 @@ def test_split_provider_public_context_media_serves_from_workspace_plane(tmp_pat
 def test_split_provider_restricted_library_gate_resolves_on_the_workspace_plane(
     tmp_path,
 ):
-    """TEN-01D pin: the restricted-Library gate must resolve its target on the
-    requested workspace's own shard.
+    """TEN-01D pin: ``resolve_restricted_library_target`` must resolve against
+    the workspace plane, not the control plane.
 
     ``_restricted_library_policy_error`` (backend/api/mcp_http.py) guards both
     the streamable-http and SSE POST paths. It used to hand the CONTROL session
-    to ``resolve_restricted_library_target``, which reads LibraryItem /
-    LibraryItemVersion / LibraryArtifact -- all workspace-plane. Commit
-    64592c9d fixed it to resolve through ``db.session_for(workspace_id)`` first
-    and only open the control session afterwards, to re-scope the actor.
+    to the resolver, which reads LibraryItem / LibraryItemVersion /
+    LibraryArtifact -- all workspace-plane. Commit 64592c9d fixed it to resolve
+    through ``db.session_for(workspace_id)``.
 
-    Nothing pinned that routing, so this test does. It is a PIN, not a
-    regression: it passes on today's code by design. What makes it load-bearing
-    is the companion assertion below -- resolving on the control session (the
-    pre-fix shape) must find nothing, because the restricted item exists only in
-    the data DB. Without that half, "the gate reports restricted" would pass
-    just as well on a single shared database and prove nothing about planes.
+    This test selects the provider session by hand and calls the resolver
+    directly, so it pins resolver behavior against the data and control
+    databases only. It does NOT exercise HTTP gate routing: the choice of
+    session inside the gate is not covered here. It passes on today's code by
+    design. The companion assertion keeps it meaningful: resolving on the
+    control session (the pre-fix shape) must find nothing, because the
+    restricted item exists only in the data DB.
     """
     control_engine = make_engine(
         f"sqlite+pysqlite:///{tmp_path / 'restricted-control.sqlite'}"

@@ -12,15 +12,31 @@ from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from backend.services.oauth_service import challenge_s256
 from backend.tests.integration.test_oauth_mcp_http import (
     current_workspace_id,
     make_client,
+    module_scoped_page_service,
     oauth_state,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
 VERIFIER = "v" * 64
+
+
+@pytest.fixture(scope="module")
+def render_client(_empty_sqlite_schema):
+    """One signed-in client for the render-only cases.
+
+    They register a client under their own name and GET the consent screen
+    without granting it, so they share a store. Tests that grant, repeat a
+    login or count rows keep their own ``make_client``.
+    """
+
+    with module_scoped_page_service(_empty_sqlite_schema) as page_service:
+        yield make_client(page_service)
 
 
 def _consent(client, *, redirect_uri: str, scope: str, client_name: str):
@@ -47,9 +63,9 @@ def _consent(client, *, redirect_uri: str, scope: str, client_name: str):
     )
 
 
-def test_read_only_request_says_it_cannot_change_anything(page_service):
+def test_read_only_request_says_it_cannot_change_anything(render_client):
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="http://127.0.0.1:53682/callback",
         scope="mcp:read",
         client_name="Read Only Client",
@@ -64,9 +80,9 @@ def test_read_only_request_says_it_cannot_change_anything(page_service):
     assert "Read pages, their version history" in page.text
 
 
-def test_write_request_does_not_promise_that_a_human_reviews_the_draft(page_service):
+def test_write_request_does_not_promise_that_a_human_reviews_the_draft(render_client):
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="http://127.0.0.1:53682/callback",
         scope="mcp:read mcp:write",
         client_name="Writing Client",
@@ -79,9 +95,9 @@ def test_write_request_does_not_promise_that_a_human_reviews_the_draft(page_serv
     assert "review policy" in page.text
 
 
-def test_loopback_destination_says_the_code_stays_on_this_computer(page_service):
+def test_loopback_destination_says_the_code_stays_on_this_computer(render_client):
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="http://127.0.0.1:53682/callback",
         scope="mcp:read",
         client_name="Loopback Client",
@@ -92,9 +108,9 @@ def test_loopback_destination_says_the_code_stays_on_this_computer(page_service)
     assert "will be sent to" not in page.text
 
 
-def test_remote_destination_names_the_host_it_will_send_the_code_to(page_service):
+def test_remote_destination_names_the_host_it_will_send_the_code_to(render_client):
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="https://collector.example.com/callback",
         scope="mcp:read",
         client_name="Remote Client",
@@ -104,11 +120,16 @@ def test_remote_destination_names_the_host_it_will_send_the_code_to(page_service
     assert "The sign-in code will be sent to" in page.text
     assert "collector.example.com" in page.text
     assert "goes to a program on this computer" not in page.text
+    destination = page.text.split('class="oauth-destination', 1)[1]
+    destination = destination[: destination.index("</p>")]
+    assert "collector.example.com" in destination
+    # Nothing from the credentials half of the authority may reach the reader.
+    assert "@" not in destination
 
 
-def test_client_identity_is_shown_as_a_claim_and_the_raw_id_is_demoted(page_service):
+def test_client_identity_is_shown_as_a_claim_and_the_raw_id_is_demoted(render_client):
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="http://127.0.0.1:53682/callback",
         scope="mcp:read",
         client_name="Totally Legit Client",
@@ -124,9 +145,9 @@ def test_client_identity_is_shown_as_a_claim_and_the_raw_id_is_demoted(page_serv
     assert "Dynamic client — Registered during this login" in technical
 
 
-def test_a_client_name_cannot_inject_markup_into_the_screen(page_service):
+def test_a_client_name_cannot_inject_markup_into_the_screen(render_client):
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="http://127.0.0.1:53682/callback",
         scope="mcp:read",
         client_name='<img src=x onerror="alert(1)">Bank of Example',
@@ -138,22 +159,22 @@ def test_a_client_name_cannot_inject_markup_into_the_screen(page_service):
 
 
 def test_revocation_path_names_the_labels_the_settings_screen_actually_shows(
-    page_service,
+    render_client,
 ):
     """A wrong path is worse than none: it sends someone hunting for a tab that
     does not exist, at the moment they have decided they want out."""
 
     page = _consent(
-        make_client(page_service),
+        render_client,
         redirect_uri="http://127.0.0.1:53682/callback",
         scope="mcp:read",
         client_name="Revocable Client",
     )
 
     settings = json.loads(
-        (
-            ROOT / "frontend/src/shared/i18n/locales/en/settings.json"
-        ).read_text(encoding="utf-8")
+        (ROOT / "frontend/src/shared/i18n/locales/en/settings.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert settings["sections"]["mcp"]["label"] in page.text
     assert settings["access"]["oauthApps"] in page.text
@@ -365,23 +386,6 @@ def test_a_redirect_uri_cannot_carry_userinfo(page_service):
         )
         assert registered.status_code == 400, hostile
         assert "userinfo" in registered.text
-
-
-def test_the_destination_line_names_only_the_host_that_receives_the_code(
-    page_service,
-):
-    page = _consent(
-        make_client(page_service),
-        redirect_uri="https://collector.example.com/callback",
-        scope="mcp:read",
-        client_name="Remote Client",
-    )
-
-    destination = page.text.split('class="oauth-destination', 1)[1]
-    destination = destination[: destination.index("</p>")]
-    assert "collector.example.com" in destination
-    # Nothing from the credentials half of the authority may reach the reader.
-    assert "@" not in destination
 
 
 def test_a_repeat_login_also_gets_the_dtxwiki_handoff_page(page_service):

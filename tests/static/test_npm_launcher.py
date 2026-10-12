@@ -353,7 +353,7 @@ def npm_publish_problems(workflow: dict) -> list[str]:
     else:
         command = publishes[0]["run"]
         path = downloads[0].get("path", "").rstrip("/") if downloads else ""
-        if f'"{path}/' not in command:
+        if f'"./{path}/' not in command:
             problems.append("npm publish must publish the downloaded tarball")
         for flag in ("--access public", "--provenance"):
             if flag not in command:
@@ -375,6 +375,16 @@ def npm_publish_problems(workflow: dict) -> list[str]:
 
 def test_the_npm_launcher_is_published_from_the_checked_tarball_after_pypi():
     assert npm_publish_problems(yaml.safe_load(RELEASE.read_text("utf-8"))) == []
+
+
+def test_npm_publish_rejects_a_path_that_can_be_parsed_as_github_shorthand():
+    workflow = yaml.safe_load(RELEASE.read_text("utf-8"))
+    for step in workflow["jobs"]["publish-npm"]["steps"]:
+        if "npm publish" in step.get("run", ""):
+            step["run"] = step["run"].replace('"./dist-npm/', '"dist-npm/')
+    assert "npm publish must publish the downloaded tarball" in npm_publish_problems(
+        workflow
+    )
 
 
 def test_npm_token_is_read_only_by_the_publish_step():

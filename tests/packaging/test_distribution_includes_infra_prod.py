@@ -56,13 +56,16 @@ CATALOG_FILES = [
 ]
 MIGRATION_FILES = sorted(
     path.relative_to(REPO_ROOT).as_posix()
-    for path in (REPO_ROOT / "backend" / "migrations" / "versions").glob("*.py")
+    for path in (REPO_ROOT / "backend" / "migrations" / "versions").rglob("*.py")
 )
 REVISION_0002_FILES = sorted(
     path.relative_to(REPO_ROOT).as_posix()
-    for path in (REPO_ROOT / "backend" / "migrations" / "revision_0002").glob(
-        "*.py"
-    )
+    for path in (
+        REPO_ROOT
+        / "backend"
+        / "migrations"
+        / "revision_modules/v0_1/efcbcf724889_core_schema"
+    ).glob("*.py")
 )
 # What `dtxwiki setup production` loads through prod_setup.share_file.
 SETUP_REFERENCES = sorted(
@@ -97,8 +100,10 @@ def test_setup_loads_packaged_files_only_through_the_listed_constants():
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(
-                func, "id", None
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", None)
             )
             if name != "share_file":
                 continue
@@ -198,6 +203,7 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
                 "config = Config(); "
                 "config.set_main_option('script_location', "
                 "str(root / 'backend' / 'migrations')); "
+                "config.set_main_option('recursive_version_locations', 'true'); "
                 "script = ScriptDirectory.from_config(config); "
                 "print(','.join(script.get_heads()))"
             ),
@@ -210,7 +216,7 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
     assert packaged_migrations.returncode == 0, (
         packaged_migrations.stdout + packaged_migrations.stderr
     )
-    assert packaged_migrations.stdout.strip() == "0002_epic1"
+    assert packaged_migrations.stdout.strip() == "efcbcf724889"
 
     with tarfile.open(sdist_path) as sdist:
         sdist_names = set(sdist.getnames())

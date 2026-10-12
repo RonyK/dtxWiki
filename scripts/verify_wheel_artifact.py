@@ -31,57 +31,64 @@ from pathlib import Path
 
 from deploy_static_bundle import _local_entry_files
 
-# The revisions 0.1.1 published, base first. Every later release keeps them as
+# Canonical IDs of the historical schema boundaries, base first. Every later release
+# keeps them as
 # the start of one linear chain: a new revision descends from the current head
 # and never edits a released file (see FROZEN_MIGRATIONS).
 RELEASED_CHAIN_BASE = [
-    ["0001_initial_release", None],
-    ["0002_epic1", "0001_initial_release"],
+    ["bd62193d5cf6", None],
+    ["efcbcf724889", "bd62193d5cf6"],
 ]
-# SHA-256 of every migration file 0.1.1 published, relative to
+# SHA-256 of the renamed baseline and its implementation modules, relative to
 # backend/migrations. A deliberate second copy of
 # backend/migrations/frozen_revisions.json: editing a released revision and
 # re-hashing the manifest in the same change still fails here, and
 # tests/packaging/test_migration_chain.py holds the two copies equal.
 FROZEN_MIGRATIONS = {
-    "revision_0002/__init__.py": (
-        "71f7a5d9f393e0b419d91f0fd9227cb27e3624785b42c2c7ddab609c80d8aee6"
+    "revision_modules/__init__.py": (
+        "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6"
     ),
-    "revision_0002/context_data.py": (
-        "075906a2ad4ea9008233509031c73ffde600043ab3894673b631d7b53426bd5d"
+    "revision_modules/v0_1/__init__.py": (
+        "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6"
     ),
-    "revision_0002/context_schema.py": (
-        "e452ac330100653c4a05a1bb279954bee83d6f3aee1f70d8a554834ceb297137"
+    "revision_modules/v0_1/efcbcf724889_core_schema/__init__.py": (
+        "b57efc37a5d5c2e8027f42613fdfdb3252376d6784ba4cff95030e74ccd26f09"
     ),
-    "revision_0002/identity_access_schema.py": (
-        "7bd29b29460f7b144b5a2f453ae3a83ba764288f8a796693ba7c8fc50bf4dd32"
+    "revision_modules/v0_1/efcbcf724889_core_schema/context_data.py": (
+        "366709f74283479354b738c4a4367f78183d327b184ad2d78654a60db4384ccc"
     ),
-    "revision_0002/library_media_schema.py": (
-        "d3e2b5666a06219e60bb6a8294d7843db2fc556a9b7b1336c56ec61dce26b532"
+    "revision_modules/v0_1/efcbcf724889_core_schema/context_schema.py": (
+        "406886a9b7e0963d0ac5e21947371a0824f5dfb1d382e384d69e90011b74ed85"
     ),
-    "revision_0002/library_policy.py": (
-        "e850a8316e11c83ada328dba0721efc862b4097a23a3e050aff2345598dd5cf8"
+    "revision_modules/v0_1/efcbcf724889_core_schema/identity_access_schema.py": (
+        "bdd07ca0004aa5973cd593bd6e00d1206781d0116e16ccc2a071aa206248f9f9"
     ),
-    "revision_0002/operations_schema.py": (
-        "0b7dc03d8fb784c891b1da555e56b1586022590696ee1027b452b76dd1de7d91"
+    "revision_modules/v0_1/efcbcf724889_core_schema/library_media_schema.py": (
+        "0026ee1fb15c27692a1888f4521ae2d01d9ddf343d45f9865c41d15e47fe5cfb"
     ),
-    "revision_0002/search_schema.py": (
-        "64eb67015b20a7569c5e977744b555eb78901bf16c5a26e15f9d8f33db224e94"
+    "revision_modules/v0_1/efcbcf724889_core_schema/library_policy.py": (
+        "ed86943f046fedf08eb7fa0dde1a6674d07243bbcaf0907d49e4e00d8ef3732c"
     ),
-    "revision_0002/tenancy_schema.py": (
-        "55426d1c3f84c7a1611f660b3b541181435d76d5674aa93e36c2ab2dd3b0272b"
+    "revision_modules/v0_1/efcbcf724889_core_schema/operations_schema.py": (
+        "daa008f631076b9018ef2ff045a06a27258c206dc001d1a23e4a836f988c36eb"
     ),
-    "revision_0002/unique_key_prepass.py": (
+    "revision_modules/v0_1/efcbcf724889_core_schema/search_schema.py": (
+        "13cb7fad720896937887a4692cb67c8afb63397cea120c38af4ae9683d7c62db"
+    ),
+    "revision_modules/v0_1/efcbcf724889_core_schema/tenancy_schema.py": (
+        "e36f7d452028a03a73ce94d50f3b6c2b30c43b60230a332170b23fbc83bc9698"
+    ),
+    "revision_modules/v0_1/efcbcf724889_core_schema/unique_key_prepass.py": (
         "6d564b038d785c0d551ee103908ec3f61f0c08a3ff6d325053e629b3519e1cec"
     ),
-    "revision_0002/workspace_schema.py": (
-        "f75ad4453b33a014bec4c40c0042a43e062c2b0f3ac825a81a928c5734461bff"
+    "revision_modules/v0_1/efcbcf724889_core_schema/workspace_schema.py": (
+        "6daaec7d569a6ec8c6f76c444a95e4fc945e218215d9234debcbb5187e2960ec"
     ),
-    "versions/0001_initial_release.py": (
-        "dc68c40730f8ef83544c5c7fb59589806cd6e80b869617eda68cf5757995c9ac"
+    "versions/v0_0/bd62193d5cf6_initial_schema.py": (
+        "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8"
     ),
-    "versions/0002_epic1.py": (
-        "1e104864f9d31a51d51906fe7e0f49c37e9605b7f5c675d057b44166f3ffd55d"
+    "versions/v0_1/efcbcf724889_core_schema.py": (
+        "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
     ),
 }
 FROZEN_MANIFEST = Path("backend") / "migrations" / "frozen_revisions.json"
@@ -110,8 +117,9 @@ RETIRED_MODULES = (
 RETIRED_MCP_CONSOLE_SCRIPT = re.compile(r"(?m)^\s*[\"']?dtxwiki-mcp[\"']?\s*=")
 
 # Resolving the head is also the revision-module import check: Alembic executes
-# versions/0002_epic1.py, whose module-level import pulls in all nine
-# revision-owned ``revision_0002`` modules. `foreign` closes the hole that makes
+# versions/v0_1/efcbcf724889_core_schema.py, whose module-level import pulls in all nine
+# revision-owned ``revision_modules/v0_1/efcbcf724889_core_schema`` modules. `foreign`
+# closes the hole that makes
 # that check
 # meaningless -- both `uv sync` and `make install` register dtxwiki as an
 # editable install, whose finder maps any missing `backend.<child>` back to the
@@ -127,12 +135,12 @@ sys.path.insert(0, root)
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-config = Config()
+config = Config(os.path.join(root, "backend", "alembic.ini"))
 config.set_main_option(
     "script_location", os.path.join(root, "backend", "migrations")
 )
 script = ScriptDirectory.from_config(config)
-heads = list(script.get_heads())
+heads = sorted(script.get_heads())
 chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
 
 contained = os.path.realpath(root)
@@ -230,16 +238,51 @@ def _check_alembic_payload(root: Path) -> list[str]:
     failures: list[str] = []
     if not (root / "backend" / "alembic.ini").is_file():
         failures.append("backend/alembic.ini is missing")
-    modules = root / "backend" / "migrations" / "revision_0002"
+    modules = (
+        root
+        / "backend"
+        / "migrations"
+        / "revision_modules/v0_1/efcbcf724889_core_schema"
+    )
     if not (modules / "__init__.py").is_file():
-        failures.append("backend/migrations/revision_0002/__init__.py is missing")
+        failures.append(
+            "backend/migrations/revision_modules/v0_1/"
+            "efcbcf724889_core_schema/__init__.py is missing"
+        )
+    # Release mappings grow with new releases; pin the historical entries,
+    # rather than freezing the entire appendable manifest's byte content.
+    manifest_path = root / "backend/migrations/release_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected = {
+            "0.0.1": {"group": "v0_0", "head": "bd62193d5cf6"},
+            "0.1.1": {"group": "v0_1", "head": "efcbcf724889"},
+        }
+        aliases = {
+            "0001_initial_release": "bd62193d5cf6",
+            "0002_epic1": "efcbcf724889",
+        }
+        valid = (
+            manifest["format_version"] == 1
+            and all(
+                manifest["schema_releases"][key] == value
+                for key, value in expected.items()
+            )
+            and manifest["legacy_revision_aliases"] == aliases
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        valid = False
+    if not valid:
+        failures.append(
+            "backend/migrations/release_manifest.json is missing or invalid"
+        )
     return failures
 
 
 def _check_frozen_migrations(root: Path) -> list[str]:
-    """Released migration files are byte-identical to what 0.1.1 published.
+    """Canonical migration files remain byte-identical to the renamed baseline.
 
-    A database stamped ``0002_epic1`` by 0.1.1 is only described by that exact
+    A database stamped ``efcbcf724889`` is only described by that exact
     code; editing a released revision silently diverges every such database
     from a fresh one. New schema work belongs in a new revision.
     """
@@ -259,10 +302,14 @@ def _check_frozen_migrations(root: Path) -> list[str]:
                 "instead of editing a released one"
             )
     failures.extend(
-        f"backend/migrations/revision_0002/{path.name} is not part of the "
-        "frozen 0.1.1 revision"
-        for path in sorted((migrations / "revision_0002").glob("*.py"))
-        if f"revision_0002/{path.name}" not in FROZEN_MIGRATIONS
+        "backend/migrations/revision_modules/v0_1/"
+        f"efcbcf724889_core_schema/{path.name} is not part of the "
+        "frozen canonical baseline revision"
+        for path in sorted(
+            (migrations / "revision_modules/v0_1/efcbcf724889_core_schema").glob("*.py")
+        )
+        if f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
+        not in FROZEN_MIGRATIONS
     )
     manifest = root / FROZEN_MANIFEST
     try:
@@ -272,8 +319,8 @@ def _check_frozen_migrations(root: Path) -> list[str]:
     else:
         if recorded != FROZEN_MIGRATIONS:
             failures.append(
-                f"{FROZEN_MANIFEST.as_posix()} does not record the frozen 0.1.1 "
-                "migration digests"
+                f"{FROZEN_MANIFEST.as_posix()} does not record the frozen "
+                "canonical baseline migration digests"
             )
     return failures
 
@@ -368,7 +415,7 @@ def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
     """One linear chain that starts with the released revisions.
 
     ``chain`` is Alembic's ``walk_revisions`` order (head first). Revisions
-    after ``0002_epic1`` are allowed; a second head, a merge, or a chain that
+    after ``efcbcf724889`` are allowed; a second head, a merge, or a chain that
     does not begin with the released 0001 -> 0002 boundary is not.
     """
 
@@ -393,7 +440,12 @@ def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
 
 
 def _revision_module_count(root: Path) -> int:
-    modules = root / "backend" / "migrations" / "revision_0002"
+    modules = (
+        root
+        / "backend"
+        / "migrations"
+        / "revision_modules/v0_1/efcbcf724889_core_schema"
+    )
     return len([path for path in modules.glob("*.py") if path.name != "__init__.py"])
 
 
@@ -478,7 +530,7 @@ def verify_artifact(artifact: Path, extract: Path) -> tuple[list[str], str | Non
         return [f"{artifact.name}: {problem}" for problem in problems], None
     return [], (
         f"{artifact.name}: alembic head {head}, "
-        f"{_revision_module_count(root)} packaged 0002 revision modules, "
+        f"{_revision_module_count(root)} packaged core revision modules, "
         f"{len(FROZEN_MIGRATIONS)} frozen migration files intact, "
         "frontend bundle intact"
     )

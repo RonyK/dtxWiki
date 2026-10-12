@@ -1,7 +1,7 @@
 from backend.app.settings import Settings
 
 
-def test_settings_exposes_sprint3_default_ports():
+def test_settings_exposes_default_endpoint_ports():
     settings = Settings()
 
     assert settings.backend_port == 21080

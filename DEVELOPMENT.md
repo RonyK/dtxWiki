@@ -417,11 +417,28 @@ sha256sum "$WHEEL" infra/prod/install.sh
 ```
 
 `verify_wheel_artifact.py` 는 릴리스 워크플로가 태그 시점에 돌리는 것과 같은 검사입니다 —
-SPA 번들과 그 index HTML 이 참조하는 asset, alembic.ini, `0001`/`0002_epic1` 두 revision,
-그리고 `0002_epic1` 이 import 하는 `backend/migrations/revision_0002/*` 모듈 전부를 확인하고,
+SPA 번들과 그 index HTML 이 참조하는 asset, alembic.ini, `bd62193d5cf6`/`efcbcf724889` 두 revision,
+그리고 `efcbcf724889` 이 import 하는 `backend/migrations/revision_modules/v0_1/efcbcf724889_core_schema/*` 모듈 전부를 확인하고,
 추출본 안에서 alembic 그래프를 실제로 걸어 head 를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
 넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
+
+Migration은 `backend/migrations/versions/v<major>_<minor>/<id>_<description>.py`
+형식으로 관리합니다. ID는 Alembic이 생성하고, 실행 순서는 `down_revision`으로
+결정합니다. Patch는 디렉터리명에 포함하지 않습니다. DB 변경이 없는 릴리스에는
+새 migration이 필요하지 않습니다. 새 파일은 다음 명령으로 생성합니다.
+
+```bash
+.venv/bin/python scripts/new_migration.py --release 0.2.0 -m "add workspace settings"
+```
+
+보조 모듈이 필요하면 `revision_modules/v0_2/<id>_add_workspace_settings/`에
+두고, migration 파일에서 import합니다. Python import 경로로 쓸 패키지 이름이
+숫자로 시작하는 경우에는 앞에 `_`를 붙입니다. `versions/` 아래에는 실행 가능한
+revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.json`에 기록하고,
+배포되는 migration과 보조 모듈의 해시는 `frozen_revisions.json` 및 독립된
+패키지 검증기의 해시 목록에 함께 고정합니다. 기존에 배포된 migration은 수정하거나
+다시 합치지 않습니다.
 
 `backend/static/`은 생성물이라 gitignored입니다. 따라서 fresh checkout에서 raw
 `python -m build`, `pip install git+...`, Git archive만 사용하면 UI 없는 wheel이 생길 수 있습니다.
@@ -602,3 +619,55 @@ install을 다시 하지 않은 상태일 수 있습니다.
 ```bash
 .venv/bin/python -m pip install -e ".[dev]"
 ```
+
+## API and MCP reference
+
+Developers can use the [REST API schema](https://github.com/dtxSuite/dtxWiki/blob/main/shared/schemas/rest/v1/openapi.json)
+and [MCP schemas](https://github.com/dtxSuite/dtxWiki/tree/main/shared/schemas/mcp/v1).
+MCP clients first call `list_my_workspaces`, then `guide` with the chosen
+`workspace_id`. Subsequent calls specify that workspace explicitly.
+
+- **MCP Streamable HTTP**: 29 tools are registered; the tools available to a
+  particular client are determined by its permissions and returned by `tools/list`.
+
+<!-- mcp-tool-catalog:start -->
+
+| Purpose | Tools |
+| --- | --- |
+| Discover and read | `list_my_workspaces`, `guide`, `search`, `fetch`, `grep_wiki`, `what_changed`, `read`, `get_index`, `read_concept`, `read_context_outline`, `read_structure_map`, `list_changes` |
+| Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `upload_image`, `cite`, `submit_feedback` |
+| Agent workflows | `list_agent_categories`, `read_agent_page`, `write_agent_page_draft`, `build_agent_input_bundle` |
+| Review and maintenance | `list_requested_changes`, `submit_revision_for_review`, `wiki_maintenance` |
+
+<!-- mcp-tool-catalog:end -->
+
+For partial edits, read the structure with `read_structure_map`, open an edit
+with `begin_context_edit`, and apply `patch_context_edit`. Use
+`update_context_edit` for a full body replacement or page metadata changes.
+Editing commands use `editing_version_id`, `expected_editing_revision`, and an
+operation key to detect conflicting updates. The Context editing tools do not
+currently support attaching citation arrays or metadata-only updates without
+resending the body.
+
+Structure results are paginated. Follow `next_cursor` for `read_structure_map`;
+for `read_context_outline`, send `outline_next_cursor` back as `outline_cursor`.
+Its separate `cursor` field pages the selected section body.
+
+<!-- legacy-tool-migration:start -->
+
+**Migrating an older MCP client:** `list_pages`, `read_page`, `write_page`,
+`write_draft`, `update_draft`, and `patch_draft` have been removed without
+compatibility aliases. Use the Context tools above and reconnect through `/mcp`.
+The old `/api/v1/pages*` REST routes have also been replaced by workspace-scoped
+Context routes. `submit_revision_for_review` remains available for responding
+to requested changes. The internal Python draft methods remain in use; their
+removal from the MCP catalog does not remove the internal workflows.
+
+<!-- legacy-tool-migration:end -->
+
+### Bundled third-party license notices
+
+Bundled third-party web components have their own licenses. The running server
+provides their notices at `/THIRD_PARTY_NOTICES.txt`, so a browser receiving the
+web bundle can also read the notices. See [LICENSE](LICENSE) and [NOTICE](NOTICE)
+for the project license and attribution terms.

@@ -73,11 +73,18 @@ class MigrationPreflight:
         return self.verdict == "blocked"
 
     def refusal(self, subject: str) -> str:
+        conversion_hint = (
+            " For a supported historical schema, preview the ID conversion "
+            "with dtxwiki db rename-revisions before applying it."
+            if self.revision in {"0001_initial_release", "0002_epic1"}
+            else ""
+        )
         return (
             f"{subject}: {PREFLIGHT_REFUSAL_TOKEN}; DB Alembic stamp/schema "
             f"evidence is {self.consistency}; this database cannot be safely "
             "identified. Back it up and rebuild it (see DEPLOYMENT.md "
             "Troubleshooting); never repair it with a blind alembic stamp."
+            f"{conversion_hint}"
         )
 
 

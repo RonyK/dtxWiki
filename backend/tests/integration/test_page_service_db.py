@@ -240,6 +240,11 @@ def test_page_service_updates_with_linear_parent_and_audit_row():
         actor_provenance="browser_session",
     )
 
+    with service.session_factory() as session:
+        created_audits = _page_service_audit_rows(session)
+    assert [audit.action for audit in created_audits] == ["page.create"]
+    created_audit_id = created_audits[0].id
+
     updated = service.write_page(
         workspace_slug="default",
         slug="hello",
@@ -257,9 +262,14 @@ def test_page_service_updates_with_linear_parent_and_audit_row():
     assert updated.content_hash != created.content_hash
 
     with service.session_factory() as session:
-        audit_actions = [row.action for row in _page_service_audit_rows(session)]
+        audits = {audit.id: audit for audit in _page_service_audit_rows(session)}
 
-    assert audit_actions == ["page.create", "page.update"]
+    # The two service calls establish the order; wall-clock timestamps do not,
+    # because the clock may step back between the writes.
+    assert len(audits) == 2
+    assert audits[created_audit_id].action == "page.create"
+    update_audits = [audit for key, audit in audits.items() if key != created_audit_id]
+    assert [audit.action for audit in update_audits] == ["page.update"]
 
 
 def test_page_service_emits_change_review_audit_bundle_for_writes():
@@ -273,7 +283,12 @@ def test_page_service_emits_change_review_audit_bundle_for_writes():
         actor_id="dev-local-user",
         actor_provenance="browser_session",
     )
-    service.write_page(
+    with service.session_factory() as session:
+        created_audits = _page_service_audit_rows(session)
+    assert [audit.action for audit in created_audits] == ["page.create"]
+    created_audit_id = created_audits[0].id
+
+    updated = service.write_page(
         workspace_slug="default",
         slug="hello",
         title="Hello v2",
@@ -295,19 +310,45 @@ def test_page_service_emits_change_review_audit_bundle_for_writes():
     # A metadata patch is staged whenever the write actually carries one, not
     # only on the review path, because comparing two versions has to be able to
     # say the title or tags moved. That makes the ledger record the metadata
-    # change alongside the body write.
-    assert [operation.operation for operation in operations] == [
-        "create",
-        "update",
-        "metadata_patch",
-    ]
-    assert [operation.target_type for operation in operations] == [
-        "context_page",
-        "context_page",
-        "context_page",
+    # change alongside the body write. The operations table has no order of its
+    # own, so each operation is matched by what it targets, not by position.
+    assert sorted(
+        (
+            operation.operation,
+            operation.target_type,
+            operation.target_id,
+            operation.diff_ref,
+        )
+        for operation in operations
+    ) == [
+        (
+            "create",
+            "context_page",
+            created.id,
+            f"context_page_version:{created.version_id}",
+        ),
+        (
+            "metadata_patch",
+            "context_page",
+            created.id,
+            f"context_page_version:{updated.version_id}",
+        ),
+        (
+            "update",
+            "context_page",
+            created.id,
+            f"context_page_version:{updated.version_id}",
+        ),
     ]
     assert [review.status for review in reviews] == ["approved", "approved"]
-    assert [audit.action for audit in audits] == ["page.create", "page.update"]
+    # The create audit was observed before the update ran, so it is matched by
+    # identity: the clock may step back between the writes, which would
+    # reorder a created_at listing.
+    audits_by_id = {audit.id: audit for audit in audits}
+    assert len(audits) == 2
+    assert audits_by_id[created_audit_id].action == "page.create"
+    update_audits = [audit for audit in audits if audit.id != created_audit_id]
+    assert [audit.action for audit in update_audits] == ["page.update"]
 
 
 class FailingRecorder:

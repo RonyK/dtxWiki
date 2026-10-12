@@ -10,16 +10,18 @@ from pathlib import Path
 from typing import Literal, Protocol, get_args
 
 _REVISION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
-#: The two revisions published in 0.1.1. Their files are frozen (see
+#: Canonical IDs for the two historical schema release boundaries (see
 #: backend/migrations/frozen_revisions.json); every later revision descends
-#: from ``0002_epic1`` in one linear chain.
-RELEASED_BASE_REVISION = "0001_initial_release"
-RELEASED_EPIC1_REVISION = "0002_epic1"
+#: from ``efcbcf724889`` in one linear chain.
+RELEASED_BASE_REVISION = "bd62193d5cf6"
+RELEASED_EPIC1_REVISION = "efcbcf724889"
 #: Identifiers of the pre-rebaseline chain. A database stamped with one of
 #: them needs an operator-led conversion, so the classifier never accepts
 #: them, and no new revision may reuse one (tests/packaging enforces that).
 RETIRED_REVISION_IDS = frozenset(
     {
+        "0001_initial_release",
+        "0002_epic1",
         "0003_oauth_consent_lifetimes",
         "0004_workspace_member_foundation",
         "0005_library_multiformat_conversion",
@@ -48,8 +50,9 @@ _UNSAFE_CONSISTENCIES = {
     "unversioned",
 }
 
-# ``0002_epic1`` was republished as the one and only Epic-1 migration after an
-# earlier, much smaller migration used the same revision identifier. The
+# Legacy ``0002_epic1`` was republished after an earlier, much smaller
+# migration used that identifier. Its canonical replacement ``efcbcf724889``
+# retains strict fingerprint checks, including during explicit ID conversion. The
 # Alembic stamp alone therefore cannot prove that a database has the current
 # schema. Keep this fingerprint made only of final-schema objects that are
 # absent from both the immutable 0001 baseline and the retired 0002 shape.
@@ -407,9 +410,7 @@ def _collect_target(
             "context_0007": {"schema_detectable": False, "data_only": True},
             "context_0008": _marker_dict(snapshot.context_0008),
             "media_0009": _marker_dict(snapshot.media_0009),
-            "public_exposure_0010": _marker_dict(
-                snapshot.public_exposure_0010
-            ),
+            "public_exposure_0010": _marker_dict(snapshot.public_exposure_0010),
             "final_epic1_0002": _marker_dict(snapshot.final_epic1_0002),
         },
         consistency=consistency,
@@ -432,9 +433,9 @@ def classify_revision_consistency(
 
     ``known_revisions`` is the script directory the caller migrates with; the
     adapters that can read one pass it (``AlembicMigrationGraphSource``, the
-    migration preflight, Alembic's env.py). A revision after ``0002_epic1`` is
+    migration preflight, Alembic's env.py). A revision after ``efcbcf724889`` is
     accepted when it is in that directory: released revisions are frozen, so
-    unlike the republished ``0002_epic1`` its stamp names one schema. Such a
+    unlike the legacy Epic-1 identifier its stamp names one schema. Such a
     database descends from the final 0002 shape, so a stamp over a schema
     that carries none of the 0002 fingerprint is still a conflict. Marker
     groups are not checked further, because a later revision may legitimately
@@ -473,9 +474,7 @@ def classify_revision_consistency(
             return "stamp_marker_conflict"
         return "consistent"
 
-    expected_state = (
-        "absent" if revision == RELEASED_BASE_REVISION else "complete"
-    )
+    expected_state = "absent" if revision == RELEASED_BASE_REVISION else "complete"
     # Preserve the more diagnostic partial-schema result at the immutable 0001
     # boundary. At republished 0002 every missing/partial fingerprint member is
     # specifically a stamp-to-schema conflict.

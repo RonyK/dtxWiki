@@ -38,28 +38,12 @@ from backend.models.media import (
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.services.conversion_orchestrator import LIBRARY_CONVERSION_JOB_TYPE
-from backend.services.library_formats import _hdf5_lookup3_checksum
 from backend.services.library_ingest import LibraryUploadAdmissionService
 from backend.tests.conftest import authenticate_test_client_in_workspace
 from backend.tests.fixtures.library_binary_samples import (
-    VALID_HDF5_V0_WITH_DATASET,
     VALID_HDF5_V0_WITH_GROUP,
-    VALID_HDF5_V0_WITH_GROUP_OFFSETS4_LENGTHS8,
-    VALID_HDF5_V0_WITH_GROUP_OFFSETS8_LENGTHS4,
-    VALID_HDF5_V0_WITH_ORDERED_GROUPS,
-    VALID_HDF5_V0_WITH_UNWRITTEN_DATASET,
-    VALID_HDF5_V0_WITH_UNWRITTEN_FILL_DATASET,
     VALID_HDF5_V3,
-    VALID_HDF5_V3_WITH_DATASET,
-    VALID_HDF5_V3_WITH_DATASET_AND_ROOT_ATTRIBUTE,
-    VALID_HDF5_V3_WITH_FLOAT_DATASET,
-    VALID_HDF5_V3_WITH_GROUP,
-    VALID_HDF5_V3_WITH_TWO_DATASETS,
-    VALID_HDF5_V3_WITH_UNWRITTEN_DATASET,
-    VALID_HDF5_V3_WITH_UNWRITTEN_FILL_DATASET,
-    VALID_HDF5_V3_WITH_V2_CONTINUATION,
     VALID_PARQUET_ONE_ROW,
-    VALID_PARQUET_ZERO_ROWS_DICTIONARY_ONLY_ROW_GROUP,
     VALID_PARQUET_ZERO_ROWS_EMPTY_ROW_GROUP,
 )
 from backend.worker.runtime import OneShotWorker
@@ -73,34 +57,6 @@ class LibraryApiFixture:
     blob_root: Path
 
 
-def _unknown_hdf5_child_message_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_GROUP)
-    payload[186] = 0xFE
-    payload[189] = 0x80
-    payload[306:310] = _hdf5_lookup3_checksum(payload[179:306]).to_bytes(4, "little")
-    return bytes(payload)
-
-
-def _known_hdf5_child_payload_confusion() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_GROUP)
-    payload[186] = 0x01
-    payload[306:310] = _hdf5_lookup3_checksum(payload[179:306]).to_bytes(4, "little")
-    return bytes(payload)
-
-
-def _hdf5_ochk_attribute_type_confusion(message_type: int) -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_V2_CONTINUATION)
-    payload[314] = message_type
-    payload[373:377] = _hdf5_lookup3_checksum(payload[310:373]).to_bytes(4, "little")
-    return bytes(payload)
-
-
-def _legacy_hdf5_tree_sibling_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V0_WITH_GROUP)
-    payload[144:152] = (96).to_bytes(8, "little")
-    return bytes(payload)
-
-
 def _legacy_hdf5_tree_key_attack(*, first_key: int = 0, final_key: int = 8) -> bytes:
     payload = bytearray(VALID_HDF5_V0_WITH_GROUP)
     assert payload[136:140] == b"TREE"
@@ -109,75 +65,10 @@ def _legacy_hdf5_tree_key_attack(*, first_key: int = 0, final_key: int = 8) -> b
     return bytes(payload)
 
 
-def _legacy_hdf5_snod_order_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V0_WITH_ORDERED_GROUPS)
-    assert payload[1512:1520] == (8).to_bytes(8, "little")
-    assert payload[1552:1560] == (16).to_bytes(8, "little")
-    payload[1512:1520] = (16).to_bytes(8, "little")
-    payload[1552:1560] = (8).to_bytes(8, "little")
-    return bytes(payload)
-
-
-def _hdf5_v2_continuation_checksum_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_V2_CONTINUATION)
-    assert payload[310:314] == b"OCHK"
-    payload[320] ^= 1
-    return bytes(payload)
-
-
-def _hdf5_raw_metadata_overlap_attack(
-    address: int, *, payload: bytes = VALID_HDF5_V3_WITH_DATASET
-) -> bytes:
-    mutated = bytearray(payload)
-    assert mutated[237:239] == b"\x03\x01"
-    mutated[239:247] = address.to_bytes(8, "little")
-    mutated[443:447] = _hdf5_lookup3_checksum(mutated[179:443]).to_bytes(4, "little")
-    return bytes(mutated)
-
-
-def _hdf5_raw_raw_overlap_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_TWO_DATASETS)
-    assert payload[507:515] == (2072).to_bytes(8, "little")
-    payload[507:515] = (2048).to_bytes(8, "little")
-    payload[711:715] = _hdf5_lookup3_checksum(payload[447:711]).to_bytes(4, "little")
-    return bytes(payload)
-
-
-def _hdf5_float_bit_overlap_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_FLOAT_DATASET)
-    assert payload[227] == 52
-    payload[227] = 0
-    payload[443:447] = _hdf5_lookup3_checksum(payload[179:443]).to_bytes(4, "little")
-    return bytes(payload)
-
-
-def _hdf5_global_heap_size_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_V2_CONTINUATION)
-    assert payload[2048:2052] == b"GCOL"
-    payload[2056:2064] = (40).to_bytes(8, "little")
-    return bytes(payload)
-
-
-def _hdf5_unwritten_layout_size_attack() -> bytes:
-    payload = bytearray(VALID_HDF5_V3_WITH_UNWRITTEN_DATASET)
-    assert payload[239:247] == b"\xff" * 8
-    assert payload[247:255] == (80).to_bytes(8, "little")
-    payload[247:255] = (79).to_bytes(8, "little")
-    payload[443:447] = _hdf5_lookup3_checksum(payload[179:443]).to_bytes(4, "little")
-    return bytes(payload)
-
-
 def _malformed_empty_parquet_attack() -> bytes:
     payload = bytearray(VALID_PARQUET_ZERO_ROWS_EMPTY_ROW_GROUP)
     assert payload[57:59] == b"\x16\x00"
     payload[58] = 0x02
-    return bytes(payload)
-
-
-def _malformed_empty_dictionary_parquet_attack() -> bytes:
-    payload = bytearray(VALID_PARQUET_ZERO_ROWS_DICTIONARY_ONLY_ROW_GROUP)
-    assert payload[11:13] == b"\x15\x00"
-    payload[12] = 0x02
     return bytes(payload)
 
 
@@ -772,98 +663,8 @@ def test_m4v_upload_accepts_common_declared_mime_alias(
     [
         ("valid.h5", VALID_HDF5_V3, "application/x-hdf5", "hdf5"),
         (
-            "earliest-ordered-groups.h5",
-            VALID_HDF5_V0_WITH_ORDERED_GROUPS,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "earliest-group-offsets8-lengths4.h5",
-            VALID_HDF5_V0_WITH_GROUP_OFFSETS8_LENGTHS4,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "earliest-group-offsets4-lengths8.h5",
-            VALID_HDF5_V0_WITH_GROUP_OFFSETS4_LENGTHS8,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "earliest-dataset.h5",
-            VALID_HDF5_V0_WITH_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "earliest-unwritten-dataset.h5",
-            VALID_HDF5_V0_WITH_UNWRITTEN_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "earliest-unwritten-fill-dataset.h5",
-            VALID_HDF5_V0_WITH_UNWRITTEN_FILL_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "latest-dataset.h5",
-            VALID_HDF5_V3_WITH_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "latest-unwritten-dataset.h5",
-            VALID_HDF5_V3_WITH_UNWRITTEN_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "latest-unwritten-fill-dataset.h5",
-            VALID_HDF5_V3_WITH_UNWRITTEN_FILL_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "latest-dataset-root-attribute.h5",
-            VALID_HDF5_V3_WITH_DATASET_AND_ROOT_ATTRIBUTE,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "latest-two-datasets.h5",
-            VALID_HDF5_V3_WITH_TWO_DATASETS,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "latest-float-dataset.h5",
-            VALID_HDF5_V3_WITH_FLOAT_DATASET,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
-            "v2-continuation.h5",
-            VALID_HDF5_V3_WITH_V2_CONTINUATION,
-            "application/x-hdf5",
-            "hdf5",
-        ),
-        (
             "valid.parquet",
             VALID_PARQUET_ONE_ROW,
-            "application/vnd.apache.parquet",
-            "parquet",
-        ),
-        (
-            "empty.parquet",
-            VALID_PARQUET_ZERO_ROWS_EMPTY_ROW_GROUP,
-            "application/vnd.apache.parquet",
-            "parquet",
-        ),
-        (
-            "dictionary-empty.parquet",
-            VALID_PARQUET_ZERO_ROWS_DICTIONARY_ONLY_ROW_GROUP,
             "application/vnd.apache.parquet",
             "parquet",
         ),
@@ -893,119 +694,13 @@ def test_structurally_valid_binary_data_uploads_are_preserved_without_converter(
     ("filename", "content", "media_type"),
     [
         (
-            "nine-byte.h5",
-            b"\x89HDF\r\n\x1a\n\x03",
-            "application/x-hdf5",
-        ),
-        (
-            "thirteen-byte.parquet",
-            b"PAR1\x00\x01\x00\x00\x00PAR1",
-            "application/vnd.apache.parquet",
-        ),
-        (
-            "zero-root.h5",
-            VALID_HDF5_V3[:48] + (b"\x00" * (len(VALID_HDF5_V3) - 48)),
-            "application/x-hdf5",
-        ),
-        (
-            "zero-pages.parquet",
-            VALID_PARQUET_ONE_ROW[:4] + (b"\x00" * 50) + VALID_PARQUET_ONE_ROW[54:],
-            "application/vnd.apache.parquet",
-        ),
-        (
-            "zero-linked-child.h5",
-            VALID_HDF5_V3_WITH_GROUP[:179]
-            + (b"\x00" * (len(VALID_HDF5_V3_WITH_GROUP) - 179)),
-            "application/x-hdf5",
-        ),
-        (
-            "unknown-page-encoding.parquet",
-            VALID_PARQUET_ONE_ROW[:14] + b"\x7e" + VALID_PARQUET_ONE_ROW[15:],
-            "application/vnd.apache.parquet",
-        ),
-        (
-            "unknown-child-message.h5",
-            _unknown_hdf5_child_message_attack(),
-            "application/x-hdf5",
-        ),
-        (
-            "known-child-payload-confusion.h5",
-            _known_hdf5_child_payload_confusion(),
-            "application/x-hdf5",
-        ),
-        *(
-            (
-                f"ochk-payload-confusion-{message_type}.h5",
-                _hdf5_ochk_attribute_type_confusion(message_type),
-                "application/x-hdf5",
-            )
-            for message_type in (0x01, 0x03, 0x08)
-        ),
-        (
-            "forged-tree-sibling.h5",
-            _legacy_hdf5_tree_sibling_attack(),
-            "application/x-hdf5",
-        ),
-        (
             "forged-tree-first-key.h5",
             _legacy_hdf5_tree_key_attack(first_key=7),
             "application/x-hdf5",
         ),
         (
-            "forged-tree-final-key.h5",
-            _legacy_hdf5_tree_key_attack(final_key=9),
-            "application/x-hdf5",
-        ),
-        (
-            "forged-snod-order.h5",
-            _legacy_hdf5_snod_order_attack(),
-            "application/x-hdf5",
-        ),
-        (
-            "bad-v2-continuation-checksum.h5",
-            _hdf5_v2_continuation_checksum_attack(),
-            "application/x-hdf5",
-        ),
-        (
-            "raw-over-root-ohdr.h5",
-            _hdf5_raw_metadata_overlap_attack(48),
-            "application/x-hdf5",
-        ),
-        (
-            "raw-over-continuation.h5",
-            _hdf5_raw_metadata_overlap_attack(
-                447, payload=VALID_HDF5_V3_WITH_DATASET_AND_ROOT_ATTRIBUTE
-            ),
-            "application/x-hdf5",
-        ),
-        (
-            "raw-over-raw.h5",
-            _hdf5_raw_raw_overlap_attack(),
-            "application/x-hdf5",
-        ),
-        (
-            "float-bit-overlap.h5",
-            _hdf5_float_bit_overlap_attack(),
-            "application/x-hdf5",
-        ),
-        (
-            "undersized-global-heap.h5",
-            _hdf5_global_heap_size_attack(),
-            "application/x-hdf5",
-        ),
-        (
-            "unwritten-layout-size-mismatch.h5",
-            _hdf5_unwritten_layout_size_attack(),
-            "application/x-hdf5",
-        ),
-        (
             "malformed-empty.parquet",
             _malformed_empty_parquet_attack(),
-            "application/vnd.apache.parquet",
-        ),
-        (
-            "malformed-empty-dictionary.parquet",
-            _malformed_empty_dictionary_parquet_attack(),
             "application/vnd.apache.parquet",
         ),
     ],

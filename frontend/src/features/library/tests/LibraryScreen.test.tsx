@@ -60,6 +60,37 @@ describe("LibraryScreen", () => {
     });
   });
 
+  it.each([
+    { uri: "https://example.com/untitled", expected: "https://example.com/untitled" },
+    { uri: "upload://untitled.md", expected: "Markdown" },
+  ])("uses the reader display title for an untitled Library item ($uri)", async ({ uri, expected }) => {
+    const previousTitle = document.title;
+    const detail = { ...libraryItemDetail(LIBRARY_ITEM_ID, "", uri), title: null };
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+        data: [{ ...libraryItemSummary(LIBRARY_ITEM_ID, "", uri), title: null }],
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
+        data: treeResponse("library", [treeNode("node-1", LIBRARY_ITEM_ID, expected)]),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: {
+        data: detail,
+      },
+    });
+    const { unmount } = render(
+      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+        <LibraryScreen />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: expected, level: 2 })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${expected} - dtxWiki`));
+    unmount();
+    expect(document.title).toBe(previousTitle);
+  });
+
   it("renders library items, current version, and extracted view", async () => {
     const apiDetail = libraryItemDetail(
       LIBRARY_ITEM_ID,
@@ -114,6 +145,7 @@ describe("LibraryScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "API Item", level: 2 }),
     ).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("API Item - dtxWiki"));
     // Item 5 (M1): the markdown item body now renders instead of raw <pre>,
     // so its leading "# API Item" appears as a level-1 heading in the preview.
     expect(
@@ -139,6 +171,7 @@ describe("LibraryScreen", () => {
       await screen.findByRole("heading", { name: "Design Item", level: 2 }),
     ).toBeInTheDocument();
     expect(await screen.findByText(/Second artifact/)).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Design Item - dtxWiki"));
     expect(
       screen.getByRole("treeitem", { name: "Design Item" }),
     ).toHaveAttribute("aria-selected", "true");
@@ -153,6 +186,7 @@ describe("LibraryScreen", () => {
     expect(await screen.findByRole("heading", { name: "Library" }))
       .toBeInTheDocument();
     expect(screen.queryByText(/Second artifact/)).not.toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("dtxWiki"));
     expect(screen.getByRole("treeitem", { name: "References" }))
       .toHaveAttribute("aria-selected", "true");
   });

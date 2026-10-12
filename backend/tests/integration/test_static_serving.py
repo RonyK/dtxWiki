@@ -7,10 +7,8 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 
 
-def test_api_routes_still_work_with_spa_mount():
-    app = create_app(
-        settings=Settings(oauth_jwt_private_key_pem=_private_key_pem())
-    )
+def test_api_routes_still_work_with_spa_mount(tmp_path):
+    app = _app_with_spa_bundle(tmp_path)
     app.state.app_version_synced = True
     app.state.mcp_session_manager = object()
     client = TestClient(app)
@@ -125,6 +123,18 @@ def _private_key_pem() -> str:
     ).decode()
 
 
+def _settings(tmp_path) -> Settings:
+    # /health/ready pings the configured database. The default URL is
+    # <DTXWIKI_DATA_DIR>/data/dtxwiki.sqlite, and create_app does not create
+    # that directory (bootstrap does), so on the default the probe answers 503
+    # unless an earlier test in the same pytest process happened to create it.
+    # Each app gets a database of its own instead.
+    return Settings(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'ready.sqlite'}",
+        oauth_jwt_private_key_pem=_private_key_pem(),
+    )
+
+
 def test_unknown_frontend_route_still_returns_spa_index(tmp_path):
     client = TestClient(_app_with_spa_bundle(tmp_path))
 
@@ -136,7 +146,7 @@ def test_unknown_frontend_route_still_returns_spa_index(tmp_path):
 
 
 def test_create_app_accepts_container_and_extra_mount(tmp_path):
-    settings = Settings(oauth_jwt_private_key_pem=_private_key_pem())
+    settings = _settings(tmp_path)
     container = assemble(settings)
 
     def mount_cloud_probe(app):
@@ -169,5 +179,4 @@ def _app_with_spa_bundle(tmp_path):
     )
     (assets / "app.js").write_text("console.log('test bundle');", encoding="utf-8")
 
-    settings = Settings(oauth_jwt_private_key_pem=_private_key_pem())
-    return create_app(settings=settings, static_root=static_root)
+    return create_app(settings=_settings(tmp_path), static_root=static_root)

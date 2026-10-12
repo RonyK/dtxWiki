@@ -484,7 +484,7 @@ def test_name_search_pushdown_is_bounded_by_this_workspace(db):
     )
 
 
-def test_pushdown_guard_counts_the_name_search_key_set(db, monkeypatch):
+def test_pushdown_guard_counts_the_name_search_key_set(monkeypatch):
     """The guard has to measure the set that is actually pushed down.
 
     It used to count only ``active_connection_keys()``, which is bounded by
@@ -497,7 +497,7 @@ def test_pushdown_guard_counts_the_name_search_key_set(db, monkeypatch):
         settings_service, "MCP_CLIENT_PUSHDOWN_KEY_WARNING_THRESHOLD", 3
     )
     health = WorkspaceOAuthHealth(
-        workspace_id=db.workspace_id,
+        workspace_id=uuid4(),
         now=utc_now(),
         known_oauth_client_ids=frozenset(),
         live_oauth_client_ids=frozenset(),
@@ -608,7 +608,7 @@ def test_two_users_sharing_one_oauth_client_are_faceted_apart(db):
     assert everything.status_counts.disabled == 1
 
 
-def test_active_connection_predicate_compiles_on_postgresql(db):
+def test_active_connection_predicate_compiles_on_postgresql():
     """The pushdown's row-value ``IN`` has to be legal SQL on the real target.
 
     The rewrite replaced portable correlated ``EXISTS`` subqueries with
@@ -621,14 +621,16 @@ def test_active_connection_predicate_compiles_on_postgresql(db):
     which is skipped without a live database.
     """
 
+    workspace_id = uuid4()
+    user_id = uuid4()
     health = WorkspaceOAuthHealth(
-        workspace_id=db.workspace_id,
+        workspace_id=workspace_id,
         now=utc_now(),
         known_oauth_client_ids=frozenset({"shared-app"}),
         live_oauth_client_ids=frozenset({"shared-app"}),
-        consent_keys=frozenset({(db.user_id, "shared-app"), (None, "shared-app")}),
+        consent_keys=frozenset({(user_id, "shared-app"), (None, "shared-app")}),
         live_expiry={
-            (db.user_id, "shared-app"): utc_now(),
+            (user_id, "shared-app"): utc_now(),
             (None, "shared-app"): utc_now(),
         },
         oauth_client_names={"shared-app": "Shared App"},

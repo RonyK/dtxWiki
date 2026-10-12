@@ -238,7 +238,7 @@ def test_context_history_repair_clears_migration_preflight_blockers(tmp_path: Pa
     page_state, _versions = _history_snapshot(session_factory, page_id)
     assert page_state == (head_id, head_id, None)
     migration = import_module(
-        "backend.migrations.revision_0002.workspace_schema"
+        "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
     )
     engine = session_factory.kw["bind"]
     with engine.connect() as connection:
@@ -995,7 +995,7 @@ def test_migration_preflight_blocks_overlap_that_masks_a_live_draft(tmp_path: Pa
     """
 
     migration = import_module(
-        "backend.migrations.revision_0002.workspace_schema"
+        "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
     )
     unique_url, unique_factory, _page_id, _head_id, _draft_id = _overlap_database(
         tmp_path, draft_count=1
@@ -1204,7 +1204,7 @@ def test_unset_pointer_audit_and_migration_preflight_agree(tmp_path: Path):
     """
 
     migration = import_module(
-        "backend.migrations.revision_0002.workspace_schema"
+        "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
     )
     unique_url, unique_factory, *_unique_ids = _unset_pointer_database(
         tmp_path, draft_count=1, unset_current=True

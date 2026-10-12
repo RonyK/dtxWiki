@@ -9,7 +9,7 @@ from alembic.operations import Operations
 from sqlalchemy import create_engine, inspect, text
 
 consolidated = import_module(
-    "backend.migrations.revision_0002.tenancy_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.tenancy_schema"
 )
 
 pytestmark = pytest.mark.integration

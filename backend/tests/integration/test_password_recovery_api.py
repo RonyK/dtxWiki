@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
@@ -68,6 +69,22 @@ def link_token(url: str) -> str:
 
 def check_reset_status(client: TestClient, token: str):
     return client.post("/api/v1/auth/password-reset/status", json={"token": token})
+
+
+def pin_recovery_clock(client: TestClient, now: datetime) -> PasswordRecoveryService:
+    """The app's recovery service with its clock held at ``now``.
+
+    The host clock steps (NTP, a resumed VM), so a test that backdates a link
+    against one read of it and has the service judge the link against another
+    leaves the link on either side of its own deadline. The service reads its
+    clock through a ``now`` callable bound when it is built, so patching
+    ``utc_now`` afterwards would not reach it; the pinned copy replaces the
+    instance the routes resolve from ``app.state``.
+    """
+
+    service = replace(client.app.state.password_recovery_service, now=lambda: now)
+    client.app.state.password_recovery_service = service
+    return service
 
 
 def test_public_request_is_uniform_and_only_verified_active_user_gets_token(
@@ -392,14 +409,18 @@ def test_unregistered_address_spray_never_touches_global_backstop(page_service):
 def test_password_reset_confirm_distinguishes_expired_and_used_links(page_service):
     client, _, _ = recovery_client(page_service)
     signup(client, "reset-state@example.com")
-    service = client.app.state.password_recovery_service
+    # The expired link is backdated one second before this "now" and judged
+    # against the same "now"; the same pin keeps the 30-minute link issued for
+    # the "used" half live until its first use.
+    now = datetime.now(UTC)
+    service = pin_recovery_clock(client, now)
 
     expired_issue = service.issue_password_reset(email="reset-state@example.com")
     expired_token = link_token(expired_issue.reset_url)
     with page_service.session_factory.begin() as session:
         token_row = session.get(PasswordResetToken, expired_issue.token_id)
         assert token_row is not None
-        token_row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        token_row.expires_at = now - timedelta(seconds=1)
 
     expired = client.post(
         "/api/v1/auth/password-reset/confirm",
@@ -444,7 +465,10 @@ def test_password_reset_status_distinguishes_valid_expired_used_and_malformed(
     # out and submitted. This read-only endpoint lets the screen check first.
     client, _, _ = recovery_client(page_service)
     signup(client, "reset-status@example.com")
-    service = client.app.state.password_recovery_service
+    # Expiry is judged against the same "now" the expired link is backdated
+    # from, and the fresh link cannot lapse between issue and use.
+    now = datetime.now(UTC)
+    service = pin_recovery_clock(client, now)
 
     fresh_issue = service.issue_password_reset(email="reset-status@example.com")
     fresh_token = link_token(fresh_issue.reset_url)
@@ -466,7 +490,7 @@ def test_password_reset_status_distinguishes_valid_expired_used_and_malformed(
     with page_service.session_factory.begin() as session:
         token_row = session.get(PasswordResetToken, expired_issue.token_id)
         assert token_row is not None
-        token_row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        token_row.expires_at = now - timedelta(seconds=1)
     expired = check_reset_status(client, expired_token)
     assert expired.status_code == 400
     assert expired.json()["error_code"] == "password_reset_token_expired"
@@ -651,23 +675,17 @@ def test_emailed_recovery_links_carry_the_token_only_in_the_fragment(
 
 
 def test_capability_distinguishes_email_admin_assisted_and_disabled(page_service):
-    email_client, _, _ = recovery_client(page_service)
-    email = email_client.get("/api/v1/auth/capabilities")
-    admin_only = TestClient(
-        create_app(
-            settings=Settings(
-                session_secret="admin-assisted-test-secret",
-                public_base_url="https://wiki.example.com",
-            ),
-            page_service=page_service,
-        )
-    ).get("/api/v1/auth/capabilities")
-    disabled = TestClient(
-        create_app(
-            settings=Settings(session_secret="disabled-recovery-test-secret"),
-            page_service=page_service,
-        )
-    ).get("/api/v1/auth/capabilities")
+    # The route projects app.state.settings at request time, so one app serves
+    # every mode; the email mode comes from the real recovery_client wiring.
+    client, _, _ = recovery_client(page_service)
+    email = client.get("/api/v1/auth/capabilities")
+    client.app.state.settings = Settings(
+        session_secret="admin-assisted-test-secret",
+        public_base_url="https://wiki.example.com",
+    )
+    admin_only = client.get("/api/v1/auth/capabilities")
+    client.app.state.settings = Settings(session_secret="disabled-recovery-test-secret")
+    disabled = client.get("/api/v1/auth/capabilities")
 
     assert email.json()["data"]["password_recovery"] == {
         "mode": "email",

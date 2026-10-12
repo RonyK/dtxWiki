@@ -1,19 +1,25 @@
 {
-  "description": "Migration files published in dtxWiki 0.1.1. They are frozen: a released revision is never edited in place; schema changes go into a new revision that descends from 0002_epic1. tests/packaging/test_migration_chain.py and scripts/verify_wheel_artifact.py fail when any of these bytes change.",
-  "released_in": "0.1.1",
+  "description": "Canonical baseline for the 0.0.1 and 0.1.1 schemas, renamed and regrouped in 0.1.2 without changing schema or data operations. Frozen files must not be edited after publication; new database changes extend the chain.",
+  "released_in": "0.1.2",
+  "schema_origins": [
+    "0.0.1",
+    "0.1.1"
+  ],
   "sha256": {
-    "revision_0002/__init__.py": "71f7a5d9f393e0b419d91f0fd9227cb27e3624785b42c2c7ddab609c80d8aee6",
-    "revision_0002/context_data.py": "075906a2ad4ea9008233509031c73ffde600043ab3894673b631d7b53426bd5d",
-    "revision_0002/context_schema.py": "e452ac330100653c4a05a1bb279954bee83d6f3aee1f70d8a554834ceb297137",
-    "revision_0002/identity_access_schema.py": "7bd29b29460f7b144b5a2f453ae3a83ba764288f8a796693ba7c8fc50bf4dd32",
-    "revision_0002/library_media_schema.py": "d3e2b5666a06219e60bb6a8294d7843db2fc556a9b7b1336c56ec61dce26b532",
-    "revision_0002/library_policy.py": "e850a8316e11c83ada328dba0721efc862b4097a23a3e050aff2345598dd5cf8",
-    "revision_0002/operations_schema.py": "0b7dc03d8fb784c891b1da555e56b1586022590696ee1027b452b76dd1de7d91",
-    "revision_0002/search_schema.py": "64eb67015b20a7569c5e977744b555eb78901bf16c5a26e15f9d8f33db224e94",
-    "revision_0002/tenancy_schema.py": "55426d1c3f84c7a1611f660b3b541181435d76d5674aa93e36c2ab2dd3b0272b",
-    "revision_0002/unique_key_prepass.py": "6d564b038d785c0d551ee103908ec3f61f0c08a3ff6d325053e629b3519e1cec",
-    "revision_0002/workspace_schema.py": "f75ad4453b33a014bec4c40c0042a43e062c2b0f3ac825a81a928c5734461bff",
-    "versions/0001_initial_release.py": "dc68c40730f8ef83544c5c7fb59589806cd6e80b869617eda68cf5757995c9ac",
-    "versions/0002_epic1.py": "1e104864f9d31a51d51906fe7e0f49c37e9605b7f5c675d057b44166f3ffd55d"
+    "revision_modules/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
+    "revision_modules/v0_1/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
+    "revision_modules/v0_1/efcbcf724889_core_schema/__init__.py": "b57efc37a5d5c2e8027f42613fdfdb3252376d6784ba4cff95030e74ccd26f09",
+    "revision_modules/v0_1/efcbcf724889_core_schema/context_data.py": "366709f74283479354b738c4a4367f78183d327b184ad2d78654a60db4384ccc",
+    "revision_modules/v0_1/efcbcf724889_core_schema/context_schema.py": "406886a9b7e0963d0ac5e21947371a0824f5dfb1d382e384d69e90011b74ed85",
+    "revision_modules/v0_1/efcbcf724889_core_schema/identity_access_schema.py": "bdd07ca0004aa5973cd593bd6e00d1206781d0116e16ccc2a071aa206248f9f9",
+    "revision_modules/v0_1/efcbcf724889_core_schema/library_media_schema.py": "0026ee1fb15c27692a1888f4521ae2d01d9ddf343d45f9865c41d15e47fe5cfb",
+    "revision_modules/v0_1/efcbcf724889_core_schema/library_policy.py": "ed86943f046fedf08eb7fa0dde1a6674d07243bbcaf0907d49e4e00d8ef3732c",
+    "revision_modules/v0_1/efcbcf724889_core_schema/operations_schema.py": "daa008f631076b9018ef2ff045a06a27258c206dc001d1a23e4a836f988c36eb",
+    "revision_modules/v0_1/efcbcf724889_core_schema/search_schema.py": "13cb7fad720896937887a4692cb67c8afb63397cea120c38af4ae9683d7c62db",
+    "revision_modules/v0_1/efcbcf724889_core_schema/tenancy_schema.py": "e36f7d452028a03a73ce94d50f3b6c2b30c43b60230a332170b23fbc83bc9698",
+    "revision_modules/v0_1/efcbcf724889_core_schema/unique_key_prepass.py": "6d564b038d785c0d551ee103908ec3f61f0c08a3ff6d325053e629b3519e1cec",
+    "revision_modules/v0_1/efcbcf724889_core_schema/workspace_schema.py": "6daaec7d569a6ec8c6f76c444a95e4fc945e218215d9234debcbb5187e2960ec",
+    "versions/v0_0/bd62193d5cf6_initial_schema.py": "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8",
+    "versions/v0_1/efcbcf724889_core_schema.py": "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
   }
 }

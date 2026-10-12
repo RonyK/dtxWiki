@@ -1,5 +1,4 @@
-"""Epic-2 Phase 6a (doc/design/workspace-database-separation-plan.md §4):
-the server-admin job listing/summary fan out across the workspace roster
+"""Server-admin job listing and summary fan out across the workspace roster
 instead of running one cross-workspace query, because once Job is
 workspace-plane data a single query has nothing left to read.
 

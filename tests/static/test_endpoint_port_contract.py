@@ -5,7 +5,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_local_compose_uses_sprint3_postgres_host_port_env():
+def test_local_compose_uses_configurable_postgres_host_port():
     compose = (ROOT / "infra/local/docker-compose.yml").read_text(encoding="utf-8")
 
     assert '"127.0.0.1:${DTXWIKI_POSTGRES_HOST_PORT:-21432}:5432"' in compose
@@ -67,7 +67,7 @@ def test_local_compose_is_postgres_only_dev_db():
     assert "DTXWIKI_JOB_QUEUE_" not in compose
 
 
-def test_frontend_and_playwright_configs_use_sprint3_ports():
+def test_frontend_and_playwright_configs_use_configurable_endpoint_ports():
     vite_config = (ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
     playwright_config = (ROOT / "playwright.config.ts").read_text(encoding="utf-8")
     api_client = (ROOT / "frontend/src/shared/api/client.ts").read_text(

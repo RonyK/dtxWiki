@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from backend.cli import main as cli_main
 from backend.cli.commands import admin as cli_admin
 from backend.services.credential_hashing import CredentialHasher
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 
 
 def fast_hasher() -> CredentialHasher:
@@ -24,7 +25,7 @@ def fast_hasher() -> CredentialHasher:
 
 
 def _db(tmp_path) -> str:
-    return f"sqlite:///{tmp_path / 'admin.sqlite'}"
+    return copy_migrated_sqlite(tmp_path / "admin.sqlite")
 
 
 def _add_user(runner, db, monkeypatch, email) -> None:

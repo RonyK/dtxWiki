@@ -1,6 +1,6 @@
 import os
-from datetime import timedelta
-from uuid import uuid4
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -477,15 +477,13 @@ def test_connection_listing_query_count_is_constant_per_page(page_service):
 
 
 def test_mcp_last_used_touch_coalesces_within_five_minutes(page_service):
-    # The seed reads the signed-up user, so the client has to exist first --
-    # without it select(User) returns None and the seed dies before the
-    # coalescing rule is ever exercised.
-    _client(page_service)
-    _user_id, _workspace_id, _oauth_client_id, mcp_client_id = _seed_expired_connection(
-        page_service
-    )
+    # The rule only reads and writes MCPClient.last_used_at, so the persisted
+    # fixture client is enough: no app, user or OAuth connection is involved.
     with page_service.session_factory.begin() as session:
-        client = session.get(MCPClient, mcp_client_id)
+        client = session.scalar(
+            select(MCPClient).where(MCPClient.name == "fixture-system-client")
+        )
+        assert client is not None
         first_used_at = utc_now()
         client.last_used_at = None
         assert touch_mcp_client_last_used(client, used_at=first_used_at) is True
@@ -930,7 +928,9 @@ def test_mcp_client_delete_rejects_bearer_pat_even_for_owner(page_service):
         )
 
 
-def _seed_connection_state_axis_fixture(page_service, *, group_size: int):
+def _seed_connection_state_axis_fixture(
+    page_service, *, group_size: int, now: datetime | None = None
+):
     """Seed `group_size` clients in each of the four connection states.
 
     Every client except the disabled group carries ``status="active"``, so a
@@ -938,9 +938,13 @@ def _seed_connection_state_axis_fixture(page_service, *, group_size: int):
     active+expired+revoked on one side. The revoked group deliberately keeps a
     live refresh token: that proves ``OAuthClient.revoked_at`` is checked in its
     own right rather than inferred from token state.
+
+    ``now`` is the instant the token expiries are measured from; a test that
+    judges them at a different clock must pass the clock it will use.
     """
 
-    now = utc_now()
+    if now is None:
+        now = utc_now()
     expected: dict[str, set[str]] = {
         "active": set(),
         "expired": set(),
@@ -1050,20 +1054,40 @@ def test_mcp_client_active_deactivated_facet_tracks_connection_health(page_servi
     assert everything.json()["filtered_count"] == 4
 
 
-def test_mcp_client_cursor_traverses_health_facets_exactly_once(page_service):
+def test_mcp_client_cursor_traverses_health_facets_exactly_once(
+    page_service, monkeypatch
+):
     client = _client(page_service)
+    now = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    # This is a stable-health traversal test. Production reevaluates UTC on
+    # every page, so a clock rollback can revive expired refresh tokens and
+    # ordinary expiry can move rows between facets mid-walk. Snapshot or
+    # irreversible-expiry semantics would need a separate product decision.
+    monkeypatch.setattr("backend.services.settings_service.utc_now", lambda: now)
     workspace_id, expected = _seed_connection_state_axis_fixture(
-        page_service, group_size=21
+        page_service, group_size=21, now=now
     )
     url = f"/api/v1/workspaces/{workspace_id}/settings/mcp-clients"
     deactivated_expected = (
         expected["expired"] | expected["revoked"] | expected["disabled"]
     )
 
+    # Each facet gets one newest row followed by a tied group that spans the
+    # page edge. ORM defaults use wall time, so pin the committed ordering keys
+    # to exercise both columns of the (created_at, id) cursor.
+    with page_service.session_factory.begin() as session:
+        for wanted in (expected["active"], deactivated_expected):
+            for index, client_id in enumerate(sorted(wanted)):
+                model = session.get(MCPClient, UUID(client_id))
+                assert model is not None
+                model.created_at = now - timedelta(seconds=min(index, 1))
+
     for status, wanted in (
         ("active", expected["active"]),
         ("disabled", deactivated_expected),
     ):
+        ordered_ids = sorted(wanted)
+        expected_order = [ordered_ids[0], *reversed(ordered_ids[1:])]
         seen: list[str] = []
         cursor = None
         while True:
@@ -1077,11 +1101,13 @@ def test_mcp_client_cursor_traverses_health_facets_exactly_once(page_service):
             assert payload["status_counts"] == {"active": 21, "disabled": 63}
             assert payload["filtered_count"] == len(wanted)
             seen.extend(row["id"] for row in payload["data"])
+            assert len(seen) <= len(wanted), f"{status} cursor did not progress"
             cursor = payload.get("next_cursor")
             if not cursor:
                 break
         assert len(seen) == len(set(seen)), f"{status} facet returned duplicates"
         assert set(seen) == wanted, f"{status} facet dropped or added rows"
+        assert seen == expected_order, f"{status} facet returned incorrect order"
 
 
 def _count_selects(engine, call) -> int:

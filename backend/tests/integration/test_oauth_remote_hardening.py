@@ -38,17 +38,21 @@ from sqlalchemy import func, select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
-from backend.models.base import utc_now
 from backend.models.oauth import OAuthAccessTokenJti, OAuthClient, OAuthRefreshToken
 from backend.services.oauth_service import (
     _OAUTH_CSRF_ISSUED_STATES,
     OAUTH_CSRF_COOKIE_NAME,
     REFRESH_REFUSAL_REASONS,
-    REFRESH_REUSE_GRACE_WINDOW_SECONDS,
     challenge_s256,
     token_hash,
 )
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.integration.test_oauth_mcp_http import module_scoped_page_service
+from backend.tests.utils.oauth_clock import (  # noqa: F401
+    OAuthClock,
+    oauth_clock_fixture,
+    oauth_row_clock_fixture,
+)
 
 pytestmark = pytest.mark.oauth_flow
 
@@ -58,6 +62,7 @@ def make_client(
     *,
     security_headers: bool = False,
     settings_overrides: dict[str, Any] | None = None,
+    authenticated: bool = True,
 ) -> TestClient:
     settings_values = {
         "database_url": "sqlite+pysqlite:///:memory:",
@@ -74,8 +79,22 @@ def make_client(
             page_service=page_service,
         )
     )
-    authenticate_test_client_in_workspace(client, page_service.session_factory)
+    if authenticated:
+        authenticate_test_client_in_workspace(client, page_service.session_factory)
     return client
+
+
+@pytest.fixture(scope="module")
+def registration_client(_empty_sqlite_schema):
+    """One signed-in client for the DCR validation cases.
+
+    They only POST /oauth/register and read the response: no case counts
+    rows or audit events, so they share a store. Cases that do keep their own
+    ``make_client``.
+    """
+
+    with module_scoped_page_service(_empty_sqlite_schema) as page_service:
+        yield make_client(page_service)
 
 
 def _valid_payload(**overrides):
@@ -117,10 +136,10 @@ def test_register_emits_audit_with_null_workspace(page_service):
     assert row.payload["scope"] == "mcp:read mcp:write"
 
 
-def test_register_accepts_mcp_agent_scope(page_service):
+def test_register_accepts_mcp_agent_scope(registration_client):
     """H22 positive control: ``mcp:agent`` is in ALLOWED_OAUTH_SCOPES."""
 
-    client = make_client(page_service)
+    client = registration_client
     resp = client.post(
         "/oauth/register",
         json=_valid_payload(scope="mcp:agent"),
@@ -134,8 +153,8 @@ def test_register_accepts_mcp_agent_scope(page_service):
 # ---------------------------------------------------------------------------
 
 
-def test_register_rejects_empty_redirects_with_keyword(page_service):
-    client = make_client(page_service)
+def test_register_rejects_empty_redirects_with_keyword(registration_client):
+    client = registration_client
     resp = client.post(
         "/oauth/register",
         json=_valid_payload(redirect_uris=[]),
@@ -144,8 +163,8 @@ def test_register_rejects_empty_redirects_with_keyword(page_service):
     assert "redirect_uris" in resp.text
 
 
-def test_register_rejects_oversized_client_name_with_keyword(page_service):
-    client = make_client(page_service)
+def test_register_rejects_oversized_client_name_with_keyword(registration_client):
+    client = registration_client
     resp = client.post(
         "/oauth/register",
         json=_valid_payload(client_name="x" * 201),
@@ -154,11 +173,11 @@ def test_register_rejects_oversized_client_name_with_keyword(page_service):
     assert "client_name" in resp.text
 
 
-def test_register_accepts_max_length_client_name(page_service):
+def test_register_accepts_max_length_client_name(registration_client):
     """Positive control paired with the oversized rejection: exactly 200
     chars is accepted (boundary not off-by-one)."""
 
-    client = make_client(page_service)
+    client = registration_client
     resp = client.post(
         "/oauth/register",
         json=_valid_payload(client_name="x" * 200),
@@ -167,8 +186,8 @@ def test_register_accepts_max_length_client_name(page_service):
     assert resp.json()["client_name"] == "x" * 200
 
 
-def test_register_rejects_unknown_scope_with_keyword(page_service):
-    client = make_client(page_service)
+def test_register_rejects_unknown_scope_with_keyword(registration_client):
+    client = registration_client
     resp = client.post(
         "/oauth/register",
         json=_valid_payload(scope="mcp:admin"),
@@ -414,11 +433,12 @@ def test_consent_state_missing_400(page_service):
     assert get_resp.status_code == 200
 
     bad_params = {**params, "state": ""}
+    workspace_id = _current_workspace_id(client)
     post_resp = client.post(
         "/oauth/authorize",
         data={
             **bad_params,
-            "workspace_ids": [_current_workspace_id(client)],
+            "workspace_ids": [workspace_id],
             "decision": "allow",
         },
         follow_redirects=False,
@@ -433,33 +453,9 @@ def test_consent_state_missing_400(page_service):
     assert events[0].payload["reason"] == "missing"
     assert events[0].payload["client_id"] == client_id
     assert events[0].actor_kind == "user_session"
-
-
-def test_consent_csrf_audit_records_authenticated_workspace(page_service):
-    """SEC-P3-1 regression: authenticated consent-CSRF failures should keep
-    forensic workspace context when the user's current workspace can be safely
-    resolved, instead of always persisting workspace_id=NULL."""
-
-    client = make_client(page_service)
-    client_id = _register_consent_client(client)
-    params = _authorize_params(client_id, state=_CONSENT_STATE_GOOD)
-    assert client.get("/oauth/authorize", params=params).status_code == 200
-    workspace_id = _current_workspace_id(client)
-
-    post_resp = client.post(
-        "/oauth/authorize",
-        data={
-            **params,
-            "state": "",
-            "workspace_ids": [workspace_id],
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-    assert post_resp.status_code == 400
-
-    events = _consent_csrf_events(page_service)
-    assert len(events) == 1
+    # SEC-P3-1 regression: authenticated consent-CSRF failures keep forensic
+    # workspace context when the user's current workspace can be safely
+    # resolved, instead of always persisting workspace_id=NULL.
     assert str(events[0].workspace_id) == workspace_id
 
 
@@ -484,6 +480,14 @@ def test_consent_state_mismatch_400(page_service):
         follow_redirects=False,
     )
     assert post_resp.status_code == 400
+    # The 400 body carries the established REST error shape (ADR A9): the
+    # OAuth ``invalid_request`` slug plus a ``message`` with the keyword
+    # ``state binding`` so callers can pin the failure mode (ADR A6).
+    body = post_resp.json()
+    assert "error_code" in body
+    assert "message" in body
+    assert body["error_code"] == "invalid_request"
+    assert "state binding" in body["message"]
     # Cookie deleted on failure (one-time).
     assert client.cookies.get(OAUTH_CSRF_COOKIE_NAME) is None
 
@@ -571,35 +575,6 @@ def test_consent_state_expired_400(page_service):
     events = _consent_csrf_events(page_service)
     assert len(events) == 1
     assert events[0].payload["reason"] == "expired"
-
-
-def test_consent_state_error_body_shape_matches_adr_a9(page_service):
-    """The 400 body for a CSRF failure carries the established REST error
-    shape (``error_code`` + ``message`` + envelope) per ADR A9. The
-    ``error_code`` is the OAuth ``invalid_request`` slug; the ``message``
-    contains the keyword ``state binding`` so callers can pin the failure
-    mode (ADR A6)."""
-
-    client = make_client(page_service)
-    client_id = _register_consent_client(client)
-    params = _authorize_params(client_id, state=_CONSENT_STATE_GOOD)
-    client.get("/oauth/authorize", params=params)
-
-    post_resp = client.post(
-        "/oauth/authorize",
-        data={
-            **params,
-            "state": _CONSENT_STATE_BAD,
-            "workspace_ids": [_current_workspace_id(client)],
-            "decision": "allow",
-        },
-        follow_redirects=False,
-    )
-    body = post_resp.json()
-    assert "error_code" in body
-    assert "message" in body
-    assert body["error_code"] == "invalid_request"
-    assert "state binding" in body["message"]
 
 
 # =========================================================================
@@ -726,21 +701,38 @@ def _refresh_reuse_audit_rows(page_service) -> list[AuditEvent]:
         )
 
 
-def _expire_reuse_grace_window(page_service, refresh_token: str) -> None:
-    """Push a just-rotated row's ``rotated_at`` outside the P10.3 T3 30s
-    reuse-grace window (section 2.3, ``REFRESH_REUSE_GRACE_WINDOW_SECONDS``)
-    so a subsequent replay of it exercises real reuse-detection (family
-    revoke) instead of a grace reissue (a fresh sibling pair, 200)."""
-
-    with page_service.session_factory.begin() as session:
-        row = session.scalar(
-            select(OAuthRefreshToken).where(
-                OAuthRefreshToken.token_lookup_hash == token_hash(refresh_token)
-            )
+def _refresh_grace_audit_rows(page_service) -> list[AuditEvent]:
+    with page_service.session_factory() as session:
+        return list(
+            session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.action == "oauth.refresh.grace_reissue"
+                )
+            ).all()
         )
-        assert row is not None
-        assert row.rotated_at is not None
-        row.rotated_at -= timedelta(seconds=REFRESH_REUSE_GRACE_WINDOW_SECONDS + 1)
+
+
+# The reuse-grace window's documented length (P10.3 T3 section 2.3, ADR A5
+# amendment). Pinned here, not read from ``REFRESH_REUSE_GRACE_WINDOW_SECONDS``,
+# so that widening or narrowing the window in the service fails these tests
+# instead of moving them along with it.
+_REUSE_GRACE_WINDOW = timedelta(seconds=30)
+_ONE_MICROSECOND = timedelta(microseconds=1)
+
+
+def _lapse_reuse_grace_window(clock: OAuthClock) -> None:
+    """Let the P10.3 T3 reuse-grace window run out on the OAuth clock, so a
+    replay of a token rotated so far exercises real reuse-detection (family
+    revoke) instead of a grace reissue (a fresh sibling pair, 200).
+
+    The service measures the window from the replayed row's own ``rotated_at``,
+    which its rotation stamped from this same clock, so moving the clock
+    decides the replay exactly. Backdating ``rotated_at`` against the host
+    clock instead left a one-second margin that a host step back of more than
+    a second could spend.
+    """
+
+    clock.value += _REUSE_GRACE_WINDOW + timedelta(seconds=1)
 
 
 # --- Positive controls ----------------------------------------------------
@@ -818,16 +810,16 @@ def test_refresh_rotation_preserves_stable_grant_identity(page_service):
     assert {str(row.grant_id) for row in rows} == {first_claims["grant_id"]}
 
 
-def test_refresh_token_lifetime_is_usable_and_rotation_slides(page_service):
-    from backend.models.base import utc_now
-
+def test_refresh_token_lifetime_is_usable_and_rotation_slides(
+    page_service, oauth_row_clock
+):
     client = make_client(page_service)
     tokens = _seed_oauth_tokens(client, state="o5-sliding-lifetime")
     # MCP-05: restored to the pre-branch 30-day default (was silently
     # widened to 180 days).
     assert tokens["refresh_token_expires_in"] == 60 * 60 * 24 * 30
 
-    now = utc_now()
+    now = oauth_row_clock.value
     with page_service.session_factory.begin() as session:
         original = session.scalar(
             select(OAuthRefreshToken).where(
@@ -839,7 +831,6 @@ def test_refresh_token_lifetime_is_usable_and_rotation_slides(page_service):
         original.created_at = now - timedelta(days=29)
         original.expires_at = now + timedelta(days=1)
 
-    rotated_at = utc_now()
     refresh = client.post(
         "/oauth/token",
         data={
@@ -859,21 +850,25 @@ def test_refresh_token_lifetime_is_usable_and_rotation_slides(page_service):
             )
         )
         assert successor is not None
-        remaining = (successor.expires_at - rotated_at).total_seconds()
-        assert 60 * 60 * 24 * 30 - 5 <= remaining <= 60 * 60 * 24 * 30 + 5
-        row_lifetime = int(
-            (successor.expires_at - successor.created_at).total_seconds()
-        )
-        assert abs(refresh.json()["refresh_token_expires_in"] - row_lifetime) <= 1
+        # The clock has not moved since the parent was aged, so the slide is
+        # exact: a full lifetime from the rotation, not what was left on the
+        # parent.
+        assert successor.expires_at == now + timedelta(days=30)
+        # The row is stamped by the same clock, so the lifetime it stores is
+        # exactly the one the response reports.
+        row_lifetime = successor.expires_at - successor.created_at
+        reported = timedelta(seconds=refresh.json()["refresh_token_expires_in"])
+        assert reported == row_lifetime
 
 
 @pytest.mark.parametrize(
     "reason",
     sorted(REFRESH_REFUSAL_REASONS),
 )
-def test_refresh_refusal_reason_reaches_audit_and_metrics(page_service, reason):
+def test_refresh_refusal_reason_reaches_audit_and_metrics(
+    page_service, oauth_clock, reason
+):
     from backend.api import metrics
-    from backend.models.base import utc_now
     from backend.models.oauth import OAuthConsent
     from backend.models.user import User
 
@@ -893,7 +888,7 @@ def test_refresh_refusal_reason_reaches_audit_and_metrics(page_service, reason):
         assert rotated.status_code == 200, rotated.text
         # Outside the P10.3 T3 30s reuse-grace window so the replay below
         # exercises real reuse-detection, not a grace reissue.
-        _expire_reuse_grace_window(page_service, tokens["refresh_token"])
+        _lapse_reuse_grace_window(oauth_clock)
     else:
         with page_service.session_factory.begin() as session:
             row = session.scalar(
@@ -904,10 +899,10 @@ def test_refresh_refusal_reason_reaches_audit_and_metrics(page_service, reason):
             )
             assert row is not None
             if reason == "expired":
-                row.created_at = utc_now() - timedelta(days=181)
-                row.expires_at = utc_now() - timedelta(days=1)
+                row.created_at = oauth_clock.value - timedelta(days=181)
+                row.expires_at = oauth_clock.value - timedelta(days=1)
             elif reason == "revoked":
-                row.revoked_at = utc_now()
+                row.revoked_at = oauth_clock.value
             elif reason == "consent_missing":
                 # P10.3 T3: OAuthRefreshToken carries no workspace_id any more
                 # (section 2.3) -- the consent row is keyed by (user, client)
@@ -971,8 +966,7 @@ def test_refresh_metric_uses_the_service_refusal_registry():
     assert metrics.REFRESH_REFUSAL_REASONS is oauth_service.REFRESH_REFUSAL_REASONS
 
 
-def test_expired_refresh_is_restart_invariant(page_service):
-    from backend.models.base import utc_now
+def test_expired_refresh_is_restart_invariant(page_service, oauth_clock):
     from backend.services.oauth_service import (
         InvalidOAuthGrantError,
         OAuthService,
@@ -988,8 +982,8 @@ def test_expired_refresh_is_restart_invariant(page_service):
             )
         )
         assert row is not None
-        row.created_at = utc_now() - timedelta(days=181)
-        row.expires_at = utc_now() - timedelta(days=1)
+        row.created_at = oauth_clock.value - timedelta(days=181)
+        row.expires_at = oauth_clock.value - timedelta(days=1)
         expected_family = row.grant_id or row.id
 
     for _ in range(2):
@@ -1044,7 +1038,14 @@ def _o7_update_consent(
     )
 
 
-def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service):
+@pytest.mark.parametrize(
+    "overshoot",
+    [timedelta(0), timedelta(microseconds=1)],
+    ids=["at_deadline", "after_deadline"],
+)
+def test_o7_non_sliding_family_expires_at_absolute_deadline(
+    page_service, oauth_clock, overshoot
+):
     client = make_client(page_service)
     initial = _seed_oauth_tokens(client, state="o7-absolute-initial")
     consent = _o7_consent(client, initial["client_id"])
@@ -1062,7 +1063,7 @@ def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service):
         workspace_id=consent["workspaces"][0]["id"],
     )
     deadlines = []
-    for _ in range(2):
+    for rotation in range(2):
         with page_service.session_factory() as session:
             current = session.scalar(
                 select(OAuthRefreshToken).where(
@@ -1072,6 +1073,13 @@ def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service):
             )
             assert current is not None
             deadlines.append(current.expires_at)
+        # Time passes between rotations, so a deadline that slides would show:
+        # an hour in for the first, the last instant before it for the second.
+        oauth_clock.value = (
+            oauth_clock.value + timedelta(hours=1)
+            if rotation == 0
+            else deadlines[0] - timedelta(microseconds=1)
+        )
         response = client.post(
             "/oauth/token",
             data={
@@ -1083,7 +1091,7 @@ def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service):
         assert response.status_code == 200, response.text
         tokens["refresh_token"] = response.json()["refresh_token"]
 
-    with page_service.session_factory.begin() as session:
+    with page_service.session_factory() as session:
         current = session.scalar(
             select(OAuthRefreshToken).where(
                 OAuthRefreshToken.token_lookup_hash
@@ -1092,9 +1100,10 @@ def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service):
         )
         assert current is not None
         deadlines.append(current.expires_at)
-        current.expires_at = utc_now() - timedelta(seconds=1)
 
     assert deadlines[0] == deadlines[1] == deadlines[2]
+    # No row is edited: the family is refused from its original deadline on.
+    oauth_clock.value = deadlines[0] + overshoot
     expired = client.post(
         "/oauth/token",
         data={
@@ -1118,8 +1127,17 @@ def test_o7_non_sliding_family_expires_at_absolute_deadline(page_service):
         assert refusal.payload["reason"] == "expired"
 
 
-def test_o7_shorter_consent_ttl_expires_before_instance_default(page_service):
-    client = make_client(page_service)
+def test_o7_shorter_consent_ttl_expires_before_instance_default(
+    page_service, oauth_clock
+):
+    # Pinned: at the 30-day default the 30-day preference below is not shorter
+    # than the instance maximum, so the premise has to be set up, not assumed.
+    instance_ttl = 180 * 24 * 60 * 60
+    client = make_client(
+        page_service,
+        settings_overrides={"oauth_refresh_token_ttl_seconds": instance_ttl},
+    )
+    issued_at = oauth_clock.value
     initial = _seed_oauth_tokens(client, state="o7-short-initial")
     consent = _o7_consent(client, initial["client_id"])
     shorter_ttl = 30 * 24 * 60 * 60
@@ -1137,9 +1155,9 @@ def test_o7_shorter_consent_ttl_expires_before_instance_default(page_service):
         workspace_id=consent["workspaces"][0]["id"],
     )
     assert tokens["refresh_token_expires_in"] == shorter_ttl
-    assert tokens["refresh_token_expires_in"] < 180 * 24 * 60 * 60
+    assert tokens["refresh_token_expires_in"] < instance_ttl
 
-    with page_service.session_factory.begin() as session:
+    with page_service.session_factory() as session:
         current = session.scalar(
             select(OAuthRefreshToken).where(
                 OAuthRefreshToken.token_lookup_hash
@@ -1147,7 +1165,10 @@ def test_o7_shorter_consent_ttl_expires_before_instance_default(page_service):
             )
         )
         assert current is not None
-        current.expires_at = utc_now() - timedelta(seconds=1)
+        deadline = current.expires_at
+    assert deadline == issued_at + timedelta(seconds=shorter_ttl)
+    # No row is edited: the stored deadline itself is what ends the token.
+    oauth_clock.value = deadline
     expired = client.post(
         "/oauth/token",
         data={
@@ -1161,9 +1182,16 @@ def test_o7_shorter_consent_ttl_expires_before_instance_default(page_service):
 
 
 def test_o7_setting_change_is_not_retroactive_and_next_rotation_uses_it(
-    page_service,
+    page_service, oauth_clock
 ):
-    client = make_client(page_service)
+    # Pinned above the new preference: at the 30-day default it is a no-op, and
+    # a service that ignored it, or applied it retroactively, would still pass.
+    instance_ttl = 180 * 24 * 60 * 60
+    client = make_client(
+        page_service,
+        settings_overrides={"oauth_refresh_token_ttl_seconds": instance_ttl},
+    )
+    issued_at = oauth_clock.value
     tokens = _seed_oauth_tokens(client, state="o7-next-rotation")
     consent = _o7_consent(client, tokens["client_id"])
     with page_service.session_factory() as session:
@@ -1175,6 +1203,7 @@ def test_o7_setting_change_is_not_retroactive_and_next_rotation_uses_it(
         )
         assert current is not None
         issued_expiry = current.expires_at
+    assert issued_expiry == issued_at + timedelta(seconds=instance_ttl)
 
     shorter_ttl = 30 * 24 * 60 * 60
     updated = _o7_update_consent(
@@ -1193,7 +1222,9 @@ def test_o7_setting_change_is_not_retroactive_and_next_rotation_uses_it(
         assert current is not None
         assert current.expires_at == issued_expiry
 
-    rotated_at = utc_now()
+    # An hour on, so a deadline taken from the issue time would not match.
+    rotated_at = issued_at + timedelta(hours=1)
+    oauth_clock.value = rotated_at
     rotated = client.post(
         "/oauth/token",
         data={
@@ -1212,8 +1243,7 @@ def test_o7_setting_change_is_not_retroactive_and_next_rotation_uses_it(
             )
         )
         assert successor is not None
-        remaining = (successor.expires_at - rotated_at).total_seconds()
-        assert shorter_ttl - 5 <= remaining <= shorter_ttl + 5
+        assert successor.expires_at == rotated_at + timedelta(seconds=shorter_ttl)
         audit = session.scalars(
             select(AuditEvent)
             .where(AuditEvent.action == "oauth.consent.settings.updated")
@@ -1320,10 +1350,13 @@ def test_pre_rotation_access_jwt_still_valid_when_refresh_rotates(page_service):
 
 # --- Refresh reuse compromise --------------------------------------------
 # Dedicated 30s reuse-grace-window regression coverage (R4) lives in
-# backend/tests/integration/test_oauth_refresh_grace_window.py.
+# backend/tests/integration/test_oauth_refresh_grace_window.py. The tests here
+# take a replay past the window by moving ``oauth_clock`` (see
+# ``_lapse_reuse_grace_window``); the two ``..._window_end_...`` tests below
+# pin where the window ends.
 
 
-def test_refresh_reuse_revokes_family_with_audit(page_service):
+def test_refresh_reuse_revokes_family_with_audit(page_service, oauth_clock):
     """Reusing a refresh token after it has been rotated triggers family
     revoke (ADR A5 + H26). The response is 400 ``invalid_grant`` with the
     keyword ``invalid``; one ``oauth.refresh.reuse`` audit row is emitted
@@ -1348,7 +1381,7 @@ def test_refresh_reuse_revokes_family_with_audit(page_service):
     )
     assert first.status_code == 200
     assert _refresh_reuse_audit_rows(page_service) == []
-    _expire_reuse_grace_window(page_service, tokens["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
 
     # Attacker replays the stolen prior refresh token.
     replay = client.post(
@@ -1374,7 +1407,9 @@ def test_refresh_reuse_revokes_family_with_audit(page_service):
     assert payload["family_access_count"] >= 1
 
 
-def test_refresh_reuse_with_widened_scope_still_revokes_and_audits(page_service):
+def test_refresh_reuse_with_widened_scope_still_revokes_and_audits(
+    page_service, oauth_clock
+):
     client = make_client(page_service)
     tokens = _seed_oauth_tokens(client, state="reuse-widened-scope")
     rotated = client.post(
@@ -1386,7 +1421,7 @@ def test_refresh_reuse_with_widened_scope_still_revokes_and_audits(page_service)
         },
     )
     assert rotated.status_code == 200, rotated.text
-    _expire_reuse_grace_window(page_service, tokens["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
 
     replay = client.post(
         "/oauth/token",
@@ -1413,7 +1448,7 @@ def test_refresh_reuse_with_widened_scope_still_revokes_and_audits(page_service)
         assert successor.revoked_at is not None
 
 
-def test_refresh_reuse_revokes_only_replayed_grant(page_service):
+def test_refresh_reuse_revokes_only_replayed_grant(page_service, oauth_clock):
     """A stale token from grant A must not kill a separately authorized grant
     B that shares the same user and dynamic ``client_id``."""
 
@@ -1448,7 +1483,7 @@ def test_refresh_reuse_revokes_only_replayed_grant(page_service):
         },
     )
     assert rotation_a.status_code == 200, rotation_a.text
-    _expire_reuse_grace_window(page_service, grant_a["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
 
     replay_a = client.post(
         "/oauth/token",
@@ -1529,7 +1564,7 @@ def test_refresh_reuse_revokes_only_replayed_grant(page_service):
     assert refresh_b_response.status_code == 200, refresh_b_response.text
 
 
-def test_refresh_reuse_revokes_entire_rotated_chain(page_service):
+def test_refresh_reuse_revokes_entire_rotated_chain(page_service, oauth_clock):
     """Replaying the middle member of a three-token chain revokes its live
     grandchild plus every access JTI linked to the stable grant."""
 
@@ -1560,7 +1595,7 @@ def test_refresh_reuse_revokes_entire_rotated_chain(page_service):
         },
     )
     assert grandchild.status_code == 200, grandchild.text
-    _expire_reuse_grace_window(page_service, child.json()["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
 
     replay_child = client.post(
         "/oauth/token",
@@ -1681,7 +1716,7 @@ def test_refresh_reuse_keeps_unrelated_legacy_null_grant_independent(
     assert refresh_b_response.status_code == 200, refresh_b_response.text
 
 
-def test_legacy_null_parent_and_rotated_child_share_family(page_service):
+def test_legacy_null_parent_and_rotated_child_share_family(page_service, oauth_clock):
     """A NULL-grant legacy parent and its child whose ``grant_id`` is the
     parent ID resolve to one family and are revoked together."""
 
@@ -1717,7 +1752,7 @@ def test_legacy_null_parent_and_rotated_child_share_family(page_service):
         assert child.grant_id == parent_id
         child_id = child.id
 
-    _expire_reuse_grace_window(page_service, parent_tokens["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
     replay_parent = client.post(
         "/oauth/token",
         data={
@@ -1745,7 +1780,7 @@ def test_legacy_null_parent_and_rotated_child_share_family(page_service):
         assert child_access.revoked_at is not None
 
 
-def test_refresh_reuse_revokes_access_jti_in_family(page_service):
+def test_refresh_reuse_revokes_access_jti_in_family(page_service, oauth_clock):
     """After family revoke, the access JWTs minted from the family (both
     the original and any rotated successor) must be rejected. The /mcp
     transport returns 401 + the generic envelope; the REST API surfaces
@@ -1769,7 +1804,7 @@ def test_refresh_reuse_revokes_access_jti_in_family(page_service):
     )
     assert rotation.status_code == 200
     new_access = rotation.json()["access_token"]
-    _expire_reuse_grace_window(page_service, tokens["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
 
     # Trigger reuse compromise.
     reuse = client.post(
@@ -1815,10 +1850,109 @@ def test_refresh_reuse_revokes_access_jti_in_family(page_service):
     assert audit[0].payload["family_access_count"] >= 2
 
 
+# The window is inclusive (``<=`` in ``_refresh_access_token_locked``) and runs
+# from the replayed row's own ``rotated_at``. The OAuth clock stands at that
+# instant from the rotation until the test moves it, so each case below replays
+# at an exact distance from it and no host-clock margin is involved.
+
+
+def _replay_spent_refresh_token_after(
+    page_service, clock: OAuthClock, *, age: timedelta
+) -> tuple[dict[str, Any], str, Any]:
+    """Rotate a fresh grant's refresh token once, then replay the spent token
+    exactly ``age`` after that rotation.
+
+    Returns the seeded tokens, the rotation's refresh token (the first child)
+    and the replay response."""
+
+    client = make_client(page_service)
+    tokens = _seed_oauth_tokens(client, state="reuse-window-edge")
+    request = {
+        "grant_type": "refresh_token",
+        "client_id": tokens["client_id"],
+        "refresh_token": tokens["refresh_token"],
+    }
+    rotation = client.post("/oauth/token", data=request)
+    assert rotation.status_code == 200, rotation.text
+    with page_service.session_factory() as session:
+        parent = session.scalar(
+            select(OAuthRefreshToken).where(
+                OAuthRefreshToken.token_lookup_hash
+                == token_hash(tokens["refresh_token"])
+            )
+        )
+        assert parent is not None
+        rotated_at = parent.rotated_at
+    # The rotation read this clock, and nothing has moved it since.
+    assert rotated_at == clock.value
+    clock.value = rotated_at + age
+    replay = client.post("/oauth/token", data=request)
+    return tokens, rotation.json()["refresh_token"], replay
+
+
+@pytest.mark.parametrize(
+    "age",
+    [_REUSE_GRACE_WINDOW - _ONE_MICROSECOND, _REUSE_GRACE_WINDOW],
+    ids=["just_inside", "exactly_at"],
+)
+def test_refresh_reuse_up_to_the_window_end_is_a_grace_reissue(
+    page_service, oauth_clock, age
+):
+    """A replay up to and including the window's last instant is still a
+    double-fired refresh, not compromise: it mints a sibling pair, leaves the
+    first child live and raises no reuse alarm."""
+
+    tokens, first_child, replay = _replay_spent_refresh_token_after(
+        page_service, oauth_clock, age=age
+    )
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["refresh_token"] not in {
+        tokens["refresh_token"],
+        first_child,
+    }
+    assert len(_refresh_grace_audit_rows(page_service)) == 1
+    assert _refresh_reuse_audit_rows(page_service) == []
+    with page_service.session_factory() as session:
+        child = session.scalar(
+            select(OAuthRefreshToken).where(
+                OAuthRefreshToken.token_lookup_hash == token_hash(first_child)
+            )
+        )
+        assert child is not None
+        assert child.revoked_at is None
+
+
+def test_refresh_reuse_just_past_the_window_end_revokes_the_family(
+    page_service, oauth_clock
+):
+    """One microsecond later the same replay is compromise: the family is
+    revoked and audited as reuse, and no sibling pair is minted."""
+
+    _tokens, first_child, replay = _replay_spent_refresh_token_after(
+        page_service, oauth_clock, age=_REUSE_GRACE_WINDOW + _ONE_MICROSECOND
+    )
+
+    assert replay.status_code == 400, replay.text
+    assert replay.json()["error"] == "invalid_grant"
+    assert _refresh_grace_audit_rows(page_service) == []
+    rows = _refresh_reuse_audit_rows(page_service)
+    assert len(rows) == 1
+    assert rows[0].payload["detected_via"] == "rotated_to_id"
+    with page_service.session_factory() as session:
+        child = session.scalar(
+            select(OAuthRefreshToken).where(
+                OAuthRefreshToken.token_lookup_hash == token_hash(first_child)
+            )
+        )
+        assert child is not None
+        assert child.revoked_at is not None
+
+
 # --- Defense in depth + cache invalidation --------------------------------
 
 
-def test_jti_denylist_cache_invalidation(page_service):
+def test_jti_denylist_cache_invalidation(page_service, oauth_clock):
     """Immediately after family revoke (or any cache_clear path), the next
     bearer-decode for a revoked jti must hit the DB and return 401. The
     REST 401 carries the ``revoked`` keyword pin; the /mcp 401 confirms
@@ -1844,7 +1978,7 @@ def test_jti_denylist_cache_invalidation(page_service):
             "refresh_token": tokens["refresh_token"],
         },
     )
-    _expire_reuse_grace_window(page_service, tokens["refresh_token"])
+    _lapse_reuse_grace_window(oauth_clock)
     reuse = client.post(
         "/oauth/token",
         data={
@@ -2940,7 +3074,8 @@ def test_metadata_advertises_revocation_endpoint(page_service):
     must advertise ``revocation_endpoint`` so native discoverers don't
     have to hardcode the path."""
 
-    client = make_client(page_service)
+    # Discovery metadata is public: no sign-in needed.
+    client = make_client(page_service, authenticated=False)
     meta = client.get("/.well-known/oauth-authorization-server").json()
     assert "revocation_endpoint" in meta
     assert meta["revocation_endpoint"].endswith("/oauth/revoke")

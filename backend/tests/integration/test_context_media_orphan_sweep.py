@@ -1,5 +1,4 @@
-"""Epic-2 Phase 5c: orphaned Context-media reclamation
-(doc/design/workspace-database-separation-plan.md D-7).
+"""Orphaned Context-media reclamation and retention boundaries.
 
 Covers page-bound uploads after their own editing version closes, the retention
 boundary (which gates tombstoning, not visibility), and the drain step that

@@ -9,11 +9,14 @@ the chat back the way the detail screen does.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
+from itertools import count
 from uuid import uuid4
 
 import anyio
 from sqlalchemy import select
 
+from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.runner import call_tool_async
 from backend.models.mcp_chat import McpChatSession
 from backend.models.workspace import Workspace
@@ -49,8 +52,25 @@ def _reader(user_id, workspace_id, role) -> ActorContext:
 
 
 def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
-    page_service, mcp_default_actor
+    page_service, mcp_default_actor, monkeypatch
 ):
+    # Chats lists a conversation's calls by the time each one started, which the
+    # runner reads from the wall clock. That clock is not monotonic: a step back
+    # between two calls lists the later one first, and the unpacking of the
+    # timeline below then names the wrong rows. Give the calls an explicit
+    # chronology, one tick per sample, so this test asserts what the timeline
+    # and the session diff do with ordered calls. Production still has no causal
+    # order to fall back on after a step; that needs a decision on what "latest"
+    # means across workers and replays, which a fixture cannot make.
+    # Start from the real time once, so the conversation still counts as active
+    # (an epoch in the past would freeze it as ended during capture).
+    trace_epoch = datetime.now(UTC)
+    trace_ticks = count()
+    monkeypatch.setattr(
+        runner_module,
+        "_utc_now",
+        lambda: trace_epoch + timedelta(seconds=next(trace_ticks)),
+    )
     with page_service.session_factory() as session:
         workspace_id = session.scalar(
             select(Workspace).where(Workspace.slug == "default")
@@ -325,7 +345,15 @@ def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
         assert row.redaction_reason is None
         assert [item.key for item in row.result_display_items] == ["discarded_edit"]
         assert row.linked_artifacts == []
-    assert edit_rows[1].edit_summary.operation_counts == {"replace_text": 1}
+    # The timeline is ordered by call start time, a wall-clock reading, so a
+    # row's place in it says nothing about which call it is. Find the patch by
+    # what it is.
+    assert {row.tool_name for row in edit_rows} == {
+        "create_context_page",
+        "patch_context_edit",
+    }
+    patch_row = next(row for row in edit_rows if row.tool_name == "patch_context_edit")
+    assert patch_row.edit_summary.operation_counts == {"replace_text": 1}
     serialized = owner_view.model_dump_json()
     for secret in ("Discarded Chats Page", "Discarded", page["id"]):
         assert secret not in serialized

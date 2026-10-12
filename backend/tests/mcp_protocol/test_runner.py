@@ -243,7 +243,17 @@ def test_disabled_and_deleted_runtime_client_is_denied_before_trace_or_chat(
     assert disabled_result.isError is True
     assert disabled_payload["envelope"]["error_code"] == "mcp_client_disabled"
 
+    # Audit rows are append-only and stamped by the host clock, which is not
+    # monotonic, so which row belongs to which call cannot be read off their
+    # timestamps. Name the first call's row now, before the second call adds its
+    # own, and tell the two apart by identity afterwards.
     with page_service.session_factory.begin() as session:
+        disabled_denials = session.scalars(
+            select(AuditEvent).where(AuditEvent.action == "mcp.client.runtime.denied")
+        ).all()
+        assert len(disabled_denials) == 1
+        assert disabled_denials[0].payload["reason"] == "mcp_client_disabled"
+        disabled_denial_id = disabled_denials[0].id
         persisted = session.get(MCPClient, client_id)
         persisted.deleted_at = utc_now()
 
@@ -261,14 +271,16 @@ def test_disabled_and_deleted_runtime_client_is_denied_before_trace_or_chat(
         assert session.scalar(select(func.count()).select_from(McpChatSession)) == 0
         assert session.scalar(select(func.count()).select_from(AgentInputBundle)) == 0
         denials = session.scalars(
-            select(AuditEvent)
-            .where(AuditEvent.action == "mcp.client.runtime.denied")
-            .order_by(AuditEvent.created_at)
+            select(AuditEvent).where(AuditEvent.action == "mcp.client.runtime.denied")
         ).all()
-        assert [row.payload["reason"] for row in denials] == [
-            "mcp_client_disabled",
-            "mcp_client_deleted",
-        ]
+        # One audit for each denied call: the first call's row, unchanged, and
+        # exactly one more, added by the call made after the client was deleted.
+        assert len(denials) == 2
+        by_id = {row.id: row for row in denials}
+        assert by_id[disabled_denial_id].payload["reason"] == "mcp_client_disabled"
+        deleted_denials = [row for row in denials if row.id != disabled_denial_id]
+        assert len(deleted_denials) == 1
+        assert deleted_denials[0].payload["reason"] == "mcp_client_deleted"
 
 
 @pytest.mark.parametrize("replica_state", ("missing", "revoked"))

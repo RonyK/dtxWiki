@@ -158,11 +158,10 @@ def test_outline_accepts_zero_to_three_space_atx_headings_only():
 
 
 def test_outline_always_parses_via_commonmark_regardless_of_html_markers(monkeypatch):
-    """markdown-it is the sole structural authority (design doc
-    doc/design/block-provenance-contract.md section 2) -- there is
-    no cheaper regex fallback path it could silently disagree with, so every
-    parse_outline call runs it, whether or not the body could plausibly
-    contain raw HTML."""
+    """Every outline parse uses markdown-it, including bodies without raw HTML.
+
+    A separate regex parser could disagree with the CommonMark structure.
+    """
     calls = []
     real_parse = MarkdownIt.parse
 

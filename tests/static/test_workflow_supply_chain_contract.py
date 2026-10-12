@@ -29,6 +29,7 @@ counterexample that hands that function a violating workflow:
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -236,6 +237,44 @@ def cla_problems(workflow: dict) -> list[str]:
     return problems + cla_wiring_problems(workflow)
 
 
+def _participant_guard_refuses_unsafe_lists(script: str) -> bool:
+    match = re.search(r"^python3 - <<'PY'\n(.*?)^PY$", script, re.M | re.S)
+    if match is None:
+        return False
+    try:
+        statements = ast.parse(match.group(1)).body
+    except SyntaxError:
+        return False
+
+    def expression(source: str) -> str:
+        return ast.dump(ast.parse(source, mode="eval").body)
+
+    reject = expression("sys.exit(1)")
+    rejecting_conditions = {
+        ast.dump(statement.test)
+        for statement in statements
+        if isinstance(statement, ast.If)
+        and any(
+            isinstance(item, ast.Expr) and ast.dump(item.value) == reject
+            for item in statement.body
+        )
+    }
+    unlinked = expression(
+        '[commit["sha"] for commit in commits if commit.get("author") is None]'
+    )
+    return {expression("not 1 <= count <= 100"), expression("unlinked")} <= (
+        rejecting_conditions
+    ) and any(
+        isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "unlinked"
+            for target in statement.targets
+        )
+        and ast.dump(statement.value) == unlinked
+        for statement in statements
+    )
+
+
 def cla_wiring_problems(workflow: dict) -> list[str]:
     problems = []
     if workflow.get("permissions") != CLA_PERMISSIONS:
@@ -349,7 +388,7 @@ def cla_wiring_problems(workflow: dict) -> list[str]:
     # The guard runs first: it refuses pull requests whose commit authors the
     # action would guess from the committer or a free-text name.
     guard = str((steps[0] if steps else {}).get("run", ""))
-    if "select(.author == null)" not in guard or "-gt 100" not in guard:
+    if not _participant_guard_refuses_unsafe_lists(guard):
         problems.append(
             "the first step must refuse more than 100 commits and commit "
             "authors that are not linked to a GitHub account"

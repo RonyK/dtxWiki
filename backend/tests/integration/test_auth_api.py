@@ -1,7 +1,9 @@
+from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
@@ -39,16 +41,85 @@ def make_client(page_service, **overrides) -> TestClient:
     )
 
 
-def test_auth_capabilities_exposes_effective_signup_and_recovery_policy(page_service):
-    solo_local = make_client(page_service).get("/api/v1/auth/capabilities")
-    team_default = make_client(page_service, app_mode="team").get(
-        "/api/v1/auth/capabilities"
+def hold_session_clock(client: TestClient, now: datetime) -> None:
+    """Hold the clock of the app's session codec at ``now``.
+
+    A token's issue time is not part of what ``verify_session`` returns, so a
+    lifetime can only be measured from the instant the codec itself issued at.
+    Comparing it with a separately read host clock is off by however far that
+    clock stepped in between. Call this after the first request, which is what
+    builds the service. The held codec is derived from the one the app built,
+    so the lifetimes Settings configured stay under test.
+    """
+
+    service = client.app.state.session_service
+    client.app.state.session_service = replace(
+        service,
+        token_codec=replace(service.token_codec, now=lambda: now),
     )
-    team_explicit = make_client(
-        page_service,
+
+
+def sign_in_on_held_session_clock(
+    client: TestClient, *, email: str, password: str
+) -> None:
+    """Swap the signup cookie for one that a held session clock issued.
+
+    Signup stamps its cookie from the host clock, and the codec reads that clock
+    again to judge the cookie on every later request. A host clock that jumps
+    forward by more than the session ttl in between expires the cookie before
+    the test has used it. Hold the codec, then sign in again, so that one
+    instant both issues and judges the cookie. The login is the real one, so
+    authentication and the Settings-built lifetimes stay under test.
+    """
+
+    hold_session_clock(client, datetime(2030, 6, 1, tzinfo=UTC))
+    client.cookies.clear()
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login.status_code == 200, login.text
+
+
+@pytest.fixture
+def api_token_clock(monkeypatch) -> list[datetime]:
+    """The API token service's "now", moved only when a test moves it.
+
+    Expiry is judged against the service's current UTC time, not a durable
+    "expired" state, so a host clock that steps backwards can make an expired
+    token live again. A test that backdates ``expires_at`` against the host
+    clock and lets the service read the host clock again later is right only
+    while no step lands between the two reads. Preventing the reactivation in
+    production needs a separate clock/expiration policy. ``created_at`` keeps
+    coming from the host clock, so a test that depends on that order pins it.
+    """
+
+    clock = [datetime(2026, 1, 1, 12, tzinfo=UTC)]
+    monkeypatch.setattr(
+        "backend.services.api_token_service.utc_now",
+        lambda: clock[0],
+    )
+    return clock
+
+
+def test_auth_capabilities_exposes_effective_signup_and_recovery_policy(page_service):
+    # The route projects app.state.settings at request time, so one app serves
+    # every configuration.
+    client = make_client(page_service)
+    base_values = {
+        "database_url": "sqlite+pysqlite:///:memory:",
+        "session_secret": "test-session-secret-for-auth-api-tests",
+        "session_ttl_seconds": 3600,
+    }
+    solo_local = client.get("/api/v1/auth/capabilities")
+    client.app.state.settings = Settings(**base_values, app_mode="team")
+    team_default = client.get("/api/v1/auth/capabilities")
+    client.app.state.settings = Settings(
+        **base_values,
         app_mode="team",
         signup_enabled=True,
-    ).get("/api/v1/auth/capabilities")
+    )
+    team_explicit = client.get("/api/v1/auth/capabilities")
 
     assert solo_local.status_code == 200
     assert solo_local.json()["data"] == {
@@ -101,7 +172,14 @@ def test_signup_sets_session_cookie_and_me_returns_user(page_service):
     assert me_data["display_name"] == data["user"]["display_name"]
     assert me_data["status"] == data["user"]["status"]
     assert me_data["email_verified_at"] is None
-    assert "oauth_available" in me_data
+    # I5: /me carries the server's authoritative OAuth availability + reason so
+    # the MCP-access UI steers from server truth (https + DCR policy), not a
+    # client-side URL guess that can contradict the deployment tab.
+    assert isinstance(me_data["oauth_available"], bool)
+    # The default test app is served over plain HTTP, so OAuth is unavailable
+    # with an actionable reason (not None).
+    assert me_data["oauth_available"] is False
+    assert me_data["oauth_unavailable_reason"]
 
 
 def test_login_cookie_and_token_lifetime_follow_remember_me(page_service):
@@ -123,6 +201,9 @@ def test_login_cookie_and_token_lifetime_follow_remember_me(page_service):
     assert "Max-Age" not in created.headers["set-cookie"]
     assert "expires=" not in created.headers["set-cookie"].lower()
 
+    issued_at = datetime(2030, 6, 1, tzinfo=UTC)
+    hold_session_clock(client, issued_at)
+
     client.cookies.clear()
     session_only = client.post(
         "/api/v1/auth/login",
@@ -141,9 +222,8 @@ def test_login_cookie_and_token_lifetime_follow_remember_me(page_service):
         session_only_token
     )
     assert session_only_verified.remember_me is False
-    assert session_only_verified.expires_at - datetime.now(UTC) < timedelta(
-        seconds=3600
-    )
+    # The ordinary ttl, from the instant the codec issued at.
+    assert session_only_verified.expires_at - issued_at == timedelta(seconds=3600)
 
     client.cookies.clear()
     remembered = client.post(
@@ -195,6 +275,9 @@ def test_omitted_remember_me_fails_closed_to_a_browser_session(page_service):
     assert "Max-Age" not in created.headers["set-cookie"]
     assert "expires=" not in created.headers["set-cookie"].lower()
 
+    issued_at = datetime(2030, 6, 1, tzinfo=UTC)
+    hold_session_clock(client, issued_at)
+
     client.cookies.clear()
     logged_in = client.post(
         "/api/v1/auth/login",
@@ -208,7 +291,7 @@ def test_omitted_remember_me_fails_closed_to_a_browser_session(page_service):
     assert verified.remember_me is False
     assert verified.authenticated_at is None
     # The 3600s ordinary ttl, not the 100s remembered one.
-    assert verified.expires_at - datetime.now(UTC) > timedelta(seconds=200)
+    assert verified.expires_at - issued_at == timedelta(seconds=3600)
 
 
 def test_me_marks_both_authenticated_and_rejected_responses_uncacheable(page_service):
@@ -219,6 +302,7 @@ def test_me_marks_both_authenticated_and_rejected_responses_uncacheable(page_ser
 
     rejected = client.get("/api/v1/auth/me")
     assert rejected.status_code == 401
+    assert rejected.json()["error_code"] == "invalid_session"
     assert rejected.headers["cache-control"] == "no-store"
     assert rejected.headers["pragma"] == "no-cache"
 
@@ -466,25 +550,6 @@ def test_me_refreshes_remembered_cookie_only_in_window_and_stops_at_cap(
     at_absolute_cap = client.get("/api/v1/auth/me")
     assert at_absolute_cap.status_code == 200
     assert "set-cookie" not in at_absolute_cap.headers
-
-
-def test_me_exposes_oauth_availability_capability(page_service):
-    """I5: /me carries the server's authoritative OAuth availability + reason so
-    the MCP-access UI steers from server truth (https + DCR policy), not a
-    client-side URL guess that can contradict the deployment tab."""
-    client = make_client(page_service)
-    client.post(
-        "/api/v1/auth/signup",
-        json={"email": "cap@example.com", "password": "correct-password"},
-    )
-    me = client.get("/api/v1/auth/me")
-    assert me.status_code == 200
-    data = me.json()["data"]
-    assert isinstance(data["oauth_available"], bool)
-    # The default test app is served over plain HTTP, so OAuth is unavailable
-    # with an actionable reason (not None).
-    assert data["oauth_available"] is False
-    assert data["oauth_unavailable_reason"]
 
 
 def test_signup_marks_session_cookie_secure_for_forwarded_https(page_service):
@@ -833,20 +898,14 @@ def test_logout_revokes_presented_session_cookie(page_service):
     assert stolen_me.json()["error_code"] == "invalid_session"
 
 
-def test_me_requires_session_cookie(page_service):
-    client = make_client(page_service)
-
-    response = client.get("/api/v1/auth/me")
-
-    assert response.status_code == 401
-    assert response.json()["error_code"] == "invalid_session"
-
-
 def test_api_token_issue_list_and_revoke_are_session_scoped(page_service):
     client = make_client(page_service)
     client.post(
         "/api/v1/auth/signup",
         json={"email": "token-owner@example.com", "password": "owner-pass"},
+    )
+    sign_in_on_held_session_clock(
+        client, email="token-owner@example.com", password="owner-pass"
     )
     with page_service.session_factory() as session:
         user = session.scalar(
@@ -892,6 +951,19 @@ def test_api_token_issue_list_and_revoke_are_session_scoped(page_service):
     )
     assert duplicate.status_code == 201
     assert duplicate.json()["data"]["api_token"]["name"] == "CI 2"
+
+    # Listing orders stored timestamps, which need not follow insertion order
+    # when the host clock steps backward. Make the expected order explicit.
+    first_id = UUID(issue_data["api_token"]["id"])
+    second_id = UUID(duplicate.json()["data"]["api_token"]["id"])
+    created_at = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    with page_service.session_factory.begin() as session:
+        first_model = session.get(ApiToken, first_id)
+        second_model = session.get(ApiToken, second_id)
+        assert first_model is not None
+        assert second_model is not None
+        first_model.created_at = created_at
+        second_model.created_at = created_at + timedelta(seconds=1)
 
     listed = client.get("/api/v1/auth/tokens")
     assert listed.status_code == 200
@@ -970,7 +1042,7 @@ def test_api_token_create_requires_supported_scope(page_service):
     assert response.json()["error_code"] == "validation_failed"
 
 
-def test_user_tokens_paginate_filter_and_delete_record(page_service):
+def test_user_tokens_paginate_filter_and_delete_record(page_service, api_token_clock):
     """D-01v2/T4: this is the account-scoped ``GET/DELETE /auth/tokens``
     listing that replaced the deleted workspace-scoped
     ``/workspaces/{id}/settings/access-keys``."""
@@ -981,6 +1053,9 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service):
         json={"email": "paged-keys@example.com", "password": "owner-pass"},
     )
     assert signup.status_code == 201
+    sign_in_on_held_session_clock(
+        client, email="paged-keys@example.com", password="owner-pass"
+    )
     with page_service.session_factory() as session:
         user = session.scalar(
             select(User).where(User.email == "paged-keys@example.com")
@@ -1007,12 +1082,26 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service):
     # (expires_in_days in {30, 90, 180, 365} or unlimited) -- there is no
     # REST-level way to mint an already-expired PAT anymore, so "expired" is
     # simulated the same way other tests in this suite construct fixture
-    # rows directly: by moving expires_at into the past after creation.
+    # rows directly: by moving expires_at into the past after creation. The
+    # service judges expiry on its own clock, so that is the clock to move it
+    # behind.
+    now = api_token_clock[0]
     with page_service.session_factory.begin() as session:
         for item in (expired, revoked_and_expired):
             model = session.get(ApiToken, UUID(item["api_token"]["id"]))
             assert model is not None
-            model.expires_at = utc_now() - timedelta(seconds=1)
+            model.expires_at = now - timedelta(seconds=1)
+
+    # Listing is newest first with ties broken by id, and created_at is the host
+    # clock, which need not follow insertion order. Pin it: one newest active
+    # token, then an older tie that straddles the page edge.
+    with page_service.session_factory.begin() as session:
+        for index, item in enumerate([*active, expired, revoked_and_expired]):
+            model = session.get(ApiToken, UUID(item["api_token"]["id"]))
+            assert model is not None
+            model.created_at = now - timedelta(seconds=min(index, 1))
+    active_ids = [item["api_token"]["id"] for item in active]
+    expected_active_order = [active_ids[0], *sorted(active_ids[1:], reverse=True)]
 
     revoke = client.delete(
         f"/api/v1/auth/tokens/{revoked_and_expired['api_token']['id']}"
@@ -1035,10 +1124,14 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service):
     assert {row["id"] for row in first_payload["data"]} <= {
         item["api_token"]["id"] for item in active
     }
+    assert [row["id"] for row in first_payload["data"]] == expected_active_order[:2]
     assert {row["workspaces"][0]["id"] for row in first_payload["data"]} == {
         workspace_id
     }
 
+    # The cursor carries page one's evaluation instant. Move the service clock,
+    # so that a page two which read its own would show it.
+    api_token_clock[0] += timedelta(seconds=10)
     second = client.get(
         base_url,
         params={
@@ -1055,6 +1148,7 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service):
     assert {row["id"] for row in first_payload["data"] + second_payload["data"]} == {
         item["api_token"]["id"] for item in active
     }
+    assert [row["id"] for row in second_payload["data"]] == expected_active_order[2:]
 
     inactive = client.get(base_url, params={"status": "inactive"})
     assert inactive.status_code == 200
@@ -1228,56 +1322,35 @@ def _audit_actions(page_service) -> set[str]:
         return {event.action for event in session.scalars(select(AuditEvent)).all()}
 
 
-def test_signup_emits_audit_event(page_service):
+def _audit_action_counts(page_service) -> Counter[str]:
+    with page_service.session_factory() as session:
+        return Counter(
+            event.action for event in session.scalars(select(AuditEvent)).all()
+        )
+
+
+def test_auth_lifecycle_emits_an_audit_event_per_step(page_service):
     client = make_client(page_service)
 
+    before = _audit_action_counts(page_service)
     response = client.post(
         "/api/v1/auth/signup",
-        json={"email": "audit-signup@example.com", "password": "owner-pass"},
+        json={"email": "audit-lifecycle@example.com", "password": "owner-pass"},
     )
-
     assert response.status_code == 201
-    assert "auth.user.signed_up" in _audit_actions(page_service)
+    assert (_audit_action_counts(page_service) - before)["auth.user.signed_up"] == 1
 
-
-def test_login_emits_audit_event(page_service):
-    client = make_client(page_service)
-    client.post(
-        "/api/v1/auth/signup",
-        json={"email": "audit-login@example.com", "password": "owner-pass"},
-    )
     # Drop session so login is a fresh authentication.
     client.cookies.clear()
-
+    before = _audit_action_counts(page_service)
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "audit-login@example.com", "password": "owner-pass"},
+        json={"email": "audit-lifecycle@example.com", "password": "owner-pass"},
     )
-
     assert response.status_code == 200
-    assert "auth.session.created" in _audit_actions(page_service)
+    assert (_audit_action_counts(page_service) - before)["auth.session.created"] == 1
 
-
-def test_logout_emits_audit_event(page_service):
-    client = make_client(page_service)
-    client.post(
-        "/api/v1/auth/signup",
-        json={"email": "audit-logout@example.com", "password": "owner-pass"},
-    )
-
-    response = client.post("/api/v1/auth/logout")
-
-    assert response.status_code == 200
-    assert "auth.session.destroyed" in _audit_actions(page_service)
-
-
-def test_password_change_emits_audit_event(page_service):
-    client = make_client(page_service)
-    client.post(
-        "/api/v1/auth/signup",
-        json={"email": "audit-pw@example.com", "password": "owner-pass"},
-    )
-
+    before = _audit_action_counts(page_service)
     response = client.post(
         "/api/v1/auth/password",
         json={
@@ -1285,9 +1358,13 @@ def test_password_change_emits_audit_event(page_service):
             "new_password": "rotated-pass",
         },
     )
-
     assert response.status_code == 200
-    assert "auth.password.changed" in _audit_actions(page_service)
+    assert (_audit_action_counts(page_service) - before)["auth.password.changed"] == 1
+
+    before = _audit_action_counts(page_service)
+    response = client.post("/api/v1/auth/logout")
+    assert response.status_code == 200
+    assert (_audit_action_counts(page_service) - before)["auth.session.destroyed"] == 1
 
 
 def _password_change_failure_events(page_service) -> list[AuditEvent]:

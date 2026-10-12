@@ -9,7 +9,7 @@ from backend.policy.auth import ActorContext
 from backend.services.mcp_client_service import evaluate_mcp_client_runtime
 
 migration = import_module(
-    "backend.migrations.revision_0002.identity_access_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.identity_access_schema"
 )
 
 
@@ -54,10 +54,7 @@ def test_legacy_catalog_metadata_backfill_preserves_snapshot_without_fake_revisi
             ],
         )
         migration._backfill_access_key_catalog_metadata(connection)
-        rows = {
-            row.id: row
-            for row in connection.execute(sa.select(tokens)).mappings()
-        }
+        rows = {row.id: row for row in connection.execute(sa.select(tokens)).mappings()}
 
     assert rows[codex_id]["catalog_app_id"] == "codex"
     assert rows[codex_id]["catalog_app_label_snapshot"] == "Old Codex label"
@@ -126,8 +123,7 @@ def test_runtime_binding_backfill_quarantines_duplicate_credential_evidence():
         )
         migration._backfill_runtime_binding_keys(connection)
         rows = {
-            row.id: row
-            for row in connection.execute(sa.select(clients)).mappings()
+            row.id: row for row in connection.execute(sa.select(clients)).mappings()
         }
 
     canonical_id = min(ids[:2], key=str)

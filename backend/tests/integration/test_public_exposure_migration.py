@@ -6,29 +6,23 @@ from importlib import import_module
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from alembic import command
-from alembic.config import Config
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, inspect, text
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
-epic1 = import_module("backend.migrations.versions.0002_epic1")
+epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
 )
-mcp_phase = import_module("backend.migrations.revision_0002.identity_access_schema")
+mcp_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.identity_access_schema"
+)
 public_phase = import_module(
-    "backend.migrations.revision_0002.context_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.context_schema"
 )
-
-
-def _config(database_url: str) -> Config:
-    config = Config(str(resolve_alembic_ini()))
-    config.set_main_option("script_location", str(resolve_migrations_dir()))
-    config.set_main_option("sqlalchemy.url", database_url)
-    return config
 
 
 def _run_steps(engine, *steps) -> None:
@@ -131,10 +125,15 @@ def _insert_legacy_public_page(
     return page_id, version_id
 
 
-def test_public_exposure_phase_backfills_only_valid_workspace_grants(tmp_path: Path):
-    database_url = f"sqlite:///{tmp_path / 'public-exposure.db'}"
-    config = _config(database_url)
-    command.upgrade(config, "0001_initial_release")
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def test_public_exposure_phase_backfills_only_valid_workspace_grants(
+    tmp_path: Path, sqlite_templates
+):
+    database_url = sqlite_templates.clone("base_0001", tmp_path / "public-exposure.db")
     engine = create_engine(database_url)
     try:
         _run_steps(
@@ -263,10 +262,7 @@ def test_public_exposure_phase_backfills_only_valid_workspace_grants(tmp_path: P
             "public_exposure_scope",
             "public_exposed_version_id",
         }.isdisjoint(
-            {
-                column["name"]
-                for column in inspect(engine).get_columns("context_page")
-            }
+            {column["name"] for column in inspect(engine).get_columns("context_page")}
         )
     finally:
         engine.dispose()

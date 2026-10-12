@@ -1,11 +1,10 @@
 """Pin the public tool-catalog documentation to the live registry.
 
-Four public surfaces had drifted away from ``TOOL_META``: the README table was
-missing ``read_structure_map``, README's feature list advertised three MCP tools
-that were deleted while another bullet in the same file said they were gone, the
-CHANGELOG counted 18 tools, and duplicated HTTP server instruction strings told
-every connecting client about "legacy page compatibility tools". Nothing
-asserted on any of it.
+The catalog, now in DEVELOPMENT.md, previously drifted from ``TOOL_META`` in
+README alongside a stale tool-count bullet and contradictory legacy-tool claims.
+CHANGELOG and duplicated HTTP server instruction strings also advertised a
+removed tool surface. Pin the developer reference and scan the public surfaces
+so moving the technical details out of README preserves these checks.
 """
 
 import importlib.util
@@ -43,7 +42,7 @@ REMOVED_TOOL_NAMES = (
 
 # Exact-phrase pin: it catches the four claims that actually shipped and any
 # copy-paste of them. Rewording the same wrong claim escapes it, which is why
-# test_readme_tool_catalog_table_matches_registry does the wording-independent
+# test_development_tool_catalog_table_matches_registry does the wording-independent
 # half.
 STALE_CATALOG_PHRASES = (
     "legacy page compatibility tools",
@@ -53,6 +52,7 @@ STALE_CATALOG_PHRASES = (
 
 DOCUMENTED_SURFACES = (
     "README.md",
+    "DEVELOPMENT.md",
     "CHANGELOG.md",
     "backend/mcp/protocol/instructions.py",
     "backend/mcp/protocol/server.py",
@@ -62,19 +62,19 @@ DOCUMENTED_SURFACES = (
 SKILL_SOURCE_ROOT = REPO_ROOT / "integrations" / "agent-skills"
 
 OUTLINE_PAGINATION_SURFACES = (
-    "README.md",
+    "DEVELOPMENT.md",
     "integrations/agent-skills/dtxwiki-retrieval/SKILL.md",
 )
 
 HISTORICAL_WIRE_NOTE_MARKER = "2026-05 Sprint_3"
 HISTORICAL_WIRE_NOTE_SECTION = "### Earlier"
 
-# The one bullet in README's feature list that states the tool count in prose,
+# The one bullet in the developer reference that states the tool count in prose,
 # where the catalog table's set equality cannot see it. Anchored on the bullet
-# instead of scanning the whole 900-line README for `tool N개`, so an unrelated
+# instead of scanning the whole document for `N tools`, so an unrelated
 # future sentence of that shape cannot turn this red for the wrong reason --
 # while deleting or retitling the bullet still does.
-README_TOOL_COUNT_BULLET = "- **MCP Streamable HTTP**"
+REFERENCE_TOOL_COUNT_BULLET = "- **MCP Streamable HTTP**"
 
 REQUIRED_SKILL_TOOLS = {
     "dtxwiki-authoring-review": (
@@ -188,42 +188,48 @@ def _schema(tool_name: str) -> dict:
     return json.loads((SCHEMA_ROOT / f"{tool_name}.json").read_text(encoding="utf-8"))
 
 
-def test_readme_tool_catalog_table_matches_registry():
-    catalog = _region(_read("README.md"), CATALOG_MARKERS)
+def test_development_tool_catalog_table_matches_registry():
+    catalog = _region(_read("DEVELOPMENT.md"), CATALOG_MARKERS)
 
     documented = set(re.findall(r"`([a-z_]+)`", catalog))
     registry = set(TOOL_META)
 
     assert documented == registry, (
-        f"README tool table is missing {sorted(registry - documented)} "
+        f"DEVELOPMENT tool table is missing {sorted(registry - documented)} "
         f"and invents {sorted(documented - registry)}"
     )
 
     bullets = [
         line
-        for line in _read("README.md").splitlines()
-        if line.startswith(README_TOOL_COUNT_BULLET)
+        for line in _read("DEVELOPMENT.md").splitlines()
+        if line.startswith(REFERENCE_TOOL_COUNT_BULLET)
     ]
     assert len(bullets) == 1, (
-        f"expected exactly one {README_TOOL_COUNT_BULLET!r} feature bullet in "
-        f"README, found {len(bullets)}"
+        f"expected exactly one {REFERENCE_TOOL_COUNT_BULLET!r} tool-count bullet in "
+        f"DEVELOPMENT, found {len(bullets)}"
     )
 
-    stated = re.findall(r"tool (\d+)개", bullets[0])
+    stated = re.findall(r"(\d+) tools\b", bullets[0])
     assert stated == [str(len(registry))], (
-        f"README feature bullet claims {stated} tools, registry has {len(registry)}"
+        f"DEVELOPMENT tool-count bullet claims {stated} tools, "
+        f"registry has {len(registry)}"
     )
 
 
 def test_removed_tool_names_appear_only_in_the_migration_note():
-    readme = _read("README.md")
-    outside = _without_region(readme, MIGRATION_MARKERS)
-    migration_note = _region(readme, MIGRATION_MARKERS)
+    reference = _read("DEVELOPMENT.md")
+    outside = _without_region(reference, MIGRATION_MARKERS)
+    migration_note = _region(reference, MIGRATION_MARKERS)
 
-    stray = [name for name in REMOVED_TOOL_NAMES if re.search(rf"\b{name}\b", outside)]
-    assert not stray, (
-        f"README advertises removed MCP tools outside the migration note: {stray}"
-    )
+    for document, text in (
+        ("DEVELOPMENT.md", outside),
+        ("README.md", _read("README.md")),
+    ):
+        stray = [name for name in REMOVED_TOOL_NAMES if re.search(rf"\b{name}\b", text)]
+        assert not stray, (
+            f"{document} advertises removed MCP tools outside the migration note: "
+            f"{stray}"
+        )
 
     # The note is the only upgrade path an integrator has; deleting it would
     # make this file silently consistent and useless.

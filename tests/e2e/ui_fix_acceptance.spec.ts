@@ -276,6 +276,7 @@ test.describe("2026-08-09 UI fix acceptance", () => {
 
   test("F10 Context destination expansion keeps the owning properties popover open", async ({
     browser,
+    browserName,
     page,
   }, testInfo) => {
     test.setTimeout(180_000);
@@ -298,7 +299,8 @@ test.describe("2026-08-09 UI fix acceptance", () => {
 
     const mobileContext = await browser.newContext({
       hasTouch: true,
-      isMobile: true,
+      // Firefox supports touch input, but not mobile viewport emulation.
+      isMobile: browserName !== "firefox",
       viewport: { width: 390, height: 844 },
     });
     try {

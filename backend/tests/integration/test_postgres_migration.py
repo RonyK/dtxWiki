@@ -43,7 +43,7 @@ def test_postgres_alembic_upgrade_head_and_downgrade_base():
     config.set_main_option("sqlalchemy.url", database_url)
     upgraded = False
     try:
-        command.upgrade(config, "0001_initial_release")
+        command.upgrade(config, "bd62193d5cf6")
         upgraded = True
         metadata = MetaData()
         users = Table("users", metadata, autoload_with=engine)
@@ -132,8 +132,7 @@ def test_postgres_alembic_upgrade_head_and_downgrade_base():
             for unique in inspector.get_unique_constraints("stored_blob")
         }
         assert "ix_media_outbox_claim" in {
-            index["name"]
-            for index in inspector.get_indexes("media_outbox")
+            index["name"] for index in inspector.get_indexes("media_outbox")
         }
         is_public = next(
             column
@@ -240,15 +239,13 @@ def test_downgrade_refuses_when_oauth_sessions_exist():
     config.set_main_option("sqlalchemy.url", database_url)
     upgraded = False
     try:
-        command.upgrade(config, "0001_initial_release")
+        command.upgrade(config, "bd62193d5cf6")
         upgraded = True
         metadata = MetaData()
         users = Table("users", metadata, autoload_with=engine)
         workspaces = Table("workspace", metadata, autoload_with=engine)
         clients = Table("oauth_clients", metadata, autoload_with=engine)
-        refresh_tokens = Table(
-            "oauth_refresh_tokens", metadata, autoload_with=engine
-        )
+        refresh_tokens = Table("oauth_refresh_tokens", metadata, autoload_with=engine)
         now = datetime.now(UTC)
         user_id = uuid4()
         workspace_id = uuid4()
@@ -326,7 +323,7 @@ def test_downgrade_refuses_when_oauth_sessions_exist():
         command.upgrade(config, "head")
 
         with pytest.raises(RuntimeError, match="oauth_refresh_tokens still holds"):
-            command.downgrade(config, "0001_initial_release")
+            command.downgrade(config, "bd62193d5cf6")
 
         # The refusal must leave head intact, not a half-reverted schema.
         assert "grant_id" in {

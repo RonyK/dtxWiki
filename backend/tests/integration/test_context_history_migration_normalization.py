@@ -14,26 +14,17 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from alembic import command
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import make_url
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
-epic1 = import_module("backend.migrations.versions.0002_epic1")
 workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
 )
-
-
-def _config(database_url: str) -> Config:
-    config = Config(str(resolve_alembic_ini()))
-    config.set_main_option("script_location", str(resolve_migrations_dir()))
-    config.set_main_option("sqlalchemy.url", database_url)
-    return config
 
 
 def _database_url(tmp_path: Path, name: str) -> str:
@@ -48,11 +39,15 @@ def _run_steps(engine, *steps) -> None:
                 step()
 
 
-def _upgrade_to_workspace_member_boundary(config: Config, database_url: str):
-    command.upgrade(config, "0001_initial_release")
-    engine = create_engine(database_url)
-    _run_steps(engine, epic1._upgrade_base_schema)
-    return engine
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
+
+
+def _clone_workspace_member_boundary(templates, database_url: str):
+    """Engine on a copy of 0001 plus ``_upgrade_base_schema``."""
+    templates.clone("boundary_workspace_member", Path(make_url(database_url).database))
+    return create_engine(database_url)
 
 
 def _insert_workspace(connection, workspaces, *, workspace_id, actor_id, slug, now):
@@ -80,9 +75,7 @@ def _insert_workspace(connection, workspaces, *, workspace_id, actor_id, slug, n
     }
     if "directory_title_key" in workspaces.c:
         values["directory_title_key"] = "migration normalization workspace"
-    connection.execute(
-        workspaces.insert().values(**values)
-    )
+    connection.execute(workspaces.insert().values(**values))
 
 
 def _insert_page(connection, pages, *, page_id, workspace_id, slug, now):
@@ -136,7 +129,9 @@ def _insert_version(
     )
 
 
-def test_migration_demotes_pre_publish_orphan_linear_draft(tmp_path: Path):
+def test_migration_demotes_pre_publish_orphan_linear_draft(
+    tmp_path: Path, sqlite_templates
+):
     """A linear draft older than the published head (by `version_no`), with
     the page's `latest_draft_version_id` pointer unset, can only be a
     pre-publish orphan left behind by the (pre-fix)
@@ -152,8 +147,7 @@ def test_migration_demotes_pre_publish_orphan_linear_draft(tmp_path: Path):
     """
 
     database_url = _database_url(tmp_path, "ctx02-orphan.db")
-    config = _config(database_url)
-    engine = _upgrade_to_workspace_member_boundary(config, database_url)
+    engine = _clone_workspace_member_boundary(sqlite_templates, database_url)
     workspace_id = uuid4()
     actor_id = uuid4()
     page_id = uuid4()
@@ -267,7 +261,7 @@ def test_migration_demotes_pre_publish_orphan_linear_draft(tmp_path: Path):
 
 
 def test_migration_demotes_pre_publish_orphan_stranded_behind_a_second_publish(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     """The case that matters most in practice: a page published TWICE.
 
@@ -288,8 +282,7 @@ def test_migration_demotes_pre_publish_orphan_stranded_behind_a_second_publish(
     """
 
     database_url = _database_url(tmp_path, "ctx02-second-publish-orphan.db")
-    config = _config(database_url)
-    engine = _upgrade_to_workspace_member_boundary(config, database_url)
+    engine = _clone_workspace_member_boundary(sqlite_templates, database_url)
     workspace_id = uuid4()
     actor_id = uuid4()
     page_id = uuid4()
@@ -405,7 +398,7 @@ def test_migration_demotes_pre_publish_orphan_stranded_behind_a_second_publish(
 
 
 def test_migration_preflight_still_blocks_live_unset_drafts_newer_than_head(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     """Two linear drafts, both newer than the published head by `version_no`,
     with the pointer unset: genuine ambiguity (which of the two is the edit
@@ -416,8 +409,7 @@ def test_migration_preflight_still_blocks_live_unset_drafts_newer_than_head(
     """
 
     database_url = _database_url(tmp_path, "ctx02-ambiguous.db")
-    config = _config(database_url)
-    engine = _upgrade_to_workspace_member_boundary(config, database_url)
+    engine = _clone_workspace_member_boundary(sqlite_templates, database_url)
     workspace_id = uuid4()
     actor_id = uuid4()
     page_id = uuid4()
@@ -493,16 +485,14 @@ def test_migration_preflight_still_blocks_live_unset_drafts_newer_than_head(
                 )
             )
 
-        with pytest.raises(
-            RuntimeError, match="latest_draft_unset_with_live_draft=1"
-        ):
+        with pytest.raises(RuntimeError, match="latest_draft_unset_with_live_draft=1"):
             _run_steps(engine, workspace_phase.upgrade)
     finally:
         engine.dispose()
 
 
 def test_migration_upgrade_head_preserves_a_rejected_restartable_draft(
-    tmp_path: Path,
+    tmp_path: Path, sqlite_templates
 ):
     """Adversarial-review follow-up to CTX-02 (post-3f40a6c7): the
     `version_no` heuristic above cannot tell a true pre-fix orphan from a
@@ -527,8 +517,7 @@ def test_migration_upgrade_head_preserves_a_rejected_restartable_draft(
     """
 
     database_url = _database_url(tmp_path, "ctx02-rejected-restartable.db")
-    config = _config(database_url)
-    engine = _upgrade_to_workspace_member_boundary(config, database_url)
+    engine = _clone_workspace_member_boundary(sqlite_templates, database_url)
     workspace_id = uuid4()
     actor_id = uuid4()
     page_id = uuid4()
@@ -545,9 +534,7 @@ def test_migration_upgrade_head_preserves_a_rejected_restartable_draft(
         pages = sa.Table("context_page", metadata, autoload_with=engine)
         versions = sa.Table("context_page_version", metadata, autoload_with=engine)
         change_sets = sa.Table("change_set", metadata, autoload_with=engine)
-        change_operations = sa.Table(
-            "change_operation", metadata, autoload_with=engine
-        )
+        change_operations = sa.Table("change_operation", metadata, autoload_with=engine)
         review_items = sa.Table("review_item", metadata, autoload_with=engine)
         with engine.begin() as connection:
             _insert_workspace(

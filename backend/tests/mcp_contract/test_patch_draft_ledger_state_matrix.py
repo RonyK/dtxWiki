@@ -111,7 +111,14 @@ def _assert_page_graph_is_consistent(page_service, page_id) -> ContextPageVersio
 def test_expired_patch_draft_ledger_entry_reenters_the_current_dag_without_replay(
     page_service,
     actor,
+    monkeypatch,
 ):
+    # The first receipt expires one second before this pinned "now", and the
+    # ledger judges both patches against that same "now": the host clock steps
+    # (NTP, a resumed VM), so backdating against one read of it and deciding
+    # against another would put the receipt on either side of its own deadline.
+    now = utc_now()
+    monkeypatch.setattr("backend.services.mcp_write_idempotency.utc_now", lambda: now)
     workspace_id = _workspace_id(page_service)
     page = page_service.write_page(
         workspace_slug="default",
@@ -154,7 +161,7 @@ def test_expired_patch_draft_ledger_entry_reenters_the_current_dag_without_repla
         )
         assert row is not None
         expired_row_id = row.id
-        row.expires_at = utc_now() - timedelta(seconds=1)
+        row.expires_at = now - timedelta(seconds=1)
 
     second = _patch_draft(page_service, actor, workspace_id, **payload)
     assert second.push_outcome == "diverged"

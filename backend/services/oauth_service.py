@@ -3290,7 +3290,8 @@ class OAuthService:
                 algorithms=["RS256"],
                 audience=self.resource,
                 issuer=self.issuer,
-                options={"verify_exp": False},
+                # iat is not a not-before gate here; see verify_access_token.
+                options={"verify_exp": False, "verify_iat": False},
             )
         except jwt.PyJWTError:
             return False
@@ -3358,7 +3359,8 @@ class OAuthService:
                 algorithms=["RS256"],
                 audience=self.resource,
                 issuer=self.issuer,
-                options={"verify_exp": False},
+                # iat is not a not-before gate here; see verify_access_token.
+                options={"verify_exp": False, "verify_iat": False},
             )
         except jwt.PyJWTError:
             return None
@@ -3373,6 +3375,15 @@ class OAuthService:
                 algorithms=["RS256"],
                 audience=self.resource,
                 issuer=self.issuer,
+                # iat is issuance metadata, not an activation time: every token
+                # this server mints is valid at once and carries no nbf. PyJWT
+                # refuses an iat ahead of the verifier's wall clock, so after a
+                # backward clock step (or on a node whose clock trails the
+                # issuer's) a token minted moments earlier would be rejected
+                # here and by the two revoke-path decodes above. exp still ends
+                # the token with no leeway, and nbf is still enforced when a
+                # token carries one.
+                options={"verify_iat": False},
             )
         except jwt.PyJWTError as exc:
             raise InvalidOAuthGrantError("access token is invalid") from exc

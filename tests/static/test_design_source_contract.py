@@ -1,33 +1,8 @@
-"""Detailed design and plan documents must never be tracked by this repository.
+"""Check public source tracking and private-document exclusion using Git.
 
-This repository is published. Detailed internal design, planning, and review
-documents are shared through dtxWiki instead, so they must not reach git.
-
-This replaces an earlier pair of tests that enforced the opposite invariant --
-that `docs/design/epic1-core-contract.md` was a *tracked* public baseline. That
-premise was reversed by an explicit 2026-08-26 decision to exclude `docs/` from
-the repository. The lesson worth keeping from the old tests is that a documented
-intention drifts unless something checks it, so the intention is re-encoded here
-in its new direction rather than simply deleted.
-
-`.gitignore` alone is not sufficient evidence: a path already committed stays
-tracked no matter what `.gitignore` later says, which is exactly how `docs/`
-survived while everyone believed it was excluded. Ask git what it actually
-tracks.
-
-Two decisions this file now pins so they are not relitigated:
-
-* `review/` is private. It held 355 tracked files of adversarial review reports
-  -- reviewed branch names, HEAD and baseline SHAs, unfixed defect rosters --
-  published for months while this guard reported green, because its root list
-  named only `doc/` and `docs/`. Rooted lists rot; the allowlist test below
-  fails on ANY new tracked top-level directory instead.
-* `internal/audit/` is the one deliberate retention exception. It is the
-  hand-written, redaction-scanned operator record: `.gitignore` names it as the
-  destination for operator artifacts, `tests/packaging/test_evidence_redaction.py`
-  secret-scans it, and `scripts/verify_all.sh` reads its `vm-smoke.md`. It stays
-  tracked and un-ignored, and a test here says so, so that a later cleanup
-  sweeping up `review/`-like trees cannot quietly take it too.
+These guards inspect tracked files and ignore rules without loading private
+documents. Only internal/audit/ is retained outside the shipped source tree;
+tests/packaging/test_evidence_redaction.py scans that operator evidence.
 """
 
 from __future__ import annotations
@@ -49,7 +24,7 @@ UNTRACKED_DOCUMENT_ROOTS = ("doc/", "docs/", "review/")
 # bulk of a review tree actually lives.
 IGNORE_PROBES = (
     ("doc/", "doc/__ignore_probe__.md"),
-    ("doc/", "doc/Epic-1/nested/__ignore_probe__.md"),
+    ("doc/", "doc/design/nested/__ignore_probe__.md"),
     ("docs/", "docs/__ignore_probe__.md"),
     ("docs/", "docs/design/nested/__ignore_probe__.md"),
     ("review/", "review/__ignore_probe__.md"),
@@ -377,58 +352,6 @@ CITATION_BASELINE: frozenset[tuple[str, str]] = frozenset(
             "doc/design/workspace-database-separation-plan.md",
         ),
         (
-            "backend/tests/integration/test_admin_jobs_fanout.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/integration/test_cloud_composition.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/integration/test_context_media_orphan_api.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/integration/test_context_media_orphan_sweep.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/integration/test_context_media_orphan_sweep_worker.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/integration/test_edge_registry.py",
-            "doc/design/api-surface-redesign.md",
-        ),
-        (
-            "backend/tests/integration/test_edge_registry.py",
-            "doc/design/workspace-tenancy-contract.md",
-        ),
-        (
-            "backend/tests/integration/test_job_visibility_api.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/mcp_contract/test_upload_tools.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/unit/test_overlay_contract_surface.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/tests/unit/test_restricted_library_policy.py",
-            "doc/design/workspace-tenancy-contract.md",
-        ),
-        (
-            "backend/tests/unit/test_settings_mcp_http_mode.py",
-            "doc/design/mcp-transport-contract.md",
-        ),
-        (
-            "backend/tests/utils/test_markdown_outline.py",
-            "doc/design/block-provenance-contract.md",
-        ),
-        (
             "backend/utils/actor_display.py",
             "doc/design/workspace-database-separation-plan.md",
         ),
@@ -440,10 +363,6 @@ CITATION_BASELINE: frozenset[tuple[str, str]] = frozenset(
         ("backend/worker/entry.py", "doc/design/workspace-database-separation-plan.md"),
         (
             "frontend/src/features/settings/AdminJobsSection.tsx",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "frontend/src/features/settings/tests/AdminJobsSection.test.tsx",
             "doc/design/workspace-database-separation-plan.md",
         ),
         (
@@ -459,14 +378,9 @@ CITATION_BASELINE: frozenset[tuple[str, str]] = frozenset(
             "shared/fixtures/content_hash_vectors.json",
             "doc/sw-design/06_mcp_and_agent_contracts.md",
         ),
-        ("tests/e2e/test_release_gate_check.py", "doc/setup/remote-mcp-clients.md"),
         (
             "tests/fixtures/client-matrix.md",
             "doc/Epic-0/Sprint-5/evidence/phase0-client-matrix.md",
-        ),
-        (
-            "tests/static/test_epic1_contract_claims.py",
-            "doc/design/epic1-core-contract.md",
         ),
         ("tests/static/test_public_schema_path_leak.py", "doc/Epic-2/...md"),
         (
@@ -474,14 +388,6 @@ CITATION_BASELINE: frozenset[tuple[str, str]] = frozenset(
             "doc/Epic-2/260828_workspace_db_isolation_plan.md",
         ),
         ("tests/static/test_public_schema_path_leak.py", "doc/Epic-2/plan.md"),
-        (
-            "tests/static/test_release_gate_contract.py",
-            "doc/setup/remote-mcp-clients.md",
-        ),
-        (
-            "tests/static/test_workspace_plane_boundary.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
     }
 )
 

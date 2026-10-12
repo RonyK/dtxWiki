@@ -3161,6 +3161,13 @@ class ContextWriteService:
                     raise StaleContextDraftError(
                         "current published ContextPage version has no publish record"
                     )
+                # Name the audit by what it recorded -- this version, published
+                # by this change set -- never by being the page's newest one.
+                # `created_at` is wall-clock time, which is not monotonic (NTP
+                # or hypervisor time steps, a resumed VM, app nodes whose
+                # clocks differ by more than the gap between two publishes), so
+                # the previous publish's audit can carry the later timestamp
+                # and would be returned for this version's replay.
                 audit_event = session.scalar(
                     select(AuditEvent)
                     .where(
@@ -3168,16 +3175,14 @@ class ContextWriteService:
                         AuditEvent.action == "context_page.draft.publish",
                         AuditEvent.target_kind == "context_page",
                         AuditEvent.target_id == page.id,
+                        AuditEvent.payload["version_id"].as_string() == str(version.id),
+                        AuditEvent.payload["change_set_id"].as_string()
+                        == str(publish_operation.change_set_id),
                     )
-                    .order_by(AuditEvent.created_at.desc())
+                    .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+                    .limit(1)
                 )
-                if (
-                    audit_event is None
-                    or not audit_event.payload
-                    or audit_event.payload.get("version_id") != str(version.id)
-                    or audit_event.payload.get("change_set_id")
-                    != str(publish_operation.change_set_id)
-                ):
+                if audit_event is None:
                     raise StaleContextDraftError(
                         "current published ContextPage version has no publish audit"
                     )

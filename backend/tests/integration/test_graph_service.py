@@ -1,10 +1,12 @@
 """GraphService.neighbors + write-through refresh + perf budget (C2-T5/T6)."""
 
+import os
 import time
+from contextlib import contextmanager
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, insert, select
 
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
@@ -812,7 +814,187 @@ def test_neighbors_refills_after_hidden_high_weight_batch(
     assert [neighbor.title for neighbor in neighbors] == ["Visible After Hidden"]
 
 
-def test_neighbors_perf_budget_10k_edges(session_factory):
+@contextmanager
+def _captured_statements(session):
+    """Every statement the engine runs inside the block, with its parameters."""
+
+    statements: list[tuple[str, tuple]] = []
+
+    def capture(_conn, _cursor, statement, parameters, _context, _many):
+        statements.append((statement, parameters))
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+
+
+def _bound_limit(statement: str, parameters: tuple) -> int | None:
+    """The LIMIT bound into a captured SQLite statement, or None without one."""
+
+    if statement.rstrip().endswith("LIMIT ? OFFSET ?"):
+        return parameters[-2]
+    return None
+
+
+def _seed_hub_graph(session_factory):
+    """A 10k-edge graph around a hub whose degree beats every scan budget.
+
+    The heaviest hub edges lead to real pages (hidden drafts first, published
+    ones after) and are inserted last, so only an ordered, bounded read keeps
+    them in view. The rest of the hub's edges dangle; the remainder of the 10k
+    belongs to unrelated sources. Returns the hub and, per direction, the
+    published (visible) pages heaviest first as ``(page_id, weight)``.
+    """
+
+    hub = uuid4()
+    visible: dict[str, list[tuple]] = {"out": [], "in": []}
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+
+        def edge(source, target, weight):
+            return {
+                "workspace_id": workspace_id,
+                "source_kind": "context_page",
+                "source_id": source,
+                "target_kind": "context_page",
+                "target_id": target,
+                "edge_kind": "wikilink",
+                "provenance": "curated",
+                "weight": weight,
+                "source_ref": {},
+            }
+
+        rows = [edge(uuid4(), uuid4(), float(index % 7 + 1)) for index in range(8_400)]
+        rows += [edge(hub, uuid4(), float(index % 7 + 1)) for index in range(990)]
+        rows += [edge(uuid4(), hub, float(index % 7 + 1)) for index in range(590)]
+        weight = 100.0
+        for direction in ("out", "in"):
+            for published in (False, True):
+                for index in range(5):
+                    state = "published" if published else "draft"
+                    page = _seed_context_page(
+                        session,
+                        workspace_id,
+                        slug=f"hub-{direction}-{state}-{index}",
+                        title=f"Hub {direction} {state} {index}",
+                        published=published,
+                    )
+                    rows.append(
+                        edge(hub, page.id, weight)
+                        if direction == "out"
+                        else edge(page.id, hub, weight)
+                    )
+                    if published:
+                        visible[direction].append((page.id, weight))
+                    weight -= 1.0
+        assert len(rows) == 10_000
+        session.execute(insert(EdgeProjection), rows)
+    return hub, visible
+
+
+# The scan budget is min(512, max(128, limit * 8)): 400 at the default limit of
+# 50, the 128 floor at limit 1 and the 512 cap at limit 100.
+@pytest.mark.parametrize(
+    ("direction", "limit", "budgets"),
+    [
+        pytest.param("out", 50, {"out": 400}, id="out"),
+        pytest.param("in", 50, {"in": 400}, id="in"),
+        pytest.param("both", 50, {"out": 400, "in": 400}, id="both"),
+        pytest.param("out", 1, {"out": 128}, id="floor"),
+        pytest.param("out", 100, {"out": 512}, id="cap"),
+    ],
+)
+def test_neighbors_work_is_bounded_on_a_10k_edge_graph(
+    session_factory, monkeypatch, direction, limit, budgets
+):
+    """19.5.7 budget, asserted as counted work rather than elapsed time.
+
+    A wall-clock gate on a two-statement call measures the scheduler as much as
+    the code (its latency lives in the opt-in benchmark below). What keeps
+    neighbors() cheap on a hostile hub is structural: one ordered edge read per
+    direction, hard-capped at min(512, max(128, limit * 8)) rows, a single
+    batched hydration of at most that many ids, and no result an actor may not
+    see. Each of those is observed on the call itself.
+    """
+
+    hub, visible = _seed_hub_graph(session_factory)
+
+    hydrated: list[int] = []
+    hydrate_context_pages = HYDRATORS[EntityKind.CONTEXT_PAGE.value]
+
+    def spy_hydrate(ctx, ids):
+        hydrated.append(len(ids))
+        return hydrate_context_pages(ctx, ids)
+
+    monkeypatch.setitem(HYDRATORS, EntityKind.CONTEXT_PAGE.value, spy_hydrate)
+
+    with session_factory() as session:
+        workspace_id = _workspace_id(session)
+        with _captured_statements(session) as statements:
+            neighbors = GraphService().neighbors(
+                session,
+                workspace_id,
+                kind="context_page",
+                entity_id=hub,
+                actor=_actor("viewer"),
+                edge_kinds=("wikilink",),
+                direction=direction,
+                limit=limit,
+            )
+
+    edge_reads: dict[str, int | None] = {}
+    for statement, parameters in statements:
+        if "FROM edge_projection" in statement:
+            side = "out" if "edge_projection.source_id = ?" in statement else "in"
+            assert side not in edge_reads, f"{side} edges were read twice"
+            edge_reads[side] = _bound_limit(statement, parameters)
+    # One read per direction, each bound by the hard cap rather than the degree.
+    assert edge_reads == budgets, "edge reads must be one per direction, LIMIT-bound"
+    # Hydration is one batch per direction holding exactly the capped window (the
+    # hub's degree exceeds every budget here), never one lookup per edge.
+    assert hydrated == list(budgets.values()), "hydration must be one capped batch"
+    # Edge read + hydration read per direction, nothing else.
+    assert len(statements) == 2 * len(budgets), "unexpected extra statements"
+
+    # The viewer gets the published pages only, heaviest first; the hidden
+    # drafts that outrank them spend scan budget but never reach the result.
+    expected = sorted(
+        (
+            (page_id, side, weight)
+            for side in budgets
+            for page_id, weight in visible[side]
+        ),
+        key=lambda item: -item[2],
+    )[:limit]
+    assert [(n.id, n.direction) for n in neighbors] == [
+        (page_id, side) for page_id, side, _weight in expected
+    ]
+
+
+@pytest.fixture
+def benchmark_lane(request):
+    """Gate for wall-clock budgets: opt-in, and never beside xdist workers.
+
+    A latency measured on a shared runner proves nothing about the code, so the
+    functional lanes assert counted work and the budgets run only when asked
+    for, one process at a time: ``make test-backend-benchmarks``.
+    """
+
+    if os.environ.get("DTXWIKI_TEST_BENCHMARKS") != "1":
+        pytest.skip("wall-clock budget; run `make test-backend-benchmarks`")
+    if hasattr(request.config, "workerinput"):
+        pytest.fail(
+            "DTXWIKI_TEST_BENCHMARKS=1 under pytest-xdist: a budget timed beside "
+            "other workers is not a measurement; run the lane without -n, as "
+            "`make test-backend-benchmarks` does",
+            pytrace=False,
+        )
+
+
+def test_neighbors_latency_benchmark_10k_edges(session_factory, benchmark_lane):
     """19.5.7 budget: median neighbors() call <= 10ms on a 10k-edge fixture."""
 
     graph = GraphService()

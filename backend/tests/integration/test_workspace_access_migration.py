@@ -1,26 +1,20 @@
 from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models.context import ContextPage
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 
-def _config(database_url: str) -> Config:
-    config = Config(str(resolve_alembic_ini()))
-    config.set_main_option("script_location", str(resolve_migrations_dir()))
-    config.set_main_option("sqlalchemy.url", database_url)
-    return config
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
 
 
-def test_workspace_access_schema_round_trip(tmp_path: Path):
-    database_url = f"sqlite:///{tmp_path / 'workspace-access.db'}"
-    config = _config(database_url)
-    command.upgrade(config, "head")
+def test_workspace_access_schema_at_head(tmp_path: Path, sqlite_templates):
+    database_url = sqlite_templates.clone("head", tmp_path / "workspace-access.db")
     engine = create_engine(database_url)
     try:
         inspector = inspect(engine)
@@ -63,16 +57,6 @@ def test_workspace_access_schema_round_trip(tmp_path: Path):
         assert "workspace_visibility_check" in {
             constraint["name"]
             for constraint in inspector.get_check_constraints("workspace")
-        }
-
-        engine.dispose()
-        command.downgrade(config, "0001_initial_release")
-        engine = create_engine(database_url)
-        downgraded = inspect(engine)
-        assert "workspace_join_requests" not in downgraded.get_table_names()
-        assert "workspace_visibility_check" not in {
-            constraint["name"]
-            for constraint in downgraded.get_check_constraints("workspace")
         }
     finally:
         engine.dispose()

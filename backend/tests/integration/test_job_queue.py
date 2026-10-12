@@ -28,6 +28,26 @@ def make_session_factory():
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
+@pytest.fixture
+def queue_clock(monkeypatch):
+    """The queue's "now", moved only when a test moves it.
+
+    ``JobQueueService`` reads the wall clock through ``job_queue.utc_now`` when
+    it claims, reclaims, fails and completes a job, and the host clock is not
+    monotonic: an NTP or VM-resume step sets it back, and a host sleep jumps it
+    forward. A test that backdates a deadline against ``utc_now()``, or
+    measures a retry window around ``fail()``, is therefore right only while
+    no step lands inside it. Here time passes by assignment and the queue's
+    decisions follow it exactly. Model defaults such as ``created_at`` keep the
+    host clock, so a test that orders jobs by it assigns it from this clock.
+    """
+
+    # An anchor only: nothing reads the host clock through it again.
+    clock = [utc_now()]
+    monkeypatch.setattr("backend.services.job_queue.utc_now", lambda: clock[0])
+    return clock
+
+
 def test_job_queue_enqueue_is_idempotent_per_workspace_type_key():
     session_factory = make_session_factory()
     queue = JobQueueService()
@@ -127,7 +147,7 @@ def test_context_embed_key_changes_when_content_reverts_to_prior_hash():
     assert str(reverted_version_id) in reverted
 
 
-def test_fail_sets_exponential_backoff_and_claim_skips_until_due():
+def test_fail_sets_exponential_backoff_and_claim_skips_until_due(queue_clock):
     session_factory = make_session_factory()
     queue = JobQueueService()
 
@@ -147,20 +167,24 @@ def test_fail_sets_exponential_backoff_and_claim_skips_until_due():
         # Requeued with a future next_attempt_at instead of immediately.
         assert claimed.status == "queued"
         assert claimed.next_attempt_at is not None
-        assert claimed.next_attempt_at > utc_now()
+        assert claimed.next_attempt_at > queue_clock[0]
+        retry_at = claimed.next_attempt_at
         # While the backoff window is pending the job is not re-claimed.
         assert queue.claim_next(session, job_types={"embed"}) is None
 
-    # Once the backoff window passes the job becomes claimable again.
+    # One tick short of the deadline the job is still not due ...
+    queue_clock[0] = retry_at - timedelta(microseconds=1)
     with session_factory.begin() as session:
-        session.scalars(select(Job)).one().next_attempt_at = utc_now() - timedelta(
-            seconds=1
-        )
+        assert queue.claim_next(session, job_types={"embed"}) is None
+
+    # ... and once the backoff window passes it becomes claimable again.
+    queue_clock[0] = retry_at
     with session_factory.begin() as session:
-        assert queue.claim_next(session, job_types={"embed"}) is not None
+        reclaimed = queue.claim_next(session, job_types={"embed"})
+        assert reclaimed is not None and reclaimed.id == job.id
 
 
-def test_fail_backoff_delay_is_capped():
+def test_fail_backoff_delay_is_capped(queue_clock):
     """L4: the exponential backoff must be clamped so a high retry_count cannot
     overflow timedelta (datetime + timedelta raises past ~year 9999)."""
     session_factory = make_session_factory()
@@ -179,12 +203,14 @@ def test_fail_backoff_delay_is_capped():
         # Push retry_count high so the raw exponential (30 * 2**19) would be
         # ~15M seconds; the cap must keep next_attempt_at within MAX backoff.
         claimed.retry_count = 19
-        before = utc_now()
+        before = queue_clock[0]
         queue.fail(session, claimed, "rate limited", max_retries=50)
         delay = (claimed.next_attempt_at - before).total_seconds()
 
     assert claimed.status == "queued"
-    assert delay <= MAX_RETRY_BACKOFF_SECONDS + 2
+    # The queue's clock does not move between ``before`` and fail(), so the
+    # delay is the backoff itself: no allowance for elapsed time is needed.
+    assert delay <= MAX_RETRY_BACKOFF_SECONDS
 
 
 def test_reclaim_requeue_is_immediately_claimable():
@@ -496,7 +522,7 @@ def test_reclaim_stale_jobs_only_touches_the_named_workspace():
     assert stored_other.retry_count == 0
 
 
-def test_reclaim_stale_jobs_leaves_fresh_running_and_queued_jobs_alone():
+def test_reclaim_stale_jobs_leaves_fresh_running_and_queued_jobs_alone(queue_clock):
     session_factory = make_session_factory()
     queue = JobQueueService()
 
@@ -509,7 +535,10 @@ def test_reclaim_stale_jobs_leaves_fresh_running_and_queued_jobs_alone():
             trigger_type="manual",
             idempotency_key="fresh-running-1",
         )
-        running.created_at = utc_now() - timedelta(seconds=1)
+        # ``claim_next`` takes the oldest job, so the one meant to be claimed
+        # is stamped older than the other from the queue's own clock: their
+        # model-default ``created_at`` values come from the host clock.
+        running.created_at = queue_clock[0] - timedelta(seconds=1)
         queued = queue.enqueue(
             session=session,
             workspace_id=workspace.id,
@@ -517,6 +546,7 @@ def test_reclaim_stale_jobs_leaves_fresh_running_and_queued_jobs_alone():
             trigger_type="manual",
             idempotency_key="still-queued-1",
         )
+        queued.created_at = queue_clock[0]
         claimed = queue.claim_next(session=session, workspace_id=workspace.id)
         assert claimed.id == running.id
 
@@ -616,12 +646,12 @@ def test_calculate_retry_delay_bounded_jitter_and_cap():
     assert actual_delay == expected_delay
 
 
-def test_fail_jittered_backoff_and_terminal_attempt_no_future_retry():
+def test_fail_jittered_backoff_and_terminal_attempt_no_future_retry(queue_clock):
     """Verify state transitions in fail():
     - Non-terminal failures (retry_count < max_retries) set status='queued',
       increment retry_count, and calculate a jittered next_attempt_at in range.
     - Terminal failure (retry_count >= max_retries) sets status='failed',
-      sets completed_at, and leaves next_attempt_at unchanged (no future retry).
+      sets completed_at, and clears next_attempt_at (no future retry).
     """
     session_factory = make_session_factory()
     queue = JobQueueService()
@@ -637,7 +667,7 @@ def test_fail_jittered_backoff_and_terminal_attempt_no_future_retry():
         )
 
     # Attempt 1 failure
-    before_1 = utc_now()
+    before_1 = queue_clock[0]
     with session_factory.begin() as session:
         claimed_1 = queue.claim_next(session, job_types={"embed"})
         assert claimed_1 is not None and claimed_1.id == job.id
@@ -651,9 +681,11 @@ def test_fail_jittered_backoff_and_terminal_attempt_no_future_retry():
         assert stored_1.next_attempt_at is not None
         delay_1 = (stored_1.next_attempt_at - before_1).total_seconds()
         # Attempt 1 backoff must be within [15.0, 30.0] seconds
-        assert 14.5 <= delay_1 <= 31.0
-        # Elapse backoff window for next claim
-        stored_1.next_attempt_at = utc_now() - timedelta(seconds=1)
+        assert 15.0 <= delay_1 <= 30.0
+        retry_at = stored_1.next_attempt_at
+
+    # Elapse backoff window for next claim
+    queue_clock[0] = retry_at
 
     # Attempt 2 failure (terminal, max_retries=2)
     with session_factory.begin() as session:

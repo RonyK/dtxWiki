@@ -3,20 +3,71 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
-from backend.models.workspace import Workspace
+from backend.models.workspace import MCPClient, Workspace
+from backend.scripts.seed_dev import seed_default_workspace
+from backend.services import credential_hashing
 from backend.services.oauth_service import OAUTH_CSRF_COOKIE_NAME, challenge_s256
-from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.services.page_service import PageService
+from backend.tests.conftest import _FAST_ARGON2, authenticate_test_client_in_workspace
+
+
+@contextmanager
+def module_scoped_page_service(empty_schema):
+    """A seeded in-memory ``PageService`` for module-scoped fixtures.
+
+    Mirrors the function-scoped ``session_factory`` fixture. For modules whose
+    tests only read or add independent rows, so one store and one signed-in
+    client can serve them all. Tests that count rows, grant consent or
+    exercise a user's lifecycle keep the per-test ``page_service`` instead.
+    The suite-wide ``fast_argon2`` fixture is function-scoped, so the
+    cheap hasher is installed here for the sign-in the fixture performs.
+    """
+
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        creator=lambda: connection,
+        poolclass=StaticPool,
+    )
+    patch = pytest.MonkeyPatch()
+    try:
+        empty_schema.backup(connection)
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        with factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            session.add(
+                MCPClient(
+                    workspace_id=workspace.id,
+                    name="fixture-system-client",
+                    client_type="system_managed",
+                    scopes=["*"],
+                    status="active",
+                )
+            )
+        patch.setattr(
+            credential_hashing,
+            "PasswordHasher",
+            lambda **_cost: PasswordHasher(**_FAST_ARGON2),
+        )
+        yield PageService(factory)
+    finally:
+        patch.undo()
+        engine.dispose()
+        connection.close()
 
 
 def make_client(
@@ -864,13 +915,16 @@ def test_oauth_authorize_browser_errors_render_html(page_service):
     assert "requested scope is not registered" in response.text
 
 
-def test_oauth_rejects_plain_pkce(page_service):
-    """Fix-7: switched from POST to GET. The POST handler rejects on
-    `authorization decision is required` BEFORE validate_pkce_request fires,
-    so the test was a false positive — it passed regardless of whether the
-    `plain` method was rejected. GET goes through
-    validate_authorization_request -> validate_pkce_request, which is the
-    actual contract we want to pin.
+def test_oauth_rejects_invalid_pkce_and_state_parameters(page_service):
+    """One registered client, five malformed authorization requests.
+
+    GET /oauth/authorize goes through validate_authorization_request ->
+    validate_pkce_request / validate_state. The POST handler rejects on
+    `authorization decision is required` BEFORE those validators fire, so a
+    POST would pass regardless of whether they ran (a false positive found in
+    Fix-7). Each case pins the validator's own failure keyword, so a refactor
+    that re-orders the validations cannot silently bypass one of them while
+    still returning `invalid_request`.
     """
     client = make_client(page_service)
     registered = client.post(
@@ -880,162 +934,40 @@ def test_oauth_rejects_plain_pkce(page_service):
             "redirect_uris": ["http://127.0.0.1:53682/callback"],
         },
     ).json()
-    authorize = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": "p" * 43,
-            "code_challenge_method": "plain",
-            "scope": "mcp:read",
-            "state": oauth_state("state-123"),
-        },
-    )
-    assert authorize.status_code == 400
-    body = authorize.json()
-    assert body["error_code"] == "invalid_request"
-    assert "S256" in body["message"], (
-        f"PKCE method validator did not fire — got message: {body['message']!r}"
-    )
+    valid = {
+        "response_type": "code",
+        "client_id": registered["client_id"],
+        "redirect_uri": "http://127.0.0.1:53682/callback",
+        "code_challenge": challenge_s256("v" * 64),
+        "code_challenge_method": "S256",
+        "scope": "mcp:read",
+        "state": oauth_state("state-123"),
+    }
+    cases = [
+        # Only S256 is accepted.
+        (
+            "plain method",
+            {"code_challenge": "p" * 43, "code_challenge_method": "plain"},
+            "S256",
+        ),
+        # RFC 7636 section 4.2: 43-char minimum, 128-char maximum.
+        ("undersized challenge", {"code_challenge": "a" * 42}, "challenge"),
+        ("oversized challenge", {"code_challenge": "a" * 129}, "challenge"),
+        ("missing state", {"state": None}, "state"),
+        ("undersized state", {"state": "short-state"}, "at least 22 chars"),
+    ]
 
-
-def test_oauth_rejects_undersized_code_challenge(page_service):
-    """Sprint-4 closure R-F6-2 (corrected by Fix-7): PKCE code_challenge
-    length lower bound.
-
-    Uses GET /oauth/authorize so the request goes through
-    `validate_authorization_request -> validate_pkce_request ->
-    validate_code_challenge` (oauth_service.py:218). The initial Fix-6
-    closure used POST without a `decision` field, which short-circuited on
-    `authorization decision is required` before PKCE was ever inspected —
-    a false positive identified during the closure re-review.
-
-    Pin RFC 7636 §4.2's 43-char minimum + the "challenge" failure message
-    so a future refactor relaxing the bound or moving the validation cannot
-    silently break PKCE downgrade protection.
-    """
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Short PKCE",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-        },
-    ).json()
-    authorize = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": "a" * 42,  # one char below RFC 7636 minimum
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("state-short-challenge"),
-        },
-    )
-    assert authorize.status_code == 400
-    body = authorize.json()
-    assert body["error_code"] == "invalid_request"
-    assert "challenge" in body["message"], (
-        f"PKCE validator did not fire — got message: {body['message']!r}"
-    )
-
-
-def test_oauth_rejects_oversized_code_challenge(page_service):
-    """Sprint-4 closure R-F6-2 (corrected by Fix-7): PKCE code_challenge
-    length upper bound (128 chars). Pair with the undersized test.
-    """
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Long PKCE",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-        },
-    ).json()
-    authorize = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": "a" * 129,  # one char above the upper bound
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": oauth_state("state-long-challenge"),
-        },
-    )
-    assert authorize.status_code == 400
-    body = authorize.json()
-    assert body["error_code"] == "invalid_request"
-    assert "challenge" in body["message"], (
-        f"PKCE validator did not fire — got message: {body['message']!r}"
-    )
-
-
-def test_oauth_rejects_missing_state(page_service):
-    """Fix-7 hygiene: same lesson as the PKCE false-positive class — pin the
-    specific failure-mode keyword so a future refactor that re-orders the
-    validations cannot silently bypass `validate_state` while still
-    returning `invalid_request`.
-    """
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Missing State",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-        },
-    ).json()
-    authorize = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": challenge_s256("v" * 64),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-        },
-    )
-    assert authorize.status_code == 400
-    body = authorize.json()
-    assert body["error_code"] == "invalid_request"
-    assert "state" in body["message"], (
-        f"validate_state did not fire — got message: {body['message']!r}"
-    )
-
-
-def test_oauth_rejects_undersized_state(page_service):
-    client = make_client(page_service)
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": "Short State",
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-        },
-    ).json()
-    short_state = "short-state"
-
-    authorize = client.get(
-        "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
-            "code_challenge": challenge_s256("v" * 64),
-            "code_challenge_method": "S256",
-            "scope": "mcp:read",
-            "state": short_state,
-        },
-    )
-
-    assert authorize.status_code == 400
-    body = authorize.json()
-    assert body["error_code"] == "invalid_request"
-    assert "at least 22 chars" in body["message"]
+    for label, override, keyword in cases:
+        params = {
+            key: value for key, value in {**valid, **override}.items() if value
+        }
+        authorize = client.get("/oauth/authorize", params=params)
+        assert authorize.status_code == 400, label
+        body = authorize.json()
+        assert body["error_code"] == "invalid_request", label
+        assert keyword in body["message"], (
+            f"{label}: validator did not fire - got message: {body['message']!r}"
+        )
 
 
 def test_oauth_deny_redirects_access_denied_and_audits(page_service):
@@ -1335,8 +1267,11 @@ def test_oauth_dcr_rate_limit_returns_invalid_client_metadata(page_service):
     # ("testclient") cannot pollute or short-circuit this test.
     oauth_service_module._DCR_BUCKET.clear()
     client = make_client(page_service)
+    # The bucket starts 19 deep, so the 20-slot boundary takes two requests:
+    # the 20th passes and the 21st is refused.
+    oauth_service_module._DCR_BUCKET["testclient"] = [time.monotonic()] * 19
     last_response = None
-    for index in range(21):
+    for index in range(2):
         last_response = client.post(
             "/oauth/register",
             json={
@@ -1345,8 +1280,8 @@ def test_oauth_dcr_rate_limit_returns_invalid_client_metadata(page_service):
                 "scope": "mcp:read",
             },
         )
-        if last_response.status_code == 400:
-            break
+        if index == 0:
+            assert last_response.status_code == 201, last_response.text
 
     assert last_response is not None
     assert last_response.status_code == 400
@@ -1379,17 +1314,19 @@ def test_oauth_dcr_rate_limit_uses_forwarded_client_ip_when_behind_proxy(page_se
     headers_a = {"X-Forwarded-For": "203.0.113.42, 10.0.0.1"}
     headers_b = {"X-Forwarded-For": "203.0.113.43, 10.0.0.1"}
 
-    for index in range(20):
-        response = client.post(
-            "/oauth/register",
-            headers=headers_a,
-            json={
-                "client_name": f"Forwarded Rate Limit Probe {index}",
-                "redirect_uris": [f"http://127.0.0.1:{53682 + index}/callback"],
-                "scope": "mcp:read",
-            },
-        )
-        assert response.status_code == 201
+    # Start the resolved client's bucket 19 deep: the 20th request passes and
+    # the 21st is refused.
+    oauth_service_module._DCR_BUCKET["203.0.113.42"] = [time.monotonic()] * 19
+    response = client.post(
+        "/oauth/register",
+        headers=headers_a,
+        json={
+            "client_name": "Forwarded Rate Limit Probe",
+            "redirect_uris": ["http://127.0.0.1:53682/callback"],
+            "scope": "mcp:read",
+        },
+    )
+    assert response.status_code == 201
 
     limited = client.post(
         "/oauth/register",
@@ -1433,17 +1370,24 @@ def test_oauth_dcr_rate_limit_ignores_spoofed_forwarded_for(page_service):
     )
     authenticate_test_client_in_workspace(client, page_service.session_factory)
 
-    last_response = None
-    for index in range(21):
-        last_response = client.post(
-            "/oauth/register",
-            headers={"X-Forwarded-For": f"203.0.113.{index}, 10.0.0.1"},
-            json={
-                "client_name": f"Spoofed Forwarded Probe {index}",
-                "redirect_uris": [f"http://127.0.0.1:{53800 + index}/callback"],
-                "scope": "mcp:read",
-            },
+    # The untrusted peer's own bucket starts 19 deep; every request carries a
+    # different forwarded value, so only the real peer address can be the key.
+    oauth_service_module._DCR_BUCKET["testclient"] = [time.monotonic()] * 19
+    responses = []
+    for index in range(2):
+        responses.append(
+            client.post(
+                "/oauth/register",
+                headers={"X-Forwarded-For": f"203.0.113.{index}, 10.0.0.1"},
+                json={
+                    "client_name": f"Spoofed Forwarded Probe {index}",
+                    "redirect_uris": [f"http://127.0.0.1:{53800 + index}/callback"],
+                    "scope": "mcp:read",
+                },
+            )
         )
+    last_response = responses[-1]
+    assert responses[0].status_code == 201, responses[0].text
 
     assert last_response is not None
     assert last_response.status_code == 400
@@ -1451,7 +1395,7 @@ def test_oauth_dcr_rate_limit_ignores_spoofed_forwarded_for(page_service):
     oauth_service_module._DCR_BUCKET.clear()
 
 
-def test_oauth_token_endpoint_rate_limit_returns_429(page_service):
+def test_oauth_token_endpoint_rate_limit_returns_429(page_service, monkeypatch):
     """Sprint-4 closure R-F6-1: /oauth/token enforces per-IP + per-client
     rate-limit.
 
@@ -1470,8 +1414,11 @@ def test_oauth_token_endpoint_rate_limit_returns_429(page_service):
 
     oauth_service_module._TOKEN_IP_BUCKET.clear()
     oauth_service_module._TOKEN_CLIENT_BUCKET.clear()
+    # The production threshold (60) and its boundary are pinned by
+    # test_rate_limit_in_process; a small one keeps the HTTP mapping cheap.
+    monkeypatch.setattr(oauth_service_module, "TOKEN_RATE_LIMIT_PER_CLIENT", 3)
     client = make_client(page_service)
-    # Use a single client_id so the per-client bucket (60/min) hits first.
+    # Use a single client_id so the per-client bucket hits first.
     last_response = None
     for index in range(
         oauth_service_module.TOKEN_RATE_LIMIT_PER_CLIENT + 1
@@ -2998,8 +2945,9 @@ def test_consent_form_preselects_resolved_workspace_when_no_hint_given(page_serv
     fallback the old pin exercised) is instead the pre-checked row in the
     ``workspace_ids`` checklist, which the user can still uncheck before
     submitting."""
+    from datetime import timedelta
+
     from backend.models.user import User
-    from backend.policy.rbac import list_user_workspaces
 
     client = make_client(page_service)
     registered = client.post(
@@ -3010,9 +2958,19 @@ def test_consent_form_preselects_resolved_workspace_when_no_hint_given(page_serv
             "scope": "mcp:read",
         },
     ).json()
-    with page_service.session_factory() as session:
+    # make_client's user holds two workspaces: the seeded "default" it selects
+    # and the Personal one signup created. They are stamped a fraction of a
+    # second apart, so which one a created_at-ordered listing puts first is
+    # whatever the wall clock did between the two inserts (a backward step
+    # lists Personal first). Name the resolved workspace by slug, not by list
+    # position, and pin Personal as the older one so the checklist has to
+    # follow the user's default rather than the first row.
+    with page_service.session_factory.begin() as session:
         user = session.scalars(select(User)).first()
-        default_workspace_id = list_user_workspaces(session, user.id)[0][0].id
+        seeded = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        personal = session.get(Workspace, user.personal_workspace_id)
+        personal.created_at = seeded.created_at - timedelta(seconds=1)
+        default_workspace_id = seeded.id
 
     response = client.get(
         "/oauth/authorize",
@@ -3440,7 +3398,7 @@ def _craft_signed_jwt(page_service, *, workspace_id_claim, user_id):
     return service, token
 
 
-def _assert_jwt_workspace_claim_is_inert(page_service, *, workspace_id_claim):
+def test_oauth_jwt_ignores_the_workspace_claim_whatever_it_holds(page_service):
     """P10.3 T3 (D-01v2/D-01v3-d) supersedes the pre-T3 quartet of tests
     that pinned ``verify_access_token`` rejecting a null/empty/malformed
     ``workspace_id`` JWT claim and accepting a well-formed one as "the
@@ -3458,42 +3416,10 @@ def _assert_jwt_workspace_claim_is_inert(page_service, *, workspace_id_claim):
     verification succeeds or fails for entirely unrelated reasons (jti
     denylist, user status), and the claim's value never appears on the
     resulting actor.
+
+    Covers a null, an empty, a malformed and a well-formed (the seeded
+    workspace's) UUID claim: one app and user, one crafted JWT per value.
     """
-    from backend.models.user import User
-
-    make_client(page_service)  # seed default user
-    with page_service.session_factory() as session:
-        user = session.scalars(select(User)).first()
-        assert user is not None
-        user_id = user.id
-
-    service, token = _craft_signed_jwt(
-        page_service, workspace_id_claim=workspace_id_claim, user_id=user_id
-    )
-    actor = service.verify_access_token(token)
-    assert not hasattr(actor, "workspace_id")
-    assert actor.user.user_id == user_id
-    assert actor.scopes == ("mcp:read",)
-
-
-def test_oauth_jwt_ignores_null_workspace_claim(page_service):
-    _assert_jwt_workspace_claim_is_inert(page_service, workspace_id_claim=None)
-
-
-def test_oauth_jwt_ignores_empty_workspace_claim(page_service):
-    _assert_jwt_workspace_claim_is_inert(page_service, workspace_id_claim="")
-
-
-def test_oauth_jwt_ignores_invalid_uuid_workspace_claim(page_service):
-    _assert_jwt_workspace_claim_is_inert(
-        page_service, workspace_id_claim="not-a-uuid"
-    )
-
-
-def test_oauth_jwt_ignores_a_well_formed_workspace_claim(page_service):
-    """A well-formed UUID in the (now-vestigial) workspace_id claim gets no
-    special treatment either -- same inert outcome as the malformed cases
-    above."""
     from backend.models.user import User
     from backend.models.workspace import Workspace
 
@@ -3506,12 +3432,14 @@ def test_oauth_jwt_ignores_a_well_formed_workspace_claim(page_service):
         assert workspace is not None
         workspace_id = workspace.id
 
-    service, token = _craft_signed_jwt(
-        page_service, workspace_id_claim=str(workspace_id), user_id=user_id
-    )
-    actor = service.verify_access_token(token)
-    assert not hasattr(actor, "workspace_id")
-    assert actor.user.user_id == user_id
+    for workspace_id_claim in (None, "", "not-a-uuid", str(workspace_id)):
+        service, token = _craft_signed_jwt(
+            page_service, workspace_id_claim=workspace_id_claim, user_id=user_id
+        )
+        actor = service.verify_access_token(token)
+        assert not hasattr(actor, "workspace_id"), workspace_id_claim
+        assert actor.user.user_id == user_id, workspace_id_claim
+        assert actor.scopes == ("mcp:read",), workspace_id_claim
 
 
 # ---------------------------------------------------------------------------

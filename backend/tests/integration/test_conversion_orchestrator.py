@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from threading import Barrier, Event, Thread
@@ -162,6 +162,32 @@ def limits() -> ConversionLimits:
     )
 
 
+@pytest.fixture
+def conversion_clock(monkeypatch: pytest.MonkeyPatch) -> list[datetime]:
+    """The orchestrator's and the queue's "now", moved only when a test moves it.
+
+    A run's total time budget is measured by ``conversion_orchestrator.utc_now``
+    from the run's ``created_at``, and the queue's lease and claim decisions by
+    ``job_queue.utc_now``. The host clock is not monotonic: an NTP or VM-resume
+    step sets it back, and a host sleep jumps it forward. A test that backdates
+    a run or a job by a small margin against ``utc_now()``, or lets a run's
+    budget of a few seconds elapse in real time, is therefore right only while
+    no step lands inside it. Here time stands still until a test moves it, and
+    both services follow it exactly. Model defaults such as ``created_at`` keep
+    the host clock, so every run starts on this clock instead (``_schedule`` and
+    ``_add_manual_attempt`` take it for that), and a test that backdates
+    anything else assigns it from this clock too.
+    """
+
+    # An anchor only: nothing reads the host clock through it again.
+    clock = [utc_now()]
+    monkeypatch.setattr(
+        "backend.services.conversion_orchestrator.utc_now", lambda: clock[0]
+    )
+    monkeypatch.setattr("backend.services.job_queue.utc_now", lambda: clock[0])
+    return clock
+
+
 def _orchestrator(
     tmp_path: Path,
     *plugins: _ScriptedConverter,
@@ -281,8 +307,18 @@ def _schedule(
     workspace: Workspace,
     version: LibraryItemVersion,
     limits: ConversionLimits,
+    clock: list[datetime],
 ):
-    return orchestrator.schedule_initial(
+    """Schedule the initial run, started at ``clock``'s current time.
+
+    The orchestrator measures a run's total budget from its ``created_at`` on
+    the conversion clock, while a model default stamps that column from the host
+    clock. Starting the run on the same clock keeps the budget out of reach of
+    any step of the host clock. A test that wants a run past its budget moves
+    ``created_at`` back from there.
+    """
+
+    scheduled = orchestrator.schedule_initial(
         session=session,
         workspace_id=workspace.id,
         version=version,
@@ -291,6 +327,8 @@ def _schedule(
         actor_kind="user",
         actor_id=str(uuid4()),
     )
+    scheduled.run.created_at = clock[0]
+    return scheduled
 
 
 def _add_manual_attempt(
@@ -299,6 +337,7 @@ def _add_manual_attempt(
     version: LibraryItemVersion,
     template_run: LibraryRun,
     run_seq: int,
+    clock: list[datetime],
 ) -> tuple[LibraryRun, LibraryAttempt]:
     run = LibraryRun(
         workspace_id=version.workspace_id,
@@ -313,6 +352,8 @@ def _add_manual_attempt(
         policy_revision=template_run.policy_revision,
         output_schema_version=template_run.output_schema_version,
         idempotency_key=f"manual:{uuid4()}",
+        # Started on the conversion clock, as ``_schedule`` starts the first run.
+        created_at=clock[0],
     )
     run.conversion_detail = LibraryRunConversionDetail(
         error_fallback_matrix_json=dict(
@@ -369,6 +410,7 @@ def _add_manual_attempt(
 def test_manual_conversion_retry_serializes_concurrent_requests(
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     database_path = tmp_path / "conversion-retry-race.db"
     engine = create_engine(
@@ -388,12 +430,14 @@ def test_manual_conversion_retry_serializes_concurrent_requests(
     orchestrator, store = _orchestrator(tmp_path, plugin)
     with concurrent_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         scheduled.job.status = "running"
         scheduled.job.stage = "conversion"
-        scheduled.job.started_at = utc_now()
+        scheduled.job.started_at = conversion_clock[0]
         orchestrator.mark_terminal_failure(
             session=session,
             workspace_id=workspace.id,
@@ -448,6 +492,7 @@ def test_manual_conversion_retry_renews_transport_budget_for_transient_failure(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.manual-retry-after-transport-budget",
@@ -466,7 +511,9 @@ def test_manual_conversion_retry_renews_transport_budget_for_transient_failure(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         budget_json = scheduled.run.conversion_detail.per_provider_budget_json
@@ -540,6 +587,7 @@ def test_manual_conversion_retry_locks_job_before_domain_lineage(
     tmp_path: Path,
     limits: ConversionLimits,
     monkeypatch: pytest.MonkeyPatch,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.manual-retry-lock-order",
@@ -549,7 +597,9 @@ def test_manual_conversion_retry_locks_job_before_domain_lineage(
     orchestrator, store = _orchestrator(tmp_path, plugin)
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         orchestrator.mark_terminal_failure(
@@ -598,6 +648,7 @@ def test_schedule_initial_is_persisted_and_idempotent(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.primary",
@@ -608,8 +659,12 @@ def test_schedule_initial_is_persisted_and_idempotent(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        first = _schedule(orchestrator, session, workspace, version, limits)
-        second = _schedule(orchestrator, session, workspace, version, limits)
+        first = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
+        second = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
 
         assert first.run.id == second.run.id
         assert first.attempt is not None
@@ -638,12 +693,15 @@ def test_schedule_without_provider_preserves_source_as_stored_unconverted(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     orchestrator, store = _orchestrator(tmp_path)
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
 
         assert scheduled.run.status == "stored_unconverted"
         assert scheduled.run.finished_at is not None
@@ -666,6 +724,7 @@ def test_provider_input_safety_cap_is_pinned_in_execution_recipe(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.bounded-provider",
@@ -677,7 +736,9 @@ def test_provider_input_safety_cap_is_pinned_in_execution_recipe(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
 
         assert scheduled.attempt is not None
         assert scheduled.run.provider_chain_json[0]["max_input_bytes"] == 512
@@ -696,6 +757,7 @@ def test_schedule_skips_unhealthy_higher_priority_provider(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     unhealthy = _HealthScriptedConverter(
         "test.unhealthy",
@@ -713,7 +775,9 @@ def test_schedule_skips_unhealthy_higher_priority_provider(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
 
         assert scheduled.run.status == "queued"
         assert scheduled.run.provider_chain_json[0]["converter_id"] == "test.healthy"
@@ -741,6 +805,7 @@ def test_schedule_with_only_unhealthy_provider_is_stored_unconverted(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     unhealthy = _HealthScriptedConverter(
         "test.unhealthy-only",
@@ -752,7 +817,9 @@ def test_schedule_with_only_unhealthy_provider_is_stored_unconverted(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
 
         assert scheduled.run.status == "stored_unconverted"
         assert scheduled.run.provider_chain_json == []
@@ -769,6 +836,7 @@ def test_execute_attempt_cross_workspace_is_opaque_not_found_without_mutation(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.cross-workspace-execute",
@@ -785,6 +853,7 @@ def test_execute_attempt_cross_workspace_is_opaque_not_found_without_mutation(
             source_workspace,
             version,
             limits,
+            conversion_clock,
         )
         assert scheduled.attempt is not None
         foreign_workspace = Workspace(
@@ -835,6 +904,7 @@ def test_worker_rejects_cross_workspace_conversion_job_without_lineage_mutation(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.cross-workspace-worker",
@@ -851,6 +921,7 @@ def test_worker_rejects_cross_workspace_conversion_job_without_lineage_mutation(
             source_workspace,
             version,
             limits,
+            conversion_clock,
         )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
@@ -933,6 +1004,7 @@ def test_success_promotes_canonical_artifact_and_duplicate_execution_is_noop(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.success",
@@ -943,7 +1015,9 @@ def test_success_promotes_canonical_artifact_and_duplicate_execution_is_noop(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -1085,6 +1159,7 @@ def test_derived_quota_rejection_does_not_install_or_associate_output(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.quota",
@@ -1105,7 +1180,9 @@ def test_derived_quota_rejection_does_not_install_or_associate_output(
             )
         )
         session.flush()
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -1127,6 +1204,7 @@ def test_durable_duplicate_digest_uses_first_batch_canonical_media_type(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     shared_content = b'{"same":true}'
     plugin = _ScriptedConverter(
@@ -1161,7 +1239,9 @@ def test_durable_duplicate_digest_uses_first_batch_canonical_media_type(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         workspace_id = workspace.id
         attempt_id = scheduled.attempt.id
@@ -1207,6 +1287,7 @@ def test_durable_conversion_quota_race_leaves_tracked_physical_orphan(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.durable-quota-race",
@@ -1217,7 +1298,9 @@ def test_durable_conversion_quota_race_leaves_tracked_physical_orphan(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         workspace_id = workspace.id
         attempt_id = scheduled.attempt.id
@@ -1279,6 +1362,7 @@ def test_durable_recipe_error_persists_failed_state_before_converter_execution(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.durable-recipe",
@@ -1294,7 +1378,9 @@ def test_durable_recipe_error_persists_failed_state_before_converter_execution(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         scheduled.attempt.config_hash = "b" * 64
         workspace_id = workspace.id
@@ -1330,6 +1416,7 @@ def test_durable_total_budget_timeout_persists_timed_out_state_before_conversion
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.durable-total-timeout",
@@ -1345,12 +1432,14 @@ def test_durable_total_budget_timeout_persists_timed_out_state_before_conversion
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         total_budget = dict(scheduled.run.conversion_detail.total_budget_json)
         total_budget["max_wall_seconds"] = 0.001
         scheduled.run.conversion_detail.total_budget_json = total_budget
-        scheduled.run.created_at = utc_now() - timedelta(seconds=1)
+        scheduled.run.created_at = conversion_clock[0] - timedelta(seconds=1)
         workspace_id = workspace.id
         version_id = version.id
         run_id = scheduled.run.id
@@ -1397,6 +1486,7 @@ def test_durable_malformed_snapshot_fails_closed_before_converter_and_install(
     limits: ConversionLimits,
     snapshot_kind: str,
     expected_code: str,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         f"test.durable-malformed-{snapshot_kind}",
@@ -1415,7 +1505,9 @@ def test_durable_malformed_snapshot_fails_closed_before_converter_and_install(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         if snapshot_kind == "provider_chain":
             scheduled.run.provider_chain_json = [
@@ -1487,6 +1579,7 @@ def test_worker_completes_corrupt_fallback_snapshot_without_generic_retry(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.worker-corrupt-fallback",
@@ -1504,7 +1597,9 @@ def test_worker_completes_corrupt_fallback_snapshot_without_generic_retry(
     orchestrator.durable_media_installer_factory = unexpected_installer_factory
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         scheduled.run.conversion_detail.error_fallback_matrix_json = {
@@ -1561,6 +1656,7 @@ def test_durable_output_capacity_guard_runs_before_quota_and_install(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     drifted_limits = replace(
         limits,
@@ -1609,6 +1705,7 @@ def test_durable_output_capacity_guard_runs_before_quota_and_install(
             workspace,
             version,
             drifted_limits,
+            conversion_clock,
         )
         assert scheduled.attempt is not None
         workspace_id = workspace.id
@@ -1645,6 +1742,7 @@ def test_transport_retry_advances_fence_and_old_generation_becomes_stale(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.retry",
@@ -1663,7 +1761,9 @@ def test_transport_retry_advances_fence_and_old_generation_becomes_stale(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         retry = orchestrator.execute_attempt(
@@ -1709,6 +1809,7 @@ def test_transport_retry_uses_snapshotted_budget_instead_of_process_default(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.no-retry",
@@ -1726,7 +1827,9 @@ def test_transport_retry_uses_snapshotted_budget_instead_of_process_default(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         budget = dict(scheduled.run.conversion_detail.per_provider_budget_json)
         budget["max_transport_retries"] = 0
@@ -1759,6 +1862,7 @@ def test_exhausted_transport_budget_persists_allowed_manual_retry(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.exhausted-transport-budget",
@@ -1776,7 +1880,9 @@ def test_exhausted_transport_budget_persists_allowed_manual_retry(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         budget_json = scheduled.run.conversion_detail.per_provider_budget_json
         max_transport_retries = budget_json["max_transport_retries"]
@@ -1804,6 +1910,7 @@ def test_converter_timeout_claiming_retry_and_fallback_is_terminal_timed_out(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     timed_out = _ScriptedConverter(
         "test.process-timeout",
@@ -1826,7 +1933,9 @@ def test_converter_timeout_claiming_retry_and_fallback_is_terminal_timed_out(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -1867,6 +1976,7 @@ def test_security_hard_stop_ignores_provider_retry_and_fallback_claims(
     tmp_path: Path,
     limits: ConversionLimits,
     error_code: str,
+    conversion_clock: list[datetime],
 ) -> None:
     blocked = _ScriptedConverter(
         f"test.security-{error_code}",
@@ -1889,7 +1999,9 @@ def test_security_hard_stop_ignores_provider_retry_and_fallback_claims(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -1918,6 +2030,7 @@ def test_nonretryable_input_limit_persists_denied_manual_retry_disposition(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.input-limit",
@@ -1935,7 +2048,9 @@ def test_nonretryable_input_limit_persists_denied_manual_retry_disposition(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
 
@@ -1975,6 +2090,7 @@ def test_expired_total_wall_budget_returns_and_persists_timed_out(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.total-timeout",
@@ -1985,12 +2101,14 @@ def test_expired_total_wall_budget_returns_and_persists_timed_out(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         total_budget = dict(scheduled.run.conversion_detail.total_budget_json)
         total_budget["max_wall_seconds"] = 0.001
         scheduled.run.conversion_detail.total_budget_json = total_budget
-        scheduled.run.created_at = utc_now() - timedelta(seconds=1)
+        scheduled.run.created_at = conversion_clock[0] - timedelta(seconds=1)
         session.flush()
 
         result = orchestrator.execute_attempt(
@@ -2014,6 +2132,7 @@ def test_stale_job_reclaim_advances_attempt_execution_fence(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.reclaim",
@@ -2024,7 +2143,9 @@ def test_stale_job_reclaim_advances_attempt_execution_fence(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         attempt_id = scheduled.attempt.id
@@ -2032,11 +2153,11 @@ def test_stale_job_reclaim_advances_attempt_execution_fence(
         version_id = version.id
         job_id = scheduled.job.id
         scheduled.attempt.status = "running"
-        scheduled.attempt.started_at = utc_now() - timedelta(seconds=30)
+        scheduled.attempt.started_at = conversion_clock[0] - timedelta(seconds=30)
         scheduled.run.status = "running"
         version.processing_status = "converting"
         scheduled.job.status = "running"
-        scheduled.job.started_at = utc_now() - timedelta(seconds=30)
+        scheduled.job.started_at = conversion_clock[0] - timedelta(seconds=30)
         session.flush()
 
     worker = OneShotWorker()
@@ -2072,6 +2193,7 @@ def test_stale_job_reclaim_reconciles_terminal_attempt_without_resurrection(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.terminal-reclaim",
@@ -2082,7 +2204,9 @@ def test_stale_job_reclaim_reconciles_terminal_attempt_without_resurrection(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         attempt_id = scheduled.attempt.id
@@ -2092,7 +2216,7 @@ def test_stale_job_reclaim_reconciles_terminal_attempt_without_resurrection(
         scheduled.run.status = "failed"
         version.processing_status = "failed"
         scheduled.job.status = "running"
-        scheduled.job.started_at = utc_now() - timedelta(seconds=30)
+        scheduled.job.started_at = conversion_clock[0] - timedelta(seconds=30)
         session.flush()
 
     worker = OneShotWorker()
@@ -2125,6 +2249,7 @@ def test_unsupported_provider_falls_back_to_next_snapshotted_provider(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     unsupported = _ScriptedConverter(
         "test.unsupported",
@@ -2141,7 +2266,9 @@ def test_unsupported_provider_falls_back_to_next_snapshotted_provider(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         first = orchestrator.execute_attempt(
@@ -2178,6 +2305,7 @@ def test_snapshotted_stop_policy_overrides_malicious_provider_fallback_request(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     malicious = _ScriptedConverter(
         "test.malicious",
@@ -2200,7 +2328,9 @@ def test_snapshotted_stop_policy_overrides_malicious_provider_fallback_request(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -2224,6 +2354,7 @@ def test_late_success_preserves_archived_lifecycle_and_skips_embedding(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.archived",
@@ -2234,7 +2365,9 @@ def test_late_success_preserves_archived_lifecycle_and_skips_embedding(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         item.lifecycle_status = "archived"
         session.flush()
@@ -2261,6 +2394,7 @@ def test_metadata_only_result_is_persisted_as_canonical_json_artifact(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.metadata",
@@ -2277,7 +2411,9 @@ def test_metadata_only_result_is_persisted_as_canonical_json_artifact(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -2322,6 +2458,7 @@ def test_empty_complete_result_cannot_be_promoted_ready(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.empty",
@@ -2332,7 +2469,9 @@ def test_empty_complete_result_cannot_be_promoted_ready(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
 
         result = orchestrator.execute_attempt(
@@ -2354,6 +2493,7 @@ def test_metadata_with_provider_asset_does_not_expand_asset_budget(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     asset_content = b'{"provider":true}'
     bounded_limits = replace(
@@ -2390,6 +2530,7 @@ def test_metadata_with_provider_asset_does_not_expand_asset_budget(
             workspace,
             version,
             bounded_limits,
+            conversion_clock,
         )
         assert scheduled.attempt is not None
 
@@ -2418,6 +2559,7 @@ def test_malformed_fallback_snapshot_fails_closed_without_next_attempt(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     failing = _ScriptedConverter(
         "test.failure",
@@ -2439,7 +2581,9 @@ def test_malformed_fallback_snapshot_fails_closed_without_next_attempt(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         scheduled.run.conversion_detail.error_fallback_matrix_json = {
             "default": "unbounded-action"
@@ -2480,6 +2624,7 @@ def test_tampered_attempt_recipe_is_rejected_before_converter_execution(
     limits: ConversionLimits,
     field: str,
     tampered_value: str,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.recipe",
@@ -2490,7 +2635,9 @@ def test_tampered_attempt_recipe_is_rejected_before_converter_execution(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         setattr(scheduled.attempt, field, tampered_value)
         session.flush()
@@ -2520,6 +2667,7 @@ def test_stale_fence_before_materialization_never_publishes_output(
     limits: ConversionLimits,
     monkeypatch: pytest.MonkeyPatch,
     preexisting: bool,
+    conversion_clock: list[datetime],
 ) -> None:
     markdown = "# Stale materialization"
     output_bytes = markdown.encode("utf-8")
@@ -2533,7 +2681,9 @@ def test_stale_fence_before_materialization_never_publishes_output(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         output_path = store.path_for_key(
             store.storage_key_for_hash(workspace.id, output_sha256)
@@ -2607,6 +2757,7 @@ def test_partial_staging_failure_never_publishes_new_output_blob(
     limits: ConversionLimits,
     monkeypatch: pytest.MonkeyPatch,
     preexisting: bool,
+    conversion_clock: list[datetime],
 ) -> None:
     markdown = "# Materialized before failure"
     markdown_bytes = markdown.encode("utf-8")
@@ -2633,7 +2784,9 @@ def test_partial_staging_failure_never_publishes_new_output_blob(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         markdown_path = store.path_for_key(
             store.storage_key_for_hash(workspace.id, markdown_sha256)
@@ -2698,6 +2851,7 @@ def test_late_older_run_cannot_replace_newer_same_version_selection(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.race",
@@ -2711,13 +2865,16 @@ def test_late_older_run_cannot_replace_newer_same_version_selection(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        initial = _schedule(orchestrator, session, workspace, version, limits)
+        initial = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert initial.attempt is not None
         _, newer_attempt = _add_manual_attempt(
             session,
             version=version,
             template_run=initial.run,
             run_seq=2,
+            clock=conversion_clock,
         )
 
         newer = orchestrator.execute_attempt(
@@ -2759,6 +2916,7 @@ def test_late_older_retryable_failure_cannot_downgrade_newer_ready_run(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.late-failure",
@@ -2777,13 +2935,16 @@ def test_late_older_retryable_failure_cannot_downgrade_newer_ready_run(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        initial = _schedule(orchestrator, session, workspace, version, limits)
+        initial = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert initial.attempt is not None
         _, newer_attempt = _add_manual_attempt(
             session,
             version=version,
             template_run=initial.run,
             run_seq=2,
+            clock=conversion_clock,
         )
 
         newer = orchestrator.execute_attempt(
@@ -2814,6 +2975,7 @@ def test_late_terminal_marker_cannot_downgrade_newer_ready_run(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.late-terminal",
@@ -2824,13 +2986,16 @@ def test_late_terminal_marker_cannot_downgrade_newer_ready_run(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        initial = _schedule(orchestrator, session, workspace, version, limits)
+        initial = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert initial.attempt is not None
         _, newer_attempt = _add_manual_attempt(
             session,
             version=version,
             template_run=initial.run,
             run_seq=2,
+            clock=conversion_clock,
         )
         newer = orchestrator.execute_attempt(
             session=session,
@@ -2858,6 +3023,7 @@ def test_same_version_reconversion_clears_previous_semantic_generation(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.same-version-semantic-fence",
@@ -2871,7 +3037,9 @@ def test_same_version_reconversion_clears_previous_semantic_generation(
 
     with session_factory.begin() as session:
         workspace, item, version = _persist_source(session, store)
-        initial = _schedule(orchestrator, session, workspace, version, limits)
+        initial = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert initial.attempt is not None
         assert (
             orchestrator.execute_attempt(
@@ -2906,6 +3074,7 @@ def test_same_version_reconversion_clears_previous_semantic_generation(
             version=version,
             template_run=initial.run,
             run_seq=2,
+            clock=conversion_clock,
         )
         replacement = orchestrator.execute_attempt(
             session=session,
@@ -2941,6 +3110,7 @@ def test_historical_version_reconversion_does_not_publish_current_projection(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.historical-reconversion",
@@ -2955,7 +3125,9 @@ def test_historical_version_reconversion_does_not_publish_current_projection(
 
     with session_factory.begin() as session:
         workspace, item, version_one = _persist_source(session, store)
-        first = _schedule(orchestrator, session, workspace, version_one, limits)
+        first = _schedule(
+            orchestrator, session, workspace, version_one, limits, conversion_clock
+        )
         assert first.attempt is not None
         assert (
             orchestrator.execute_attempt(
@@ -2987,7 +3159,9 @@ def test_historical_version_reconversion_does_not_publish_current_projection(
         session.add(version_two)
         session.flush()
         item.current_version_id = version_two.id
-        second = _schedule(orchestrator, session, workspace, version_two, limits)
+        second = _schedule(
+            orchestrator, session, workspace, version_two, limits, conversion_clock
+        )
         assert second.attempt is not None
         assert (
             orchestrator.execute_attempt(
@@ -3005,6 +3179,7 @@ def test_historical_version_reconversion_does_not_publish_current_projection(
             version=version_one,
             template_run=first.run,
             run_seq=2,
+            clock=conversion_clock,
         )
         historical = orchestrator.execute_attempt(
             session=session,
@@ -3040,6 +3215,7 @@ def test_historical_version_reconversion_does_not_publish_current_projection(
 def test_two_phase_worker_commits_converting_state_before_converter_runs(
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     entered = Event()
     release = Event()
@@ -3070,7 +3246,9 @@ def test_two_phase_worker_commits_converting_state_before_converter_runs(
     with worker_sessions.begin() as session:
         seed_default_workspace(session)
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         attempt_id = scheduled.attempt.id
         run_id = scheduled.run.id
@@ -3121,6 +3299,7 @@ def test_manual_retry_of_terminal_running_job_fences_late_phase_two_completion(
     tmp_path: Path,
     limits: ConversionLimits,
     monkeypatch: pytest.MonkeyPatch,
+    conversion_clock: list[datetime],
 ) -> None:
     phase_two_entered = Event()
     release_phase_two = Event()
@@ -3147,7 +3326,9 @@ def test_manual_retry_of_terminal_running_job_fences_late_phase_two_completion(
     with worker_sessions.begin() as session:
         seed_default_workspace(session)
         workspace, item, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         transport_budget = scheduled.run.conversion_detail.per_provider_budget_json[
@@ -3237,6 +3418,7 @@ def test_manual_retry_of_terminal_running_job_fences_late_phase_two_completion(
 def test_reclaimed_generation_is_not_completed_by_late_worker(
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     entered = Event()
     release = Event()
@@ -3267,7 +3449,9 @@ def test_reclaimed_generation_is_not_completed_by_late_worker(
     with worker_sessions.begin() as session:
         seed_default_workspace(session)
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         assert scheduled.job is not None
         attempt_id = scheduled.attempt.id
@@ -3298,7 +3482,7 @@ def test_reclaimed_generation_is_not_completed_by_late_worker(
         with worker_sessions.begin() as session:
             running_job = session.get(Job, job_id)
             assert running_job is not None
-            running_job.started_at = utc_now() - timedelta(seconds=30)
+            running_job.started_at = conversion_clock[0] - timedelta(seconds=30)
 
         assert (
             worker.reclaim_stale_jobs_with_session_factory(
@@ -3342,6 +3526,7 @@ def test_reclaimed_generation_is_not_failed_by_late_worker(
     session_factory,
     tmp_path: Path,
     limits: ConversionLimits,
+    conversion_clock: list[datetime],
 ) -> None:
     plugin = _ScriptedConverter(
         "test.late-queue-failure",
@@ -3354,7 +3539,9 @@ def test_reclaimed_generation_is_not_failed_by_late_worker(
 
     with session_factory.begin() as session:
         workspace, _, version = _persist_source(session, store)
-        scheduled = _schedule(orchestrator, session, workspace, version, limits)
+        scheduled = _schedule(
+            orchestrator, session, workspace, version, limits, conversion_clock
+        )
         assert scheduled.attempt is not None
         claimed = orchestrator.job_queue.claim_next(
             session=session,
@@ -3363,7 +3550,7 @@ def test_reclaimed_generation_is_not_failed_by_late_worker(
         )
         assert claimed is not None
         generation_one = _ClaimedJob.from_model(claimed)
-        claimed.started_at = utc_now() - timedelta(seconds=30)
+        claimed.started_at = conversion_clock[0] - timedelta(seconds=30)
         assert orchestrator.mark_attempt_running(
             session=session,
             workspace_id=workspace.id,

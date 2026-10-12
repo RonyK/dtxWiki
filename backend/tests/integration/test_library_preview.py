@@ -376,6 +376,15 @@ def test_admitted_source_image_manifest_has_exact_dimensions_and_inline_transpor
     assert uploaded.status_code == 201, uploaded.text
     item = uploaded.json()["data"]
     version = item["current_version"]
+    with preview_api.session_factory() as session:
+        queued = session.scalar(
+            select(Job).where(
+                Job.job_type == LIBRARY_PREVIEW_JOB_TYPE,
+            )
+        )
+        attempt = session.scalar(select(LibraryAttempt))
+        assert queued is None
+        assert attempt is None
     manifest_response = preview_api.client.get(
         _preview_url(preview_api, item["id"], version["id"])
     )
@@ -383,6 +392,7 @@ def test_admitted_source_image_manifest_has_exact_dimensions_and_inline_transpor
     manifest = manifest_response.json()["data"]
     source_url = _preview_source_url(preview_api, item["id"], version["id"])
     assert manifest["status"] == "ready"
+    assert manifest["selected_preview_attempt_id"] is None
     assert manifest["download_url"] == version["original_url"]
     assert manifest["variants"] == [
         {
@@ -1215,58 +1225,6 @@ def test_upload_enqueues_durable_preview_and_worker_promotes_without_db_lock(
             session.scalar(select(Job).where(Job.job_type == "preview_test_probe"))
             is not None
         )
-
-
-@pytest.mark.parametrize(
-    ("filename", "media_type", "pillow_format"),
-    (
-        ("photo.jpg", "image/jpeg", "JPEG"),
-        ("diagram.png", "image/png", "PNG"),
-    ),
-)
-def test_source_image_is_previewable_without_production_provider_job(
-    preview_api: _PreviewApi,
-    filename: str,
-    media_type: str,
-    pillow_format: str,
-) -> None:
-    source = _valid_image(pillow_format)
-    uploaded = _upload(
-        preview_api,
-        filename=filename,
-        content=source,
-        media_type=media_type,
-    )
-    assert uploaded.status_code == 201, uploaded.text
-    item = uploaded.json()["data"]
-    with preview_api.session_factory() as session:
-        queued = session.scalar(
-            select(Job).where(
-                Job.job_type == LIBRARY_PREVIEW_JOB_TYPE,
-            )
-        )
-        attempt = session.scalar(select(LibraryAttempt))
-        assert queued is None
-        assert attempt is None
-    manifest = preview_api.client.get(
-        _preview_url(
-            preview_api,
-            item["id"],
-            item["current_version"]["id"],
-        )
-    ).json()["data"]
-    assert manifest["status"] == "ready"
-    assert manifest["selected_preview_attempt_id"] is None
-    source_variants = [
-        variant for variant in manifest["variants"] if variant["source"] == "original"
-    ]
-    assert len(source_variants) == 1
-    assert source_variants[0]["renderer_contract"] == "core.image.v1"
-    assert source_variants[0]["width"] == 24
-    assert source_variants[0]["height"] == 12
-    content = preview_api.client.get(source_variants[0]["content_url"])
-    assert content.status_code == 200
-    assert content.content == source
 
 
 @pytest.mark.parametrize("failure", ["timeout", "crash"])

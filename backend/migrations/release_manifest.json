@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "description": "Schema release boundaries under canonical revision IDs. These schemas originally shipped under the legacy IDs; renaming does not change their schema or data operations. Patch releases without database changes retain the same head.",
+  "schema_releases": {
+    "0.0.1": {
+      "group": "v0_0",
+      "head": "bd62193d5cf6"
+    },
+    "0.1.1": {
+      "group": "v0_1",
+      "head": "efcbcf724889"
+    }
+  },
+  "legacy_revision_aliases": {
+    "0001_initial_release": "bd62193d5cf6",
+    "0002_epic1": "efcbcf724889"
+  }
+}

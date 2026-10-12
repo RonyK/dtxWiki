@@ -1,23 +1,7 @@
-"""The default release gate must be runnable by anyone who clones this repo.
+"""The default release gate must run from a clean clone with tracked inputs.
 
-`scripts/release_gate_check.sh` used to hard-require seven inputs that are not
-tracked here -- `internal/audit/{cli,security-headers,remote-smoke}.log`,
-`internal/audit/client-smoke-log.md`, `doc/setup/remote-mcp-clients.md` and the
-two `doc/Epic-0/Sprint-5/*` overviews -- so a clean checkout produced seven
-`FAIL: missing file:` lines and exit 1 before the gate reached a single check it
-could actually perform. A gate that only its author can run gates nothing.
-
-The existing suite could not see this: every test in
-`tests/e2e/test_release_gate_check.py` overrides all four private paths through
-`DTXWIKI_*` environment variables, so the default input set was never exercised.
-These tests exercise exactly that default set, from two angles:
-
-* a static one, which asks git whether each default input is tracked and not
-  ignored (fast, needs no toolchain), and
-* a behavioural one, which materialises a clean checkout and runs the script.
-
-Plus the other half of the contract: the private evidence checks must refuse to
-invent repository defaults, so they can never creep back in as hard requirements.
+Private evidence checks are opt-in and require explicit input paths. Static
+inspection and a clean-checkout execution cover the default input set.
 """
 
 from __future__ import annotations
@@ -102,7 +86,7 @@ def test_public_gate_reads_only_inputs_a_clean_clone_has() -> None:
     assert offenders == [], (
         "scripts/release_gate_check.sh reads inputs by default that a clean "
         f"clone does not have: {offenders}. Private acceptance evidence "
-        "(internal/audit logs, doc/ overviews, the remote client setup guide) "
+        "(operator logs, acceptance overviews and remote client setup) "
         "must be supplied explicitly via --with-evidence, never defaulted to a "
         "repository path that is git-ignored or untracked."
     )

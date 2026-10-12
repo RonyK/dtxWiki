@@ -148,7 +148,13 @@ def test_existing_hit_transforms_return_value_without_rewriting_stored_result(
         assert stored.result_payload == {"value": "committed"}
 
 
-def test_expired_key_is_reclaimed_as_a_new_intent(session_factory) -> None:
+def test_expired_key_is_reclaimed_as_a_new_intent(session_factory, monkeypatch) -> None:
+    # The receipt expired one second before "now", and the service must judge it
+    # against that same "now": the host clock steps (NTP, a resumed VM), so
+    # backdating against one read of it and deciding against another would
+    # put the receipt on either side of its own deadline.
+    now = utc_now()
+    monkeypatch.setattr("backend.services.mcp_write_idempotency.utc_now", lambda: now)
     with session_factory.begin() as session:
         workspace_id = session.scalar(
             select(Workspace.id).where(Workspace.slug == "default")
@@ -161,7 +167,7 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory) -> None:
             idempotency_key="expired-key",
             request_fingerprint="expired-fingerprint",
             result_payload={"value": "expired-result"},
-            expires_at=utc_now() - timedelta(seconds=1),
+            expires_at=now - timedelta(seconds=1),
         )
         session.add(expired)
         session.flush()
@@ -174,7 +180,6 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory) -> None:
         execute_count += 1
         return _Result(value="new-result")
 
-    before = utc_now()
     with session_factory.begin() as session:
         result = execute_idempotent_write(
             session,
@@ -204,7 +209,7 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory) -> None:
         assert replacement.id != expired_id
         assert replacement.request_fingerprint == "new-fingerprint"
         assert replacement.result_payload == {"value": "new-result"}
-        assert replacement.expires_at >= before + IDEMPOTENCY_WINDOW
+        assert replacement.expires_at >= now + IDEMPOTENCY_WINDOW
 
 
 def test_retry_only_without_a_key_is_a_contract_violation() -> None:
@@ -262,12 +267,17 @@ def test_retry_only_with_no_receipt_answers_outcome_unknown_without_executing(
 
 def test_retry_only_with_an_expired_receipt_preserves_the_row(
     session_factory,
+    monkeypatch,
 ) -> None:
     """P8.5: an expired receipt must NOT be read as "no receipt ever
     existed" and silently reclaimed as license to execute -- `retry_only`
     leaves the expired row in place for the real (non-retry_only) resend to
     reclaim, and answers unknown instead of guessing."""
 
+    # Judge the receipt against the same "now" it is backdated from; see
+    # test_expired_key_is_reclaimed_as_a_new_intent.
+    now = utc_now()
+    monkeypatch.setattr("backend.services.mcp_write_idempotency.utc_now", lambda: now)
     with session_factory.begin() as session:
         workspace_id = session.scalar(
             select(Workspace.id).where(Workspace.slug == "default")
@@ -280,7 +290,7 @@ def test_retry_only_with_an_expired_receipt_preserves_the_row(
             idempotency_key="retry-only-expired-key",
             request_fingerprint="expired-fingerprint",
             result_payload={"value": "expired-result"},
-            expires_at=utc_now() - timedelta(seconds=1),
+            expires_at=now - timedelta(seconds=1),
         )
         session.add(expired)
         session.flush()

@@ -1,3 +1,5 @@
+import os
+import sys
 from io import BytesIO
 from uuid import UUID, uuid4
 
@@ -10,6 +12,7 @@ from backend.app.container import DatabaseProvider, assemble
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.context_media.domain import CONTEXT_MEDIA_UPLOAD_POLICY
+from backend.converters.external_protocol import ExternalProcessConverter
 from backend.media.domain import (
     MediaStagingBytesExceededError,
     MediaStagingLimitExceededError,
@@ -63,6 +66,53 @@ SECOND_PNG_BYTES = bytes.fromhex(
     "890000000d49444154789c63f8cfc0f01f00050001ff89993d1d000000004945"
     "4e44ae426082"
 )
+
+_CONVERTER_HEALTH_READY: set = set()
+# Mirrors the inherited-environment allowlist in ``_run_bounded``.
+_CONVERTER_ENV_NAMES = ("LANG", "LC_ALL", "SYSTEMROOT", "WINDIR")
+
+
+def _is_bundled_host(command) -> bool:
+    return (
+        len(command) == 5
+        and command[0] == sys.executable
+        and command[1:4] == ("-m", "backend.worker.converter_host", "--converter")
+    )
+
+
+@pytest.fixture
+def cached_converter_health(monkeypatch):
+    """Run each bundled converter's health handshake once per module and worker.
+
+    Every per-test container builds a fresh ``ConverterRegistry`` whose first
+    readiness check spawns the converter subprocess (~0.26 s). Tests that only
+    consume the readiness result opt in; handshake, mismatch and failure
+    behavior stays covered, uncached, by ``test_converter_adapters.py``. Only
+    the first-party bundled host (``<python> -m backend.worker.converter_host
+    --converter <id>``) is cached, and only a ready result is remembered, keyed
+    by command, descriptor, timeout and the environment values the subprocess
+    inherits. Every other provider runs the real healthcheck unchanged.
+    """
+
+    real = ExternalProcessConverter.healthcheck
+
+    def _healthcheck(self, *, timeout_seconds=5.0):
+        if not _is_bundled_host(self._command):
+            return real(self, timeout_seconds=timeout_seconds)
+        key = (
+            self._command,
+            self._descriptor,
+            timeout_seconds,
+            tuple(os.environ.get(name) for name in _CONVERTER_ENV_NAMES),
+        )
+        if key in _CONVERTER_HEALTH_READY:
+            return True, None
+        result = real(self, timeout_seconds=timeout_seconds)
+        if result == (True, None):
+            _CONVERTER_HEALTH_READY.add(key)
+        return result
+
+    monkeypatch.setattr(ExternalProcessConverter, "healthcheck", _healthcheck)
 
 
 def _context_image_bytes(image_format: str) -> bytes:
@@ -211,6 +261,7 @@ def test_context_media_capabilities_publish_central_upload_policy(
     }
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_new_signup_personal_workspace_accepts_first_context_upload(
     session_factory,
     tmp_path,
@@ -671,6 +722,7 @@ def _version_content_url(client: TestClient, page: dict, asset: dict) -> str:
     )
 
 
+@pytest.mark.usefixtures("cached_converter_health")
 def test_context_media_http_vertical_editing_preview_public_and_delete(
     session_factory,
     tmp_path,

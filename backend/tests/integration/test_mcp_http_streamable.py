@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import ExitStack
 
 import anyio
 import pytest
@@ -37,6 +38,7 @@ from sqlalchemy import select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.workspace import MCPClient
+from backend.tests.integration.test_oauth_mcp_http import module_scoped_page_service
 
 
 def _make_settings(mode: str) -> Settings:
@@ -982,21 +984,17 @@ def test_post_mcp_succeeds_in_json_stateless_setup(page_service):
     assert response.status_code == 401, response.text
 
 
-def test_get_mcp_unauthorized_returns_401(page_service):
+def test_get_mcp_unauthorized_returns_401(mcp_modes):
     """Task 2.3 (Task 2.7 cross-ref): mode=``streamable`` GET without
     bearer returns 401 + canonical ``WWW-Authenticate`` header.
 
     Negative-test rule (ADR A6): paired positive control verifies that
     *with* a bearer the request reaches the SDK handshake (no 401).
     """
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    response = client.get(
+        "/mcp", headers={"Accept": "text/event-stream"}
     )
-    with TestClient(app) as client:
-        response = client.get(
-            "/mcp", headers={"Accept": "text/event-stream"}
-        )
     assert response.status_code == 401, response.text
     assert "resource_metadata=" in response.headers["www-authenticate"]
 
@@ -1058,60 +1056,56 @@ def test_mcp_auth_server_fault_returns_500_not_401(page_service, monkeypatch):
             assert "www-authenticate" not in response.headers, method
 
 
-def test_get_mcp_session_errors_are_json_rpc(page_service):
-    _, pat = _pat_client(page_service)
+def test_get_mcp_session_errors_are_json_rpc(mcp_modes):
+    pat = mcp_modes.pat
 
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    unknown = client.get(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "text/event-stream",
+            "Mcp-Session-Id": "unknown-get-session",
+        },
     )
-    with TestClient(app) as client:
-        unknown = client.get(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "text/event-stream",
-                "Mcp-Session-Id": "unknown-get-session",
-            },
-        )
-        initial = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "get-error-shape",
-                        "version": "0.0.0",
-                    },
+    initial = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "get-error-shape",
+                    "version": "0.0.0",
                 },
             },
-        )
-        assert initial.status_code == 200, initial.text
-        session_id = initial.headers["mcp-session-id"]
-        deleted = client.delete(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Mcp-Session-Id": session_id,
-            },
-        )
-        assert deleted.status_code == 200, deleted.text
-        expired = client.get(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "text/event-stream",
-                "Mcp-Session-Id": session_id,
-            },
-        )
+        },
+    )
+    assert initial.status_code == 200, initial.text
+    session_id = initial.headers["mcp-session-id"]
+    deleted = client.delete(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Mcp-Session-Id": session_id,
+        },
+    )
+    assert deleted.status_code == 200, deleted.text
+    expired = client.get(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "text/event-stream",
+            "Mcp-Session-Id": session_id,
+        },
+    )
 
     assert unknown.status_code == 404, unknown.text
     assert_json_rpc_error(
@@ -1336,7 +1330,7 @@ def test_delete_mcp_idempotent(page_service):
     assert no_id_response.json() == {"status": "ok"}
 
 
-def test_delete_mcp_requires_auth(page_service):
+def test_delete_mcp_requires_auth(mcp_modes):
     """Task 2.4: bearer missing on a ``streamable`` DELETE → 401 +
     canonical ``WWW-Authenticate`` header.
 
@@ -1347,12 +1341,8 @@ def test_delete_mcp_requires_auth(page_service):
     Pins the ``resource_metadata=`` substring per the OAuth protected
     resource metadata RFC 9728.
     """
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
-    )
-    with TestClient(app) as client:
-        response = client.delete("/mcp")
+    client = mcp_modes.client("streamable")
+    response = client.delete("/mcp")
 
     assert response.status_code == 401, response.text
     assert "resource_metadata=" in response.headers["www-authenticate"]
@@ -1685,7 +1675,45 @@ def _pat_client(page_service) -> tuple[TestClient, str]:
     return client, issue_personal_api_token(client)
 
 
-def test_force_mode_conflict_returns_415(page_service):
+class _SharedMcpApps:
+    """Lazily built, lifespan-entered apps over one store, keyed by transport.
+
+    The Accept negotiation, parse-error, session-gate and 401-challenge tests
+    only POST to /mcp with a bearer from the shared store, so they reuse these
+    apps instead of building (and signing up for) their own. Tests that count
+    sessions, patch app state or exercise lifecycle build their own app.
+    """
+
+    def __init__(self, page_service, pat: str, stack: ExitStack):
+        self._page_service = page_service
+        self._stack = stack
+        self._clients: dict[tuple[str, bool], TestClient] = {}
+        self.pat = pat
+
+    def client(self, mode: str, *, public_origin: bool = False) -> TestClient:
+        key = (mode, public_origin)
+        if key not in self._clients:
+            settings = (
+                _make_settings_with_public_origin(mode)
+                if public_origin
+                else _make_settings(mode)
+            )
+            app = create_app(settings=settings, page_service=self._page_service)
+            self._clients[key] = self._stack.enter_context(TestClient(app))
+        return self._clients[key]
+
+
+@pytest.fixture(scope="module")
+def mcp_modes(_empty_sqlite_schema):
+    with (
+        module_scoped_page_service(_empty_sqlite_schema) as page_service,
+        ExitStack() as stack,
+    ):
+        _, pat = _pat_client(page_service)
+        yield _SharedMcpApps(page_service, pat, stack)
+
+
+def test_force_mode_conflict_returns_415(mcp_modes):
     """Plan-named test for §2.4 rows 5 + 12.
 
     mode=``json_stateless`` + Accept=``text/event-stream`` → 415 with a
@@ -1699,34 +1727,26 @@ def test_force_mode_conflict_returns_415(page_service):
     ``test_accept_star_uses_mode_default`` in the same file — same
     setup, Accept compatible with the mode → 2xx.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    js_app = create_app(
-        settings=_make_settings("json_stateless"),
-        page_service=page_service,
+    js_client = mcp_modes.client("json_stateless")
+    stream_client = mcp_modes.client("streamable")
+    js_resp = js_client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "text/event-stream",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    stream_app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    stream_resp = stream_client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-
-    with TestClient(js_app) as js_client, TestClient(stream_app) as stream_client:
-        js_resp = js_client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "text/event-stream",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        stream_resp = stream_client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
 
     assert js_resp.status_code == 415, js_resp.text
     js_body = js_resp.json()
@@ -1753,7 +1773,7 @@ def test_force_mode_conflict_returns_415(page_service):
     assert "expected" not in stream_body
 
 
-def test_no_accept_fallback_per_mode(page_service):
+def test_no_accept_fallback_per_mode(mcp_modes):
     """Plan-named test for §2.4 rows 1 + 9 + 15 (missing Accept).
 
     - mode=``json_stateless`` no Accept → JSON branch → 2xx (Sprint_4
@@ -1766,26 +1786,22 @@ def test_no_accept_fallback_per_mode(page_service):
     setup MUST still 401 — proves the missing-Accept fallback did not
     inadvertently bypass bearer auth.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
     # Row 1: json_stateless, missing Accept → 200 (the request is a
     # tools/list, which succeeds for an mcp:read PAT actor against the
     # default workspace).
-    js_app = create_app(
-        settings=_make_settings("json_stateless"),
-        page_service=page_service,
+    client = mcp_modes.client("json_stateless")
+    r1 = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(js_app) as client:
-        r1 = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        # Positive control: same setup without bearer still 401.
-        r1_no_auth = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
+    # Positive control: same setup without bearer still 401.
+    r1_no_auth = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
     assert r1.status_code == 200, r1.text
     assert "application/json" in r1.headers.get("content-type", "")
     assert r1_no_auth.status_code == 401
@@ -1795,15 +1811,11 @@ def test_no_accept_fallback_per_mode(page_service):
     # MUST NOT fire because missing → SSE per §2.3 Step 5(a)). Either
     # the SDK accepts it (2xx) or rejects with 406; the wrong outcome
     # would be a 415 from our negotiator. We assert *not* 415.
-    stream_app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
-    )
-    with TestClient(stream_app) as client:
-        r9 = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    client = mcp_modes.client("streamable")
+    r9 = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
     assert r9.status_code != 415, (
         "streamable missing-Accept MUST go to SSE branch (not 415); "
@@ -1811,15 +1823,11 @@ def test_no_accept_fallback_per_mode(page_service):
     )
 
     # Row 15: auto, missing Accept → also SSE branch, same expectation.
-    auto_app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
-    )
-    with TestClient(auto_app) as client:
-        r15 = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    client = mcp_modes.client("auto")
+    r15 = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
     assert r15.status_code != 415, (
         "auto missing-Accept MUST go to mode-default SSE (not 415); "
@@ -1827,7 +1835,7 @@ def test_no_accept_fallback_per_mode(page_service):
     )
 
 
-def test_accept_star_uses_mode_default(page_service):
+def test_accept_star_uses_mode_default(mcp_modes):
     """Plan-named test for §2.4 rows 2 + 10 + 16 (Accept=``*/*``).
 
     - mode=``streamable`` Accept=``*/*`` → SSE branch (not 415).
@@ -1838,37 +1846,29 @@ def test_accept_star_uses_mode_default(page_service):
     paired with the streamable not-415 assertion in the same test so a
     regression that broke either branch's ``*/*`` fallback surfaces.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    js_app = create_app(
-        settings=_make_settings("json_stateless"),
-        page_service=page_service,
+    client = mcp_modes.client("json_stateless")
+    r_js = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}", "Accept": "*/*"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(js_app) as client:
-        r_js = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}", "Accept": "*/*"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     assert r_js.status_code == 200, r_js.text
     assert "application/json" in r_js.headers.get("content-type", "")
 
-    stream_app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    r_stream = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}", "Accept": "*/*"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(stream_app) as client:
-        r_stream = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}", "Accept": "*/*"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     assert r_stream.status_code != 415, (
         f"streamable */* MUST go to SSE branch (not 415); got {r_stream.status_code}"
     )
 
 
-def test_accept_q_zero_excluded(page_service):
+def test_accept_q_zero_excluded(mcp_modes):
     """Plan-named test for §2.4 row 13 (streamable, q=0 exclusion).
 
     Accept=``application/json;q=0, text/event-stream;q=0.5`` →
@@ -1879,21 +1879,17 @@ def test_accept_q_zero_excluded(page_service):
     Negative-test rule (ADR A6): the *negative* twin is §2.4 row 8 —
     same q=0 logic flips to a 415 conflict when the mode demands JSON.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    stream_app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    r = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json;q=0, text/event-stream;q=0.5",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(stream_app) as client:
-        r = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json;q=0, text/event-stream;q=0.5",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     # Negotiator output is SSE; SDK will accept the text/event-stream
     # request. The wrong outcome would be a 415 (q=0 forgotten).
     assert r.status_code != 415, (
@@ -1901,19 +1897,15 @@ def test_accept_q_zero_excluded(page_service):
     )
 
     # §2.4 row 8 paired negative: json_stateless + same q=0 layout → 415.
-    js_app = create_app(
-        settings=_make_settings("json_stateless"),
-        page_service=page_service,
+    client = mcp_modes.client("json_stateless")
+    r_js = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json;q=0, text/event-stream",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(js_app) as client:
-        r_js = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json;q=0, text/event-stream",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     assert r_js.status_code == 415, r_js.text
     assert_json_rpc_error(
         r_js.json(),
@@ -1923,7 +1915,7 @@ def test_accept_q_zero_excluded(page_service):
     )
 
 
-def test_accept_q_value_respected(page_service):
+def test_accept_q_value_respected(mcp_modes):
     """Plan-named test for §2.4 row 19 (auto, q-value precedence).
 
     mode=``auto`` Accept=``application/json;q=0.9, text/event-stream;q=0.5``
@@ -1940,21 +1932,17 @@ def test_accept_q_value_respected(page_service):
     values → SSE). Two opposing assertions on the same code path catch
     a regression that hardcoded one branch.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    auto_app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
+    client = mcp_modes.client("auto")
+    r = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json;q=0.9, text/event-stream;q=0.5",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(auto_app) as client:
-        r = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json;q=0.9, text/event-stream;q=0.5",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     assert r.status_code == 200, r.text
     content_type = r.headers.get("content-type", "")
     assert "application/json" in content_type, (
@@ -1963,7 +1951,7 @@ def test_accept_q_value_respected(page_service):
     )
 
 
-def test_accept_json_returns_json(page_service):
+def test_accept_json_returns_json(mcp_modes):
     """Plan-named test for §2.4 row 17 (auto, JSON explicit).
 
     mode=``auto`` Accept=``application/json`` → JSON branch → 200 +
@@ -1975,21 +1963,17 @@ def test_accept_json_returns_json(page_service):
     auto/JSON via the request-scope ``json_response=True`` manager,
     matching Phase_2 §2.4 row 17 contract.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    auto_app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
+    client = mcp_modes.client("auto")
+    r = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(auto_app) as client:
-        r = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     assert r.status_code == 200, r.text
     content_type = r.headers.get("content-type", "")
     assert "application/json" in content_type, (
@@ -1998,7 +1982,7 @@ def test_accept_json_returns_json(page_service):
     )
 
 
-def test_accept_sse_returns_sse(page_service):
+def test_accept_sse_returns_sse(mcp_modes):
     """Plan-named test for §2.4 row 18 (auto, SSE explicit).
 
     mode=``auto`` Accept=``text/event-stream`` → SSE branch dispatch.
@@ -2014,33 +1998,29 @@ def test_accept_sse_returns_sse(page_service):
     ``status_code != 415``; we now pin the SDK 406 path so a regression
     that swapped SSE → JSON dispatch (or back into 415) fails.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    auto_app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
-    )
-    with TestClient(auto_app) as client:
-        r = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "text/event-stream",
-            },
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "test-client",
-                        "version": "0.0.0",
-                    },
+    client = mcp_modes.client("auto")
+    r = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "text/event-stream",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "test-client",
+                    "version": "0.0.0",
                 },
             },
-        )
+        },
+    )
     # SDK enforces "Accept must include both application/json AND
     # text/event-stream" — proves we routed to the SSE branch (vs 415
     # transport_mode_mismatch from the negotiator).
@@ -2051,7 +2031,7 @@ def test_accept_sse_returns_sse(page_service):
     )
 
 
-def test_accept_q_value_respected_reverse(page_service):
+def test_accept_q_value_respected_reverse(mcp_modes):
     """Plan-named test for §2.4 row 20 (auto, q-value precedence reversed).
 
     mode=``auto`` Accept=``application/json;q=0.5, text/event-stream;q=0.9``
@@ -2064,39 +2044,36 @@ def test_accept_q_value_respected_reverse(page_service):
     ``initialize`` (no session id required) so the Task 2.6 gate does
     not preempt the SSE dispatch.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    auto_app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
-    )
-    with TestClient(auto_app) as client:
-        r = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json;q=0.5, text/event-stream;q=0.9",
-            },
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "test-client",
-                        "version": "0.0.0",
-                    },
+    client = mcp_modes.client("auto")
+    r = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json;q=0.5, text/event-stream;q=0.9",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "test-client",
+                    "version": "0.0.0",
                 },
             },
-        )
+        },
+    )
     assert r.status_code == 200, r.text
     content_type = r.headers.get("content-type", "")
     assert "text/event-stream" in content_type, (
         f"auto + SSE-priority q-values must return SSE; got "
         f"content-type={content_type!r}"
     )
+    _delete_session(client, pat, r)
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
@@ -2263,25 +2240,21 @@ def test_streamable_sse_response_declares_utf8_and_roundtrips_unicode(
     ],
 )
 def test_streamable_malformed_or_non_utf8_json_returns_parse_error(
-    page_service, payload, content_type
+    mcp_modes, payload, content_type
 ):
     """Bad request encoding is a stable JSON-RPC parse error, never a 500."""
 
-    _, pat = _pat_client(page_service)
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    pat = mcp_modes.pat
+    client = mcp_modes.client("streamable")
+    response = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": content_type,
+        },
+        content=payload,
     )
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-                "Content-Type": content_type,
-            },
-            content=payload,
-        )
 
     assert response.status_code == 400, response.text
     body = response.json()
@@ -2295,33 +2268,29 @@ def test_streamable_malformed_or_non_utf8_json_returns_parse_error(
     assert body["error"]["data"] == {"error": "parse_error"}
 
 
-def test_malformed_json_keeps_accept_negotiation_precedence(page_service):
+def test_malformed_json_keeps_accept_negotiation_precedence(mcp_modes):
     """Malformed JSON must not replace established 406/415 transport errors."""
 
-    _, pat = _pat_client(page_service)
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    pat = mcp_modes.pat
+    client = mcp_modes.client("streamable")
+    incompatible = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        content=b'{"jsonrpc":',
     )
-    with TestClient(app) as client:
-        incompatible = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            content=b'{"jsonrpc":',
-        )
-        unacceptable = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "image/png",
-                "Content-Type": "application/json",
-            },
-            content=b'{"jsonrpc":',
-        )
+    unacceptable = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "image/png",
+            "Content-Type": "application/json",
+        },
+        content=b'{"jsonrpc":',
+    )
 
     assert incompatible.status_code == 415, incompatible.text
     assert incompatible.json()["error"]["data"]["error"] == (
@@ -2379,7 +2348,7 @@ def test_buffered_mcp_bridge_preserves_duplicate_headers_and_sse_charset():
     assert response.headers["x-transport-marker"] == "preserved"
 
 
-def test_accept_dual_sdk_chooses(page_service):
+def test_accept_dual_sdk_chooses(mcp_modes):
     """Plan-named test for §2.4 row 21 (auto, dual-q SDK delegation).
 
     mode=``auto`` Accept=``application/json, text/event-stream`` (both
@@ -2389,21 +2358,17 @@ def test_accept_dual_sdk_chooses(page_service):
     위임의 비결정성"), this test asserts only that the negotiator did
     NOT 415 — the SDK content-type choice is outside our contract.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    auto_app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
+    client = mcp_modes.client("auto")
+    r = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(auto_app) as client:
-        r = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
     assert r.status_code != 415, r.text
     # Whatever the SDK picked, the content-type must be valid for one of
     # the two declared media types (positive control: SDK actually
@@ -2420,7 +2385,42 @@ def test_accept_dual_sdk_chooses(page_service):
 # ---------------------------------------------------------------------------
 
 
-def test_non_initialize_without_session_id_400(page_service):
+def _assert_session_error_envelope(body: dict) -> None:
+    """The Task 2.6 POST errors are bare JSON-RPC 2.0 errors (ADR A9).
+
+    Cross-shape contamination guard: no REST ``error_code`` / ``details`` and
+    no legacy top-level ``expected``; exactly ``jsonrpc`` / ``id`` / ``error``.
+    """
+    assert set(body.keys()) == {"jsonrpc", "id", "error"}, (
+        f"JSON-RPC error body must have exactly jsonrpc/id/error keys; "
+        f"got {set(body.keys())}"
+    )
+    assert "error_code" not in body, (
+        f"MCP transport body MUST NOT contain REST 'error_code' key; got {body}"
+    )
+    assert "details" not in body, (
+        f"MCP transport body MUST NOT contain REST 'details' key; got {body}"
+    )
+    assert "expected" not in body, (
+        f"legacy top-level 'expected' key leaked; got {body}"
+    )
+
+
+def _delete_session(client: TestClient, pat: str, response) -> None:
+    """Terminate the session an initialize created on a shared app."""
+    session_id = response.headers.get("mcp-session-id")
+    if session_id:
+        deleted = client.delete(
+            "/mcp",
+            headers={
+                "Authorization": f"Bearer {pat}",
+                "Mcp-Session-Id": session_id,
+            },
+        )
+        assert deleted.status_code == 200, deleted.text
+
+
+def test_non_initialize_without_session_id_400(mcp_modes):
     """Plan-named test (§Task 2.6 branch 2): mode=``streamable``, POST
     with method=``tools/list`` and NO ``Mcp-Session-Id`` header → 400
     JSON-RPC error envelope with ``session_required``.
@@ -2433,21 +2433,17 @@ def test_non_initialize_without_session_id_400(page_service):
     - Pins the JSON-RPC error envelope and ensures ``error_code`` /
       ``details`` (REST API shape) MUST NOT appear.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    response = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
 
     assert response.status_code == 400, response.text
     body = response.json()
@@ -2460,9 +2456,10 @@ def test_non_initialize_without_session_id_400(page_service):
     assert "session" in error_payload["data"]["error"] + error_payload["message"]
     assert "error_code" not in body
     assert "details" not in body
+    _assert_session_error_envelope(body)
 
 
-def test_initialize_without_session_id_creates_session(page_service):
+def test_initialize_without_session_id_creates_session(mcp_modes):
     """Plan-named test (§Task 2.6 branch 1) + positive control for
     ``test_non_initialize_without_session_id_400``.
 
@@ -2474,33 +2471,29 @@ def test_initialize_without_session_id_creates_session(page_service):
     The SDK requires Accept include both ``application/json`` AND
     ``text/event-stream`` for non-stateless POSTs.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
-    )
-    with TestClient(app) as client:
-        initial = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "test-client",
-                        "version": "0.0.0",
-                    },
+    client = mcp_modes.client("streamable")
+    initial = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "test-client",
+                    "version": "0.0.0",
                 },
             },
-        )
+        },
+    )
 
     # 200 + Mcp-Session-Id present.
     assert initial.status_code == 200, initial.text
@@ -2511,9 +2504,10 @@ def test_initialize_without_session_id_creates_session(page_service):
     )
     # The SDK lifecycle creates a hex session id; pin shape lightly.
     assert len(session_id) > 0
+    _delete_session(client, pat, initial)
 
 
-def test_session_id_unknown_404(page_service):
+def test_session_id_unknown_404(mcp_modes):
     """Plan-named test (§Task 2.6 branch 3): mode=``streamable``, POST
     with ``Mcp-Session-Id: nonexistent`` → 404 JSON-RPC error envelope
     with ``session_unknown``.
@@ -2525,22 +2519,18 @@ def test_session_id_unknown_404(page_service):
       issuance path).
     - Pins the JSON-RPC error envelope contract.
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    response = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+            "Mcp-Session-Id": "nonexistent-session-id-xyz",
+        },
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-                "Mcp-Session-Id": "nonexistent-session-id-xyz",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
 
     assert response.status_code == 404, response.text
     body = response.json()
@@ -2553,9 +2543,10 @@ def test_session_id_unknown_404(page_service):
     assert "unknown" in error_payload["data"]["error"]
     assert "error_code" not in body
     assert "details" not in body
+    _assert_session_error_envelope(body)
 
 
-def test_session_id_expired_410(page_service):
+def test_session_id_expired_410(mcp_modes):
     """Plan-named test (§Task 2.6 branch 4): initialize → DELETE → reuse
     the same session id on POST → 410 JSON-RPC error envelope with
     ``session_expired``.
@@ -2571,54 +2562,50 @@ def test_session_id_expired_410(page_service):
       a session id that was DELETE'd MUST surface as expired, not
       unknown (the operator-distinguishable case the plan calls out).
     """
-    _, pat = _pat_client(page_service)
+    pat = mcp_modes.pat
 
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable")
+    initial = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "expire-test", "version": "0.0"},
+            },
+        },
     )
-    with TestClient(app) as client:
-        initial = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "expire-test", "version": "0.0"},
-                },
-            },
-        )
-        assert initial.status_code == 200, initial.text
-        session_id = initial.headers["mcp-session-id"]
-        assert session_id
+    assert initial.status_code == 200, initial.text
+    session_id = initial.headers["mcp-session-id"]
+    assert session_id
 
-        # DELETE terminates the session.
-        delete_resp = client.delete(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Mcp-Session-Id": session_id,
-            },
-        )
-        assert delete_resp.status_code == 200, delete_resp.text
+    # DELETE terminates the session.
+    delete_resp = client.delete(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Mcp-Session-Id": session_id,
+        },
+    )
+    assert delete_resp.status_code == 200, delete_resp.text
 
-        # Reuse the terminated id → 410.
-        follow_up = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-                "Mcp-Session-Id": session_id,
-            },
-            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-        )
+    # Reuse the terminated id → 410.
+    follow_up = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json, text/event-stream",
+            "Mcp-Session-Id": session_id,
+        },
+        json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+    )
 
     assert follow_up.status_code == 410, follow_up.text
     body = follow_up.json()
@@ -2631,105 +2618,7 @@ def test_session_id_expired_410(page_service):
     assert "expired" in error_payload["data"]["error"]
     assert "error_code" not in body
     assert "details" not in body
-
-
-def test_session_id_error_shape_matches_adr_a9(page_service):
-    """All three Task 2.6 POST errors are JSON-RPC 2.0 errors.
-
-    Negative-test rule (ADR A6):
-    - Cross-shape contamination guard. The top-level body MUST NOT carry
-      REST ``error_code`` / ``details`` or legacy ``expected``.
-    - Each response must preserve the request ``id`` for JSON-RPC
-      correlation.
-    """
-    _, pat = _pat_client(page_service)
-
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
-    )
-    with TestClient(app) as client:
-        # Branch (2): non-initialize without session id → 400.
-        b400 = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        # Branch (3): unknown id → 404.
-        b404 = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-                "Mcp-Session-Id": "nonexistent-shape-test",
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        # Branch (4): expired id → 410 (lifecycle init → DELETE → reuse).
-        initial = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-            },
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "shape-test", "version": "0.0"},
-                },
-            },
-        )
-        sid = initial.headers["mcp-session-id"]
-        client.delete(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Mcp-Session-Id": sid,
-            },
-        )
-        b410 = client.post(
-            "/mcp",
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Accept": "application/json, text/event-stream",
-                "Mcp-Session-Id": sid,
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-
-    bodies = [
-        (b400.status_code, "session_required", b400.json()),
-        (b404.status_code, "session_unknown", b404.json()),
-        (b410.status_code, "session_expired", b410.json()),
-    ]
-    expected_statuses = {400, 404, 410}
-    assert {status for status, _, _ in bodies} == expected_statuses, bodies
-
-    for status, expected_error, body in bodies:
-        assert set(body.keys()) == {"jsonrpc", "id", "error"}, (
-            f"status={status}: JSON-RPC error body must have exactly "
-            f"jsonrpc/id/error keys; got {set(body.keys())}"
-        )
-        assert_json_rpc_error(body, request_id=1, error=expected_error)
-        # Cross-shape contamination guards.
-        assert "error_code" not in body, (
-            f"status={status}: MCP transport body MUST NOT "
-            f"contain REST 'error_code' key; got {body}"
-        )
-        assert "details" not in body, (
-            f"status={status}: MCP transport body MUST NOT "
-            f"contain REST 'details' key; got {body}"
-        )
-        assert "expected" not in body, (
-            f"status={status}: legacy top-level 'expected' key leaked; got {body}"
-        )
+    _assert_session_error_envelope(body)
 
 
 def test_initialize_without_session_in_json_stateless_no_op(page_service):
@@ -2915,7 +2804,7 @@ def _make_settings_with_public_origin(
     )
 
 
-def test_unauthorized_metadata_uses_public_origin(page_service):
+def test_unauthorized_metadata_uses_public_origin(mcp_modes):
     """Plan-named test (B5.7): POST /mcp without bearer → 401 with
     ``WWW-Authenticate: Bearer resource_metadata="<public_base_url>/
     .well-known/oauth-protected-resource"`` exactly.
@@ -2930,15 +2819,11 @@ def test_unauthorized_metadata_uses_public_origin(page_service):
     H7 invariant: the metadata URL MUST come from
     ``settings.public_base_url``, NEVER from request Host header.
     """
-    app = create_app(
-        settings=_make_settings_with_public_origin("json_stateless"),
-        page_service=page_service,
+    client = mcp_modes.client("json_stateless", public_origin=True)
+    response = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
 
     assert response.status_code == 401, response.text
     assert response.headers["www-authenticate"] == _EXPECTED_WWW_AUTH, (
@@ -2946,34 +2831,26 @@ def test_unauthorized_metadata_uses_public_origin(page_service):
     )
 
 
-def test_unauthorized_get_metadata_uses_public_origin(page_service):
+def test_unauthorized_get_metadata_uses_public_origin(mcp_modes):
     """Plan-named test (B5.7): GET /mcp without bearer → 401 with the
     same WWW-Authenticate metadata URL as POST.
 
     Bearer auth is required on every transport mode. Use streamable mode here
     to exercise the SSE branch after the shared authentication boundary.
     """
-    app = create_app(
-        settings=_make_settings_with_public_origin("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable", public_origin=True)
+    response = client.get(
+        "/mcp", headers={"Accept": "text/event-stream"}
     )
-    with TestClient(app) as client:
-        response = client.get(
-            "/mcp", headers={"Accept": "text/event-stream"}
-        )
 
     assert response.status_code == 401, response.text
     assert response.headers["www-authenticate"] == _EXPECTED_WWW_AUTH
 
 
-def test_unauthorized_delete_metadata_uses_public_origin(page_service):
+def test_unauthorized_delete_metadata_uses_public_origin(mcp_modes):
     """DELETE /mcp without a bearer returns the shared auth challenge."""
-    app = create_app(
-        settings=_make_settings_with_public_origin("streamable"),
-        page_service=page_service,
-    )
-    with TestClient(app) as client:
-        response = client.delete("/mcp")
+    client = mcp_modes.client("streamable", public_origin=True)
+    response = client.delete("/mcp")
 
     assert response.status_code == 401, response.text
     assert response.headers["www-authenticate"] == _EXPECTED_WWW_AUTH
@@ -3016,7 +2893,7 @@ def test_unauthorized_no_public_base_url_uses_request_base_url(page_service):
     assert www_auth.endswith('"'), www_auth
 
 
-def test_unauthorized_body_is_single_key(page_service):
+def test_unauthorized_body_is_single_key(mcp_modes):
     """Plan-named test: minimal-disclosure invariant — the 401 body is
     exactly ``{"error":"unauthorized"}`` with NO ``detail`` /
     ``message`` / ``error_description`` / ``error_code`` keys.
@@ -3030,21 +2907,17 @@ def test_unauthorized_body_is_single_key(page_service):
     Negative-test rule (ADR A6): pins the exact key set and asserts
     common leakage keys are absent.
     """
-    app = create_app(
-        settings=_make_settings_with_public_origin("streamable"),
-        page_service=page_service,
+    client = mcp_modes.client("streamable", public_origin=True)
+    # Three verbs, three asserts — minimal-disclosure must hold
+    # across the full unauthorized surface.
+    post_resp = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    with TestClient(app) as client:
-        # Three verbs, three asserts — minimal-disclosure must hold
-        # across the full unauthorized surface.
-        post_resp = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        get_resp = client.get(
-            "/mcp", headers={"Accept": "text/event-stream"}
-        )
-        delete_resp = client.delete("/mcp")
+    get_resp = client.get(
+        "/mcp", headers={"Accept": "text/event-stream"}
+    )
+    delete_resp = client.delete("/mcp")
 
     for verb, resp in (
         ("POST", post_resp),
@@ -3123,7 +2996,7 @@ def test_unauthorized_metadata_ignores_host_header_injection(page_service, monke
         )
 
 
-def test_unauthorized_omitted_when_authorized(page_service):
+def test_unauthorized_omitted_when_authorized(mcp_modes):
     """Task 2.7 positive control (ADR A6 pair for the 401 metadata
     tests). With a valid bearer token, the response is 2xx AND the
     ``WWW-Authenticate`` header is NOT present.
@@ -3132,24 +3005,12 @@ def test_unauthorized_omitted_when_authorized(page_service):
     unconditionally (e.g. on a 200 response) would still pass every
     negative 401 test in this section.
     """
-    from backend.tests.integration._cross_transport_helpers import (
-        issue_personal_api_token,
-        make_client,
+    client = mcp_modes.client("json_stateless", public_origin=True)
+    response = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {mcp_modes.pat}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-
-    setup_client = make_client(page_service)
-    pat = issue_personal_api_token(setup_client)
-
-    app = create_app(
-        settings=_make_settings_with_public_origin("json_stateless"),
-        page_service=page_service,
-    )
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
 
     assert response.status_code == 200, response.text
     assert "www-authenticate" not in {
@@ -3442,6 +3303,9 @@ def test_full_round_trip_streamable(page_service):
     surface (false-positive on a regression that silently dropped
     every tool).
 
+    The same round trip also pins the PAT credential (``dtxw_`` prefix) and
+    Mcp-Session-Id reuse across requests within one transport.
+
     Implementation note: this exercises the Tasks 2.2-2.7 surface
     end-to-end through the SDK client — Accept negotiation, Mcp-
     Session-Id lifecycle, bearer auth, and the streaming POST
@@ -3450,11 +3314,19 @@ def test_full_round_trip_streamable(page_service):
     import asyncio
 
     streamable_app, pat = _build_streamable_round_trip_setup(page_service)
+    # Sanity-check the PAT prefix so a future refactor that accidentally
+    # swapped the token type (e.g. issuing an OAuth JWT instead) surfaces
+    # here, not as a confusing round-trip failure.
+    assert pat.startswith("dtxw_"), f"expected dtxw_ PAT prefix; got {pat[:8]}..."
+    snapshots: list[str | None] = []
 
     async def _run():
         with _UvicornServer(streamable_app) as server:
             tools_result, final_session_id = await _round_trip_via_sdk(
-                server.url, pat, call_tools=True
+                server.url,
+                pat,
+                capture_session_ids=snapshots,
+                call_tools=True,
             )
         return tools_result, final_session_id
 
@@ -3477,44 +3349,12 @@ def test_full_round_trip_streamable(page_service):
     )
     assert isinstance(final_session_id, str) and final_session_id
 
-
-def test_session_id_reused_across_requests(page_service):
-    """Plan-named test: within one ``ClientSession``, the SDK transport
-    reuses the same Mcp-Session-Id across multiple requests.
-
-    The SDK's ``streamablehttp_client`` stores the session id from the
-    initialize response header (Task 2.6 branch 1 SDK behavior). Every
-    subsequent request on the same transport must carry the same id —
-    confirmed via ``get_session_id()`` snapshots taken after each
-    SDK operation.
-
-    Negative-test rule (ADR A6): the test pins identity across 3
-    snapshots (after initialize / after first list_tools / after
-    second list_tools). A regression that minted a new id per request
-    would surface as differing snapshot values.
-    """
-    import asyncio
-
-    streamable_app, pat = _build_streamable_round_trip_setup(page_service)
-
-    snapshots: list[str | None] = []
-
-    async def _run():
-        with _UvicornServer(streamable_app) as server:
-            await _round_trip_via_sdk(
-                server.url,
-                pat,
-                capture_session_ids=snapshots,
-                call_tools=True,
-            )
-
-    asyncio.run(_run())
-
-    # 3 snapshots: after initialize, after list_tools #1, after list_tools #2.
+    # The SDK transport reuses the same Mcp-Session-Id across requests: 3
+    # snapshots (after initialize, after list_tools #1, after list_tools #2),
+    # all non-None and identical. A regression that minted a new id per
+    # request would surface as differing snapshot values.
     assert len(snapshots) == 3, snapshots
-    # All non-None.
     assert all(sid is not None for sid in snapshots), snapshots
-    # All identical (reuse invariant).
     assert len(set(snapshots)) == 1, (
         f"Mcp-Session-Id MUST be reused across requests; snapshots={snapshots}"
     )
@@ -3561,40 +3401,6 @@ def test_round_trip_oauth_token(page_service):
         with _UvicornServer(streamable_app) as server:
             tools_result, _ = await _round_trip_via_sdk(
                 server.url, oauth_token, call_tools=False
-            )
-        return tools_result
-
-    tools_result = asyncio.run(_run())
-    assert tools_result is not None
-    assert len(tools_result.tools) > 0
-    assert "search" in {t.name for t in tools_result.tools}
-
-
-def test_round_trip_pat_token(page_service):
-    """Plan-named test: PAT bearer (``dtxw_…`` prefix, ApiTokenService)
-    drives the same round trip. This is the ``mcp_http_pat`` cross-
-    transport row's SDK-client analogue — the round trip uses the
-    same PAT credential issued via ``/api/v1/auth/tokens`` that
-    Sprint_4 cross-transport tests use.
-
-    Positive control: the test asserts the round trip *succeeds*; a
-    regression that broke PAT auth on the streamable path would
-    surface here as a 401 (raised from inside the SDK client).
-    """
-    import asyncio
-
-    streamable_app, pat = _build_streamable_round_trip_setup(page_service)
-    # Sanity-check the PAT prefix so a future refactor that
-    # accidentally swapped the token type (e.g. issuing an OAuth JWT
-    # instead) surfaces here, not as a confusing round-trip failure.
-    assert pat.startswith("dtxw_"), (
-        f"expected dtxw_ PAT prefix; got {pat[:8]}..."
-    )
-
-    async def _run():
-        with _UvicornServer(streamable_app) as server:
-            tools_result, _ = await _round_trip_via_sdk(
-                server.url, pat, call_tools=False
             )
         return tools_result
 
@@ -3990,19 +3796,15 @@ def test_session_owner_cap_rejects_new_initialize_keeps_live_sessions(
 
 
 @pytest.mark.parametrize("mode", ["json_stateless", "streamable", "auto"])
-def test_accept_without_json_or_sse_candidate_returns_406(page_service, mode):
-    _, pat = _pat_client(page_service)
-    app = create_app(
-        settings=_make_settings(mode),
-        page_service=page_service,
-    )
+def test_accept_without_json_or_sse_candidate_returns_406(mcp_modes, mode):
+    pat = mcp_modes.pat
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}", "Accept": "image/png"},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
+    client = mcp_modes.client(mode)
+    response = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}", "Accept": "image/png"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
 
     assert response.status_code == 406, response.text
     assert_json_rpc_error(
@@ -4020,19 +3822,15 @@ def test_accept_without_json_or_sse_candidate_returns_406(page_service, mode):
         "application/json;q=0, text/event-stream;q=0",
     ],
 )
-def test_accept_explicit_zero_quality_candidates_return_406(page_service, accept):
-    _, pat = _pat_client(page_service)
-    app = create_app(
-        settings=_make_settings("auto"),
-        page_service=page_service,
-    )
+def test_accept_explicit_zero_quality_candidates_return_406(mcp_modes, accept):
+    pat = mcp_modes.pat
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {pat}", "Accept": accept},
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
+    client = mcp_modes.client("auto")
+    response = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {pat}", "Accept": accept},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
 
     assert response.status_code == 406, response.text
     assert_json_rpc_error(

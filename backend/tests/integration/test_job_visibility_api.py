@@ -1,6 +1,4 @@
-"""Epic-2 Phase 1 (job visibility, doc/design/workspace-database-separation-plan.md
-D-6): GET /workspaces/{id}/jobs (1b), the server-admin GET /admin/jobs* surface
-and POST .../retry (1c).
+"""Workspace and server-admin job visibility and retry authorization.
 """
 
 import base64
@@ -196,56 +194,6 @@ def test_list_workspace_jobs_status_filter_and_problems_only(page_service):
     assert failed_item["retryable"] is True
 
 
-def test_job_apis_never_return_internal_error_text(page_service):
-    workspace_client = make_client(page_service)
-    workspace_id = _workspace_id(workspace_client)
-    failed = _enqueue(
-        page_service,
-        workspace_id,
-        job_type="feedback_resolution",
-        trigger_type="manual",
-        idempotency_key="error-boundary-failed",
-    )
-    # POSIX slashes deliberately: a Windows path's backslashes are re-escaped
-    # in the JSON body, so the "not in response.text" assertion below could
-    # never fail on a leak of the raw text.
-    internal_error = "/srv/dtxwiki/private/converter.log token=secret-sentinel"
-    _fail_terminally(page_service, failed.id, error=internal_error)
-
-    workspace_response = workspace_client.get(
-        f"/api/v1/workspaces/{workspace_id}/jobs",
-        params={"problems_only": True},
-    )
-
-    assert workspace_response.status_code == 200
-    workspace_item = next(
-        item
-        for item in workspace_response.json()["data"]["items"]
-        if item["id"] == str(failed.id)
-    )
-    assert "last_error" not in workspace_item
-    assert internal_error not in workspace_response.text
-
-    admin_client = make_server_admin_client(
-        page_service,
-        email="jobs-error-boundary-admin@example.com",
-    )
-    admin_response = admin_client.get(
-        "/api/v1/admin/jobs",
-        params={"problems_only": True},
-    )
-
-    assert admin_response.status_code == 200
-    admin_item = next(
-        item
-        for item in admin_response.json()["data"]["items"]
-        if item["id"] == str(failed.id)
-    )
-    assert "last_error" not in admin_item
-    assert admin_item["error_code"] == "job_failed"
-    assert internal_error not in admin_response.text
-
-
 def test_workspace_activity_feed_redacts_the_internal_job_error(page_service):
     """The Activity feed projects Job rows directly (ActivityService._jobs),
     bypassing job_read_projection's shared disclosure boundary. A viewer --
@@ -316,6 +264,7 @@ def test_job_failure_code_replaces_last_error_on_both_job_surfaces(page_service)
     assert workspace_items[str(failed.id)]["error_code"] == "job_failed"
     # Never attempted, no error: nothing to disclose.
     assert workspace_items[str(queued.id)]["error_code"] is None
+    assert internal_error not in workspace_response.text
 
     admin_client = make_server_admin_client(
         page_service, email="jobs-disclosure-admin@example.com"
@@ -331,6 +280,24 @@ def test_job_failure_code_replaces_last_error_on_both_job_surfaces(page_service)
     assert "last_error" not in admin_item
     assert admin_item["error_code"] == "job_failed"
     assert internal_error not in admin_response.text
+
+    # The problems_only listings share the disclosure boundary and must hold it.
+    for problems_response in (
+        workspace_client.get(
+            f"/api/v1/workspaces/{workspace_id}/jobs",
+            params={"problems_only": True},
+        ),
+        admin_client.get("/api/v1/admin/jobs", params={"problems_only": True}),
+    ):
+        assert problems_response.status_code == 200
+        problem_item = next(
+            item
+            for item in problems_response.json()["data"]["items"]
+            if item["id"] == str(failed.id)
+        )
+        assert "last_error" not in problem_item
+        assert problem_item["error_code"] == "job_failed"
+        assert internal_error not in problems_response.text
 
 
 def test_workspace_jobs_and_activity_expose_the_same_stable_failure_code(page_service):
@@ -387,12 +354,10 @@ def test_list_workspace_jobs_rejects_invalid_status(page_service):
 
 
 def test_workspace_job_list_cursor_stops_at_the_offset_cap(page_service, monkeypatch):
-    """A capped offset cursor must terminate rather than decode back to the
-    same page. list_workspace_jobs never fans out (it is already scoped to
-    one session_for(workspace_id)), so it keeps the offset cursor + cap this
-    pins -- unlike admin listing below, which moved to a seek cursor in
-    Phase 6a (doc/design/workspace-database-separation-plan.md §4) and has no
-    offset, so this cap does not apply to it any more (see the admin test)."""
+    """A capped workspace offset cursor must terminate rather than repeat a page.
+
+    The server-admin listing uses a seek cursor, so this cap does not apply.
+    """
     monkeypatch.setattr(job_read_service_module, "_MAX_JOB_OFFSET", 1)
     client = make_server_admin_client(page_service)
     workspace_id = _workspace_id(client)
@@ -419,14 +384,10 @@ def test_workspace_job_list_cursor_stops_at_the_offset_cap(page_service, monkeyp
 def test_admin_job_list_seek_cursor_pages_through_every_job_with_no_cap(
     page_service, monkeypatch
 ):
-    """Phase 6a (doc/design/workspace-database-separation-plan.md §4): admin
-    listing's cursor changed from an offset into one query to a (created_at,
-    id) seek key re-applied per shard. _MAX_JOB_OFFSET was an offset-pagination
-    defense (an attacker-supplied cursor cannot force an arbitrarily large
-    OFFSET scan) that has nothing to bind to on a seek cursor -- patching it
-    here must be inert, not truncate a real page early. With limit=1 and 3
-    jobs, correct behavior is 3 pages (one job each), the third's next_cursor
-    None -- not 2, which is what the old offset cap forced."""
+    """Admin seek pagination returns every shard's job without an offset cap.
+
+    With limit=1 and three jobs, the third page has no next cursor.
+    """
     monkeypatch.setattr(job_read_service_module, "_MAX_JOB_OFFSET", 1)
     client = make_server_admin_client(page_service)
     workspace_id = _workspace_id(client)

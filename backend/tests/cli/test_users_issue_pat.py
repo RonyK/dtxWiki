@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 from argon2 import PasswordHasher, Type
+from click import unstyle
 from typer.testing import CliRunner
 
 from backend.app.db import make_session_factory_from_settings
@@ -12,6 +13,7 @@ from backend.models.api_token import ApiToken
 from backend.models.user import User
 from backend.models.workspace import Workspace
 from backend.services.credential_hashing import CredentialHasher
+from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 
 
 def fast_hasher() -> CredentialHasher:
@@ -28,7 +30,9 @@ def fast_hasher() -> CredentialHasher:
 
 
 def _database_url(tmp_path):
-    return f"sqlite:///{tmp_path / 'issue-pat.sqlite'}"
+    """A migrated, empty database; the CLI under test creates every row."""
+
+    return copy_migrated_sqlite(tmp_path / "issue-pat.sqlite")
 
 
 def _create_user(
@@ -107,7 +111,11 @@ def test_issue_pat_stores_hashed(tmp_path, monkeypatch):
     result = _issue_pat(runner, database_url, workspace_slug, "--json")
 
     assert result.exit_code == 0, result.stderr
-    plain_token = json.loads(result.stdout)["plain_token"]
+    payload = json.loads(result.stdout)
+    plain_token = payload["plain_token"]
+    assert set(payload) == {"plain_token", "token_id", "scopes", "expires_at", "name"}
+    assert plain_token.startswith("dtxw_")
+    assert payload["name"] == "remote-client"
     session_factory = make_session_factory_from_settings(
         Settings(database_url=database_url)
     )
@@ -152,12 +160,11 @@ def test_issue_pat_scope_validation_includes_agent(tmp_path, monkeypatch):
     assert json.loads(result.stdout)["scopes"] == ["mcp:agent"]
 
 
-def test_issue_pat_requires_explicit_workspace(tmp_path, monkeypatch):
-    database_url = _database_url(tmp_path)
-    runner = CliRunner()
-    _create_user(runner, database_url, monkeypatch)
+def test_issue_pat_requires_explicit_workspace(tmp_path):
+    # The required option is rejected while parsing, before any database is opened.
+    database_url = f"sqlite:///{tmp_path / 'never-opened.sqlite'}"
 
-    result = runner.invoke(
+    result = CliRunner().invoke(
         cli_main.app,
         [
             "users",
@@ -174,7 +181,8 @@ def test_issue_pat_requires_explicit_workspace(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 2
-    assert "--workspace" in result.output
+    assert "--workspace" in unstyle(result.output)
+    assert not (tmp_path / "never-opened.sqlite").exists()
 
 
 def test_issue_pat_scope_validation_rejects_unknown(tmp_path, monkeypatch):
@@ -239,17 +247,3 @@ def test_issue_pat_user_not_found_exit_nonzero(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert "user" in result.stderr
     assert "dtxw_" not in result.stdout
-
-
-def test_issue_pat_json_output_shape(tmp_path, monkeypatch):
-    database_url = _database_url(tmp_path)
-    runner = CliRunner()
-    workspace_slug = _create_user(runner, database_url, monkeypatch)
-
-    result = _issue_pat(runner, database_url, workspace_slug, "--json")
-
-    assert result.exit_code == 0, result.stderr
-    payload = json.loads(result.stdout)
-    assert set(payload) == {"plain_token", "token_id", "scopes", "expires_at", "name"}
-    assert payload["plain_token"].startswith("dtxw_")
-    assert payload["name"] == "remote-client"

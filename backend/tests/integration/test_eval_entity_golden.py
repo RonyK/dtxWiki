@@ -227,7 +227,7 @@ def test_entity_rename_golden_retires_old_title_immediately(session_factory):
         )
 
 
-def test_sprint4_per_lane_golden_baselines_are_green(session_factory):
+def test_per_lane_golden_baselines_are_green(session_factory):
     service = build_search_service(Settings())
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)

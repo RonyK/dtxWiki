@@ -130,35 +130,46 @@ def test_server_admin_search_requires_recent_http_only_proof(page_service):
 def test_reauthentication_audits_failures_and_rate_limits(page_service, monkeypatch):
     client, admin, _ = admin_client(page_service)
 
+    def failure_events() -> list[AuditEvent]:
+        with page_service.session_factory() as session:
+            return list(
+                session.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.action == "auth.reauthentication.failed",
+                        AuditEvent.target_id == admin.user_id,
+                    )
+                ).all()
+            )
+
     denied = client.post(
         "/api/v1/auth/reauthenticate",
         json={"current_password": "wrong-password"},
     )
+    assert denied.status_code == 401
+    assert denied.json()["error_code"] == "invalid_credentials"
+    # Attribute each audit row to its request by the request boundary. Ordering
+    # by created_at would not do: that is wall-clock time, so it need not follow
+    # request order when the host clock steps backward.
+    after_denied = failure_events()
+    assert [event.payload["reason"] for event in after_denied] == [
+        "invalid_credentials"
+    ]
+
     monkeypatch.setattr(session_service_module, "AUTH_RATE_LIMIT_PER_EMAIL", 1)
     rate_limited = client.post(
         "/api/v1/auth/reauthenticate",
         json={"current_password": "correct-password"},
     )
-
-    assert denied.status_code == 401
-    assert denied.json()["error_code"] == "invalid_credentials"
     assert rate_limited.status_code == 429
-    with page_service.session_factory() as session:
-        events = list(
-            session.scalars(
-                select(AuditEvent)
-                .where(
-                    AuditEvent.action == "auth.reauthentication.failed",
-                    AuditEvent.target_id == admin.user_id,
-                )
-                .order_by(AuditEvent.created_at)
-            ).all()
-        )
-        assert [event.payload["reason"] for event in events] == [
-            "invalid_credentials",
-            "rate_limited",
-        ]
-        assert all("password" not in str(event.payload) for event in events)
+
+    events = failure_events()
+    assert len(events) == 2
+    reasons = {event.id: event.payload["reason"] for event in events}
+    denied_event_id = after_denied[0].id
+    assert reasons[denied_event_id] == "invalid_credentials"
+    new_event_ids = set(reasons) - {denied_event_id}
+    assert [reasons[event_id] for event_id in new_event_ids] == ["rate_limited"]
+    assert all("password" not in str(event.payload) for event in events)
 
 
 def test_reauthentication_proof_is_revoked_by_generation_change_and_logout(

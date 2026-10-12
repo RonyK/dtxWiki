@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
@@ -56,13 +57,19 @@ from backend.models.media import (
 from backend.models.workspace import Workspace
 from backend.tests.integration import test_context_media_repository as media_fixtures
 
-epic1 = import_module("backend.migrations.versions.0002_epic1")
+epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
 workspace_phase = import_module(
-    "backend.migrations.revision_0002.workspace_schema"
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.workspace_schema"
 )
-mcp_phase = import_module("backend.migrations.revision_0002.identity_access_schema")
-context_phase = import_module("backend.migrations.revision_0002.context_schema")
-media_phase = import_module("backend.migrations.revision_0002.library_media_schema")
+mcp_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.identity_access_schema"
+)
+context_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.context_schema"
+)
+media_phase = import_module(
+    "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.library_media_schema"
+)
 
 MEDIA_TABLES = {
     "workspace_media_write_intent",
@@ -121,7 +128,7 @@ def _run_steps(engine: Engine, *steps) -> None:
 
 
 def _upgrade_to_media_boundary(config: Config, engine: Engine) -> None:
-    command.upgrade(config, "0001_initial_release")
+    command.upgrade(config, "bd62193d5cf6")
     _run_steps(
         engine,
         epic1._upgrade_base_schema,
@@ -131,11 +138,22 @@ def _upgrade_to_media_boundary(config: Config, engine: Engine) -> None:
     )
 
 
-@pytest.fixture
-def media_engine(tmp_path: Path) -> Engine:
-    database_url = _database_url(tmp_path, "media.db")
+@pytest.fixture(scope="session")
+def migrated_media_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Migrate once per worker; each test copies the closed, rollback-journal DB."""
+
+    directory = tmp_path_factory.mktemp("media-template")
+    database_url = _database_url(directory, "media.db")
     command.upgrade(_config(database_url), "head")
     engine = _engine(database_url)
+    engine.dispose()
+    return directory / "media.db"
+
+
+@pytest.fixture
+def media_engine(tmp_path: Path, migrated_media_template: Path) -> Engine:
+    shutil.copyfile(migrated_media_template, tmp_path / "media.db")
+    engine = _engine(_database_url(tmp_path, "media.db"))
     try:
         yield engine
     finally:
@@ -226,9 +244,10 @@ def test_media_phase_upgrades_from_mcp_boundary_and_downgrades_cleanly(
         assert MEDIA_TABLES.isdisjoint(inspect(engine).get_table_names())
         _run_steps(engine, media_phase.upgrade)
         with engine.connect() as connection:
-            assert connection.scalar(
-                text("SELECT version_num FROM alembic_version")
-            ) == "0001_initial_release"
+            assert (
+                connection.scalar(text("SELECT version_num FROM alembic_version"))
+                == "bd62193d5cf6"
+            )
         assert MEDIA_TABLES <= set(inspect(engine).get_table_names())
 
         _run_steps(
@@ -364,15 +383,17 @@ def test_media_phase_downgrade_refuses_populated_context_media(tmp_path: Path) -
             )
 
         with engine.connect() as connection:
-            assert connection.scalar(
-                text("SELECT version_num FROM alembic_version")
-            ) == "0001_initial_release"
-            assert connection.scalar(
-                text(
-                    "SELECT COUNT(*) FROM context_media_asset WHERE id = :id"
-                ),
-                {"id": asset_id.hex},
-            ) == 1
+            assert (
+                connection.scalar(text("SELECT version_num FROM alembic_version"))
+                == "bd62193d5cf6"
+            )
+            assert (
+                connection.scalar(
+                    text("SELECT COUNT(*) FROM context_media_asset WHERE id = :id"),
+                    {"id": asset_id.hex},
+                )
+                == 1
+            )
     finally:
         engine.dispose()
 
@@ -446,12 +467,15 @@ def test_available_blob_registration_reuses_workspace_digest_and_charge(
         session.commit()
 
         assert second == first
-        assert session.scalar(
-            select(StoredBlobRow).where(
-                StoredBlobRow.workspace_id == workspace_id,
-                StoredBlobRow.sha256 == candidate.sha256.value,
+        assert (
+            session.scalar(
+                select(StoredBlobRow).where(
+                    StoredBlobRow.workspace_id == workspace_id,
+                    StoredBlobRow.sha256 == candidate.sha256.value,
+                )
             )
-        ) is not None
+            is not None
+        )
         usage = session.get(WorkspaceMediaQuotaUsage, workspace_id)
         assert usage is not None
         assert usage.charged_bytes == candidate.byte_size
@@ -820,15 +844,23 @@ def test_quota_and_outbox_roll_back_with_the_unit_of_work(
     with factory() as session:
         usage = session.get(WorkspaceMediaQuotaUsage, workspace_id)
         assert usage is not None and usage.charged_bytes == 0
-        assert session.scalar(
-            select(MediaPhysicalCharge.id).where(
-                MediaPhysicalCharge.workspace_id == workspace_id
+        assert (
+            session.scalar(
+                select(MediaPhysicalCharge.id).where(
+                    MediaPhysicalCharge.workspace_id == workspace_id
+                )
             )
-        ) is None
-        assert session.scalar(
-            text("SELECT COUNT(*) FROM media_outbox WHERE workspace_id = :workspace"),
-            {"workspace": workspace_id.hex},
-        ) == 0
+            is None
+        )
+        assert (
+            session.scalar(
+                text(
+                    "SELECT COUNT(*) FROM media_outbox WHERE workspace_id = :workspace"
+                ),
+                {"workspace": workspace_id.hex},
+            )
+            == 0
+        )
 
         oversized_staging_id, oversized_key = _create_staging_lease(
             session,

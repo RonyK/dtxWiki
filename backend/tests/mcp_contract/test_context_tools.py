@@ -34,9 +34,8 @@ from backend.services.read_errors import (
     StaleBaseVersionError,
 )
 
-# P8.6: write_draft/update_draft/patch_draft are no longer callable MCP tools
-# (deregistered -- see .claude/plan/260906-fix-epic-1-fixes-p9-1-decisions.md,
-# search "P8.6"), but ContextWriteService's methods backing them remain fully
+# write_draft/update_draft/patch_draft are no longer callable MCP tools,
+# but ContextWriteService's methods backing them remain fully
 # live internal callers for PageService.reconcile_branch and
 # ReviewService.submit_revision_for_review. Tests whose actual subject is this
 # engine (body validation, CAS conflicts, patch operations, idempotency

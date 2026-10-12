@@ -7,8 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.sql.dml import Update
+from sqlalchemy.orm import sessionmaker
 
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
@@ -328,23 +327,12 @@ def test_email_verification_mail_carries_the_token_only_in_the_fragment(
 
 
 def test_sqlite_delivery_claim_prevents_concurrent_provider_send(tmp_path):
-    second_update_started = threading.Event()
-
-    class TrackingSession(Session):
-        def execute(self, statement, *args, **kwargs):
-            if threading.current_thread().name == "second-delivery" and isinstance(
-                statement, Update
-            ):
-                second_update_started.set()
-            return super().execute(statement, *args, **kwargs)
-
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'mail-claim.db'}",
         connect_args={"check_same_thread": False, "timeout": 5},
     )
     sessions = sessionmaker(
         bind=engine,
-        class_=TrackingSession,
         expire_on_commit=False,
     )
     Base.metadata.create_all(engine)
@@ -382,15 +370,21 @@ def test_sqlite_delivery_claim_prevents_concurrent_provider_send(tmp_path):
         first = threading.Thread(target=deliver, name="first-delivery")
         second = threading.Thread(target=deliver, name="second-delivery")
         first.start()
-        assert provider.entered.wait(timeout=5)
-        second.start()
-        assert second_update_started.wait(timeout=5)
-        provider.release.set()
+        try:
+            assert provider.entered.wait(timeout=5)
+            # The first claim is committed and its thread is parked in the
+            # provider with no transaction open, so the second delivery runs
+            # to completion now, against a row that still reads 'sending'.
+            # Releasing the provider any earlier let the first settle 'sent'
+            # ahead of the second's claim, which then returned quietly.
+            second.start()
+            second.join(timeout=5)
+            assert not second.is_alive()
+        finally:
+            provider.release.set()
         first.join(timeout=5)
-        second.join(timeout=5)
 
         assert not first.is_alive()
-        assert not second.is_alive()
         # BEHAVIOUR CHANGE (MAIL-01): the loser used to block on the winner's
         # write lock until the row already read "sent" and then return it
         # quietly. The claim commits before the send now, so the loser sees
@@ -496,23 +490,12 @@ def test_sweep_and_a_direct_delivery_cannot_double_send(tmp_path):
     test_sqlite_delivery_claim_prevents_concurrent_provider_send, but pits
     sweep_due() against a direct deliver() call (the shape the CLI's
     immediate delivery uses) instead of two direct deliver() calls."""
-    second_update_started = threading.Event()
-
-    class TrackingSession(Session):
-        def execute(self, statement, *args, **kwargs):
-            if threading.current_thread().name == "direct-delivery" and isinstance(
-                statement, Update
-            ):
-                second_update_started.set()
-            return super().execute(statement, *args, **kwargs)
-
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'mail-sweep-claim.db'}",
         connect_args={"check_same_thread": False, "timeout": 5},
     )
     sessions = sessionmaker(
         bind=engine,
-        class_=TrackingSession,
         expire_on_commit=False,
     )
     Base.metadata.create_all(engine)
@@ -561,15 +544,19 @@ def test_sweep_and_a_direct_delivery_cannot_double_send(tmp_path):
             target=run_direct_deliver, name="direct-delivery"
         )
         sweep_thread.start()
-        assert provider.entered.wait(timeout=5)
-        direct_thread.start()
-        assert second_update_started.wait(timeout=5)
-        provider.release.set()
+        try:
+            assert provider.entered.wait(timeout=5)
+            # As in the two-deliver test: the direct call finishes while the
+            # sweep is still parked in the provider, so it cannot meet a row
+            # the sweep has already settled.
+            direct_thread.start()
+            direct_thread.join(timeout=5)
+            assert not direct_thread.is_alive()
+        finally:
+            provider.release.set()
         sweep_thread.join(timeout=5)
-        direct_thread.join(timeout=5)
 
         assert not sweep_thread.is_alive()
-        assert not direct_thread.is_alive()
         # The sweep's claim is already committed by the time the direct call
         # runs its own guarded UPDATE, so that UPDATE matches nothing and the
         # direct call reports the live claim rather than quietly returning a

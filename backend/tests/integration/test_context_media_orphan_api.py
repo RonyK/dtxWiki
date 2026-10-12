@@ -1,6 +1,4 @@
-"""Epic-2 Phase 5c: GET /workspaces/{id}/context/media/orphans (workspace
-admin) and GET /admin/context-media/orphans (server admin)
-(doc/design/workspace-database-separation-plan.md D-7).
+"""Workspace and server administrators can inspect orphaned Context media.
 
 Mirrors test_job_visibility_api.py's isolation pattern: an outsider must be
 refused, and the refusal must come from the endpoint's own membership

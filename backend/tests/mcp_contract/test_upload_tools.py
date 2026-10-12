@@ -223,9 +223,10 @@ def _real_session_factory() -> sessionmaker:
 def test_upload_image_uses_workspace_plane_not_control_plane(
     actor, tmp_path, monkeypatch
 ):
-    """D-7 (doc/design/workspace-database-separation-plan.md): Context media
-    -- assets and blobs -- is workspace-owned data (ContextMediaAsset carries
-    a FK to ContextPage that cannot span two databases), so ``upload_image``'s
+    """Context media assets and blobs are workspace-owned data.
+
+    ContextMediaAsset carries a FK to ContextPage that cannot span databases,
+    so ``upload_image``'s
     ingest write must land in ``request.workspace_id``'s plane, not the
     control plane. ``upload_image`` requires the 'editor' role, which makes
     ``backend.mcp.router`` bind ``ctx.workspace_id`` to that same value -- the

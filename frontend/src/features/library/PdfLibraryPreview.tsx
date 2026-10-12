@@ -51,6 +51,8 @@ export function PdfLibraryPreview({
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const documentRef = useRef<HTMLDivElement | null>(null);
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [pageWidth, setPageWidth] = useState(PDF_MAX_PAGE_WIDTH);
   const [zoomStep, setZoomStep] = useState(0);
   const zoom = PDF_ZOOM_STEPS[zoomStep];
@@ -98,6 +100,18 @@ export function PdfLibraryPreview({
   function handleLoadSuccess({ numPages: nextNumPages }: { numPages: number }) {
     setNumPages(nextNumPages);
     setPageNumber((current) => Math.min(current, nextNumPages));
+  }
+
+  function alignTextLayerWithCanvas() {
+    const canvas = canvasRef.current;
+    const textLayer = pageRef.current?.querySelector<HTMLElement>(".textLayer");
+    if (!canvas || !textLayer) return;
+    // react-pdf floors the viewport in JavaScript for the canvas, while pdf.js
+    // rounds its text layer in CSS. Firefox can round the same scale down one
+    // pixel further. Use the rendered canvas's CSS dimensions for both layers;
+    // either layer can finish first, including after a resize, zoom or page turn.
+    textLayer.style.width = canvas.style.width;
+    textLayer.style.height = canvas.style.height;
   }
 
   return (
@@ -189,6 +203,10 @@ export function PdfLibraryPreview({
             onLoadSuccess={handleLoadSuccess}
           >
             <Page
+              canvasRef={canvasRef}
+              inputRef={pageRef}
+              onRenderSuccess={alignTextLayerWithCanvas}
+              onRenderTextLayerSuccess={alignTextLayerWithCanvas}
               pageNumber={pageNumber}
               renderAnnotationLayer={false}
               renderTextLayer

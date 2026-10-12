@@ -59,6 +59,9 @@ def test_tree_mutation_routes_record_visible_state(page_service):
     assert renamed.status_code == 200
     assert renamed.json()["data"]["title"] == "Renamed Ask"
 
+    with page_service.session_factory() as session:
+        before_move_ids = set(session.scalars(select(ChangeSet.id)))
+
     moved = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/move",
         json={
@@ -69,11 +72,16 @@ def test_tree_mutation_routes_record_visible_state(page_service):
     assert moved.status_code == 200
     assert moved.json()["data"]["parent_id"] == ask_root["id"]
     with page_service.session_factory() as session:
-        latest_change = session.scalar(
-            select(ChangeSet).order_by(ChangeSet.created_at.desc())
-        )
-        assert latest_change is not None
-        assert latest_change.reason == "Tree node moved"
+        # The move's change set is the one that did not exist before it. Ranking
+        # by created_at would pick the rename after a backward clock step.
+        changes = session.scalars(select(ChangeSet)).all()
+        assert before_move_ids <= {change.id for change in changes}
+        move_changes = [
+            change for change in changes if change.id not in before_move_ids
+        ]
+        assert len(move_changes) == 1
+        assert move_changes[0].workspace_id == UUID(workspace_id)
+        assert move_changes[0].reason == "Tree node moved"
 
     root_move = client.post(
         f"/api/v1/workspaces/{workspace_id}/tree/move",
@@ -452,75 +460,16 @@ def test_context_ingress_slug_race_retries_with_next_suffix(
     assert created.slug == "collision-2"
 
 
-def test_ingress_accept_audit_uses_policy_resolved_review_required(page_service):
-    client = make_client(page_service)
-    workspace_id = current_workspace_id(client)
-    ask_captures = tree_node_by_slug(client, workspace_id, "ask_captures")
-    policy = default_review_policy()
-    policy["defaults"]["context_ingress_auto"] = "high"
-    with page_service.session_factory.begin() as session:
-        workspace = session.get(Workspace, UUID(workspace_id))
-        assert workspace is not None
-        workspace.review_policy = policy
-
+def _promote_ingress_proposal(client, workspace_id, ask_captures, *, title):
     session_response = client.post(
         f"/api/v1/workspaces/{workspace_id}/ask/sessions",
-        json={"title": "Policy Gated Ingress"},
-    )
-    assert session_response.status_code == 201
-    turn_response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/ask/sessions/{session_response.json()['data']['id']}/turns",
-        json={"user_message": "Draft a policy gated page"},
-    )
-    assert turn_response.status_code == 200
-    promoted = client.post(
-        f"/api/v1/workspaces/{workspace_id}/ask/turns/{turn_response.json()['data']['id']}/promote",
-        json={
-            "save_mode": "create_page",
-            "parent_node_id": ask_captures["id"],
-            "page_type": "guide",
-            "title": "Policy Gated Page",
-        },
-    )
-    assert promoted.status_code == 201
-
-    accepted = client.post(
-        f"/api/v1/workspaces/{workspace_id}/context/ingress-proposals/{promoted.json()['data']['id']}/accept",
-        json={
-            "final_save_mode": "create_page",
-            "final_parent_node_id": ask_captures["id"],
-            "final_page_type": "guide",
-            "final_title": "Policy Gated Page",
-        },
-    )
-    assert accepted.status_code == 200
-    assert accepted.json()["data"]["review_item_id"] is None
-
-    with page_service.session_factory() as session:
-        audit = (
-            session.query(AuditEvent)
-            .filter(AuditEvent.action == "context_ingress.proposal.accept")
-            .order_by(AuditEvent.created_at.desc())
-            .first()
-        )
-        assert audit is not None
-        assert audit.payload["review_required"] is False
-
-
-def test_human_ingress_explicit_review_request_creates_pending_review(page_service):
-    client = make_client(page_service)
-    workspace_id = current_workspace_id(client)
-    ask_captures = tree_node_by_slug(client, workspace_id, "ask_captures")
-
-    session_response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/ask/sessions",
-        json={"title": "Explicit Review Ingress"},
+        json={"title": title},
     )
     assert session_response.status_code == 201
     turn_response = client.post(
         f"/api/v1/workspaces/{workspace_id}/ask/sessions/"
         f"{session_response.json()['data']['id']}/turns",
-        json={"user_message": "Draft a page for another person to review"},
+        json={"user_message": f"Draft {title}"},
     )
     assert turn_response.status_code == 200
     promoted = client.post(
@@ -530,21 +479,47 @@ def test_human_ingress_explicit_review_request_creates_pending_review(page_servi
             "save_mode": "create_page",
             "parent_node_id": ask_captures["id"],
             "page_type": "guide",
-            "title": "Explicit Review Page",
+            "title": title,
         },
     )
     assert promoted.status_code == 201
+    return promoted.json()["data"]["id"]
 
-    accepted = client.post(
+
+def _accept_ingress_proposal(
+    client, workspace_id, ask_captures, proposal_id, *, title, **extra
+):
+    return client.post(
         f"/api/v1/workspaces/{workspace_id}/context/ingress-proposals/"
-        f"{promoted.json()['data']['id']}/accept",
+        f"{proposal_id}/accept",
         json={
             "final_save_mode": "create_page",
             "final_parent_node_id": ask_captures["id"],
             "final_page_type": "guide",
-            "final_title": "Explicit Review Page",
-            "review_required": True,
+            "final_title": title,
+            **extra,
         },
+    )
+
+
+def test_ingress_accept_opens_a_review_when_asked_and_follows_policy_otherwise(
+    page_service,
+):
+    client = make_client(page_service)
+    workspace_id = current_workspace_id(client)
+    ask_captures = tree_node_by_slug(client, workspace_id, "ask_captures")
+
+    # Default policy: the caller asking for review opens a pending ReviewItem.
+    explicit_id = _promote_ingress_proposal(
+        client, workspace_id, ask_captures, title="Explicit Review Page"
+    )
+    accepted = _accept_ingress_proposal(
+        client,
+        workspace_id,
+        ask_captures,
+        explicit_id,
+        title="Explicit Review Page",
+        review_required=True,
     )
 
     assert accepted.status_code == 200
@@ -555,6 +530,38 @@ def test_human_ingress_explicit_review_request_creates_pending_review(page_servi
         assert review is not None
         assert review.status == "pending"
         assert review.risk_signals["caller_needs_review"] is True
+
+    # With context_ingress_auto=high and no flag from the caller, the policy
+    # decides: no review, and the accept audit records review_required False.
+    policy = default_review_policy()
+    policy["defaults"]["context_ingress_auto"] = "high"
+    with page_service.session_factory.begin() as session:
+        workspace = session.get(Workspace, UUID(workspace_id))
+        assert workspace is not None
+        workspace.review_policy = policy
+    gated_id = _promote_ingress_proposal(
+        client, workspace_id, ask_captures, title="Policy Gated Page"
+    )
+    accepted = _accept_ingress_proposal(
+        client,
+        workspace_id,
+        ask_captures,
+        gated_id,
+        title="Policy Gated Page",
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["data"]["review_item_id"] is None
+
+    with page_service.session_factory() as session:
+        audit = (
+            session.query(AuditEvent)
+            .filter(
+                AuditEvent.action == "context_ingress.proposal.accept",
+                AuditEvent.target_id == UUID(gated_id),
+            )
+            .one()
+        )
+        assert audit.payload["review_required"] is False
 
 
 def test_ask_turn_feedback_only_accept_creates_feedback_without_context_page(

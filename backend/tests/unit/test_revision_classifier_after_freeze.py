@@ -16,7 +16,7 @@ from backend.services.ops import alembic_migration_graph as graph
 from backend.services.ops import db_revision_inventory as inventory
 
 _LATER_SCRIPT_DIRECTORY = frozenset(
-    {"0001_initial_release", "0002_epic1", "0003_next_release"}
+    {"bd62193d5cf6", "efcbcf724889", "0003_next_release"}
 )
 
 
@@ -92,8 +92,8 @@ def test_a_retired_identifier_is_unknown_even_in_the_script_directory():
     )
 
 
-def test_the_released_epic1_stamp_still_requires_its_whole_fingerprint():
-    snapshot = _snapshot("0002_epic1", final_epic1_0002="partial")
+def test_released_core_schema_stamp_requires_its_whole_fingerprint():
+    snapshot = _snapshot("efcbcf724889", final_epic1_0002="partial")
 
     assert (
         inventory.classify_revision_consistency(
@@ -106,8 +106,10 @@ def test_the_released_epic1_stamp_still_requires_its_whole_fingerprint():
 def test_code_revisions_are_the_shipped_script_directory():
     shipped = {
         revision.revision
-        for revision in ScriptDirectory(str(resolve_migrations_dir())).walk_revisions()
+        for revision in ScriptDirectory(
+            str(resolve_migrations_dir()), recursive_version_locations=True
+        ).walk_revisions()
     }
 
     assert graph.code_revisions() == shipped
-    assert {"0001_initial_release", "0002_epic1"} <= shipped
+    assert {"bd62193d5cf6", "efcbcf724889"} <= shipped

@@ -407,6 +407,11 @@ class LibraryService:
         for preview_run in preview_runs:
             session.delete(preview_run)
         session.flush()
+        # Session.delete() leaves flushed children in loaded collections.
+        # Reload runs before the version cascade, so already deleted Preview
+        # runs and their attempts/details are not scheduled for deletion twice.
+        for version in versions:
+            session.expire(version, ["runs"])
         for version in versions:
             session.delete(version)
         session.delete(item)

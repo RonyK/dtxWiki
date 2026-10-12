@@ -238,7 +238,7 @@ def test_context_api_refuses_a_viewer_before_it_resolves_the_name(page_service):
     cannot: the write route requires editor, and any actor who clears that can
     already read every draft in the workspace. A viewer is refused before the
     name is ever resolved. The vector that does exist is MCP, where role and
-    scope are separate -- covered by the sibling test in test_sprint_b4_names.
+    scope are separate -- covered by the sibling test in test_context_name_ownership.
 
     P9.1: the canonical `context/pages` create route (`create_page_first`)
     never resolves a title to existing candidates at all -- there is no

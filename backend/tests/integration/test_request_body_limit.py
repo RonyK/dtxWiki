@@ -9,32 +9,72 @@ configured bounds so the bodies stay small.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from backend.api.middleware.request_body_limit import AUTH_REQUEST_BODY_LIMIT_BYTES
 from backend.api.read import LIBRARY_UPLOAD_MULTIPART_OVERHEAD_BYTES
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.context_media.domain.policy import CONTEXT_MEDIA_UPLOAD_POLICY
+from backend.services.page_service import PageService
 
 SMALL_LIMIT = 4096
 
 
-def _app(page_service, **overrides):
-    values = {
-        "database_url": "sqlite+pysqlite:///:memory:",
-        "session_secret": "request-body-limit-test-secret",
-        "max_request_body_bytes": SMALL_LIMIT,
-    }
-    values.update(overrides)
-    return create_app(settings=Settings(**values), page_service=page_service)
+@pytest.fixture(scope="module")
+def shared_page_service(_empty_sqlite_schema):
+    """One schema-only service for the module.
+
+    The bounds are decided before routing and authentication, so apps that
+    differ only in their body-limit settings can share a store.
+    """
+
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    _empty_sqlite_schema.backup(connection)
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        creator=lambda: connection,
+        poolclass=StaticPool,
+    )
+    try:
+        yield PageService(sessionmaker(bind=engine, expire_on_commit=False))
+    finally:
+        engine.dispose()
+        connection.close()
 
 
-def _client(page_service, **overrides) -> TestClient:
-    return TestClient(_app(page_service, **overrides))
+@pytest.fixture(scope="module")
+def apps(shared_page_service):
+    """Apps cached by their (immutable) settings overrides."""
+
+    cache: dict[tuple, object] = {}
+
+    def _build(**overrides):
+        key = tuple(sorted(overrides.items()))
+        if key not in cache:
+            values = {
+                "database_url": "sqlite+pysqlite:///:memory:",
+                "session_secret": "request-body-limit-test-secret",
+                "max_request_body_bytes": SMALL_LIMIT,
+            }
+            values.update(overrides)
+            cache[key] = create_app(
+                settings=Settings(**values), page_service=shared_page_service
+            )
+        return cache[key]
+
+    return _build
+
+
+def _client(apps, **overrides) -> TestClient:
+    return TestClient(apps(**overrides))
 
 
 def _assert_too_large(response, error_code: str = "request_too_large") -> dict:
@@ -44,8 +84,8 @@ def _assert_too_large(response, error_code: str = "request_too_large") -> dict:
     return body
 
 
-def test_oversized_body_is_refused_before_authentication(page_service):
-    client = _client(page_service)
+def test_oversized_body_is_refused_before_authentication(apps):
+    client = _client(apps)
     oversized = {"name": "x" * (SMALL_LIMIT * 2)}
 
     response = client.post("/api/v1/workspaces", json=oversized)
@@ -85,8 +125,8 @@ def _asgi_post(app, path: str, headers: list[tuple[bytes, bytes]], receive):
     return sent
 
 
-def test_chunked_body_without_content_length_is_cut_off(page_service):
-    app = _app(page_service)
+def test_chunked_body_without_content_length_is_cut_off(apps):
+    app = apps()
     chunk = b"x" * 1024
     total_chunks = 1000
     pulled = 0
@@ -113,8 +153,8 @@ def test_chunked_body_without_content_length_is_cut_off(page_service):
     assert pulled <= SMALL_LIMIT // len(chunk) + 1
 
 
-def test_declared_oversize_is_answered_without_reading_the_body(page_service):
-    app = _app(page_service)
+def test_declared_oversize_is_answered_without_reading_the_body(apps):
+    app = apps()
     receive_calls = 0
 
     async def receive():
@@ -148,10 +188,10 @@ def test_declared_oversize_is_answered_without_reading_the_body(page_service):
     ],
     ids=["auth-login-json", "oauth-register-json", "oauth-token-form"],
 )
-def test_auth_and_oauth_bodies_get_a_small_bound(page_service, path, request_kwargs):
+def test_auth_and_oauth_bodies_get_a_small_bound(apps, path, request_kwargs):
     # The general bound is far larger; the auth/OAuth endpoints parse their
     # bodies synchronously and get a tight one of their own.
-    client = _client(page_service, max_request_body_bytes=16 * 1024 * 1024)
+    client = _client(apps, max_request_body_bytes=16 * 1024 * 1024)
     padding = "p" * (AUTH_REQUEST_BODY_LIMIT_BYTES + 1)
     if "json" in request_kwargs:
         body = {**request_kwargs["json"], "padding": padding}
@@ -170,8 +210,8 @@ def _multipart(size: int) -> dict:
     return {"file": ("notes.txt", b"n" * size, "text/plain")}
 
 
-def test_library_upload_route_gets_its_own_larger_bound(page_service):
-    client = _client(page_service, max_request_body_bytes=SMALL_LIMIT)
+def test_library_upload_route_gets_its_own_larger_bound(apps):
+    client = _client(apps, max_request_body_bytes=SMALL_LIMIT)
     workspace_id = uuid4()
 
     # 16x the general bound, far below the Library upload cap: reaches
@@ -185,10 +225,10 @@ def test_library_upload_route_gets_its_own_larger_bound(page_service):
 
 
 def test_library_upload_beyond_its_cap_is_refused_before_authentication(
-    page_service,
+    apps,
 ):
     cap = 1024
-    client = _client(page_service, library_upload_hard_cap_bytes=cap)
+    client = _client(apps, library_upload_hard_cap_bytes=cap)
     workspace_id = uuid4()
     oversized = cap + LIBRARY_UPLOAD_MULTIPART_OVERHEAD_BYTES + 1
 
@@ -204,8 +244,8 @@ def test_library_upload_beyond_its_cap_is_refused_before_authentication(
         assert body["settings_link"] == "/settings?section=library"
 
 
-def test_context_media_upload_keeps_its_policy_bound(page_service):
-    client = _client(page_service, max_request_body_bytes=SMALL_LIMIT)
+def test_context_media_upload_keeps_its_policy_bound(apps):
+    client = _client(apps, max_request_body_bytes=SMALL_LIMIT)
     path = f"/api/v1/workspaces/{uuid4()}/context/pages/{uuid4()}/media"
 
     # Above the general bound, within the Context media policy.
@@ -219,10 +259,10 @@ def test_context_media_upload_keeps_its_policy_bound(page_service):
     _assert_too_large(beyond, "media_too_large")
 
 
-def test_mcp_keeps_its_own_reader(page_service):
+def test_mcp_keeps_its_own_reader(apps):
     # /mcp authenticates from headers before reading anything and bounds the
     # body itself, answering with JSON-RPC errors; the REST bound stays out.
-    client = _client(page_service, max_request_body_bytes=SMALL_LIMIT)
+    client = _client(apps, max_request_body_bytes=SMALL_LIMIT)
 
     response = client.post(
         "/mcp",

@@ -5706,7 +5706,7 @@ type WorkspaceDeleteFlow =
       blockers: WorkspaceDeleteBlocker[];
     };
 
-function WorkspaceDangerZone({
+export function WorkspaceDangerZone({
   currentSlug,
   onPoliciesChanged,
   readOnly,
@@ -5750,9 +5750,12 @@ function WorkspaceDangerZone({
   const slugSaveDisabled =
     readOnly || slugBusy || !normalizedSlug || normalizedSlug === activeSlug;
 
-  useEffect(() => {
+  // Re-baseline while rendering rather than from an effect: see PolicyGroupView.
+  const [slugBaseline, setSlugBaseline] = useState(activeSlug);
+  if (slugBaseline !== activeSlug) {
+    setSlugBaseline(activeSlug);
     setSlugDraft(activeSlug);
-  }, [activeSlug]);
+  }
 
   async function onSubmitSlug(event: FormEvent) {
     event.preventDefault();
@@ -7280,7 +7283,7 @@ const LIBRARY_EXTENSION_CHIP_LIMIT = 7;
 const LIBRARY_FORMAT_LIMIT_PICKER_LIMIT = 8;
 const LIBRARY_ACTIVE_FORMAT_LIMIT_PAGE_SIZE = 25;
 
-function LibraryPolicyView({
+export function LibraryPolicyView({
   busyKey,
   card,
   isServerAdmin,
@@ -7331,7 +7334,16 @@ function LibraryPolicyView({
     { errorMessage: t("policy.libraryUpload.capabilitiesLoadFailed") },
   );
 
-  useEffect(() => {
+  // Re-baseline while rendering rather than from an effect: see PolicyGroupView.
+  const [draftBaseline, setDraftBaseline] = useState({
+    baseline,
+    revision: card.revision,
+  });
+  if (
+    draftBaseline.baseline !== baseline ||
+    draftBaseline.revision !== card.revision
+  ) {
+    setDraftBaseline({ baseline, revision: card.revision });
     setDraft(baseline);
     setAdvancedQuery("");
     setAddedFormatLimitIds([]);
@@ -7341,7 +7353,7 @@ function LibraryPolicyView({
     setFamilyEditorOpen(false);
     setEditingFamilyId(null);
     setPendingFamilyFocusId(null);
-  }, [baseline, card.revision]);
+  }
 
   const changes = libraryPolicyChanges(card.policy, draft);
   const dirty = Object.keys(changes).length > 0;
@@ -8031,7 +8043,7 @@ function LibraryPolicyView({
   );
 }
 
-function PolicyGroupView({
+export function PolicyGroupView({
   busyKey,
   card,
   fields,
@@ -8059,6 +8071,17 @@ function PolicyGroupView({
     draftValuesForFields(fields),
   );
   const baselineKey = useMemo(() => policyFieldsBaselineKey(fields), [fields]);
+  // Re-baseline the drafts while rendering, not from an effect. A passive reset
+  // can still be pending when an edit arrives (on mount too, where useState
+  // already holds this baseline), and React flushes it after the edit has
+  // queued its update, so the reset replaced the very edit it should have
+  // preceded. Keyed on the semantic baseline, not on the identity of the
+  // `fields` array a parent rebuilds on every render.
+  const [draftsBaselineKey, setDraftsBaselineKey] = useState(baselineKey);
+  if (draftsBaselineKey !== baselineKey) {
+    setDraftsBaselineKey(baselineKey);
+    setDrafts(draftValuesForFields(fields));
+  }
   const savedLabel = savedLabelFor(saveNotice, (key) =>
     fields.some((field) => field.key === key),
   );
@@ -8096,13 +8119,6 @@ function PolicyGroupView({
   const editStatus = readOnly
     ? t("state.ownerOnly", { defaultValue: "Owner only" })
     : t(`state.${editState}`);
-
-  useEffect(() => {
-    setDrafts(draftValuesForFields(fields));
-    // Reset only when the semantic policy baseline changes, not when a parent
-    // recreates an equivalent fields array.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baselineKey]);
 
   function updateDraft(field: PolicyField, value: unknown) {
     setDrafts((current) => ({ ...current, [field.key]: value }));
@@ -8240,7 +8256,7 @@ function PolicyRawValuesDisclosure({
   );
 }
 
-function ReviewAutoApproveByRiskSettings({
+export function ReviewAutoApproveByRiskSettings({
   busyKey,
   onFieldsSave,
   saveNotice,
@@ -8266,6 +8282,13 @@ function ReviewAutoApproveByRiskSettings({
     () => rows.find((row) => row.risk === "high")?.allowed ?? false,
   );
   const baselineKey = useMemo(() => JSON.stringify(rows), [rows]);
+  // Re-baseline while rendering rather than from an effect: see PolicyGroupView.
+  const [draftsBaselineKey, setDraftsBaselineKey] = useState(baselineKey);
+  if (draftsBaselineKey !== baselineKey) {
+    setDraftsBaselineKey(baselineKey);
+    setDrafts(rows);
+    setHighDangerAck(rows.find((row) => row.risk === "high")?.allowed ?? false);
+  }
   const savedLabel = savedLabelFor(saveNotice, (key) =>
     key.includes("auto_approve_by_risk"),
   );
@@ -8291,13 +8314,6 @@ function ReviewAutoApproveByRiskSettings({
   const saveDisabled =
     readOnly || busy || dirtyRows.length === 0 || Boolean(conflictingDraft);
   useRegisterSettingsDirty("policy:reviewAutoApprove", dirtyRows.length > 0);
-
-  useEffect(() => {
-    setDrafts(rows);
-    setHighDangerAck(rows.find((row) => row.risk === "high")?.allowed ?? false);
-    // `baselineKey` is the stable semantic identity of these derived rows.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baselineKey]);
 
   // RO-4: when the overview deep-links to /settings?section=review#auto-approve-<risk>,
   // scroll the matching row into view and flash it for 1.5s.

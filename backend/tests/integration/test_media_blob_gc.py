@@ -818,6 +818,7 @@ def test_worker_media_blob_gc_uses_routed_provider_after_candidate_commit(
     assert blob_provider.workspace_ids == [installed_blob.workspace_id]
 
 
+@pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 def test_library_hard_delete_unregisters_source_conversion_and_preview_owners(
     installed_blob: _InstalledFixture,
 ) -> None:

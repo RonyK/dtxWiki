@@ -19,7 +19,7 @@
 - [ ] Markdown rendering or rich HTML changes include sanitize/XSS coverage.
 - [ ] Shared component changes include a Storybook story and a Vitest unit test.
 - [ ] UI changes reuse existing shared components, or the description explains why a new one is needed.
-- [ ] I have accepted the CLA, and my commits carry a `Signed-off-by:` line (see CONTRIBUTING.md).
+- [ ] I have accepted the CLA (see CONTRIBUTING.md).
 
 ## Verification
 

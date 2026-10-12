@@ -3915,117 +3915,109 @@ describe("SettingsScreen", () => {
     expect(within(card).getByText("Archived text renamed")).toBeInTheDocument();
   });
 
-  // Timing-sensitive under full-suite load: the assertions below sit in
-  // `waitFor` with the 1s default budget, which this heavy file exceeds when the
-  // suite saturates the CPU. Passes 50/50 in isolation. Opting in per the
-  // `retry: 0` policy in vite.config.ts rather than raising a global budget.
-  it(
-    "edits the Library maximum upload size with friendly units and exact bytes",
-    { retry: 2 },
-    async () => {
-      const user = userEvent.setup();
-      const fetchMock = mockFetch({
-        [`${BASE}/api/v1/workspaces`]: {
-          data: {
-            current_workspace_id: WORKSPACE_ID,
-            workspaces: [
-              workspaceSummary(WORKSPACE_ID, "Default Workspace", "default"),
-            ],
-          },
+  it("edits the Library maximum upload size with friendly units and exact bytes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [
+            workspaceSummary(WORKSPACE_ID, "Default Workspace", "default"),
+          ],
         },
-        [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
-          data: {
-            workspace: policy("workspace", "Workspace policy"),
-            library: policy("library", "Library policy", {
-              allowed_sources: [{ type: "manual_upload" }],
-              denied_sources: [],
-              max_upload_bytes: 2000000,
-            }),
-            citation: policy("citation", "Citation policy"),
-            context_write: policy("context_write", "Context write policy"),
-            agent_injection: policy(
-              "agent_injection",
-              "Agent injection policy",
-            ),
-            mcp_clients: [],
-          },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy", {
+            allowed_sources: [{ type: "manual_upload" }],
+            denied_sources: [],
+            max_upload_bytes: 2000000,
+          }),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy(
+            "agent_injection",
+            "Agent injection policy",
+          ),
+          mcp_clients: [],
         },
-        [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`]: {
-          data: settingsLibraryCapabilities(),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`]: {
+        data: settingsLibraryCapabilities(),
+      },
+      [`${BASE}/api/v1/auth/tokens`]: {
+        data: [],
+      },
+      [`${BASE}/oauth/consents`]: {
+        data: [],
+      },
+      [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy", {
+            allowed_sources: [{ type: "manual_upload" }],
+            denied_sources: [],
+            max_upload_bytes: 5000000,
+          }),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy(
+            "agent_injection",
+            "Agent injection policy",
+          ),
+          mcp_clients: [],
         },
-        [`${BASE}/api/v1/auth/tokens`]: {
-          data: [],
-        },
-        [`${BASE}/oauth/consents`]: {
-          data: [],
-        },
-        [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`]: {
-          data: {
-            workspace: policy("workspace", "Workspace policy"),
-            library: policy("library", "Library policy", {
-              allowed_sources: [{ type: "manual_upload" }],
-              denied_sources: [],
-              max_upload_bytes: 5000000,
-            }),
-            citation: policy("citation", "Citation policy"),
-            context_write: policy("context_write", "Context write policy"),
-            agent_injection: policy(
-              "agent_injection",
-              "Agent injection policy",
-            ),
-            mcp_clients: [],
-          },
-        },
-      });
+      },
+    });
 
-      render(
-        <MemoryRouter initialEntries={["/settings?section=library"]}>
-          <WorkspaceProvider>
-            <WorkspaceRefreshGate>
-              <SettingsScreen />
-            </WorkspaceRefreshGate>
-          </WorkspaceProvider>
-        </MemoryRouter>,
-      );
+    render(
+      <MemoryRouter initialEntries={["/settings?section=library"]}>
+        <WorkspaceProvider>
+          <WorkspaceRefreshGate>
+            <SettingsScreen />
+          </WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
 
-      const uploadSize = await screen.findByRole("spinbutton", {
-        name: "Manual upload limit",
-      });
-      expect(uploadSize).toHaveDisplayValue("2");
-      expect(
-        screen.getByRole("combobox", { name: "Manual upload limit unit" }),
-      ).toHaveDisplayValue("MB");
-      expect(
-        screen.queryByRole("spinbutton", { name: "Stored value (bytes)" }),
-      ).not.toBeInTheDocument();
-      const uploadSizeCard = uploadSize.closest(".policy-card") as HTMLElement;
-      expect(uploadSizeCard).toHaveTextContent("Configured: 2 MB");
-      expect(uploadSizeCard).not.toHaveClass("library-policy-card--dirty");
+    const uploadSize = await screen.findByRole("spinbutton", {
+      name: "Manual upload limit",
+    });
+    expect(uploadSize).toHaveDisplayValue("2");
+    expect(
+      screen.getByRole("combobox", { name: "Manual upload limit unit" }),
+    ).toHaveDisplayValue("MB");
+    expect(
+      screen.queryByRole("spinbutton", { name: "Stored value (bytes)" }),
+    ).not.toBeInTheDocument();
+    const uploadSizeCard = uploadSize.closest(".policy-card") as HTMLElement;
+    expect(uploadSizeCard).toHaveTextContent("Configured: 2 MB");
+    expect(uploadSizeCard).not.toHaveClass("library-policy-card--dirty");
 
-      fireEvent.change(uploadSize, { target: { value: "5" } });
-      expect(uploadSize).toHaveDisplayValue("5");
-      expect(uploadSizeCard).toHaveClass("library-policy-card--dirty");
+    fireEvent.change(uploadSize, { target: { value: "5" } });
+    expect(uploadSize).toHaveDisplayValue("5");
+    expect(uploadSizeCard).toHaveClass("library-policy-card--dirty");
 
-      await user.click(
-        within(uploadSizeCard).getByRole("button", { name: "Save changes" }),
-      );
+    await user.click(
+      within(uploadSizeCard).getByRole("button", { name: "Save changes" }),
+    );
 
-      expect(
-        await screen.findByText("Library upload policy saved"),
-      ).toBeInTheDocument();
-      expect(
-        lastJsonBody(
-          fetchMock,
-          `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`,
-          "PATCH",
-        ),
-      ).toEqual({
-        group: "library",
-        expected_revision: "0".repeat(64),
-        changes: { max_upload_bytes: 5000000 },
-      });
-    },
-  );
+    expect(
+      await screen.findByText("Library upload policy saved"),
+    ).toBeInTheDocument();
+    expect(
+      lastJsonBody(
+        fetchMock,
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`,
+        "PATCH",
+      ),
+    ).toEqual({
+      group: "library",
+      expected_revision: "0".repeat(64),
+      changes: { max_upload_bytes: 5000000 },
+    });
+  });
 
   it("renders the configured Library limit in friendly units", async () => {
     mockFetch({
@@ -4072,133 +4064,128 @@ describe("SettingsScreen", () => {
     expect(uploadSizeCard).toHaveTextContent("Configured: 2 MB");
   });
 
-  it(
-    "edits Agent bundle TTL as hours, minutes, and seconds",
-    { retry: 2 },
-    async () => {
-      const user = userEvent.setup();
-      const fetchMock = mockFetch({
-        [`${BASE}/api/v1/workspaces`]: {
-          data: {
-            current_workspace_id: WORKSPACE_ID,
-            workspaces: [
-              workspaceSummary(WORKSPACE_ID, "Default Workspace", "default"),
-            ],
-          },
+  it("edits Agent bundle TTL as hours, minutes, and seconds", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [
+            workspaceSummary(WORKSPACE_ID, "Default Workspace", "default"),
+          ],
         },
-        [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
-          data: {
-            workspace: policy("workspace", "Workspace policy"),
-            library: policy("library", "Library policy"),
-            citation: policy("citation", "Citation policy"),
-            context_write: policy("context_write", "Context write policy"),
-            agent_injection: policy(
-              "agent_injection",
-              "Agent injection policy",
-              {
-                bundle_ttl_default_seconds: 3600,
-                bundle_ttl_max_seconds: 86400,
-                category_inclusion_policy: { memory: "task_matched" },
-              },
-            ),
-            mcp_clients: [],
-          },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy"),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy(
+            "agent_injection",
+            "Agent injection policy",
+            {
+              bundle_ttl_default_seconds: 3600,
+              bundle_ttl_max_seconds: 86400,
+              category_inclusion_policy: { memory: "task_matched" },
+            },
+          ),
+          mcp_clients: [],
         },
-        [`${BASE}/api/v1/auth/tokens`]: {
-          data: [],
+      },
+      [`${BASE}/api/v1/auth/tokens`]: {
+        data: [],
+      },
+      [`${BASE}/oauth/consents`]: {
+        data: [],
+      },
+      [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy"),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy(
+            "agent_injection",
+            "Agent injection policy",
+            {
+              bundle_ttl_default_seconds: 7500,
+              bundle_ttl_max_seconds: 86400,
+              category_inclusion_policy: { memory: "task_matched" },
+            },
+          ),
+          mcp_clients: [],
         },
-        [`${BASE}/oauth/consents`]: {
-          data: [],
-        },
-        [`PATCH ${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
-          data: {
-            workspace: policy("workspace", "Workspace policy"),
-            library: policy("library", "Library policy"),
-            citation: policy("citation", "Citation policy"),
-            context_write: policy("context_write", "Context write policy"),
-            agent_injection: policy(
-              "agent_injection",
-              "Agent injection policy",
-              {
-                bundle_ttl_default_seconds: 7500,
-                bundle_ttl_max_seconds: 86400,
-                category_inclusion_policy: { memory: "task_matched" },
-              },
-            ),
-            mcp_clients: [],
-          },
-        },
-      });
+      },
+    });
 
-      render(
-        <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
-          <WorkspaceProvider>
-            <WorkspaceRefreshGate>
-              <SettingsScreen />
-            </WorkspaceRefreshGate>
-          </WorkspaceProvider>
-        </MemoryRouter>,
-      );
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+        <WorkspaceProvider>
+          <WorkspaceRefreshGate>
+            <SettingsScreen />
+          </WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
 
-      const defaultHours = await screen.findByRole("spinbutton", {
-        name: "Reference refresh interval",
-      });
-      expect(defaultHours).toHaveDisplayValue("1");
-      expect(
-        screen.getByRole("spinbutton", {
-          name: "Reference refresh interval Minutes",
-        }),
-      ).toHaveDisplayValue("0");
-      expect(screen.getAllByText("Maximum 8,760 hours (1 year).")).toHaveLength(
-        2,
-      );
-      const defaultIntervalRow = defaultHours.closest(
-        ".policy-edit-field",
-      ) as HTMLElement;
-      expect(defaultIntervalRow).toHaveTextContent(
-        "Current interval 1 hour (3,600 seconds)",
-      );
+    const defaultHours = await screen.findByRole("spinbutton", {
+      name: "Reference refresh interval",
+    });
+    expect(defaultHours).toHaveDisplayValue("1");
+    expect(
+      screen.getByRole("spinbutton", {
+        name: "Reference refresh interval Minutes",
+      }),
+    ).toHaveDisplayValue("0");
+    expect(screen.getAllByText("Maximum 8,760 hours (1 year).")).toHaveLength(
+      2,
+    );
+    const defaultIntervalRow = defaultHours.closest(
+      ".policy-edit-field",
+    ) as HTMLElement;
+    expect(defaultIntervalRow).toHaveTextContent(
+      "Current interval 1 hour (3,600 seconds)",
+    );
 
-      // Empty numeric drafts are normalized back to the last valid value. A
-      // clear-then-type sequence can therefore race that normalization and turn
-      // `1` + `2` into `12` under full-suite load. Enter the intended values as
-      // one input edit, matching browsers' select-all-and-replace behavior.
-      fireEvent.change(defaultHours, { target: { value: "2" } });
-      fireEvent.change(
-        screen.getByRole("spinbutton", {
-          name: "Reference refresh interval Minutes",
-        }),
-        { target: { value: "5" } },
-      );
-      expect(defaultIntervalRow).toHaveTextContent(
-        "Pending interval 2 hours 5 minutes (7,500 seconds)",
-      );
-      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    // Empty numeric drafts are normalized back to the last valid value. A
+    // clear-then-type sequence can therefore race that normalization and turn
+    // `1` + `2` into `12` under full-suite load. Enter the intended values as
+    // one input edit, matching browsers' select-all-and-replace behavior.
+    fireEvent.change(defaultHours, { target: { value: "2" } });
+    fireEvent.change(
+      screen.getByRole("spinbutton", {
+        name: "Reference refresh interval Minutes",
+      }),
+      { target: { value: "5" } },
+    );
+    expect(defaultIntervalRow).toHaveTextContent(
+      "Pending interval 2 hours 5 minutes (7,500 seconds)",
+    );
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
-      const agentCard = defaultHours.closest(".policy-card") as HTMLElement;
-      await user.click(
-        within(agentCard).getByRole("button", { name: "Save changes" }),
-      );
+    const agentCard = defaultHours.closest(".policy-card") as HTMLElement;
+    await user.click(
+      within(agentCard).getByRole("button", { name: "Save changes" }),
+    );
 
-      expect(
-        await screen.findByText("Reference refresh interval saved"),
-      ).toBeInTheDocument();
-      expect(
-        lastJsonBody(
-          fetchMock,
-          `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`,
-          "PATCH",
-        ),
-      ).toEqual({
-        group: "agent_injection",
-        key: "bundle_ttl_default_seconds",
-        value: 7500,
-      });
-    },
-  );
+    expect(
+      await screen.findByText("Reference refresh interval saved"),
+    ).toBeInTheDocument();
+    expect(
+      lastJsonBody(
+        fetchMock,
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`,
+        "PATCH",
+      ),
+    ).toEqual({
+      group: "agent_injection",
+      key: "bundle_ttl_default_seconds",
+      value: 7500,
+    });
+  });
 
-  // Timing-sensitive under full-suite load, same cause as the upload-size spec.
-  it("edits Review auto-approval delay in days", { retry: 2 }, async () => {
+  it("edits Review auto-approval delay in days", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
@@ -4820,24 +4807,12 @@ describe("SettingsScreen", () => {
       ".policy-edit-field",
     ) as HTMLElement;
     const maxReuseRow = maxHours.closest(".policy-edit-field") as HTMLElement;
-    // Awaited rather than read synchronously: this screen is still settling
-    // several fetches when the value changes, so a late re-render can land
-    // after the edit. Under a full parallel run that is the difference
-    // between a green test and a phantom failure. findBy*'s default 1s retry
-    // window was still too tight there — observed failing at ~1.17s while
-    // passing in isolation — so give the settling screen room. It bounds a
-    // hang, it does not assert a latency budget.
+    // Read synchronously: the message derives from the draft in the same
+    // render as the edit, so one that is missing means the edit was lost, and
+    // no amount of waiting brings a lost edit back.
     const violation = "Maximum reuse must be at least the refresh interval.";
-    expect(
-      await within(defaultIntervalRow).findByText(violation, undefined, {
-        timeout: 5_000,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      await within(maxReuseRow).findByText(violation, undefined, {
-        timeout: 5_000,
-      }),
-    ).toBeInTheDocument();
+    expect(within(defaultIntervalRow).getByText(violation)).toBeInTheDocument();
+    expect(within(maxReuseRow).getByText(violation)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 
@@ -4921,15 +4896,26 @@ describe("SettingsScreen", () => {
     const maxHours = screen.getByRole("spinbutton", {
       name: "Maximum reference reuse",
     });
+    // "Unsaved changes" is absent while the write is still in flight as well
+    // (the rows read "Saving…"), so it cannot tell a finished save from a
+    // pending one. The idle, disabled Save button exists only once the response
+    // has been adopted as the new baseline, and only then may the next round
+    // edit.
+    const saveFinished = async () => {
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Save changes" }),
+        ).toBeDisabled(),
+      );
+      expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+    };
 
     // Both related constraints travel in one request, so no invalid
     // intermediate state is observable by the server.
     fireEvent.change(defaultHours, { target: { value: "2" } });
     fireEvent.change(maxHours, { target: { value: "48" } });
     await user.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() =>
-      expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument(),
-    );
+    await saveFinished();
     expect(patchBodies).toEqual([
       {
         group: "agent_injection",
@@ -4945,16 +4931,12 @@ describe("SettingsScreen", () => {
     fireEvent.change(defaultHours, { target: { value: "1" } });
     fireEvent.change(maxHours, { target: { value: "24" } });
     await user.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() =>
-      expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument(),
-    );
+    await saveFinished();
     // A mixed direction update is still one atomic write.
     fireEvent.change(defaultHours, { target: { value: "2" } });
     fireEvent.change(maxHours, { target: { value: "12" } });
     await user.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() =>
-      expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument(),
-    );
+    await saveFinished();
     expect(patchBodies).toEqual([
       {
         group: "agent_injection",

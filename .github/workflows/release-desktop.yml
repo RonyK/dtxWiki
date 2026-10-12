@@ -1,4 +1,4 @@
-# Desktop installers are not part of release 0.1.1, so a `v*` tag no longer
+# Desktop installers are not part of release 0.1.2, so a `v*` tag no longer
 # starts this workflow: the tag publishes the Python package and creates the
 # GitHub Release through release.yml alone. Before any release ships
 # installers, the signing and notarization secrets must exist and the macOS

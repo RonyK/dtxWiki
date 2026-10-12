@@ -105,14 +105,20 @@ def test_postgres_outbox_lock_prevents_cli_worker_double_send():
         cli_thread = threading.Thread(target=deliver_once)
         worker_thread = threading.Thread(target=deliver_once)
         cli_thread.start()
-        assert provider.entered.wait(timeout=10)
-        worker_thread.start()
-        provider.release.set()
+        try:
+            assert provider.entered.wait(timeout=10)
+            # The worker runs to completion while the CLI delivery is parked
+            # in the provider with no transaction open. Released any earlier,
+            # the CLI delivery could settle 'sent' before the worker's claim,
+            # and the worker would then return quietly instead of raising.
+            worker_thread.start()
+            worker_thread.join(timeout=10)
+            assert not worker_thread.is_alive()
+        finally:
+            provider.release.set()
         cli_thread.join(timeout=10)
-        worker_thread.join(timeout=10)
 
         assert not cli_thread.is_alive()
-        assert not worker_thread.is_alive()
         # MAIL-01 commits the claim before the send, so the loser of the race
         # now sees "sending" and says so instead of blocking on the winner's
         # write lock until the row reads "sent". Exactly one thread must lose:

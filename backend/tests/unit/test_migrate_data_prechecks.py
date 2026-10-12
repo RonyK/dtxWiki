@@ -16,7 +16,7 @@ from backend.scripts.migrate_data import (
 )
 from backend.services.ops import runtime_lock
 
-REVISION = "0002_epic1"
+REVISION = "efcbcf724889"
 
 
 def _url(path: Path) -> str:
@@ -103,7 +103,6 @@ def test_refuses_while_a_dtxwiki_runtime_holds_the_lock(tmp_path: Path) -> None:
 
 def test_rejects_same_source_and_target_url(tmp_path: Path) -> None:
     url = _url(tmp_path / "same.sqlite")
-    _create_schema(url)
 
     with pytest.raises(MigrationPrecheckError, match="must differ"):
         migrate_data(url, url)
@@ -158,7 +157,7 @@ def test_rejects_source_whose_stamp_does_not_describe_its_schema(
     """A laundered stamp must not be copied into a freshly built backend.
 
     The revision-equality precheck alone accepts it: both ends read
-    ``0002_epic1`` and the copy only fails later on a missing source table.
+    ``efcbcf724889`` and the copy only fails later on a missing source table.
     """
     source_url = _url(tmp_path / "source.sqlite")
     target_url = _url(tmp_path / "target.sqlite")

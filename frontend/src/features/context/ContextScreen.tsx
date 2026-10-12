@@ -127,6 +127,7 @@ import {
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import {
   copyTextWithReason,
@@ -1118,6 +1119,8 @@ export function ContextScreen() {
     nextParams.delete(TREE_NEW_FOLDER_PARAM);
     setSearchParams(nextParams, { replace: true });
   }, [canEdit, searchParams, setSearchParams, state]);
+
+  useDocumentTitle(state?.detail?.title ?? null, " - ");
 
   if (!state) {
     return (

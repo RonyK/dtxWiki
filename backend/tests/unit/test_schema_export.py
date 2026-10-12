@@ -24,6 +24,18 @@ from backend.scripts.export_openapi import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+@pytest.fixture(scope="module")
+def openapi_schema():
+    """Built once per worker; the consumers below only read it."""
+    return build_openapi_schema()
+
+
+@pytest.fixture(scope="module")
+def mcp_schemas():
+    """Built once per worker; the consumers below only read it."""
+    return build_mcp_schemas()
+
+
 def _authored_413_416_422_descriptions() -> set[str]:
     """Statically collect every hand-authored 413/416/422 response
     description declared in backend/api/**, e.g.
@@ -60,8 +72,8 @@ def _authored_413_416_422_descriptions() -> set[str]:
     return authored
 
 
-def test_openapi_export_contains_phase3_page_endpoints():
-    schema = build_openapi_schema()
+def test_openapi_export_contains_phase3_page_endpoints(openapi_schema):
+    schema = openapi_schema
 
     assert "/api/v1/workspaces/{workspace_id}/context/pages" in schema["paths"]
     assert (
@@ -78,14 +90,14 @@ def test_openapi_export_contains_phase3_page_endpoints():
     assert {"envelope", "data"}.issubset(page_response["properties"])
 
 
-def test_openapi_export_excludes_mcp_transport_endpoint():
-    schema = build_openapi_schema()
+def test_openapi_export_excludes_mcp_transport_endpoint(openapi_schema):
+    schema = openapi_schema
 
     assert "/mcp" not in schema["paths"]
 
 
-def test_workspace_create_statuses_and_security_schemes_are_explicit():
-    schema = build_openapi_schema()
+def test_workspace_create_statuses_and_security_schemes_are_explicit(openapi_schema):
+    schema = openapi_schema
 
     member_create = schema["paths"]["/api/v1/workspaces/{workspace_id}/members"]["post"]
     join_create = schema["paths"]["/api/v1/workspaces/{workspace_id}/join-requests"][
@@ -130,8 +142,8 @@ def test_workspace_create_statuses_and_security_schemes_are_explicit():
     assert blocker_items["$ref"].endswith("/RESTBlocker")
 
 
-def test_openapi_security_matches_exhaustive_reviewed_route_matrix():
-    schema = build_openapi_schema()
+def test_openapi_security_matches_exhaustive_reviewed_route_matrix(openapi_schema):
+    schema = openapi_schema
     reviewed = reviewed_openapi_security()
     actual_routes = {
         (method.upper(), path)
@@ -158,8 +170,8 @@ def test_openapi_security_matches_exhaustive_reviewed_route_matrix():
     assert "client_id" in schema["paths"]["/oauth/revoke"]["post"]["description"]
 
 
-def test_mcp_client_tombstone_delete_is_browser_session_only():
-    schema = build_openapi_schema()
+def test_mcp_client_tombstone_delete_is_browser_session_only(openapi_schema):
+    schema = openapi_schema
 
     operation = schema["paths"][
         "/api/v1/workspaces/{workspace_id}/settings/mcp-clients/{client_id}"
@@ -168,8 +180,8 @@ def test_mcp_client_tombstone_delete_is_browser_session_only():
     assert {tuple(item) for item in operation["security"]} == {("SessionCookie",)}
 
 
-def test_list_my_workspaces_schema_omits_conversation_token():
-    schemas = build_mcp_schemas()
+def test_list_my_workspaces_schema_omits_conversation_token(mcp_schemas):
+    schemas = mcp_schemas
 
     assert (
         "conversation_token" not in schemas["list_my_workspaces"]["input"]["properties"]
@@ -177,8 +189,8 @@ def test_list_my_workspaces_schema_omits_conversation_token():
     json.dumps(schemas)
 
 
-def test_openapi_export_matches_checked_in_artifact():
-    generated = json.dumps(build_openapi_schema(), indent=2, sort_keys=True) + "\n"
+def test_openapi_export_matches_checked_in_artifact(openapi_schema):
+    generated = json.dumps(openapi_schema, indent=2, sort_keys=True) + "\n"
     checked_in = (REPO_ROOT / "shared/schemas/rest/v1/openapi.json").read_text(
         encoding="utf-8",
     )
@@ -186,8 +198,10 @@ def test_openapi_export_matches_checked_in_artifact():
     assert generated == checked_in
 
 
-def test_reconciliation_result_uses_required_boolean_literals_without_discriminator():
-    schemas = build_openapi_schema()["components"]["schemas"]
+def test_reconciliation_result_uses_required_boolean_literals_without_discriminator(
+    openapi_schema,
+):
+    schemas = openapi_schema["components"]["schemas"]
     response_data = schemas["ContextReconciliationResultResponse"]["properties"]["data"]
 
     assert "discriminator" not in response_data
@@ -254,8 +268,8 @@ def test_pin_http_response_descriptions_normalizes_defaults_and_preserves_author
     )
 
 
-def test_openapi_export_preserves_library_upload_size_limit_description():
-    schema = build_openapi_schema()
+def test_openapi_export_preserves_library_upload_size_limit_description(openapi_schema):
+    schema = openapi_schema
 
     for path in (
         "/api/v1/workspaces/{workspace_id}/library/items",
@@ -267,7 +281,7 @@ def test_openapi_export_preserves_library_upload_size_limit_description():
         )
 
 
-def test_exported_413_416_422_descriptions_are_pinned_or_authored():
+def test_exported_413_416_422_descriptions_are_pinned_or_authored(openapi_schema):
     """No 413/416/422 description in the real exported schema may be
     anything other than the stable pinned phrase for that status, or text
     this repo actually authored in backend/api/**.
@@ -280,7 +294,7 @@ def test_exported_413_416_422_descriptions_are_pinned_or_authored():
     FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS, it will show up here as
     neither pinned nor authored.
     """
-    schema = build_openapi_schema()
+    schema = openapi_schema
     authored = _authored_413_416_422_descriptions()
 
     offenders = []
@@ -307,31 +321,31 @@ def test_exported_413_416_422_descriptions_are_pinned_or_authored():
     assert offenders == []
 
 
-def test_mcp_schema_export_covers_all_advertised_tools():
+def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
     # Codex #9: every tool advertised by tools/list must have an exported schema,
     # so a newly-advertised tool cannot ship without its shared contract.
     from backend.mcp.protocol.tool_descriptors import list_dtxwiki_tools
 
     advertised = {tool.name for tool in list_dtxwiki_tools()}
-    assert advertised == set(build_mcp_schemas())
+    assert advertised == set(mcp_schemas)
 
 
-def test_mcp_schema_export_includes_review_tools():
-    schemas = build_mcp_schemas()
+def test_mcp_schema_export_includes_review_tools(mcp_schemas):
+    schemas = mcp_schemas
     assert {"list_requested_changes", "submit_revision_for_review"}.issubset(schemas)
 
 
-def test_mcp_envelope_actor_is_optional_on_the_wire():
+def test_mcp_envelope_actor_is_optional_on_the_wire(mcp_schemas):
     # Codex #8: actor must NOT be a required v1 output field (legacy actor_kind/
     # actor_id remain), so an old v1 consumer is not rejected for missing actor.
-    envelope = build_mcp_schemas()["read"]["output"]["$defs"]["MCPResultEnvelope"]
+    envelope = mcp_schemas["read"]["output"]["$defs"]["MCPResultEnvelope"]
     assert "actor" not in envelope.get("required", [])
     assert "result_status" in envelope["required"]
 
 
-def test_mcp_schema_export_matches_checked_in_artifacts():
+def test_mcp_schema_export_matches_checked_in_artifacts(mcp_schemas):
     schema_dir = REPO_ROOT / "shared/schemas/mcp/v1"
-    generated = build_mcp_schemas()
+    generated = mcp_schemas
 
     assert set(generated) == {path.stem for path in schema_dir.glob("*.json")}
     for tool_name, schema in generated.items():

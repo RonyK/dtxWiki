@@ -1,10 +1,11 @@
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
 from backend.models.change import ChangeOperation, ChangeSet
-from backend.models.context import ContextPage
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.repositories.context_page_repo import insert_version
@@ -291,10 +292,25 @@ def test_reader_modified_time_stays_at_published_head_when_draft_is_staged(
     published = _create_published(
         client, title="Published", body_md="# Published\n\nReader body.\n"
     )
-    published_at = published["updated_at"]
     newer = _create_published(
         client, title="Newer published", body_md="# Newer published\n"
     )
+    # The list orders pages by their recorded published instants, which are
+    # wall-clock readings: a clock that steps back between the two publications
+    # would turn "newer" into the older one. Pin the instants this test is about.
+    # The pinned instant keeps its time of day and microseconds so that a
+    # response which rounds or truncates the published time is still caught.
+    published_at = datetime(2000, 1, 1, 12, 34, 56, 123456, tzinfo=UTC)
+    with page_service.session_factory.begin() as session:
+        for data, instant in (
+            (published, published_at),
+            (newer, published_at + timedelta(days=1)),
+        ):
+            version = session.get(ContextPageVersion, UUID(data["version_id"]))
+            page = session.get(ContextPage, UUID(data["id"]))
+            assert version is not None and page is not None
+            version.created_at = instant
+            page.updated_at = instant
 
     autosave_response = client.post(
         f"{pages_url}/{published['id']}/autosave",
@@ -310,11 +326,20 @@ def test_reader_modified_time_stays_at_published_head_when_draft_is_staged(
     assert autosave_response.status_code == 200, autosave_response.text
     draft = autosave_response.json()["data"]
     assert draft["version_status"] == "draft"
-    assert draft["updated_at"] == published_at
+    assert datetime.fromisoformat(draft["updated_at"]) == published_at
+
+    # Stamp the draft and the page after both publications, the two wrong
+    # candidates for a "modified" time, so ranking by either one is caught.
+    with page_service.session_factory.begin() as session:
+        version = session.get(ContextPageVersion, UUID(draft["version_id"]))
+        page = session.get(ContextPage, UUID(published["id"]))
+        assert version is not None and page is not None
+        version.created_at = published_at + timedelta(days=2)
+        page.updated_at = published_at + timedelta(days=2)
 
     read = client.get(f"{pages_url}/{published['id']}")
     assert read.status_code == 200
-    assert read.json()["data"]["updated_at"] == published_at
+    assert datetime.fromisoformat(read.json()["data"]["updated_at"]) == published_at
 
     # P9.1: the old dedicated `/api/v1/pages` list and the intermediate
     # `context-pages` list are now the exact same canonical route/schema
@@ -326,7 +351,7 @@ def test_reader_modified_time_stays_at_published_head_when_draft_is_staged(
     listed = next(
         page for page in page_list.json()["data"] if page["id"] == published["id"]
     )
-    assert listed["updated_at"] == published_at
+    assert datetime.fromisoformat(listed["updated_at"]) == published_at
     assert listed["latest_draft_version_id"] == draft["version_id"]
     page_ids = [page["id"] for page in page_list.json()["data"]]
     assert page_ids.index(newer["id"]) < page_ids.index(published["id"])

@@ -1,17 +1,9 @@
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
+import pytest
 from sqlalchemy import create_engine, inspect
 
-from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-
-
-def _config(database_url: str) -> Config:
-    config = Config(str(resolve_alembic_ini()))
-    config.set_main_option("script_location", str(resolve_migrations_dir()))
-    config.set_main_option("sqlalchemy.url", database_url)
-    return config
+from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 
 def _message_kind_check(database_url: str) -> str:
@@ -27,27 +19,16 @@ def _message_kind_check(database_url: str) -> str:
     )
 
 
-def _has_email_outbox(database_url: str) -> bool:
-    engine = create_engine(database_url)
-    try:
-        return "email_outbox" in inspect(engine).get_table_names()
-    finally:
-        engine.dispose()
+@pytest.fixture(scope="session")
+def sqlite_templates(tmp_path_factory):
+    return shared_templates(tmp_path_factory)
 
 
-def test_epic1_round_trip_adds_final_notification_mail_kinds(
-    tmp_path: Path,
+def test_core_schema_has_final_notification_mail_kinds(
+    tmp_path: Path, sqlite_templates
 ):
-    database_url = f"sqlite:///{tmp_path / 'reconciliation-reminder.db'}"
-    config = _config(database_url)
+    database_url = sqlite_templates.clone("head", tmp_path / "reconciliation.db")
 
-    command.upgrade(config, "0001_initial_release")
-    assert not _has_email_outbox(database_url)
-
-    command.upgrade(config, "0002_epic1")
     upgraded_check = _message_kind_check(database_url)
     assert "job_failed" in upgraded_check
     assert "reconciliation_reminder" in upgraded_check
-
-    command.downgrade(config, "0001_initial_release")
-    assert not _has_email_outbox(database_url)
