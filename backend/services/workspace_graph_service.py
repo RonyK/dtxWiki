@@ -93,6 +93,7 @@ class _Document:
     path: str
     head_id: UUID
     updated_at: datetime
+    selected_conversion_attempt_id: UUID | None = None
     primary: _Placement | None = None
     secondary: list[_Placement] = field(default_factory=list)
     secondary_revision: tuple[_Placement, ...] = ()
@@ -454,6 +455,7 @@ class WorkspaceGraphService:
                     LibraryItemVersion.library_item_id,
                     LibraryItemVersion.processing_status,
                     LibraryItemVersion.updated_at,
+                    LibraryItemVersion.selected_conversion_attempt_id,
                     raiseload=True,
                 ),
             )
@@ -488,6 +490,7 @@ class WorkspaceGraphService:
                 path=f"/library?target={item.id}",
                 head_id=head.id,
                 updated_at=_aware(head.updated_at),
+                selected_conversion_attempt_id=head.selected_conversion_attempt_id,
             )
         return documents
 
@@ -505,6 +508,7 @@ class WorkspaceGraphService:
                 LibraryArtifact.library_item_version_id.label(
                     "artifact_library_item_version_id"
                 ),
+                LibraryArtifact.attempt_id.label("artifact_attempt_id"),
             )
             .outerjoin(
                 LibraryArtifact,
@@ -526,19 +530,27 @@ class WorkspaceGraphService:
                 WorkspaceTreeNode.id,
             )
         ).all()
-        nodes = [node for node, _artifact_version_id in node_rows]
+        nodes = [node for node, _artifact_version_id, _artifact_attempt_id in node_rows]
         nodes_by_id = {node.id: node for node in nodes}
-        item_by_head = {
-            document.head_id: document.entity_id
+        # A retained artifact from another conversion attempt is not a visible
+        # placement, even when its source version remains the ready head.
+        item_by_artifact_head = {
+            (
+                document.head_id,
+                document.selected_conversion_attempt_id,
+            ): document.entity_id
             for document in documents.values()
             if document.entity_kind == "library"
+            and document.selected_conversion_attempt_id is not None
         }
         artifact_items = {
-            node.target_id: item_by_head[artifact_version_id]
-            for node, artifact_version_id in node_rows
+            node.target_id: item_by_artifact_head[
+                (artifact_version_id, artifact_attempt_id)
+            ]
+            for node, artifact_version_id, artifact_attempt_id in node_rows
             if node.target_kind == "library_artifact"
             and node.target_id is not None
-            and artifact_version_id in item_by_head
+            and (artifact_version_id, artifact_attempt_id) in item_by_artifact_head
         }
 
         initially_visible: set[UUID] = set()
@@ -748,6 +760,12 @@ class WorkspaceGraphService:
             for document in documents.values()
             if document.entity_kind == "library"
         }
+        library_by_artifact_head = {
+            (document.head_id, document.selected_conversion_attempt_id): document.key
+            for document in documents.values()
+            if document.entity_kind == "library"
+            and document.selected_conversion_attempt_id is not None
+        }
         if not context_by_id:
             return []
 
@@ -874,6 +892,7 @@ class WorkspaceGraphService:
             cited_library_artifact.library_item_version_id.label(
                 "artifact_library_item_version_id"
             ),
+            cited_library_artifact.attempt_id.label("artifact_attempt_id"),
             ContextCitation.created_at,
         )
 
@@ -1000,8 +1019,11 @@ class WorkspaceGraphService:
                     )
                     kind = "citation_page"
                 elif citation["library_artifact_id"] is not None:
-                    target = library_by_head.get(
-                        citation["artifact_library_item_version_id"]
+                    target = library_by_artifact_head.get(
+                        (
+                            citation["artifact_library_item_version_id"],
+                            citation["artifact_attempt_id"],
+                        )
                     )
                     kind = "citation_source"
                 elif citation["library_item_version_id"] is not None:

@@ -278,6 +278,12 @@ def add_knowledge_40_relation_branch_fixtures(
         library_item_version_id=artifact_library_head_id,
         fixture_key=fixture_key,
     )
+    artifact_head = session.get(LibraryItemVersion, artifact_library_head_id)
+    assert artifact_head is not None
+    artifact_head.selected_conversion_attempt_id = artifact.attempt_id
+    # This is part of the fixed-time canonical fixture, not a new publication
+    # occurring on the test runner's clock.
+    flag_modified(artifact_head, "updated_at")
     session.add_all(
         [
             ContextCitation(

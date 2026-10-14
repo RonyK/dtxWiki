@@ -12,6 +12,7 @@ import type {
   GraphRenderScene,
   GraphViewport,
 } from "./shared/rendererTypes";
+import { readGraphTokens } from "./shared/graphTokens";
 
 export type GraphCanvasHandle = {
   centerOn(id: string): void;
@@ -44,6 +45,13 @@ type GraphCanvasProps = {
   showLabels?: boolean;
   viewport?: GraphViewport | null;
 };
+
+function graphPaletteKey(container: Element, forcedColors: boolean): string {
+  const mode = forcedColors ? "forced"
+    : document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  // Label and seed-border ink is independent of the graph color tokens.
+  return JSON.stringify([mode, readGraphTokens(container, mode), getComputedStyle(container).color]);
+}
 
 export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   function GraphCanvas(
@@ -89,6 +97,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     // latest value in a ref so presentation-mode renderer recreation restores
     // the current view without making pan/zoom recreate the adapter.
     const viewportRef = useRef(viewport);
+    const previousViewportHintRef = useRef(viewport);
+    const paletteRef = useRef<string | null>(null);
     const [status, setStatus] = useState<RendererStatus>("loading");
     const [rendererRevision, setRendererRevision] = useState(0);
     const [themeRevision, setThemeRevision] = useState(0);
@@ -107,7 +117,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     focusedIdRef.current = focusedId;
     activeRef.current = active;
     showLabelsRef.current = showLabels;
-    viewportRef.current = viewport;
+    // An unchanged restore hint must not overwrite later native camera input
+    // when selection, filters, or renderer status make GraphView render again.
+    if (previousViewportHintRef.current !== viewport) {
+      previousViewportHintRef.current = viewport;
+      viewportRef.current = viewport;
+    }
 
     useImperativeHandle(ref, () => ({
       centerOn: (id) => adapterRef.current?.centerOn(id),
@@ -154,7 +169,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
                 onHover: (id) => callbacksRef.current.onHover(id),
                 onPin: (id, position) => callbacksRef.current.onPin(id, position),
                 onSelect: (id) => callbacksRef.current.onSelect(id),
-                onViewport: (nextViewport) => callbacksRef.current.onViewport?.(nextViewport),
+                onViewport: (nextViewport) => {
+                  if (cancelled || rendererFailed || generation !== generationRef.current) return;
+                  // Own the live camera even when the caller does not persist
+                  // it. A ref keeps native pan/zoom out of React rendering.
+                  viewportRef.current = { zoom: nextViewport.zoom, pan: { ...nextViewport.pan } };
+                  callbacksRef.current.onViewport?.(nextViewport);
+                },
                 onContextStatus: (contextStatus) => {
                   if (cancelled || generation !== generationRef.current) return;
                   if (contextStatus === "lost") {
@@ -168,6 +189,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               },
             },
           );
+          // CSS may finish loading while the lazy adapter import is pending.
+          // The observer must compare against the palette this engine read,
+          // rather than an earlier pre-import default ink/color snapshot.
+          paletteRef.current = graphPaletteKey(container, forcedColors);
           createdAdapter = adapter;
           if (cancelled || generation !== generationRef.current) {
             adapter.destroy();
@@ -206,17 +231,26 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
     useEffect(() => {
       if (typeof MutationObserver === "undefined") return undefined;
+      const container = containerRef.current;
+      if (!container) return undefined;
+      paletteRef.current = graphPaletteKey(container, forcedColors);
       const observer = new MutationObserver(() => {
+        const nextPalette = graphPaletteKey(container, forcedColors);
+        if (nextPalette === paletteRef.current) return;
+        paletteRef.current = nextPalette;
         setThemeRevision((revision) => revision + 1);
       });
       const options: MutationObserverInit = {
         attributeFilter: ["class", "data-theme", "style"],
         attributes: true,
       };
-      observer.observe(document.documentElement, options);
-      if (document.body) observer.observe(document.body, options);
+      // Dialog scroll locks change body style without changing this palette.
+      // Scoped ancestors can also supply genuine inherited graph colors.
+      for (let element: Element | null = container; element; element = element.parentElement) {
+        observer.observe(element, options);
+      }
       return () => observer.disconnect();
-    }, []);
+    }, [forcedColors]);
 
     useEffect(() => {
       const adapter = adapterRef.current;

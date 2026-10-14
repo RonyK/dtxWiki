@@ -8,6 +8,7 @@ import { buildLocalScene } from "../../frontend/src/features/graph/local/sceneIn
 import { graphFixture } from "../../frontend/src/features/graph/tests/graphFixture";
 import { setLocale } from "../../frontend/src/shared/i18n";
 import type { GraphNode, GraphQueryPayload } from "../../frontend/src/shared/api/graph";
+import { Dialog } from "../../frontend/src/shared/components/Dialog";
 import "../../frontend/src/styles/index.css";
 
 // Actual GraphView, translations, styles and Sigma renderer, with a synthetic
@@ -17,7 +18,7 @@ const payload = graphFixture();
 payload.history.mode = "current";
 payload.query.time = { mode: "current" };
 const scenario = parameters.get("scenario") ?? "folder";
-if (!["complete", "node-cues", "details-long", "details-actions-long", "keyboard-boundary"].includes(scenario)) {
+if (!["complete", "node-cues", "details-long", "details-actions-long", "keyboard-boundary", "camera-rebuild"].includes(scenario)) {
   payload.truncated = true;
   payload.completeness = "capped";
 }
@@ -169,6 +170,7 @@ setLocale(parameters.get("locale") === "ko" ? "ko" : "en", { persist: false });
 const host = document.querySelector("#fixture");
 if (!host) throw new Error("Missing GraphView coverage fixture host");
 const renderers: Sigma[] = [];
+let lostContext: WEBGL_lose_context | null = null;
 let hoveredKey: string | null = null;
 const originalRefresh = Sigma.prototype.refresh;
 Sigma.prototype.refresh = function (...args: Parameters<Sigma["refresh"]>) {
@@ -193,6 +195,9 @@ declare global {
       activate(active: boolean): void;
       replacePayload(): void;
       projectionRevision(): number;
+      cameraAnimated(): boolean;
+      loseContext(): void;
+      restoreContext(): void;
       nativeNode(id: string): {
         key: string; raw: { x: number; y: number }; displayed: { x: number; y: number };
         point: { x: number; y: number }; paintedPoint: { x: number; y: number };
@@ -215,10 +220,23 @@ function Fixture() {
   const [active, setActive] = useState(true);
   const [currentPayload, setPayload] = useState(payload);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   Object.assign(window, { __localCoverageFixture: {
     activate: setActive,
     replacePayload: () => setPayload((current) => ({ ...current, projection_revision: current.projection_revision + 1 })),
     projectionRevision: () => currentPayload.projection_revision,
+    cameraAnimated: () => renderers.at(-1)?.getCamera().isAnimated() ?? false,
+    loseContext: () => {
+      const canvas = renderers.at(-1)?.getCanvases().nodes;
+      const context = canvas?.getContext("webgl2") ?? canvas?.getContext("webgl");
+      lostContext = context?.getExtension("WEBGL_lose_context") ?? null;
+      if (!lostContext) throw new Error("WEBGL_lose_context is unavailable");
+      lostContext.loseContext();
+    },
+    restoreContext: () => {
+      if (!lostContext) throw new Error("No lost Local Graph context to restore");
+      lostContext.restoreContext();
+    },
     nativeNode: (id: string) => {
       const renderer = renderers.at(-1);
       const localScene = buildLocalScene(currentPayload);
@@ -279,6 +297,18 @@ function Fixture() {
       : undefined,
     key: workspaceId,
   });
+  if (scenario === "camera-rebuild") {
+    return createElement("div", {},
+      createElement("button", { type: "button", onClick: () => setDialogOpen(true) }, "Open camera fixture dialog"),
+      graph,
+      dialogOpen ? createElement(Dialog, {
+        labelledBy: "camera-fixture-dialog-title", onClose: () => setDialogOpen(false),
+        children: createElement("div", {},
+          createElement("h2", { id: "camera-fixture-dialog-title" }, "Camera fixture dialog"),
+          createElement("button", { type: "button", onClick: () => setDialogOpen(false) }, "Close camera fixture dialog")),
+      }) : null,
+    );
+  }
   if (scenario !== "keyboard-boundary") return graph;
   const replace = (next: GraphQueryPayload) => setPayload(next);
   return createElement("div", {},

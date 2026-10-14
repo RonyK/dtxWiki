@@ -44,6 +44,72 @@ const copy = {
   },
 } as const;
 
+async function zoomAndPanLocalGraph(page: Page) {
+  const initial = await page.evaluate(() => window.__localCoverageFixture.read());
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  const bounds = await page.getByTestId("graph-canvas").boundingBox();
+  if (!bounds) throw new Error("The Local Graph canvas has no bounds");
+  // Real stage input, away from the three document glyphs. Observe native
+  // camera animation completion instead of guessing a drag-inertia delay.
+  await page.mouse.move(bounds.x + 35, bounds.y + 35);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + 73, bounds.y + 61, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.cameraAnimated())).toBe(false);
+  const moved = await page.evaluate(() => window.__localCoverageFixture.read());
+  expect(moved.instances).toBe(initial.instances);
+  expect(moved.camera.ratio).toBeCloseTo(initial.camera.ratio / 1.44, 12);
+  expect([moved.camera.x, moved.camera.y]).not.toEqual([initial.camera.x, initial.camera.y]);
+  return moved;
+}
+
+for (const rebuild of ["theme", "forced-colors", "reduced-motion", "context-restored"] as const) {
+  test(`Local GraphView retains native zoom and pan through a ${rebuild} rebuild`, async ({ page }, testInfo) => {
+    const errors = await mount(page, "camera-rebuild", "en", "light", { width: 1440, height: 900 });
+    const before = await zoomAndPanLocalGraph(page);
+    if (rebuild === "theme") {
+      await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    } else if (rebuild === "forced-colors") {
+      await page.emulateMedia({ forcedColors: "active" });
+    } else if (rebuild === "reduced-motion") {
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+    } else {
+      await page.evaluate(() => window.__localCoverageFixture.loseContext());
+      await expect(page.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "error");
+      await page.evaluate(() => window.__localCoverageFixture.restoreContext());
+    }
+    await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.read().instances)).toBe(before.instances + 1);
+    await expect(page.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "ready");
+    const after = await page.evaluate(() => window.__localCoverageFixture.read());
+    expect(after.camera).toEqual(before.camera);
+    expect(errors).toEqual([]);
+    await testInfo.attach("local-native-camera-rebuild", { contentType: "application/json",
+      body: JSON.stringify({ rebuild, before, after }, null, 2) });
+  });
+}
+
+test("Local GraphView keeps its native camera and engine while Dialog locks and unlocks body scrolling", async ({ page }, testInfo) => {
+  const errors = await mount(page, "camera-rebuild", "en", "light", { width: 1440, height: 900 });
+  const before = await zoomAndPanLocalGraph(page);
+  const native = await page.locator("canvas.sigma-nodes").elementHandle();
+  await page.getByRole("button", { name: "Open camera fixture dialog", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Camera fixture dialog", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(before);
+  await page.getByRole("button", { name: "Close camera fixture dialog", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const after = await page.evaluate(() => window.__localCoverageFixture.read());
+  expect(after).toEqual(before);
+  expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+  expect(errors).toEqual([]);
+  await testInfo.attach("local-native-dialog-camera", { contentType: "application/json",
+    body: JSON.stringify({ before, after }, null, 2) });
+});
+
 for (const locale of ["en", "ko"] as const) {
   for (const scenario of ["folder", "quota", "source", "history", "observation-source", "privacy", "unknown"] as const) {
     test(`Local ${locale} ${scenario} coverage explanation stays readable at 390px with actual Sigma paint`, async ({ page }, testInfo) => {

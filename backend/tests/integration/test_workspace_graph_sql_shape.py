@@ -230,6 +230,7 @@ def test_workspace_graph_document_queries_select_only_projection_columns(
         "library_item_version.library_item_id",
         "library_item_version.processing_status",
         "library_item_version.updated_at",
+        "library_item_version.selected_conversion_attempt_id",
     }
     assert result["documents"][("library", corpus.library_ids[0])].label == (
         expected_library_label

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GraphCanvas } from "../GraphCanvas";
 import { deriveGraphScene, graphFacets } from "../graphModel";
 import { graphFixture } from "./graphFixture";
-import type { GraphRenderScene } from "../shared/rendererTypes";
+import type { GraphRenderScene, GraphViewport } from "../shared/rendererTypes";
 
 const { adapter, createAdapter } = vi.hoisted(() => {
   const adapter = {
@@ -272,6 +272,102 @@ describe("GraphCanvas reconciliation", () => {
     );
     view.unmount();
     expect(adapter.destroy).toHaveBeenCalledTimes(createAdapter.mock.calls.length);
+  });
+
+  it.each(["theme", "forced-colors", "reduced-motion", "context-restored"] as const)(
+    "retains the latest native camera through a %s rebuild without a viewport consumer",
+    async (rebuild) => {
+      const payload = graphFixture();
+      const scene = deriveGraphScene(payload, graphFacets(payload), null);
+      const common = reconciliationProps();
+      const view = render(<GraphCanvas {...common} scene={scene} />);
+      await waitFor(() => expect(createAdapter).toHaveBeenCalledOnce());
+      const options = (createAdapter.mock.calls[0] as unknown as [HTMLElement, GraphRenderScene, {
+        callbacks: {
+          onViewport(viewport: GraphViewport): void;
+          onContextStatus(status: "lost" | "restored"): void;
+        };
+      }])[2];
+      const camera = { zoom: 1.44, pan: { x: 0.23, y: 0.72 } };
+      act(() => options.callbacks.onViewport(camera));
+      // A later selection render must not replace the native camera with the
+      // unchanged, absent restore hint used by GraphView in the application.
+      view.rerender(<GraphCanvas {...common} scene={scene} selectedId="node:related" />);
+      expect(createAdapter).toHaveBeenCalledOnce();
+      if (rebuild === "theme") {
+        document.documentElement.setAttribute("data-theme", "dark");
+      } else if (rebuild === "context-restored") {
+        act(() => options.callbacks.onContextStatus("lost"));
+        act(() => options.callbacks.onContextStatus("restored"));
+      } else {
+        view.rerender(<GraphCanvas {...common} scene={scene} selectedId="node:related"
+          forcedColors={rebuild === "forced-colors"} reducedMotion={rebuild === "reduced-motion"} />);
+      }
+      await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(2));
+      expect(createAdapter).toHaveBeenLastCalledWith(expect.any(HTMLElement), scene,
+        expect.objectContaining({ initialViewport: camera }));
+    },
+  );
+
+  it("ignores body scroll locks while rebuilding for a changed scoped graph palette", async () => {
+    const payload = graphFixture();
+    const scene = deriveGraphScene(payload, graphFacets(payload), null);
+    const view = render(<GraphCanvas {...reconciliationProps()} scene={scene} />);
+    await waitFor(() => expect(createAdapter).toHaveBeenCalledOnce());
+    const previousOverflow = document.body.style.overflow;
+    const previousBodyClass = document.body.className;
+    const previousHtmlClass = document.documentElement.className;
+    try {
+      await act(async () => {
+        document.body.style.overflow = "hidden";
+        document.body.classList.add("camera-fixture-modal");
+        document.documentElement.classList.add("camera-fixture-modal");
+      });
+      expect(createAdapter).toHaveBeenCalledOnce();
+      expect(adapter.destroy).not.toHaveBeenCalled();
+      await act(async () => {
+        screen.getByTestId("graph-canvas").style.setProperty("--graph-node-context", "#112233");
+      });
+      await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(2));
+      expect(adapter.destroy).toHaveBeenCalledOnce();
+      await act(async () => { screen.getByTestId("graph-canvas").style.color = "rgb(17, 34, 51)"; });
+      await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(3));
+    } finally {
+      view.unmount();
+      document.body.style.overflow = previousOverflow;
+      document.body.className = previousBodyClass;
+      document.documentElement.className = previousHtmlClass;
+    }
+  });
+
+  it("copies live camera input and rejects camera callbacks from a replaced or lost renderer", async () => {
+    const payload = graphFixture();
+    const scene = deriveGraphScene(payload, graphFacets(payload), null);
+    const onViewport = vi.fn();
+    const common = { ...reconciliationProps(), onViewport };
+    const view = render(<GraphCanvas {...common} scene={scene} />);
+    await waitFor(() => expect(createAdapter).toHaveBeenCalledOnce());
+    type Options = { callbacks: {
+      onViewport(viewport: GraphViewport): void;
+      onContextStatus(status: "lost" | "restored"): void;
+    } };
+    const oldOptions = (createAdapter.mock.calls[0] as unknown as [HTMLElement, GraphRenderScene, Options])[2];
+    const camera = { zoom: 1.44, pan: { x: 0.23, y: 0.72 } };
+    act(() => oldOptions.callbacks.onViewport(camera));
+    expect(onViewport).toHaveBeenCalledExactlyOnceWith(camera);
+    // A consumer owns its callback value, not the internal restore snapshot.
+    camera.pan.x = 99;
+    view.rerender(<GraphCanvas {...common} scene={scene} forcedColors />);
+    await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(2));
+    act(() => oldOptions.callbacks.onViewport({ zoom: 7, pan: { x: 7, y: 7 } }));
+    const currentOptions = (createAdapter.mock.calls[1] as unknown as [HTMLElement, GraphRenderScene, Options])[2];
+    act(() => currentOptions.callbacks.onContextStatus("lost"));
+    act(() => currentOptions.callbacks.onViewport({ zoom: 8, pan: { x: 8, y: 8 } }));
+    act(() => currentOptions.callbacks.onContextStatus("restored"));
+    await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(3));
+    expect(onViewport).toHaveBeenCalledOnce();
+    expect(createAdapter).toHaveBeenLastCalledWith(expect.any(HTMLElement), scene,
+      expect.objectContaining({ initialViewport: { zoom: 1.44, pan: { x: 0.23, y: 0.72 } } }));
   });
 
   it("reports renderer lifecycle, exposes retry, and recovers from an initialization error", async () => {

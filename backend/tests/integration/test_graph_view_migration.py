@@ -10,8 +10,13 @@ import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from backend.app.bootstrap import resolve_migrations_dir
+from backend.models.context import EdgeProjection, PageLink
+from backend.models.workspace import Workspace
+from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.page_service import PageService
 from backend.tests.integration.test_release_schema_migration import (
     _config,
     _insert_initial_release_page_link_source,
@@ -23,6 +28,294 @@ from backend.tests.utils.migrated_sqlite_templates import shared_templates
 CORE_REVISION = "efcbcf724889"
 GRAPH_REVISION = "9aeab6944f25"
 GRAPH_FILE = "9aeab6944f25_add_graph_view.py"
+
+
+def _released_edge_rows(engine):
+    edges = Table("edge_projection", MetaData(), autoload_with=engine)
+    columns = [
+        column
+        for column in edges.c
+        if column.name not in {"support_session_count", "first_observed_at"}
+    ]
+    with engine.connect() as connection:
+        return {
+            str(row["id"]).replace("-", ""): dict(row)
+            for row in connection.execute(select(*columns)).mappings()
+        }
+
+
+def _seed_runtime_url_projection(engine):
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory.begin() as session:
+        workspace = seed_default_workspace(session)
+        untouched_workspace = seed_default_workspace(session, slug="untouched")
+        workspace_id = workspace.id
+        untouched_workspace_id = untouched_workspace.id
+    service = PageService(factory)
+
+    def write(slug, body, previous=None):
+        return service.write_page(
+            workspace_slug="default",
+            slug=slug,
+            title=slug,
+            body_md=body,
+            actor_kind="human",
+            actor_id="migration-url-regression",
+            actor_provenance="browser_session",
+            base_version_id=None if previous is None else previous.version_id,
+            base_content_hash=None if previous is None else previous.content_hash,
+        )
+
+    target = write("downgrade-target", "# Target")
+    old_url_only = write("downgrade-url-only", f"# Before\n\n[[{target.slug}]]")
+    url_only = write(
+        "downgrade-url-only",
+        f"# URL only\n\n[Target](/context?target={target.id})",
+        old_url_only,
+    )
+    mixed = write(
+        "downgrade-mixed",
+        f"# Mixed\n\n[[{target.slug}]] twice [[{target.slug}]]\n\n"
+        f"[Target](/context?target={target.id})",
+    )
+    wiki_only = write("downgrade-wiki-only", f"# Wiki only\n\n[[{target.slug}]]")
+    other_origin = write(
+        "downgrade-other-origin", f"# Other\n\n[Target](/context?target={target.id})"
+    )
+    with factory.begin() as session:
+        authored = {
+            row.source_id: row
+            for row in session.scalars(
+                select(EdgeProjection).where(
+                    EdgeProjection.workspace_id == workspace_id,
+                    EdgeProjection.edge_kind == "wikilink",
+                    EdgeProjection.source_kind == "context_page",
+                    EdgeProjection.target_kind == "context_page",
+                )
+            )
+        }
+        assert authored[url_only.id].weight == 1
+        assert authored[mixed.id].weight == 3
+        assert authored[wiki_only.id].weight == 1
+        # An old version's wikilink must not keep a current URL-only edge
+        # alive when the published head no longer contains that wikilink.
+        session.add(
+            PageLink(
+                workspace_id=workspace_id,
+                source_page_id=url_only.id,
+                source_version_id=old_url_only.version_id,
+                target_slug=target.slug,
+                target_page_id=target.id,
+                link_syntax="wikilink",
+                occurrence_count=9,
+            )
+        )
+        # Preserve the identity, observation timestamps and metadata of the
+        # surviving authored edge; only its aggregate weight should change.
+        authored[mixed.id].occurred_at = datetime(2026, 10, 12, tzinfo=UTC)
+        authored[mixed.id].last_seen_at = datetime(2026, 10, 13, tzinfo=UTC)
+        authored[mixed.id].source_ref = {"table": "page_links", "retained": True}
+        authored[other_origin.id].source_ref = {"table": "other_projection"}
+        for source_kind, target_kind, edge_kind in (
+            ("context_page", "context_page", "citation_page"),
+            ("agent_page", "context_page", "wikilink"),
+            ("context_page", "library_item", "wikilink"),
+        ):
+            session.add(
+                EdgeProjection(
+                    workspace_id=workspace_id,
+                    source_kind=source_kind,
+                    source_id=url_only.id,
+                    target_kind=target_kind,
+                    target_id=target.id,
+                    edge_kind=edge_kind,
+                    provenance="curated",
+                    weight=7,
+                    source_ref={"table": "page_links"},
+                    last_seen_at=datetime(2026, 10, 10, tzinfo=UTC),
+                )
+            )
+        workspace = session.get(Workspace, workspace_id)
+        workspace.authority_projection_version = workspace.edge_projection_version
+        versions = (
+            workspace.edge_projection_version,
+            workspace.authority_projection_version,
+        )
+        untouched = session.get(Workspace, untouched_workspace_id)
+        untouched_versions = (
+            untouched.edge_projection_version,
+            untouched.authority_projection_version,
+        )
+        url_edge_id = authored[url_only.id].id.hex
+        mixed_edge_id = authored[mixed.id].id.hex
+    return (
+        workspace_id,
+        untouched_workspace_id,
+        url_edge_id,
+        mixed_edge_id,
+        versions,
+        untouched_versions,
+    )
+
+
+def test_downgrade_reconciles_runtime_url_edges_and_preserves_released_relations(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'runtime-url-downgrade.db'}"
+    _assert_runtime_url_downgrade(database_url)
+
+
+def _assert_runtime_url_downgrade(database_url):
+    config = _config(database_url)
+    command.upgrade(config, GRAPH_REVISION)
+    engine = create_engine(database_url)
+    try:
+        (
+            workspace_id,
+            untouched_workspace_id,
+            url_edge_id,
+            mixed_edge_id,
+            versions,
+            untouched_versions,
+        ) = _seed_runtime_url_projection(engine)
+        before = _released_edge_rows(engine)
+        expected = {key: dict(row) for key, row in before.items() if key != url_edge_id}
+        expected[mixed_edge_id]["weight"] = 2.0
+
+        command.downgrade(config, CORE_REVISION)
+        assert _released_edge_rows(engine) == expected
+        workspaces = Table("workspace", MetaData(), autoload_with=engine)
+        with engine.connect() as connection:
+            actual_versions = {
+                str(row.id).replace("-", ""): (
+                    row.edge_projection_version,
+                    row.authority_projection_version,
+                )
+                for row in connection.execute(
+                    select(
+                        workspaces.c.id,
+                        workspaces.c.edge_projection_version,
+                        workspaces.c.authority_projection_version,
+                    )
+                )
+            }
+            assert actual_versions[workspace_id.hex] == (versions[0] + 1, versions[1])
+            assert actual_versions[untouched_workspace_id.hex] == untouched_versions
+            assert connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            ) == (CORE_REVISION)
+            assert "graph_observation" not in inspect(connection).get_table_names()
+            assert "link_syntax" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("page_links")
+            }
+        # Reapplying the revision preserves the repaired released projections;
+        # the URL projections are intentionally rebuilt by the maintenance CLI.
+        command.upgrade(config, GRAPH_REVISION)
+        assert _released_edge_rows(engine) == expected
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            ) == (GRAPH_REVISION)
+            assert (
+                connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
+            )
+    finally:
+        engine.dispose()
+
+
+def test_url_edge_reconciliation_failure_rolls_back_downgrade(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'failed-url-downgrade.db'}"
+    config = _config(database_url)
+    command.upgrade(config, GRAPH_REVISION)
+    scripts = tmp_path / "migrations"
+    shutil.copytree(
+        resolve_migrations_dir(), scripts, ignore=shutil.ignore_patterns("__pycache__")
+    )
+    graph = scripts / "versions" / "v0_1" / GRAPH_FILE
+    graph.write_text(
+        graph.read_text()
+        + "\n_original_reconcile = _reconcile_released_wikilink_edges\n"
+        + "def _reconcile_released_wikilink_edges():\n"
+        + "    _original_reconcile()\n"
+        + '    raise RuntimeError("URL edge reconciliation failure")\n'
+    )
+    config.set_main_option("script_location", str(scripts))
+    config.set_main_option("version_locations", str(scripts / "versions"))
+    engine = create_engine(database_url)
+    try:
+        _seed_runtime_url_projection(engine)
+        before_schema = _schema_snapshot(engine)
+        tables = (
+            "workspace",
+            "page_links",
+            "edge_projection",
+            "graph_observation",
+            "graph_history_coverage",
+        )
+        with engine.connect() as connection:
+            before_data = {
+                table: connection.execute(
+                    text(f"SELECT * FROM {table} ORDER BY id")
+                ).all()
+                for table in tables
+            }
+            before_triggers = connection.execute(
+                text(
+                    "SELECT name, sql FROM sqlite_master "
+                    "WHERE type='trigger' ORDER BY name"
+                )
+            ).all()
+        with pytest.raises(RuntimeError, match="URL edge reconciliation failure"):
+            command.downgrade(config, CORE_REVISION)
+        assert _schema_snapshot(engine) == before_schema
+        with engine.connect() as connection:
+            assert {
+                table: connection.execute(
+                    text(f"SELECT * FROM {table} ORDER BY id")
+                ).all()
+                for table in tables
+            } == before_data
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT name, sql FROM sqlite_master "
+                        "WHERE type='trigger' ORDER BY name"
+                    )
+                ).all()
+                == before_triggers
+            )
+            assert connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            ) == (GRAPH_REVISION)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.xdist_group("postgres")
+@pytest.mark.skipif(
+    not os.getenv("DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL", "").startswith(
+        "postgresql"
+    ),
+    reason="requires a dedicated PostgreSQL migration test database",
+)
+def test_postgres_downgrade_reconciles_runtime_url_edges_and_replays():
+    database_url = os.environ["DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL"]
+    engine = create_engine(database_url)
+    try:
+        tables = set(inspect(engine).get_table_names())
+        assert tables <= {"alembic_version"}, "requires an empty dedicated database"
+        if "alembic_version" in tables:
+            with engine.connect() as connection:
+                assert (
+                    connection.scalar(text("SELECT COUNT(*) FROM alembic_version")) == 0
+                )
+    finally:
+        engine.dispose()
+    try:
+        _assert_runtime_url_downgrade(database_url)
+    finally:
+        command.downgrade(_config(database_url), "base")
 
 
 def test_populated_released_core_upgrades_and_downgrades_without_data_loss(

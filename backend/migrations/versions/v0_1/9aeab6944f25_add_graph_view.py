@@ -74,6 +74,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     _downgrade_ledger()
+    _reconcile_released_wikilink_edges()
     # URL links are a rebuildable Graph View projection unsupported by core.
     # Remove them before restoring the old unique key so a URL row can never
     # replace a pre-existing wikilink for the same source/version/target.
@@ -93,6 +94,144 @@ def downgrade() -> None:
         batch_op.drop_column("usage_relation_signals_enabled")
         batch_op.drop_column("workspace_graph_enabled")
         batch_op.drop_column("graph_observation_sequence")
+
+
+def _reconcile_released_wikilink_edges() -> None:
+    """Remove URL contributions without rebuilding unrelated released edges.
+
+    Both authored syntaxes feed the same current-published-head aggregate.
+    Keep surviving edge identities and evidence metadata, adjusting only the
+    weight; a URL-only aggregate has no released-core source and is removed.
+    Revision-local SQL shapes deliberately avoid evolving runtime models.
+    """
+
+    connection = op.get_bind()
+    links = sa.table(
+        "page_links",
+        sa.column("workspace_id", sa.Uuid()),
+        sa.column("source_page_id", sa.Uuid()),
+        sa.column("source_version_id", sa.Uuid()),
+        sa.column("target_page_id", sa.Uuid()),
+        sa.column("link_syntax", sa.Text()),
+        sa.column("occurrence_count", sa.Integer()),
+    )
+    pages = sa.table(
+        "context_page",
+        sa.column("id", sa.Uuid()),
+        sa.column("workspace_id", sa.Uuid()),
+        sa.column("current_published_version_id", sa.Uuid()),
+    )
+    edges = sa.table(
+        "edge_projection",
+        sa.column("id", sa.Uuid()),
+        sa.column("workspace_id", sa.Uuid()),
+        sa.column("source_kind", sa.Text()),
+        sa.column("source_id", sa.Uuid()),
+        sa.column("target_kind", sa.Text()),
+        sa.column("target_id", sa.Uuid()),
+        sa.column("edge_kind", sa.Text()),
+        sa.column("weight", sa.Float()),
+        sa.column("source_ref", sa.JSON()),
+    )
+    affected = (
+        sa.select(
+            links.c.workspace_id,
+            links.c.source_page_id,
+            links.c.target_page_id,
+        )
+        .where(
+            links.c.link_syntax == "context_url", links.c.target_page_id.is_not(None)
+        )
+        .distinct()
+        .subquery()
+    )
+    candidates = connection.execute(
+        sa.select(
+            edges.c.id,
+            edges.c.workspace_id,
+            edges.c.source_id,
+            edges.c.target_id,
+            edges.c.weight,
+        )
+        .select_from(
+            edges.join(
+                affected,
+                sa.and_(
+                    edges.c.workspace_id == affected.c.workspace_id,
+                    edges.c.source_id == affected.c.source_page_id,
+                    edges.c.target_id == affected.c.target_page_id,
+                ),
+            )
+        )
+        .where(
+            edges.c.edge_kind == "wikilink",
+            edges.c.source_kind == "context_page",
+            edges.c.target_kind == "context_page",
+            edges.c.source_ref["table"].as_string() == "page_links",
+        )
+    ).all()
+    if not candidates:
+        return
+    surviving_weights = {
+        (workspace_id, source_id, target_id): float(total or 1)
+        for workspace_id, source_id, target_id, total in connection.execute(
+            sa.select(
+                links.c.workspace_id,
+                links.c.source_page_id,
+                links.c.target_page_id,
+                sa.func.sum(links.c.occurrence_count),
+            )
+            .select_from(
+                links.join(
+                    pages,
+                    sa.and_(
+                        links.c.workspace_id == pages.c.workspace_id,
+                        links.c.source_page_id == pages.c.id,
+                        links.c.source_version_id
+                        == pages.c.current_published_version_id,
+                    ),
+                ).join(
+                    affected,
+                    sa.and_(
+                        links.c.workspace_id == affected.c.workspace_id,
+                        links.c.source_page_id == affected.c.source_page_id,
+                        links.c.target_page_id == affected.c.target_page_id,
+                    ),
+                )
+            )
+            .where(links.c.link_syntax == "wikilink")
+            .group_by(
+                links.c.workspace_id,
+                links.c.source_page_id,
+                links.c.target_page_id,
+            )
+        )
+    }
+    changed_workspaces = set()
+    for edge_id, workspace_id, source_id, target_id, old_weight in candidates:
+        weight = surviving_weights.get((workspace_id, source_id, target_id))
+        if weight is None:
+            connection.execute(edges.delete().where(edges.c.id == edge_id))
+        elif weight != old_weight:
+            connection.execute(
+                edges.update().where(edges.c.id == edge_id).values(weight=weight)
+            )
+        else:
+            continue
+        changed_workspaces.add(workspace_id)
+    if changed_workspaces:
+        workspaces = sa.table(
+            "workspace",
+            sa.column("id", sa.Uuid()),
+            sa.column("edge_projection_version", sa.Integer()),
+        )
+        # Keep the previous authority watermark: advancing the edge version
+        # makes it stale, so the released authority maintenance recomputes it.
+        connection.execute(
+            workspaces.update()
+            .where(workspaces.c.id.in_(changed_workspaces))
+            .values(edge_projection_version=workspaces.c.edge_projection_version + 1)
+        )
 
 
 def _upgrade_ledger() -> None:
