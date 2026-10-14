@@ -31,6 +31,15 @@ from pathlib import Path
 
 from deploy_static_bundle import _local_entry_files
 
+# This is Vite's emitted URL literal for our one module collision Worker,
+# not a general JavaScript/import parser. Match its quoted content hash so an
+# unrelated old Worker file cannot stand in for the adapter's required asset.
+_COLLISION_WORKER_URL = re.compile(
+    r'new\s+URL\(\s*(?P<quote>["\'])'
+    r'(?P<path>/assets/forceAtlas2Collision\.worker-[A-Za-z0-9_-]+\.js)'
+    r'(?P=quote)\s*,\s*import\.meta\.url\s*\)'
+)
+
 # Canonical IDs of the historical schema boundaries, base first. Every later release
 # keeps them as
 # the start of one linear chain: a new revision descends from the current head
@@ -225,6 +234,53 @@ def _check_frontend_bundle(root: Path) -> list[str]:
         failures.append(
             "backend/static/index.html references no entry under backend/static/assets/"
         )
+    # The module Worker is lazy-loaded from the map adapter, not index.html.
+    # A missing package-data entry used to pass the direct-entry check above
+    # and fail only when the 2K layout reached contact projection. Check both
+    # wheel and sdist here; the upstream ForceAtlas2 Blob Worker is embedded in
+    # the adapter and does not have a separate file to require.
+    if not any(
+        path.is_file() and path.stat().st_size > 0
+        for path in (static / "assets").glob("forceAtlas2Collision.worker-*.js")
+    ):
+        failures.append(
+            "backend/static/assets/forceAtlas2Collision.worker-*.js is missing "
+            "or empty (the 2K layout requires its module collision Worker)"
+        )
+    failures.extend(_check_2k_worker_references(static))
+    return failures
+
+
+def _check_2k_worker_references(static: Path) -> list[str]:
+    """Verify the exact Worker hash the built JavaScript requests."""
+
+    references: set[tuple[Path, Path]] = set()
+    failures: list[str] = []
+    for javascript in sorted((static / "assets").rglob("*.js")):
+        try:
+            source = javascript.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            failures.append(
+                f"backend/static/{javascript.relative_to(static)} "
+                "is not UTF-8 JavaScript"
+            )
+            continue
+        references.update(
+            (javascript.relative_to(static), Path(match["path"].lstrip("/")))
+            for match in _COLLISION_WORKER_URL.finditer(source)
+        )
+    if not references:
+        failures.append(
+            "backend/static/assets JavaScript has no 2K collision Worker URL "
+            "reference (expected Vite's new URL(...,import.meta.url) literal)"
+        )
+    for javascript, reference in sorted(references):
+        worker = static / reference
+        if not worker.is_file() or worker.stat().st_size == 0:
+            failures.append(
+                f"backend/static/{javascript.as_posix()} references "
+                f"backend/static/{reference.as_posix()}, which is missing or empty"
+            )
     return failures
 
 

@@ -59,9 +59,21 @@ def _stage(tmp_path, name="stage"):
     assets = stage / "backend" / "static" / "assets"
     assets.mkdir(parents=True)
     (assets.parent / "index.html").write_text(INDEX_HTML, encoding="utf-8")
-    (assets / "index-abc123.js").write_text("export {};\n", encoding="utf-8")
+    (assets / "index-abc123.js").write_text(
+        'export const openMap=()=>import("./cosmosAdapter-abc123.js");\n',
+        encoding="utf-8",
+    )
+    (assets / "cosmosAdapter-abc123.js").write_text(
+        'export const createCollisionWorker=()=>new Worker(new URL('
+        '"/assets/forceAtlas2Collision.worker-abc123.js",import.meta.url),'
+        '{type:"module",name:"workspace-fa2-collision"});\n',
+        encoding="utf-8",
+    )
     (assets / "index-abc123.css").write_text(":root{}\n", encoding="utf-8")
     (assets / "pdf.worker.min-abc123.mjs").write_text("export {};\n", encoding="utf-8")
+    (assets / "forceAtlas2Collision.worker-abc123.js").write_text(
+        "self.onmessage = () => {};\n", encoding="utf-8"
+    )
     (assets.parent / "THIRD_PARTY_NOTICES.txt").write_text(
         THIRD_PARTY_NOTICES, encoding="utf-8"
     )
@@ -820,3 +832,82 @@ def test_verifier_rejects_notices_that_omit_the_shipped_pdfjs_worker(tmp_path):
 
     assert result.returncode == 1
     assert "omits pdfjs-dist" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
+@pytest.mark.parametrize("damage", ["missing", "empty"])
+def test_verifier_rejects_a_missing_2k_collision_worker(
+    tmp_path, artifact_kind, damage
+):
+    def damage_worker(stage):
+        worker = stage / "backend/static/assets/forceAtlas2Collision.worker-abc123.js"
+        if damage == "missing":
+            worker.unlink()
+        else:
+            worker.write_bytes(b"")
+
+    dist = _dist_with_one_artifact_mutated(tmp_path, artifact_kind, damage_worker)
+
+    result = _run_verifier(dist)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    artifact = WHEEL_NAME if artifact_kind == "wheel" else SDIST_NAME
+    assert f"{artifact}: backend/static/assets/forceAtlas2Collision.worker" in (
+        result.stdout + result.stderr
+    )
+
+
+@pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
+def test_verifier_rejects_a_stale_2k_worker_instead_of_the_referenced_hash(
+    tmp_path, artifact_kind
+):
+    def keep_only_stale_worker(stage):
+        assets = stage / "backend/static/assets"
+        (assets / "forceAtlas2Collision.worker-abc123.js").rename(
+            assets / "forceAtlas2Collision.worker-old456.js"
+        )
+
+    result = _run_verifier(
+        _dist_with_one_artifact_mutated(tmp_path, artifact_kind, keep_only_stale_worker)
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    artifact = WHEEL_NAME if artifact_kind == "wheel" else SDIST_NAME
+    assert (
+        f"{artifact}: backend/static/assets/cosmosAdapter-abc123.js references "
+        "backend/static/assets/forceAtlas2Collision.worker-abc123.js"
+    ) in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
+def test_verifier_rejects_a_worker_file_without_an_actual_bundle_reference(
+    tmp_path, artifact_kind
+):
+    def remove_reference(stage):
+        (stage / "backend/static/assets/cosmosAdapter-abc123.js").write_text(
+            "export {};\n", encoding="utf-8"
+        )
+
+    result = _run_verifier(
+        _dist_with_one_artifact_mutated(tmp_path, artifact_kind, remove_reference)
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "JavaScript has no 2K collision Worker URL reference" in (
+        result.stdout + result.stderr
+    )
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_verifier_resolves_the_vite_worker_url_literal(tmp_path, quote):
+    stage = _stage(tmp_path)
+    adapter = stage / "backend/static/assets/cosmosAdapter-abc123.js"
+    adapter.write_text(
+        "new Worker(new URL( "
+        f"{quote}/assets/forceAtlas2Collision.worker-abc123.js{quote}"
+        ', import.meta.url ), {type:"module",name:"workspace-fa2-collision"});',
+        encoding="utf-8",
+    )
+
+    failures = _verifier_module()._check_2k_worker_references(stage / "backend/static")
+    assert failures == []

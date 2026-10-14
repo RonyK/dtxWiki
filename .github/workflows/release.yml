@@ -65,6 +65,27 @@ jobs:
         run: >-
           .venv/bin/python -m pytest tests/packaging tests/static -q
           --deselect tests/packaging/test_distribution_includes_infra_prod.py::test_wheel_and_sdist_include_operator_artifacts
+      # Tags can bypass PR/main CI. A valid wheel inventory alone cannot prove
+      # that its graph adapter, module Worker and Blob Worker run under CSP.
+      # Keep these bounded 2K browser gates before any artifact can publish;
+      # the real-API wrapper owns an isolated migrated DB and production SPA.
+      - name: Install the release-gate browser
+        run: npx playwright install --with-deps chromium
+      - name: Verify the 2K CPU Workers under production CSP
+        run: >-
+          npm run test:graph-webgl -- workspace-cpu-layout.spec.ts --reporter=line
+      - name: Verify the real-API 2K graph
+        env:
+          DTXWIKI_E2E_GRAPH_2K: "1"
+        run: >-
+          npm run test:e2e -- tests/e2e/workspace_graph_2k_real.spec.ts
+          tests/e2e/workspace_graph_reading_real.spec.ts
+          tests/e2e/workspace_graph_first_view.spec.ts
+          --project=chromium --workers=1 --retries=0 --reporter=line
+      # The corpus wrapper serves a repo-built SPA. Exercise the wheel itself
+      # as well: an isolated install must supply both backend and graph assets.
+      - name: Verify the installed-wheel Graph runtime
+        run: .venv/bin/python tests/packaging/packaged_browser_smoke.py
       - uses: actions/upload-artifact@v4
         with:
           name: dist
