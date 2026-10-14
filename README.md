@@ -53,6 +53,8 @@ and creative projects.
 
 ## Get started
 
+### Install and run
+
 You need **Python 3.12 or newer** and [pipx](https://pipx.pypa.io/) or
 [uv](https://docs.astral.sh/uv/).
 
@@ -71,14 +73,193 @@ dtxwiki
 ```
 
 Open **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)** if your browser does not open automatically.
-Create an account on your first visit. Keep the command running while using
-dtxWiki; press `Ctrl+C` to stop it.
+Keep the command running while using dtxWiki; press `Ctrl+C` to stop it.
+The `serve --no-open` option turns off automatic browser opening.
 
 If you prefer npm, run `npx @dtxsuite/dtxwiki`. This requires Node.js 22 or newer
 and uv or pipx; with pipx, Python 3.12 or newer must also be installed.
 
+### Create your account and grant server-admin
+
+There is no default account or password. Create an account with your email and
+chosen password on your first visit. Your account owns its Personal workspace;
+the first account also needs a separate **server-admin** permission for server
+administration. In a second terminal, use the same OS user and environment
+settings as the running server. Replace `you@example.com` with the email you
+registered.
+
+For a pipx or uv installation:
+
+```bash
+dtxwiki admin grant --email you@example.com
+dtxwiki admin list
+```
+
+For an npm installation:
+
+```bash
+npx @dtxsuite/dtxwiki admin grant --email you@example.com
+npx @dtxsuite/dtxwiki admin list
+```
+
+Refresh your browser to access **Settings > Deployment**. Server administration
+manages system settings; access to workspace content still follows workspace
+membership.
+
 Start with one Context page about your current project. Link the background,
 then connect an AI tool through **Settings > Integrations** when you want help.
+
+### Set the access URL and allowed hosts
+
+`DTXWIKI_PUBLIC_BASE_URL` is the canonical URL people use to reach your server.
+It is used for server links and metadata, and its host is automatically allowed.
+It does not change the listening address or enable HTTPS: use `--host` to choose
+where the server listens, and follow the deployment guide to configure TLS.
+
+Host validation accepts loopback names, the canonical URL's host, and additional
+hosts in `DTXWIKI_ALLOWED_HOSTS`. Set that variable to comma-separated host names
+or IP addresses, such as `wiki.local,192.168.1.20`; it is not a JSON array.
+This check helps prevent DNS rebinding, where an attacker-controlled name points
+to your server. `DTXWIKI_ALLOWED_HOSTS=*` disables validation for every Host,
+including all host names and IP addresses.
+
+For IP access, list the IP or set a canonical URL containing it. There is no
+IP-only bypass. Keep Host validation enabled for regular use. The bundled UI
+uses same-origin API requests, so LAN access does not need a separate CORS origin.
+
+The default npm, pipx, and uv launch listens on
+`127.0.0.1:21080`, so it is accessible only on the computer running dtxWiki.
+For an HTTP test on a trusted LAN, stop the current process and restart it with
+the LAN URL configured. Replace `192.168.1.20` with your server's LAN IP; setting
+this URL automatically allows that host.
+
+Linux/macOS:
+
+```bash
+export DTXWIKI_PUBLIC_BASE_URL=http://192.168.1.20:21080
+npx @dtxsuite/dtxwiki serve --host 0.0.0.0 --port 21080 --no-open
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DTXWIKI_PUBLIC_BASE_URL = "http://192.168.1.20:21080"
+npx @dtxsuite/dtxwiki serve --host 0.0.0.0 --port 21080 --no-open
+```
+
+For pipx or uv, replace `npx @dtxsuite/dtxwiki` with `dtxwiki`. On the other device,
+open `http://192.168.1.20:21080/`. Allow TCP port 21080 through the server's firewall
+for trusted LAN clients; virtual machines or WSL may also need network forwarding.
+See the [WSL networking guide](https://learn.microsoft.com/en-us/windows/wsl/networking)
+when running the server in WSL.
+HTTP exposes credentials and session cookies in transit, so use this only for LAN
+evaluation. For internet access or regular shared use, follow the
+[HTTPS server deployment guide](DEPLOYMENT.md#quick-install-현재-권장-경로).
+For a network without public DNS, see the
+[internal-network TLS options](DEPLOYMENT.md#내부망--공인-도메인-없는-배포-tls-모드-선택).
+Production deployment uses a separate data location; existing local accounts and
+data are not transferred automatically. Follow the guide's backup and migration
+steps when moving an existing installation.
+
+### Run in the background and start a worker
+
+On Linux or macOS, stop the existing foreground server, then run:
+
+```bash
+nohup npx --yes @dtxsuite/dtxwiki serve --no-open > dtxwiki.log 2>&1 < /dev/null &
+```
+
+For pipx or uv, replace `npx --yes @dtxsuite/dtxwiki` with `dtxwiki`.
+For LAN access, keep the `--host 0.0.0.0 --port 21080` options from the example
+above. Read the log with `tail -f dtxwiki.log`; press `Ctrl+C` to stop following it.
+To stop the server, find the process actually listening on its port:
+
+```bash
+lsof -nP -iTCP:21080 -sTCP:LISTEN
+```
+
+Run `kill -TERM PID`, replacing `PID` with that listener's PID. The npm wrapper's
+PID is not a reliable identifier for the server process.
+
+On Windows PowerShell, open a separate console window:
+
+```powershell
+Start-Process npx.cmd -ArgumentList "--yes @dtxsuite/dtxwiki serve --no-open"
+```
+
+For pipx or uv, use `Start-Process dtxwiki -ArgumentList "serve --no-open"`.
+Keep the new console visible and press `Ctrl+C` in that window to stop the server.
+Include the same LAN bind options when needed.
+
+The server does not automatically start a worker. Background jobs and queued
+email delivery need a separate worker process. For pipx or uv installations:
+
+```bash
+dtxwiki-worker run
+```
+
+The npm launcher exposes the server CLI; run its matching Python worker through
+uv or pipx. For dtxWiki 0.1.2:
+
+```bash
+uvx --python 3.12 --from dtxwiki==0.1.2 dtxwiki-worker run
+# Or, with pipx:
+pipx run --spec dtxwiki==0.1.2 dtxwiki-worker run
+```
+
+Use the same dtxWiki version, OS user, database, and SMTP environment for the
+server and worker. `run` keeps polling until stopped; it has no default idle exit.
+Run it in a second terminal, or manage both processes as services.
+
+For startup at boot and automatic restarts on Ubuntu, first complete the
+[production deployment guide](DEPLOYMENT.md#quick-install-현재-권장-경로), which
+installs the server and worker services. Enable and inspect both:
+
+```bash
+sudo systemctl enable --now dtxwiki dtxwiki-worker
+sudo systemctl status dtxwiki dtxwiki-worker
+```
+
+Follow their logs with `sudo journalctl -u dtxwiki -u dtxwiki-worker -f`.
+Stop both with `sudo systemctl stop dtxwiki dtxwiki-worker`.
+
+### Configure email delivery
+
+**SMTP configuration is optional.** You can sign up, log in, and use the wiki
+without it. Email sending is disabled by default (`DTXWIKI_MAIL_PROVIDER=none`);
+without SMTP, email verification, password recovery by email, and email
+notifications do not work.
+
+To enable these features, configure SMTP and set `DTXWIKI_PUBLIC_BASE_URL` to an
+HTTPS URL that users can actually reach. An HTTP canonical URL leaves email
+sending disabled.
+
+| Environment variable | Value or example |
+| --- | --- |
+| `DTXWIKI_PUBLIC_BASE_URL` | `https://wiki.example.com` |
+| `DTXWIKI_MAIL_PROVIDER` | `smtp` |
+| `DTXWIKI_MAIL_FROM_ADDRESS` | `wiki@example.com` |
+| `DTXWIKI_SMTP_HOST` | `smtp.example.com` |
+| `DTXWIKI_SMTP_PORT` | `587` |
+| `DTXWIKI_SMTP_STARTTLS` | `true` |
+| `DTXWIKI_SMTP_USE_SSL` | `false` |
+| `DTXWIKI_SMTP_USERNAME` | `<smtp-username>` |
+| `DTXWIKI_SMTP_PASSWORD` | `<smtp-password>` |
+
+Apply these environment variables to both the server and worker, then restart
+both. On Linux/macOS, use `export KEY=value`; in PowerShell, use
+`$env:KEY = 'value'`, substituting each table entry. For SMTP port 465, set
+`DTXWIKI_SMTP_STARTTLS=false` and `DTXWIKI_SMTP_USE_SSL=true` together.
+For a production installation, use the persistent `dtxwiki config set` procedure
+in [Identity & Recovery settings](DEPLOYMENT.md#identity--recovery-설정).
+
+Exactly one SMTP TLS mode must be enabled. Use the SMTP provider's authorized
+sender address and credentials. These variables must be set in the process
+environment; merely creating a `.env` file does not apply them automatically.
+
+**Settings > Deployment** showing email as configured confirms the settings,
+not successful delivery. Check recent outbox delivery status and confirm receipt
+in the recipient's inbox.
 
 **[Open the documentation →](http://docs.dtxwiki.com/)** for installation details,
 AI connections, team setup, updates, and everyday workflows.

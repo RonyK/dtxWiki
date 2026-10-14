@@ -270,9 +270,11 @@ remembered 갱신은 `auth.session.renewed` audit event 로 Activity 에 남습�
 
 ## Identity & Recovery 설정
 
-기본 `DTXWIKI_MAIL_PROVIDER=none`은 공개 이메일 복구를 노출하지 않고 server-admin 지원만
-허용합니다. 비밀번호 원문은 저장되지 않으므로 운영자가 조회할 수 없습니다. 응급 복구는 다음처럼
-사용자 본인만 새 비밀번호를 선택하는 일회용 링크를 발급합니다.
+**SMTP 설정은 선택 사항입니다.** SMTP 없이도 회원가입·로그인·위키 기본 기능을 사용할
+수 있습니다. 기본 `DTXWIKI_MAIL_PROVIDER=none`에서는 이메일 인증, 이메일을 통한
+비밀번호 복구, 이메일 알림이 동작하지 않습니다. 이 경우 비밀번호 복구는 server-admin의
+지원으로 진행합니다. 비밀번호 원문은 저장되지 않으므로 운영자가 조회할 수 없습니다.
+응급 복구는 다음처럼 사용자 본인만 새 비밀번호를 선택하는 일회용 링크를 발급합니다.
 
 ```bash
 sudo dtxwiki users issue-password-reset user@example.com --delivery link
@@ -299,6 +301,33 @@ sudo dtxwiki config set DTXWIKI_SMTP_USERNAME='<username>'
 sudo dtxwiki config set DTXWIKI_SMTP_PASSWORD='<secret>' --i-understand
 sudo systemctl restart dtxwiki dtxwiki-worker
 ```
+
+SMTP 기본 전송 방식은 587/STARTTLS(`DTXWIKI_SMTP_STARTTLS=true`,
+`DTXWIKI_SMTP_USE_SSL=false`)입니다. 제공자가 465/TLS를 요구하면 포트와 두 TLS
+플래그를 함께 바꿔야 합니다. 이미 SMTP가 켜진 환경에서 `config set`으로 전환할 때는
+다음 순서로 저장한 후 두 서비스를 재시작하세요. SMTP provider를 잠시 `none`으로
+저장하는 것은 TLS 플래그가 둘 다 꺼지거나 켜진 중간 상태를 검증에서 거부하기 때문입니다.
+실행 중인 프로세스는 재시작 전까지 기존 설정을 사용합니다.
+
+```bash
+sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=none
+sudo dtxwiki config set DTXWIKI_SMTP_PORT=465
+sudo dtxwiki config set DTXWIKI_SMTP_STARTTLS=false
+sudo dtxwiki config set DTXWIKI_SMTP_USE_SSL=true
+sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
+sudo systemctl restart dtxwiki dtxwiki-worker
+```
+
+메일 활성화에는 발신 주소·SMTP 호스트·TLS 설정뿐 아니라 실제 HTTPS 대표 URL도
+필요합니다. 대표 URL을 HTTP로 설정하면 현재 제품의 메일 기능은 켜지지 않습니다.
+설정 변경은 서버와 worker에 모두 적용해야 합니다. SMTP 인증 값은 제공자가 발급한
+값을 사용하고, SMTP가 허용하는 발신 주소를 지정하세요.
+
+메일 상태의 `configured`는 설정값 검사이며 SMTP 인증 확인이 아닙니다. 최근 outbox의
+`sent`는 SMTP 서버가 전송을 수락했다는 의미로, 수신함 도착을 보장하지 않습니다.
+설정 후 이메일 확인이나 복구 메일을 실제로 요청하고 발송 상태와 수신함을 함께 확인하세요.
+전용 SMTP 테스트 명령은 없습니다. `users issue-password-reset --delivery email`은
+실제 재설정 토큰을 발급·전송하므로 단순 연결 확인 명령으로 사용하지 않습니다.
 
 복구 성공은 모든 브라우저 세션과 다른 재설정 토큰을 폐기합니다. PAT/MCP/OAuth 자격 증명은
 별도이며, 복구 화면이나 server-admin 조치에서 명시적으로 선택한 경우에만 전부 폐기합니다.
