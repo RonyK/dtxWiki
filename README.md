@@ -25,6 +25,9 @@ access you grant.
 - **Keep the reasoning with the result.** Connect a plan to the interviews,
   notes, and decisions behind it. When you return to a project, you can understand
   how it got there as well as what needs to happen next.
+- **Explore the connections.** Open a Context page's Local Graph to follow
+  links, citations, and documents read together. A workspace owner can enable
+  the Workspace Knowledge Map in **Settings > Workspace > Knowledge graph**.
 - **See what your AI did.** **Chats** shows the searches, reads, and updates
   performed through dtxWiki's MCP tools. Follow the materials consulted and
   inspect changes in document history. Chats records tool actions, not full

@@ -462,7 +462,7 @@ describe("AdminUserRecoverySection", () => {
         screen.queryByRole("dialog", { name: "Issue a password reset?" }),
       ).not.toBeInTheDocument();
     });
-    expect(recoveryAction).toHaveFocus();
+    await waitFor(() => expect(recoveryAction).toHaveFocus());
   }, 15_000);
 
   it("uses the global full-viewport dialog layer for recovery modals", () => {

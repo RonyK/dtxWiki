@@ -16,6 +16,9 @@ from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
     actor_can_read_sensitive_agent_pages,
 )
+from backend.repositories.context_visibility import (
+    PUBLISHED_CONTEXT_VERSION_STATUSES,
+)
 from backend.repositories.workspace_scoped import get_in_workspace
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 
@@ -26,9 +29,6 @@ if TYPE_CHECKING:
     from backend.policy.auth import ActorContext
 
 
-PUBLISHED_CONTEXT_VERSION_STATUSES = frozenset(
-    {"published_snapshot", "superseded_snapshot"}
-)
 VISIBLE_AGENT_SENSITIVITIES = frozenset({"public", "workspace"})
 
 

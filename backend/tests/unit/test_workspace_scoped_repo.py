@@ -5,6 +5,7 @@ the requested workspace, and must not distinguish "wrong workspace" from
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import literal
 
 from backend.app.db import make_engine, make_session_factory
 from backend.models.api_token import ApiToken
@@ -14,7 +15,7 @@ from backend.models.context_media import ContextMediaAsset
 from backend.models.library import LibraryItem
 from backend.models.user import User
 from backend.models.workspace_join import WorkspaceJoinRequest
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.scripts.seed_dev import seed_default_workspace
 
 
@@ -164,3 +165,88 @@ def test_get_in_workspace_rejects_nullable_workspace_scope(monkeypatch):
                 workspace_id=workspace.id,
                 resource_id=uuid4(),
             )
+
+
+def test_scoped_selection_returns_only_own_workspace_rows_and_columns():
+    factory = _session_factory()
+    with factory() as session:
+        home = seed_default_workspace(session, slug="selection-home")
+        other = seed_default_workspace(session, slug="selection-other")
+        items = [
+            LibraryItem(
+                workspace_id=workspace.id,
+                connector_type="manual",
+                format_hint="unknown",
+                uri=f"file:///{workspace.slug}",
+                metadata_json={},
+                trust_level="unknown",
+                lifecycle_status="registered",
+            )
+            for workspace in (home, other)
+        ]
+        session.add_all(items)
+        session.flush()
+
+        assert list(
+            session.scalars(
+                select_in_workspace(
+                    LibraryItem,
+                    workspace_id=home.id,
+                )
+            )
+        ) == [items[0]]
+        assert session.execute(
+            select_in_workspace(
+                LibraryItem,
+                workspace_id=home.id,
+                columns=(LibraryItem.id, LibraryItem.uri),
+            )
+        ).all() == [(items[0].id, items[0].uri)]
+        # An extra predicate cannot widen the mandatory workspace scope.
+        assert (
+            list(
+                session.scalars(
+                    select_in_workspace(
+                        LibraryItem,
+                        workspace_id=home.id,
+                        predicates=(LibraryItem.workspace_id == other.id,),
+                    )
+                )
+            )
+            == []
+        )
+
+
+@pytest.mark.parametrize("model", [ApiToken, WorkspaceJoinRequest, AuditEvent, User])
+def test_scoped_selection_rejects_non_workspace_plane_models(model):
+    with pytest.raises(TypeError, match="WORKSPACE_PLANE_TABLES"):
+        select_in_workspace(model, workspace_id=uuid4())
+
+
+def test_scoped_selection_rejects_nullable_scope_and_invalid_workspace(monkeypatch):
+    with pytest.raises(TypeError, match="workspace UUID"):
+        select_in_workspace(LibraryItem, workspace_id=None)
+    monkeypatch.setattr(LibraryItem.__table__.c.workspace_id, "nullable", True)
+    with pytest.raises(TypeError, match="non-null workspace_id"):
+        select_in_workspace(LibraryItem, workspace_id=uuid4())
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [(User.id,), (LibraryItem.current_version,), (literal(1),)],
+    ids=["other-model", "relationship", "expression"],
+)
+def test_scoped_selection_rejects_non_model_columns(columns):
+    with pytest.raises(TypeError, match="columns must belong"):
+        select_in_workspace(
+            LibraryItem,
+            workspace_id=uuid4(),
+            columns=columns,
+        )
+
+
+def test_scoped_selection_accepts_composite_identity_without_resource_lookup():
+    # Unlike get_in_workspace, selection does not conflate a complete
+    # composite identity with a single resource_id.
+    statement = select_in_workspace(ContextMediaAsset, workspace_id=uuid4())
+    assert "context_media_asset.workspace_id" in str(statement)

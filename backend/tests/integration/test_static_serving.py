@@ -65,8 +65,8 @@ def test_public_page_spa_shell_does_not_blanket_noindex(tmp_path):
     assert "X-Robots-Tag" not in response.headers
 
 
-def test_spa_cache_policy_does_not_override_api_or_oauth(tmp_path):
-    app = _app_with_spa_bundle(tmp_path)
+def test_spa_cache_policy_does_not_override_api_or_oauth(tmp_path, session_factory):
+    app = _app_with_spa_bundle(tmp_path, session_factory=session_factory)
     app.state.app_version_synced = True
     app.state.mcp_session_manager = object()
     client = TestClient(app)
@@ -168,7 +168,7 @@ def test_create_app_accepts_container_and_extra_mount(tmp_path):
     assert response.json() == {"ok": True}
 
 
-def _app_with_spa_bundle(tmp_path):
+def _app_with_spa_bundle(tmp_path, *, session_factory=None):
     static_root = tmp_path / "static"
     assets = static_root / "assets"
     assets.mkdir(parents=True)

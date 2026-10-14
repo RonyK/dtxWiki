@@ -1733,11 +1733,25 @@ class OneShotWorker:
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
         from backend.services.trail_analysis import run_trail_tick
+        from backend.services.workspace_graph_capability import (
+            usage_relation_signals_enabled,
+        )
 
+        # The switch is a control-plane Workspace column. Without a database
+        # provider both planes are the one database this session is bound to.
+        if self._database_provider is None:
+            enabled = usage_relation_signals_enabled(session, job.workspace_id)
+        else:
+            control_session_factory = self._database_provider.control_session_factory()
+            with control_session_factory() as control_session:
+                enabled = usage_relation_signals_enabled(
+                    control_session, job.workspace_id
+                )
         return run_trail_tick(
             session,
             job.workspace_id,
             now=self._datetime_target(job=job, key="scheduled_for"),
+            usage_signals_enabled=enabled,
         )
 
     def _business_librarian_tick(

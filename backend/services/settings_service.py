@@ -242,6 +242,31 @@ def settings_policy_revision(group: str, policy: dict[str, object]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+# Knowledge graph card key -> Workspace column. Both are control-plane booleans
+# read by the graph capability check and the usage-signal projection.
+_GRAPH_SETTING_COLUMNS = {
+    "workspace_map_enabled": "workspace_graph_enabled",
+    "usage_relation_signals_enabled": "usage_relation_signals_enabled",
+}
+
+
+def _graph_policy(workspace: Workspace) -> dict[str, object]:
+    return {
+        key: getattr(workspace, column)
+        for key, column in _GRAPH_SETTING_COLUMNS.items()
+    }
+
+
+def _update_graph_setting(workspace: Workspace, key: str, value: object) -> None:
+    column = _GRAPH_SETTING_COLUMNS.get(key)
+    if column is None:
+        raise SettingsPolicyUpdateRejected(f"unknown knowledge graph setting: {key}")
+    # A JSON number or string is not a switch position; only true/false is.
+    if not isinstance(value, bool):
+        raise SettingsPolicyUpdateRejected(f"{key} must be true or false")
+    setattr(workspace, column, value)
+
+
 def _policy_card(*, name: str, title: str, policy: dict) -> PolicyCard:
     return PolicyCard(
         name=name,
@@ -633,6 +658,11 @@ class SettingsService:
                 title="Review risk policy",
                 policy=normalized_review_policy(workspace.review_policy),
             ),
+            graph=_policy_card(
+                name="graph",
+                title="Knowledge graph",
+                policy=_graph_policy(workspace),
+            ),
             lint=_policy_card(
                 name="lint",
                 title="Lint rules",
@@ -753,6 +783,9 @@ class SettingsService:
         elif group == "lint":
             for key, value in changes.items():
                 self._update_lint_policy(workspace, key, value)
+        elif group == "graph":
+            for key, value in changes.items():
+                _update_graph_setting(workspace, key, value)
         elif group in POLICY_GROUP_ATTRS:
             # Deep copy: _set_path mutates nested dicts in place (for example
             # category_inclusion_policy.memory). The column is plain JSON, not a
@@ -869,6 +902,8 @@ class SettingsService:
             }
         if group == "context_write":
             return {}
+        if group == "graph":
+            return _graph_policy(workspace)
         if group not in POLICY_GROUP_ATTRS:
             raise SettingsPolicyUpdateRejected("unknown settings group")
         policy = dict(getattr(workspace, POLICY_GROUP_ATTRS[group]) or {})

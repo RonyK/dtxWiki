@@ -1,5 +1,7 @@
 {
-  "home": { "eyebrow": "컨텍스트 홈" },
+  "home": {
+    "eyebrow": "컨텍스트 홈"
+  },
   "children": {
     "title": "하위 항목",
     "eyebrow": "직접 하위 인덱스",
@@ -242,6 +244,7 @@
     "relationshipList": "그래프 관계",
     "relationshipListDescription": "다이어그램과 같은 관계를 키보드로 열려면 이 목록을 사용하세요.",
     "loadError": "이웃 정보를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+    "boundedWarning": "일부 관계 결과가 제한되었습니다. 아래 목록은 완전하지 않을 수 있습니다.",
     "unavailable": "이웃 목록을 표시할 수 없습니다.",
     "outbound": "나가는 링크"
   },

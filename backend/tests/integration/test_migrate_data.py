@@ -28,9 +28,10 @@ from backend.models import Base
 from backend.models.workspace import Workspace
 from backend.scripts.migrate_data import _resolve_order, migrate_data
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.tests.utils.postgres import create_isolated_postgres_metadata
 from backend.tests.utils.postgres_reset import reset_postgres_test_database
 
-TEST_REVISION = "efcbcf724889"
+TEST_REVISION = "9aeab6944f25"
 
 
 def _create_schema(url: str) -> None:
@@ -45,7 +46,10 @@ def _create_schema(url: str) -> None:
 def _seed(url: str) -> None:
     engine = make_engine(url)
     try:
-        Base.metadata.create_all(engine)
+        if engine.dialect.name == "postgresql":
+            create_isolated_postgres_metadata(engine)
+        else:
+            Base.metadata.create_all(engine)
         _stamp_revision(engine, TEST_REVISION)
         session_factory = sessionmaker(bind=engine, expire_on_commit=False)
         with session_factory.begin() as session:

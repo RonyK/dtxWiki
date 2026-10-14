@@ -236,6 +236,14 @@ class McpChatToolCallArtifact(UuidPrimaryKeyMixin, Base):
             "resource_kind",
             "resource_id",
         ),
+        # The co-read source (co_access edges and hot paths) reads one
+        # workspace's last 30 days; the per-call history is never pruned, so
+        # without this every trail tick scanned the whole table.
+        Index(
+            "ix_mcp_chat_tool_call_artifact_workspace_time",
+            "workspace_id",
+            "occurred_at",
+        ),
         # Epic-3 D-3 final schema: workspace-scoped, not just
         # session/tool-call-scoped.
         ForeignKeyConstraint(

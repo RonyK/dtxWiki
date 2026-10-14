@@ -24,6 +24,7 @@ import {
 } from "../api/auth";
 import { clearPersistedWorkspaceId } from "../api/workspace";
 import { isAbortError } from "../lib/abortError";
+import { clearWorkspaceGraphStorage } from "../lib/workspaceGraphStorage";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous" | "transient_error";
 type PasswordRecoveryMode = "email" | "admin_assisted" | "disabled";
@@ -75,6 +76,13 @@ export function AuthProvider({
   const automaticCapabilitiesLoadStarted = useRef(false);
   const sessionProbeEpochRef = useRef(0);
   const activeSessionProbeRef = useRef<AbortController | null>(null);
+  const previousActorRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const actorId = user?.user_id ?? null;
+    if (previousActorRef.current && previousActorRef.current !== actorId) clearWorkspaceGraphStorage();
+    previousActorRef.current = actorId;
+  }, [user?.user_id]);
 
   const invalidateSessionProbes = useCallback(() => {
     sessionProbeEpochRef.current += 1;
@@ -121,6 +129,7 @@ export function AuthProvider({
       // log the user out — surface them as sessionError so the UI can show
       // a banner without redirecting to /login (review §6.3 FA-H4).
       if (error instanceof ApiError && error.status === 401) {
+        clearWorkspaceGraphStorage();
         setApiErrorViewerIsServerAdmin(false);
         setUser(null);
         setStatus("anonymous");
@@ -193,6 +202,7 @@ export function AuthProvider({
 
   useEffect(() => {
     const handleAuthExpired = () => {
+      clearWorkspaceGraphStorage();
       invalidateSessionProbes();
       setApiErrorViewerIsServerAdmin(false);
       // The dispatcher (client.ts handleAuthExpired) already dropped the
@@ -238,6 +248,7 @@ export function AuthProvider({
     // round-trip, and again at the state transition in case another probe was
     // started while logout was in flight.
     invalidateSessionProbes();
+    clearWorkspaceGraphStorage();
     try {
       await logoutRequest();
     } catch {
@@ -246,6 +257,7 @@ export function AuthProvider({
       // protects future requests once the backend is reachable again.
     } finally {
       invalidateSessionProbes();
+      clearWorkspaceGraphStorage();
       setApiErrorViewerIsServerAdmin(false);
       // WS-05: the same localStorage key + in-memory snapshot the 401 path
       // clears in client.ts. Without this, the next user to sign in on this
@@ -304,4 +316,9 @@ export function useAuth() {
     throw new Error("useAuth must be used inside AuthProvider");
   }
   return context;
+}
+
+/** Optional readers stay usable in public and standalone capability surfaces. */
+export function useOptionalAuth() {
+  return useContext(AuthContext);
 }

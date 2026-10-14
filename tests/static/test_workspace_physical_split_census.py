@@ -106,6 +106,8 @@ EXPECTED_WORKSPACE_TO_CONTROL_FK_EDGES: frozenset[str] = frozenset(
         "context_page_version.workspace_id -> workspace",
         "edge_projection.workspace_id -> workspace",
         "feedback_item.workspace_id -> workspace",
+        "graph_history_coverage.workspace_id -> workspace",
+        "graph_observation.workspace_id -> workspace",
         "job.workspace_id -> workspace",
         "knowledge_coverage_gap.workspace_id -> workspace",
         "knowledge_node_stat.workspace_id -> workspace",
@@ -185,41 +187,46 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     58 = 57 + 1, and since its parent is ``workspace`` (not ``users``), that
     parent's own edge and blocked-table counts both move too: 55 = 54 + 1.
     The insertable count is unchanged (83 - 55 = 28 = 82 - 54) because the new
-    table is itself blocked, not newly reachable.
+    table is itself blocked, not newly reachable. Graph View then added two
+    workspace-plane ledger tables, ``graph_observation`` and
+    ``graph_history_coverage``, each with a single FK into ``workspace`` and
+    no other cross-plane edge: 85 = 83 + 2, 60 = 58 + 2, and ``workspace``
+    moves to 57 = 55 + 2 edges blocking 57 = 55 + 2 tables. Insertable stays
+    28 (85 - 57) for the same reason as before.
     """
 
     edges = workspace_to_control_fk_edges()
     labels = frozenset(edge.label for edge in edges)
     assert labels == EXPECTED_WORKSPACE_TO_CONTROL_FK_EDGES
     # One label per constraint: no two constraints may collapse into one entry.
-    assert len(edges) == len(labels) == 58
+    assert len(edges) == len(labels) == 60
     assert all(len(edge.columns) == 1 for edge in edges)
     # Reconciles this census with the workspace-plane-only scoping recorded
-    # elsewhere in the tree as 57: the difference is the one MIXED child.
-    assert len([edge for edge in edges if edge.child in WORKSPACE_PLANE_TABLES]) == 57
+    # elsewhere in the tree as 59: the difference is the one MIXED child.
+    assert len([edge for edge in edges if edge.child in WORKSPACE_PLANE_TABLES]) == 59
     assert [edge.label for edge in edges if edge.child in MIXED_PLANE_TABLES] == [
         "audit_event.workspace_id -> workspace"
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 83
+    assert len(resident) == 85
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
         for parent in {edge.parent for edge in edges}
     }
     assert {parent: len(found) for parent, found in by_parent.items()} == {
-        "workspace": 55,
+        "workspace": 57,
         "users": 3,
     }
     assert {
         parent: len({edge.child for edge in found})
         for parent, found in by_parent.items()
-    } == {"workspace": 55, "users": 2}
+    } == {"workspace": 57, "users": 2}
 
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
-    assert len(blocked) == 55
+    assert len(blocked) == 57
     assert len(resident) - len(blocked) == 28
 
     assert (

@@ -33,6 +33,9 @@ const { ctxWorkspace } = vi.hoisted(() => ({
     >,
   },
 }));
+const { ctxAuth } = vi.hoisted(() => ({
+  ctxAuth: { current: null as { user: { user_id: string } } | null },
+}));
 const { contextMermaid } = vi.hoisted(() => ({
   contextMermaid: {
     initialize: vi.fn(),
@@ -42,6 +45,9 @@ const { contextMermaid } = vi.hoisted(() => ({
     }),
   },
 }));
+const { workspaceGraphEnabled } = vi.hoisted(() => ({
+  workspaceGraphEnabled: { current: false },
+}));
 vi.mock(
   "../../../shared/workspace/WorkspaceContext",
   async (importOriginal) => ({
@@ -49,12 +55,49 @@ vi.mock(
     useOptionalWorkspaceContext: () => ctxWorkspace.current,
   }),
 );
+vi.mock("../../../shared/auth/AuthContext", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useOptionalAuth: () => ctxAuth.current,
+}));
 vi.mock("mermaid", () => ({ default: contextMermaid }));
+// The Knowledge Map link follows the server capability for this workspace.
+vi.mock("../../graph/useWorkspaceGraphCapability", () => ({
+  useWorkspaceGraphCapability: () => ({
+    status: "ready",
+    capability: null,
+    enabled: workspaceGraphEnabled.current,
+  }),
+}));
+vi.mock("../../graph/GraphCanvas", () => ({
+  GraphCanvas: ({ scene, pinnedIds }: {
+    scene: { nodes: unknown[]; edges: unknown[] };
+    pinnedIds: string[];
+  }) => (
+    <div
+      data-edges={scene.edges.length}
+      data-nodes={scene.nodes.length}
+      data-pinned={pinnedIds.join(",")}
+      data-testid="context-graph-canvas"
+    />
+  ),
+}));
 
 const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "workspace-1";
-const PAGE_ID = "context-1";
-const SECOND_PAGE_ID = "context-2";
+const PAGE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const SECOND_PAGE_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+async function selectGraphNodeDetails(graph: HTMLElement, label: string) {
+  const row = within(graph).getByText(label, {
+    exact: true,
+    selector: ".graph-relationship-list > details > ul > li > button strong",
+  }).closest("button");
+  expect(row).not.toBeNull();
+  await userEvent.click(row!);
+  const details = within(graph).getByRole("complementary", { name: "Details" });
+  expect(within(details).getByRole("heading", { level: 5 }).textContent).toBe(label);
+  return details;
+}
 
 describe("ContextScreen", () => {
   beforeEach(() => {
@@ -68,6 +111,8 @@ describe("ContextScreen", () => {
       selectedWorkspace: { role: "owner", visibility: "public" },
       workspaceSlug: "demo",
     };
+    ctxAuth.current = null;
+    workspaceGraphEnabled.current = false;
   });
 
   afterEach(() => {
@@ -91,6 +136,20 @@ describe("ContextScreen", () => {
       activityNextCursor?: string;
       decisionLogChildCount?: number;
       reconciliationAvailable?: boolean;
+      graphBounded?: boolean;
+      neighborsBounded?: boolean;
+      neighborsHandler?: (pageId: string) => unknown;
+      graphQueryHandler?: (
+        request: {
+          seeds?: Array<{ kind: "context_page"; id: string }>;
+          time?: { mode?: "current" | "appearance" | "action" | "as_of" };
+          depth?: 1 | 2;
+          budget?: { nodes: number; edges: number };
+        },
+        init?: RequestInit,
+      ) => unknown;
+      libraryGraphNodeKind?: "library_artifact" | "library_item_version";
+      unpublishedSecondPage?: boolean;
     } = {},
   ) {
     const decisionLogChildCount = options.decisionLogChildCount ?? 0;
@@ -190,6 +249,9 @@ describe("ContextScreen", () => {
             ),
             current_version_id: "version-2",
             visible_version_id: "version-2",
+            current_published_version_id: options.unpublishedSecondPage
+              ? null
+              : "version-1",
             latest_draft_version_id: "version-2",
             body_md: "# Architecture Notes\n\nSelected second page",
             workspace_id: WORKSPACE_ID,
@@ -435,6 +497,36 @@ describe("ContextScreen", () => {
             ? { error: new Error("activity unavailable") }
             : { data: { items: [], unread_count: 0, next_cursor: null } }),
         },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`]: (
+        _input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const request = JSON.parse(String(init?.body)) as {
+          seeds?: Array<{ kind: "context_page"; id: string }>;
+          time?: { mode?: "current" | "appearance" | "action" | "as_of" };
+          depth?: 1 | 2;
+          budget?: { nodes: number; edges: number };
+        };
+        if (options.graphQueryHandler) {
+          return options.graphQueryHandler(request, init);
+        }
+        const payload = contextGraphPayload(
+          request.seeds?.[0]?.id ?? PAGE_ID,
+          request.time?.mode ?? "appearance",
+          request.seeds,
+          options.libraryGraphNodeKind,
+          request.depth,
+        );
+        return {
+          data: options.graphBounded
+            ? {
+                ...payload,
+                truncated: true,
+                warnings: ["graph_budget_applied", "private_internal_reason"],
+              }
+            : payload,
+        };
+      },
     };
     if (options.activityNextCursor) {
       routes[
@@ -467,6 +559,18 @@ describe("ContextScreen", () => {
         },
       };
     }
+    if (options.neighborsHandler) {
+      for (const pageId of [PAGE_ID, SECOND_PAGE_ID]) {
+        routes[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${pageId}/neighbors`] =
+          () => options.neighborsHandler!(pageId);
+      }
+    } else if (options.neighborsBounded) {
+      const route = routes[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/neighbors`] as {
+        data: Record<string, unknown>;
+      };
+      route.data.truncated = true;
+      route.data.warnings = ["graph_projection_source_bounded", "private_internal_reason"];
+    }
     return mockFetch(routes);
   }
 
@@ -475,6 +579,20 @@ describe("ContextScreen", () => {
       bodyMarkdown?: string;
       secondActivityFails?: boolean;
       reconciliationAvailable?: boolean;
+      graphBounded?: boolean;
+      neighborsBounded?: boolean;
+      neighborsHandler?: (pageId: string) => unknown;
+      graphQueryHandler?: (
+        request: {
+          seeds?: Array<{ kind: "context_page"; id: string }>;
+          time?: { mode?: "current" | "appearance" | "action" | "as_of" };
+          depth?: 1 | 2;
+          budget?: { nodes: number; edges: number };
+        },
+        init?: RequestInit,
+      ) => unknown;
+      libraryGraphNodeKind?: "library_artifact" | "library_item_version";
+      unpublishedSecondPage?: boolean;
     } = {},
   ) {
     const fetchMock = mockDecisionLogRoutes(options);
@@ -1356,7 +1474,365 @@ describe("ContextScreen", () => {
     expect(inspector.queryByRole("tab", { name: /History/ })).toBeNull();
   });
 
-  it("renders the body-width graph from one cached neighbor response", async () => {
+  it("does not query the heavyweight graph until its reader tab is first activated", async () => {
+    const fetchMock = await renderDecisionLog();
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/graph/query")))
+      .toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith(`/pages/${PAGE_ID}/neighbors`))).toHaveLength(1));
+  });
+
+  it("renders body and authoritative Inspector links while a first graph request remains pending", async () => {
+    const pending = deferredValue<{ data: ReturnType<typeof contextGraphPayload> }>();
+    const fetchMock = mockDecisionLogRoutes({ graphQueryHandler: () => pending.promise });
+    render(<MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=graph`]}>
+      <ContextScreen />
+    </MemoryRouter>);
+    try {
+      expect(await screen.findByRole("tablist", { name: "Context reader views" })).toBeInTheDocument();
+      await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) =>
+        String(input).endsWith("/graph/query"))).toHaveLength(1));
+      expect(screen.getByText(i18n.t("context:neighbors.graphLoading"))).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+      const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+      await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+      expect(await inspector.findByRole("link", { name: /Deployment Runbook/ }))
+        .toHaveAttribute("href", "/library?target=library-1");
+      expect(inspector.getAllByRole("link", { name: /Architecture Notes/ })).toHaveLength(2);
+      await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+        .getByRole("tab", { name: "View" }));
+      expect(await screen.findByText("Needle body")).toBeVisible();
+    } finally {
+      await act(async () => { pending.resolve({ data: contextGraphPayload(PAGE_ID, "current") }); });
+    }
+  });
+
+  it("keeps body and Inspector backlinks usable when the deferred graph fails", async () => {
+    await renderDecisionLog({ graphQueryHandler: () => ({ error: new Error("Graph failed") }) });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    const readerTabs = within(screen.getByRole("tablist", { name: "Context reader views" }));
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
+    expect(await screen.findByText("Graph could not be loaded.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+    expect(await inspector.findByRole("link", { name: /Deployment Runbook/ })).toBeInTheDocument();
+    expect(inspector.queryByRole("alert")).toBeNull();
+    await userEvent.click(readerTabs.getByRole("tab", { name: /View/ }));
+    expect(screen.getByText("Needle body")).toBeVisible();
+  });
+
+  it("does not hold the body or Graph behind a pending independent Inspector request", async () => {
+    const pending = deferredValue<unknown>();
+    await renderDecisionLog({ neighborsHandler: () => pending.promise });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    expect(await screen.findByText("Needle body")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+    expect(inspector.getByRole("status")).toHaveTextContent(i18n.t("context:neighbors.graphLoading"));
+    expect(inspector.queryByText("No visible pages link here yet.")).toBeNull();
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    expect(await screen.findByTestId("graph-view")).toBeVisible();
+    await act(async () => { pending.resolve({ data: { backlinks: [], outbound: [], citations: [], co_access: [] } }); });
+    expect(inspector.getByText("No visible pages link here yet.")).toBeInTheDocument();
+  });
+
+  it("aborts a first graph request when the selected page changes and ignores its late completion", async () => {
+    const pending = deferredValue<unknown>();
+    let initialSignal: AbortSignal | null | undefined;
+    const fetchMock = await renderDecisionLog({
+      graphQueryHandler: (request, init) => {
+        if (request.seeds?.[0]?.id === PAGE_ID) {
+          initialSignal = init?.signal;
+          return pending.promise;
+        }
+        return { data: contextGraphPayload(SECOND_PAGE_ID, "current") };
+      },
+    });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await screen.findByText("Needle body");
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    await waitFor(() => expect(initialSignal?.aborted).toBe(false));
+    await userEvent.click(screen.getByRole("treeitem", { name: "Architecture Notes" }));
+    expect(await screen.findByText("Selected second page")).toBeVisible();
+    expect(initialSignal?.aborted).toBe(true);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/graph/query")))
+      .toHaveLength(1);
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    const nextGraph = await screen.findByTestId("graph-view");
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "1");
+    await act(async () => { pending.resolve({ data: contextGraphPayload(PAGE_ID, "current") }); });
+    expect(screen.getByTestId("graph-view")).toBe(nextGraph);
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "1");
+    expect(within(nextGraph).queryByText("Deployment Runbook", {
+      selector: ".graph-relationship-list > details > ul > li > button strong",
+    })).toBeNull();
+  });
+
+  it("discards a previous page's late Inspector response without showing its private links", async () => {
+    const pending = deferredValue<unknown>();
+    await renderDecisionLog({ neighborsHandler: (pageId) => pageId === PAGE_ID
+      ? pending.promise
+      : { data: { backlinks: [], outbound: [], citations: [], co_access: [] } } });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await screen.findByText("Needle body");
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const initialInspector = within(screen.getByRole("region", { name: "Context detail" }));
+    await userEvent.click(initialInspector.getByRole("tab", { name: /Backlinks/ }));
+    expect(initialInspector.getByRole("status")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("treeitem", { name: "Architecture Notes" }));
+    await screen.findByText("Selected second page");
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+    expect(await inspector.findByText("No visible pages link here yet.")).toBeInTheDocument();
+    await act(async () => { pending.resolve({ data: {
+      backlinks: [{ kind: "context_page", id: PAGE_ID, title: "Previous page private link", edge_kind: "wikilink" }],
+      outbound: [], citations: [], co_access: [],
+    } }); });
+    expect(screen.queryByText("Previous page private link")).toBeNull();
+    expect(inspector.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps Graph usable when the independent Inspector request fails", async () => {
+    await renderDecisionLog({ neighborsHandler: () => ({ error: new Error("Neighbors failed") }) });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await screen.findByText("Needle body");
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+    expect(await inspector.findByRole("alert")).toHaveTextContent("Neighbor details could not be loaded");
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    expect(await screen.findByTestId("graph-view")).toBeVisible();
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "3");
+    expect(inspector.getByRole("alert")).toHaveTextContent("Neighbor details could not be loaded");
+  });
+
+  it("aborts the old workspace scene and rejects its late payload even for the same page id", async () => {
+    const nextWorkspaceId = "workspace-2";
+    const pending = deferredValue<unknown>();
+    let initialSignal: AbortSignal | null | undefined;
+    const fetchMock = mockDecisionLogRoutes({ graphQueryHandler: (_request, init) => {
+      initialSignal = init?.signal;
+      return pending.promise;
+    } });
+    const original = fetchMock.getMockImplementation()!;
+    let currentWorkspaceId = WORKSPACE_ID;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: currentWorkspaceId, workspaces: [] } });
+      }
+      if (url.includes(`/workspaces/${nextWorkspaceId}/`)) {
+        if (url.endsWith("/graph/query")) {
+          const payload = contextGraphPayload(PAGE_ID, "current");
+          return jsonResponse({ data: { ...payload, nodes: payload.nodes.slice(0, 1), edges: [] } });
+        }
+        const response = await original(url.replace(`/workspaces/${nextWorkspaceId}/`, `/workspaces/${WORKSPACE_ID}/`), init);
+        const body = await response.json() as { data?: Record<string, unknown> };
+        if (body.data?.workspace_id) body.data.workspace_id = nextWorkspaceId;
+        return jsonResponse(body);
+      }
+      return original(input, init);
+    });
+    ctxWorkspace.current = { ...ctxWorkspace.current, selectedId: WORKSPACE_ID };
+    const content = <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=graph`]}>
+      <ContextScreen />
+    </MemoryRouter>;
+    const view = render(content);
+    await screen.findByRole("tablist", { name: "Context reader views" });
+    await waitFor(() => expect(initialSignal?.aborted).toBe(false));
+    currentWorkspaceId = nextWorkspaceId;
+    ctxWorkspace.current = { ...ctxWorkspace.current, selectedId: nextWorkspaceId };
+    view.rerender(<MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=graph`]}>
+      <ContextScreen />
+    </MemoryRouter>);
+    const nextGraph = await screen.findByTestId("graph-view");
+    expect(initialSignal?.aborted).toBe(true);
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "1");
+    await act(async () => { pending.resolve({ data: contextGraphPayload(PAGE_ID, "current") }); });
+    expect(screen.getByTestId("graph-view")).toBe(nextGraph);
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "1");
+  });
+
+  it.each([
+    { change: "observed role", actorId: "actor-a", role: "viewer" },
+    { change: "actor", actorId: "actor-b", role: "owner" },
+  ])("discards the entire Context owner on $change change before fresh page reads settle", async ({ actorId, role }) => {
+    ctxAuth.current = { user: { user_id: "actor-a" } };
+    ctxWorkspace.current = {
+      ...ctxWorkspace.current,
+      selectedId: WORKSPACE_ID,
+      selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public" },
+    };
+    const pendingGraph = deferredValue<unknown>();
+    const pendingDetail = deferredResponse();
+    let graphRequests = 0;
+    let previousSignal: AbortSignal | null | undefined;
+    const fetchMock = mockDecisionLogRoutes({
+      bodyMarkdown: "Old authority body",
+      graphQueryHandler: (request, init) => {
+        graphRequests += 1;
+        if (graphRequests === 2) {
+          previousSignal = init?.signal;
+          return pendingGraph.promise;
+        }
+        return { data: contextGraphPayload(PAGE_ID, "current", request.seeds) };
+      },
+    });
+    const original = fetchMock.getMockImplementation()!;
+    const detailUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const freshDetailBody = await (await original(detailUrl)).json() as {
+      data: Record<string, unknown>;
+    };
+    freshDetailBody.data.title = "Fresh authority reader";
+    freshDetailBody.data.body_md = "Fresh authority body";
+    let authorityChanged = false;
+    let freshDetailRequested = false;
+    fetchMock.mockImplementation((input, init) => {
+      if (authorityChanged && String(input) === detailUrl) {
+        freshDetailRequested = true;
+        return pendingDetail.promise;
+      }
+      return original(input, init);
+    });
+    const content = () => <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=graph`]}>
+      <ContextScreen />
+    </MemoryRouter>;
+    const view = render(content());
+    const oldGraph = await screen.findByTestId("graph-view");
+    const oldReader = oldGraph.closest(".context-reader");
+    const details = await selectGraphNodeDetails(oldGraph, "Architecture Notes");
+    await userEvent.click(within(details).getByRole("button", { name: "Pin" }));
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-pinned", `node:${SECOND_PAGE_ID}`);
+    await userEvent.click(within(details).getByRole("button", { name: "Expand" }));
+    expect(previousSignal?.aborted).toBe(false);
+
+    authorityChanged = true;
+    ctxAuth.current = { user: { user_id: actorId } };
+    ctxWorkspace.current = {
+      ...ctxWorkspace.current,
+      selectedWorkspace: { id: WORKSPACE_ID, role, visibility: "public" },
+    };
+    view.rerender(content());
+    // The owner is replaced in this render, not after a fresh payload arrives.
+    expect(oldReader).not.toBeInTheDocument();
+    expect(screen.queryByTestId("graph-view")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Context reader views" })).toBeNull();
+    expect(previousSignal?.aborted).toBe(true);
+    await waitFor(() => expect(freshDetailRequested).toBe(true));
+    const stalePayload = contextGraphPayload(PAGE_ID, "current");
+    await act(async () => {
+      pendingGraph.resolve({ data: {
+        ...stalePayload,
+        nodes: stalePayload.nodes.map((node) => ({ ...node, label: "Late old authority node" })),
+      } });
+    });
+    expect(screen.queryByTestId("graph-view")).toBeNull();
+    expect(screen.queryByText("Late old authority node")).toBeNull();
+    expect(graphRequests).toBe(2);
+
+    await act(async () => { pendingDetail.resolve(jsonResponse(freshDetailBody)); });
+    const freshGraph = await screen.findByTestId("graph-view");
+    expect(freshGraph).not.toBe(oldGraph);
+    expect(screen.getByRole("heading", { name: "Fresh authority reader" })).toBeInTheDocument();
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-pinned", "");
+    expect(within(freshGraph).queryByRole("complementary", { name: "Details" })).toBeNull();
+    const freshDetails = await selectGraphNodeDetails(freshGraph, "Architecture Notes");
+    expect(within(freshDetails).getByRole("button", { name: "Pin" })).toBeEnabled();
+    expect(within(freshDetails).queryByRole("button", { name: "Unpin" })).toBeNull();
+    expect(graphRequests).toBe(3);
+  });
+
+  it.each([
+    { change: "observed role", actorId: "actor-a", role: "viewer" },
+    { change: "actor", actorId: "actor-b", role: "owner" },
+  ])("ignores a late Context page response from the previous $change owner", async ({ actorId, role }) => {
+    ctxAuth.current = { user: { user_id: "actor-a" } };
+    ctxWorkspace.current = {
+      ...ctxWorkspace.current,
+      selectedId: WORKSPACE_ID,
+      selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public" },
+    };
+    const pendingDetail = deferredResponse();
+    const fetchMock = mockDecisionLogRoutes({ bodyMarkdown: "Late old authority body" });
+    const original = fetchMock.getMockImplementation()!;
+    const detailUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const oldDetailBody = await (await original(detailUrl)).json() as {
+      data: Record<string, unknown>;
+    };
+    const freshDetailBody = { data: {
+      ...oldDetailBody.data,
+      title: "Fresh authority reader",
+      body_md: "Fresh authority body",
+    } };
+    let authorityChanged = false;
+    let previousDetailRequested = false;
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input) === detailUrl) {
+        if (authorityChanged) return Promise.resolve(jsonResponse(freshDetailBody));
+        previousDetailRequested = true;
+        return pendingDetail.promise;
+      }
+      return original(input, init);
+    });
+    const content = () => <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <ContextScreen />
+    </MemoryRouter>;
+    const view = render(content());
+    await waitFor(() => expect(previousDetailRequested).toBe(true));
+    authorityChanged = true;
+    ctxAuth.current = { user: { user_id: actorId } };
+    ctxWorkspace.current = {
+      ...ctxWorkspace.current,
+      selectedWorkspace: { id: WORKSPACE_ID, role, visibility: "public" },
+    };
+    view.rerender(content());
+    expect(await screen.findByText("Fresh authority body")).toBeVisible();
+    const freshReader = screen.getByRole("heading", { name: "Fresh authority reader" });
+    await act(async () => { pendingDetail.resolve(jsonResponse(oldDetailBody)); });
+    expect(screen.getByRole("heading", { name: "Fresh authority reader" })).toBe(freshReader);
+    expect(screen.queryByText("Late old authority body")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/graph/query"))).toHaveLength(0);
+  });
+
+  it("retains the Context owner for metadata-only authority refreshes", async () => {
+    ctxAuth.current = { user: { user_id: "actor-a" } };
+    ctxWorkspace.current = {
+      ...ctxWorkspace.current,
+      selectedId: WORKSPACE_ID,
+      selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public" },
+    };
+    const fetchMock = mockDecisionLogRoutes();
+    const content = () => <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=graph`]}>
+      <ContextScreen />
+    </MemoryRouter>;
+    const view = render(content());
+    const graph = await screen.findByTestId("graph-view");
+    const details = await selectGraphNodeDetails(graph, "Architecture Notes");
+    await userEvent.click(within(details).getByRole("button", { name: "Pin" }));
+    const reads = fetchMock.mock.calls.length;
+    ctxAuth.current = { user: { user_id: "actor-a" } };
+    ctxWorkspace.current = {
+      ...ctxWorkspace.current,
+      selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public", title: "Renamed workspace" },
+    };
+    view.rerender(content());
+    expect(screen.getByTestId("graph-view")).toBe(graph);
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-pinned", `node:${SECOND_PAGE_ID}`);
+    expect(within(details).getByRole("button", { name: "Unpin" })).toBeEnabled();
+    expect(fetchMock.mock.calls).toHaveLength(reads);
+  });
+
+  it("renders the body-width graph from one cached query projection", async () => {
     // Split out of the inspector-tab walk above: the reader tablist is a
     // separate control, and combining both walks in one test pushed its many
     // sequential userEvent interactions past the default timeout under parallel
@@ -1373,34 +1849,396 @@ describe("ContextScreen", () => {
     await userEvent.click(
       readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
     );
-    const graph = await screen.findByTestId("context-local-graph");
+    const graph = await screen.findByTestId("graph-view");
     expect(
       within(graph).getByRole("heading", { name: "Graph relationships" }),
     ).toBeInTheDocument();
-    const architectureLinks = within(graph).getAllByRole("link", {
-      name: "Architecture Notes",
-    });
-    expect(architectureLinks).toHaveLength(2);
-    for (const link of architectureLinks) {
-      expect(link).toHaveAttribute(
-        "href",
-        `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
-      );
-    }
+    const architectureDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
+    expect(within(architectureDetails).getByRole("link", { name: "Open" })).toHaveAttribute(
+      "href", `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
+    );
+    const libraryDetails = await selectGraphNodeDetails(graph, "Deployment Runbook");
     expect(
-      within(graph).getByRole("link", { name: "Deployment Runbook" }),
+      within(libraryDetails).getByRole("link", { name: "Open" }),
     ).toHaveAttribute("href", "/library?target=library-1");
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute(
+      "data-nodes",
+      "3",
+    );
     await userEvent.click(readerTabs.getByRole("tab", { name: /View/ }));
     await userEvent.click(
       readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
     );
     expect(
       fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes(
-          `/context/pages/${PAGE_ID}/neighbors?format=mermaid`,
-        ),
+        String(input).includes(`/workspaces/${WORKSPACE_ID}/graph/query`),
       ),
     ).toHaveLength(1);
+  });
+
+  it("navigates Local rows without querying and hands keyboard selections to Details", async () => {
+    const fetchMock = await renderDecisionLog();
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    const graph = await screen.findByTestId("graph-view");
+    const nodeList = within(graph).getByRole("list", { name: "Nodes" });
+    const rows = within(nodeList).getAllByRole("button");
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((row) => row.tabIndex === 0)).toHaveLength(1);
+    expect(within(nodeList).queryByRole("link")).toBeNull();
+    const queries = () => fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`));
+    await act(async () => rows[0].focus());
+    await userEvent.keyboard("{End}");
+    expect(rows[2]).toHaveFocus();
+    await userEvent.keyboard("{Home}{ArrowDown}");
+    expect(rows[1]).toHaveFocus();
+    expect(within(graph).queryByRole("complementary", { name: "Details" })).toBeNull();
+    expect(queries()).toHaveLength(1);
+    await userEvent.keyboard("{Enter}");
+    const details = within(graph).getByRole("complementary", { name: "Details" });
+    expect(details).toHaveFocus();
+    expect(within(details).getByRole("heading", { level: 5 })).toHaveTextContent("Architecture Notes");
+    await userEvent.tab();
+    expect(within(details).getByRole("link", { name: "Open" })).toHaveFocus();
+    // Re-selecting the same ID must hand off even when selection state does
+    // not change and the original main-list button remains connected.
+    await act(async () => rows[1].focus());
+    await userEvent.keyboard(" ");
+    expect(details).toHaveFocus();
+    expect(queries()).toHaveLength(1);
+  });
+
+  it("requeries bounded seeds for expand and replaces the graph scene on collapse", async () => {
+    const fetchMock = await renderDecisionLog();
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Decision Log" }),
+    );
+    expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    const readerTabs = within(
+      screen.getByRole("tablist", { name: "Context reader views" }),
+    );
+    await userEvent.click(
+      readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
+    );
+    const graph = await screen.findByTestId("graph-view");
+    const relatedDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
+    expect(
+      within(graph).getByText("Deployment Runbook", {
+        selector: ".graph-relationship-list > details > ul > li > button strong",
+      }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      within(relatedDetails).getByRole("button", { name: "Expand" }),
+    );
+    await waitFor(() => {
+      expect(
+        within(relatedDetails).getByRole("button", { name: "Collapse" }),
+      ).toBeEnabled();
+    });
+    // A multi-seed query is an actor-authorized replacement scene. This
+    // fixture removes an old node after expansion to make stale-union bugs
+    // visible even if the projection revision did not change.
+    expect(
+      within(graph).queryByText("Deployment Runbook", {
+        selector: ".graph-relationship-list > details > ul > li > button strong",
+      }),
+    ).not.toBeInTheDocument();
+
+    const graphCallsAfterExpand = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes(`/workspaces/${WORKSPACE_ID}/graph/query`),
+    );
+    expect(
+      JSON.parse(String(graphCallsAfterExpand.at(-1)?.[1]?.body)),
+    ).toMatchObject({
+      seeds: [
+        { kind: "context_page", id: PAGE_ID },
+        { kind: "context_page", id: SECOND_PAGE_ID },
+      ],
+    });
+
+    await userEvent.click(
+      within(relatedDetails).getByRole("button", { name: "Collapse" }),
+    );
+    await waitFor(() => {
+      expect(
+        within(relatedDetails).getByRole("button", { name: "Expand" }),
+      ).toBeEnabled();
+    });
+    const graphCallsAfterCollapse = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes(`/workspaces/${WORKSPACE_ID}/graph/query`),
+    );
+    expect(
+      JSON.parse(String(graphCallsAfterCollapse.at(-1)?.[1]?.body)),
+    ).toMatchObject({
+      seeds: [{ kind: "context_page", id: PAGE_ID }],
+    });
+  });
+
+  it("requests and displays the server's current Local depth instead of a client-only filter", async () => {
+    const fetchMock = await renderDecisionLog();
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    const readerTabs = within(screen.getByRole("tablist", { name: "Context reader views" }));
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
+    const graph = await screen.findByTestId("graph-view");
+    const graphUi = within(graph);
+    expect(graphUi.getByRole("button", { name: "Depth 2" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(graphUi.getByRole("button", { name: "Depth 1" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 1" }))
+      .toHaveAttribute("aria-pressed", "true"));
+    const requests = () => fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
+    ).map(([, init]) => JSON.parse(String(init?.body)));
+    expect(requests().at(-1)).toMatchObject({
+      seeds: [{ kind: "context_page", id: PAGE_ID }],
+      depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
+    });
+    await userEvent.click(graphUi.getByRole("button", { name: "Depth 2" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 2" }))
+      .toHaveAttribute("aria-pressed", "true"));
+    expect(requests().at(-1)).toMatchObject({ depth: 2, time: { mode: "current" } });
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^View$/ }));
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
+    expect(requests()).toHaveLength(3);
+  });
+
+  it("rebuilds supported history queries while retaining expanded seeds and the user's current depth", async () => {
+    const fetchMock = await renderDecisionLog();
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    const graph = await screen.findByTestId("graph-view");
+    const graphUi = within(graph);
+    await userEvent.click(graphUi.getByRole("button", { name: "Depth 1" }));
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 1" }))
+      .toHaveAttribute("aria-pressed", "true"));
+    const relatedDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
+    await userEvent.click(within(relatedDetails).getByRole("button", { name: "Expand" }));
+    await waitFor(() => expect(within(relatedDetails).getByRole("button", { name: "Collapse" })).toBeEnabled());
+    await userEvent.selectOptions(graphUi.getByLabelText("History mode"), "appearance");
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 2" })).toBeDisabled());
+    const requests = () => fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith(`/workspaces/${WORKSPACE_ID}/graph/query`),
+    ).map(([, init]) => JSON.parse(String(init?.body)));
+    const seeds = [{ kind: "context_page", id: PAGE_ID }, { kind: "context_page", id: SECOND_PAGE_ID }];
+    expect(requests().at(-1)).toMatchObject({
+      seeds, depth: 1, time: { mode: "appearance" }, budget: { nodes: 50, edges: 150 }, cursor: null,
+    });
+    await userEvent.selectOptions(graphUi.getByLabelText("History mode"), "current");
+    await waitFor(() => expect(graphUi.getByRole("button", { name: "Depth 2" })).toBeEnabled());
+    expect(graphUi.getByRole("button", { name: "Depth 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(requests().at(-1)).toMatchObject({
+      seeds, depth: 1, time: { mode: "current" }, budget: { nodes: 250, edges: 750 },
+    });
+  });
+
+  it("cannot replace a newer history scene when an aborted depth query settles late", async () => {
+    const pendingDepth = deferredValue<{ data: ReturnType<typeof contextGraphPayload> }>();
+    let depthSignal: AbortSignal | null | undefined;
+    await renderDecisionLog({
+      graphQueryHandler: (request, init) => {
+        if (request.time?.mode === "current" && request.depth === 1) {
+          depthSignal = init?.signal;
+          return pendingDepth.promise;
+        }
+        return { data: contextGraphPayload(PAGE_ID, request.time?.mode ?? "current") };
+      },
+    });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await userEvent.click(within(screen.getByRole("tablist", { name: "Context reader views" }))
+      .getByRole("tab", { name: /^Graph, Preview$/ }));
+    const graph = await screen.findByTestId("graph-view");
+    const graphUi = within(graph);
+    await userEvent.click(graphUi.getByRole("button", { name: "Depth 1" }));
+    await waitFor(() => expect(depthSignal).toBeDefined());
+    await userEvent.selectOptions(graphUi.getByLabelText("History mode"), "appearance");
+    await waitFor(() => expect(depthSignal?.aborted).toBe(true));
+    await waitFor(() => expect(graphUi.getByText("History views currently support depth 1 only."))
+      .toBeInTheDocument());
+    await act(async () => {
+      pendingDepth.resolve({ data: contextGraphPayload(PAGE_ID, "current", undefined, undefined, 1) });
+    });
+    expect(graphUi.getByLabelText("History mode")).toHaveValue("appearance");
+    expect(graphUi.getByRole("button", { name: "Depth 2" })).toBeDisabled();
+  });
+
+  it("keeps the newest graph action when an aborted expand settles after a history query", async () => {
+    const expanded = deferredValue<{
+      data: ReturnType<typeof contextGraphPayload>;
+    }>();
+    const appearance = deferredValue<{
+      data: ReturnType<typeof contextGraphPayload>;
+    }>();
+    let expandSignal: AbortSignal | null | undefined;
+    const fetchMock = await renderDecisionLog({
+      graphQueryHandler: (request, init) => {
+        if ((request.seeds?.length ?? 0) > 1) {
+          expandSignal = init?.signal;
+          return expanded.promise;
+        }
+        if (request.time?.mode === "appearance") {
+          return appearance.promise;
+        }
+        return {
+          data: contextGraphPayload(
+            request.seeds?.[0]?.id ?? PAGE_ID,
+            request.time?.mode ?? "appearance",
+            request.seeds,
+          ),
+        };
+      },
+    });
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Decision Log" }),
+    );
+    const readerTabs = within(
+      screen.getByRole("tablist", { name: "Context reader views" }),
+    );
+    await userEvent.click(
+      readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
+    );
+    const graph = await screen.findByTestId("graph-view");
+    const relatedDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
+
+    await userEvent.click(
+      within(relatedDetails).getByRole("button", { name: "Expand" }),
+    );
+    await waitFor(() => expect(expandSignal).toBeDefined());
+    await userEvent.selectOptions(screen.getByLabelText("History mode"), "appearance");
+    await waitFor(() => expect(expandSignal?.aborted).toBe(true));
+
+    await act(async () => {
+      appearance.resolve({ data: contextGraphPayload(PAGE_ID, "appearance") });
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/Observations/)).toBeInTheDocument(),
+    );
+    // History changes deliberately clear selection. Re-select the exact
+    // current row before settling the aborted query, so its selected action
+    // still proves the newer single-seed history scene was not overwritten.
+    const historyDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
+    expect(within(historyDetails).getByRole("button", { name: "Expand" })).toBeEnabled();
+
+    await act(async () => {
+      expanded.resolve({
+        data: contextGraphPayload(PAGE_ID, "current", [
+          { kind: "context_page", id: PAGE_ID },
+          { kind: "context_page", id: SECOND_PAGE_ID },
+        ]),
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Observations/)).toBeInTheDocument();
+      expect(
+        within(historyDetails).getByRole("button", { name: "Expand" }),
+      ).toBeEnabled();
+    });
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes(`/workspaces/${WORKSPACE_ID}/graph/query`),
+      ),
+    ).toHaveLength(3);
+  });
+
+  it("shows a localized generic warning for independently bounded Inspector relationship lists", async () => {
+    await renderDecisionLog({ neighborsBounded: true });
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Decision Log" }),
+    );
+    expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const inspector = within(
+      screen.getByRole("region", { name: "Context detail" }),
+    );
+    await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+
+    const warning = inspector.getByRole("alert");
+    expect(warning).toHaveTextContent(
+      "Some relationship results were limited. The lists below may be incomplete.",
+    );
+    expect(warning.textContent).not.toMatch(/\d/);
+    expect(
+      inspector.queryByText(/graph_budget_applied|private_internal_reason/),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      await i18n.changeLanguage("ko");
+    });
+    expect(inspector.getByRole("alert")).toHaveTextContent(
+      "일부 관계 결과가 제한되었습니다. 아래 목록은 완전하지 않을 수 있습니다.",
+    );
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+  });
+
+  it("exposes Context-to-Workspace Graph links only when the feature is enabled", async () => {
+    workspaceGraphEnabled.current = true;
+    await renderDecisionLog();
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Decision Log" }),
+    );
+    const readerTabs = within(
+      screen.getByRole("tablist", { name: "Context reader views" }),
+    );
+    await userEvent.click(
+      readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
+    );
+
+    const graph = await screen.findByTestId("graph-view");
+    for (const [label, focus] of [
+      ["Decision Log", PAGE_ID], ["Architecture Notes", SECOND_PAGE_ID], ["Deployment Runbook", "library-1"],
+    ]) {
+      const details = await selectGraphNodeDetails(graph, label);
+      const workspaceLinks = within(details).getAllByRole("link", { name: "Show in Knowledge Map" });
+      expect(workspaceLinks).toHaveLength(1);
+      expect(workspaceLinks[0]).toHaveAttribute("href", `/graph?focus=${focus}`);
+    }
+  });
+
+  it("maps canonical Library version paths to their Library-item Knowledge Map focus", async () => {
+    workspaceGraphEnabled.current = true;
+    await renderDecisionLog({ libraryGraphNodeKind: "library_item_version" });
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Decision Log" }),
+    );
+    const readerTabs = within(
+      screen.getByRole("tablist", { name: "Context reader views" }),
+    );
+    await userEvent.click(
+      readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
+    );
+
+    const graph = await screen.findByTestId("graph-view");
+    const libraryDetails = await selectGraphNodeDetails(graph, "Deployment Runbook");
+    expect(
+      within(libraryDetails).getByRole("link", { name: "Show in Knowledge Map" }),
+    ).toHaveAttribute("href", "/graph?focus=library-1");
+  });
+
+  it("does not link an unpublished current Context page to the published-only Knowledge Map", async () => {
+    workspaceGraphEnabled.current = true;
+    await renderDecisionLog({ unpublishedSecondPage: true });
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Architecture Notes" }),
+    );
+    expect(await screen.findByText("Selected second page")).toBeInTheDocument();
+    const readerTabs = within(
+      screen.getByRole("tablist", { name: "Context reader views" }),
+    );
+    await userEvent.click(
+      readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
+    );
+
+    const graph = await screen.findByTestId("graph-view");
+    const details = await selectGraphNodeDetails(graph, "Architecture Notes");
+    expect(
+      within(details).queryByRole("link", {
+        name: "Show in Knowledge Map",
+      }),
+    ).toBeNull();
   });
 
   it("separates the member-only workspace link from readonly web publishing", async () => {
@@ -1625,7 +2463,7 @@ describe("ContextScreen", () => {
     expect(screen.queryByText(/SQLSTATE/)).toBeNull();
   });
 
-  it("uses the shared Mermaid renderer for Context View and Graph diagrams", async () => {
+  it("uses the shared Mermaid renderer for Context View diagrams", async () => {
     contextMermaid.initialize.mockClear();
     contextMermaid.render.mockClear();
     await renderDecisionLog({
@@ -1651,20 +2489,7 @@ describe("ContextScreen", () => {
       ),
     );
 
-    const readerTabs = within(
-      screen.getByRole("tablist", { name: "Context reader views" }),
-    );
-    await userEvent.click(
-      readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
-    );
-    await waitFor(() =>
-      expect(contextMermaid.render).toHaveBeenCalledWith(
-        expect.stringMatching(/^dtxwiki-mermaid-/),
-        expect.stringContaining('seed["Decision Log"]'),
-      ),
-    );
-
-    expect(contextMermaid.initialize).toHaveBeenCalledTimes(2);
+    expect(contextMermaid.initialize).toHaveBeenCalledTimes(1);
     for (const [config] of contextMermaid.initialize.mock.calls) {
       expect(config).toEqual(
         expect.objectContaining({
@@ -1682,9 +2507,6 @@ describe("ContextScreen", () => {
     );
     expect(await screen.findByText("Needle body")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
-    const inspector = within(
-      screen.getByRole("region", { name: "Context detail" }),
-    );
 
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
@@ -1701,13 +2523,16 @@ describe("ContextScreen", () => {
     await userEvent.click(
       readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
     );
-    expect(
-      await screen.findByText("No graph relationships to show."),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("graph-view")).toBeInTheDocument();
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute(
+      "data-nodes",
+      "1",
+    );
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Activity$/ }));
     expect(
       await screen.findByText("Nothing has happened to this page yet."),
     ).toBeInTheDocument();
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
     await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
     expect(
       inspector.getByText("No visible pages link here yet."),
@@ -1853,6 +2678,9 @@ describe("ContextScreen", () => {
             diffs: null,
           },
         },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/neighbors`]: {
+        error: new Error("neighbors unavailable"),
+      },
     });
 
     render(
@@ -2638,6 +3466,9 @@ describe("ContextScreen", () => {
             },
           });
         }
+        if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`) {
+          return graphQueryResponse(init);
+        }
         if (
           url ===
           `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=context_page&target_id=${PAGE_ID}`
@@ -2876,6 +3707,9 @@ describe("ContextScreen", () => {
           },
         });
       }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`) {
+        return graphQueryResponse(init);
+      }
       if (
         url.endsWith(
           `/changesets?target_type=context_page&target_id=${PAGE_ID}`,
@@ -2966,7 +3800,7 @@ describe("ContextScreen", () => {
     // the loading reset -- that card's Compare used to stay disabled and stuck
     // on "Loading diff" for the rest of the session.
     const pendingDiff = deferredResponse();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
@@ -3031,6 +3865,9 @@ describe("ContextScreen", () => {
             mermaid: null,
           },
         });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`) {
+        return graphQueryResponse(init);
       }
       if (
         url.endsWith(
@@ -3762,6 +4599,41 @@ describe("ContextScreen", () => {
     };
     return responses;
   }
+
+  it("revalidates an activated graph and Inspector after approving the same visible version", async () => {
+    const responses: Record<string, MockFetchResponse> = pendingReviewFetch();
+    responses[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/rev-1/decision`] = {
+      data: { id: "rev-1", status: "approved", published_version_id: "version-2", superseded_review_count: 0 },
+    };
+    responses[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/neighbors`] = {
+      data: { backlinks: [], outbound: [], citations: [], co_access: [] },
+    };
+    let graphCalls = 0;
+    responses[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`] = () => {
+      const payload = contextGraphPayload(PAGE_ID, "current");
+      graphCalls += 1;
+      return { data: graphCalls === 1 ? payload : { ...payload, nodes: payload.nodes.slice(0, 1), edges: [] } };
+    };
+    const fetchMock = mockFetch(responses);
+    render(<MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}><ContextScreen /></MemoryRouter>);
+    await screen.findByText("Body");
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const readerTabs = within(screen.getByRole("tablist", { name: "Context reader views" }));
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
+    await screen.findByTestId("graph-view");
+    expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "3");
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    await waitFor(() => expect(approve).toBeEnabled());
+    await userEvent.click(approve);
+    await waitFor(() => expect(screen.getByTestId("context-graph-canvas"))
+      .toHaveAttribute("data-nodes", "1"));
+    expect(await screen.findByText("Version published.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith(`/pages/${PAGE_ID}/neighbors`)))
+      .toHaveLength(2);
+    await userEvent.click(readerTabs.getByRole("tab", { name: "View" }));
+    await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
+    expect(graphCalls).toBe(2);
+  });
 
   it("opens the pending draft comparison with the newer draft on the right in one click", async () => {
     mockFetch(pendingReviewFetch());
@@ -4631,6 +5503,40 @@ describe("ContextScreen", () => {
       expect(screen.queryByText("Selected second page")).not.toBeInTheDocument();
     });
 
+    it("normalizes an uppercase UUID query target before selecting its tree node", async () => {
+      mockDecisionLogRoutes();
+      renderAtCanonicalRoute(
+        `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}?target=${PAGE_ID.toUpperCase()}`,
+      );
+
+      expect(await screen.findByText("Needle body")).toBeInTheDocument();
+      expect(screen.queryByText("Selected second page")).not.toBeInTheDocument();
+    });
+
+    it("normalizes an uppercase UUID canonical route target", async () => {
+      mockDecisionLogRoutes();
+      renderAtCanonicalRoute(
+        `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID.toUpperCase()}`,
+      );
+
+      expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    });
+
+    it("keeps the first non-UUID target's case authoritative over later and routed UUIDs", async () => {
+      const nonUuidTarget = "NODE-1";
+      mockDecisionLogRoutes();
+      renderAtCanonicalRoute(
+        `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?target=${nonUuidTarget}&target=${PAGE_ID}`,
+      );
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "We couldn't find that page",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
+    });
+
     it("leaves a deleted canonical page route instead of retaining its stale :pageId", async () => {
       const user = userEvent.setup();
       const fetchMock = mockDecisionLogRoutes();
@@ -4905,13 +5811,38 @@ function HistoryButtons() {
   );
 }
 
-function mockFetch(responses: Record<string, unknown>) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+type MockFetchResponse =
+  | unknown
+  | ((input: RequestInfo | URL, init?: RequestInit) => unknown);
+
+function mockFetch(responses: Record<string, MockFetchResponse>) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
     // The context/pages list endpoint now carries pagination query params
     // (?limit=…&cursor=…); fall back to the query-stripped path so existing
     // mocks keyed on the bare endpoint still match.
-    const body = responses[url] ?? responses[url.split("?")[0]];
+    let response = responses[url] ?? responses[url.split("?")[0]];
+    if (
+      response === undefined &&
+      url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`
+    ) {
+      const request = JSON.parse(String(init?.body)) as {
+        seeds?: Array<{ kind: "context_page"; id: string }>;
+        time?: { mode?: "current" | "appearance" | "action" | "as_of" };
+        depth?: 1 | 2;
+      };
+      response = {
+        data: contextGraphPayload(
+          request.seeds?.[0]?.id ?? PAGE_ID,
+          request.time?.mode ?? "appearance",
+          request.seeds,
+          undefined,
+          request.depth,
+        ),
+      };
+    }
+    const body =
+      typeof response === "function" ? await response(input, init) : response;
     if (
       body &&
       typeof body === "object" &&
@@ -4934,12 +5865,235 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function graphQueryResponse(init?: RequestInit) {
+  const request = JSON.parse(String(init?.body)) as {
+    seeds?: Array<{ kind: "context_page"; id: string }>;
+    time?: { mode?: "current" | "appearance" | "action" | "as_of" };
+  };
+  return jsonResponse({
+    data: contextGraphPayload(
+      request.seeds?.[0]?.id ?? PAGE_ID,
+      request.time?.mode ?? "appearance",
+      request.seeds,
+    ),
+  });
+}
+
 function deferredResponse() {
   let resolve!: (value: Response) => void;
   const promise = new Promise<Response>((nextResolve) => {
     resolve = nextResolve;
   });
   return { promise, resolve };
+}
+
+function deferredValue<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+function contextGraphPayload(
+  pageId: string,
+  mode: "current" | "appearance" | "action" | "as_of",
+  seeds: Array<{ kind: "context_page"; id: string }> = [
+    { kind: "context_page", id: pageId },
+  ],
+  libraryGraphNodeKind: "library_artifact" | "library_item_version" =
+    "library_artifact",
+  depth: 1 | 2 = 2,
+) {
+  const isDecisionLog = pageId === PAGE_ID;
+  const seedTitle = isDecisionLog ? "Decision Log" : "Architecture Notes";
+  const seedNode = {
+    id: `node:${pageId}`,
+    entity_kind: "context_page",
+    entity_id: pageId,
+    family: "document",
+    label: seedTitle,
+    status: "published",
+    path: isDecisionLog
+      ? "/context/decision-log.md"
+      : "/context/architecture-notes.md",
+    is_seed: true,
+    occurred_at: "2026-05-09T00:00:00Z",
+    actor_label: null,
+    evidence: null,
+  };
+  const nodes = isDecisionLog
+    ? [
+        seedNode,
+        {
+          id: `node:${SECOND_PAGE_ID}`,
+          entity_kind: "context_page",
+          entity_id: SECOND_PAGE_ID,
+          family: "document",
+          label: "Architecture Notes",
+          status: "draft",
+          path: "/context/architecture-notes.md",
+          is_seed: false,
+          occurred_at: "2026-05-09T00:01:00Z",
+          actor_label: null,
+          evidence: null,
+        },
+        {
+          id: "node:library-1",
+          entity_kind: libraryGraphNodeKind,
+          entity_id: "artifact-1",
+          family: "document",
+          label: "Deployment Runbook",
+          status: "published",
+          path: "/library/library-1.md",
+          is_seed: false,
+          occurred_at: "2026-05-09T00:02:00Z",
+          actor_label: null,
+          evidence: null,
+        },
+      ]
+    : [seedNode];
+  const edges = isDecisionLog
+    ? [
+        {
+          id: "edge:backlink",
+          source: `node:${SECOND_PAGE_ID}`,
+          target: `node:${PAGE_ID}`,
+          edge_kind: "wikilink",
+          action_kind: null,
+          label: "linked from",
+          layer: "knowledge",
+          provenance: "curated",
+          direction: "directed",
+          weight: 1,
+          occurred_at: "2026-05-09T00:01:00Z",
+          sequence: 1,
+          aggregate: false,
+          count: null,
+          window_from: null,
+          window_to: null,
+          evidence: null,
+        },
+        {
+          id: "edge:citation",
+          source: `node:${PAGE_ID}`,
+          target: "node:library-1",
+          edge_kind: "citation_source",
+          action_kind: "cited",
+          label: "cites source",
+          layer: "evidence",
+          provenance: "curated",
+          direction: "directed",
+          weight: 1,
+          occurred_at: "2026-05-09T00:02:00Z",
+          sequence: 2,
+          aggregate: false,
+          count: null,
+          window_from: null,
+          window_to: null,
+          evidence: null,
+        },
+        {
+          id: "edge:co-access",
+          source: `node:${PAGE_ID}`,
+          target: `node:${SECOND_PAGE_ID}`,
+          edge_kind: "co_access",
+          action_kind: null,
+          label: "often read together",
+          layer: "activity",
+          provenance: "usage",
+          direction: "undirected",
+          weight: 2,
+          occurred_at: "2026-05-09T00:03:00Z",
+          sequence: 3,
+          aggregate: true,
+          count: 2,
+          window_from: null,
+          window_to: null,
+          evidence: null,
+        },
+      ]
+    : [];
+  // A fresh multi-seed query can be actor-filtered more tightly than the
+  // original one. The fixture deliberately models that so the screen test
+  // detects accidental scene union after an expansion.
+  const actorVisibleNodes = seeds.length > 1
+    ? nodes.filter(({ id }) => id !== "node:library-1")
+    : nodes;
+  const actorVisibleNodeIds = new Set(actorVisibleNodes.map(({ id }) => id));
+  const actorVisibleEdges = edges.filter(({ source, target }) =>
+    actorVisibleNodeIds.has(source) && actorVisibleNodeIds.has(target),
+  );
+  return {
+    schema_version: "dtxwiki.graph-scene.v1",
+    query: {
+      schema_version: "dtxwiki.graph-query.v1",
+      seeds,
+      scope: "local",
+      preset: "all",
+      layers: ["knowledge", "evidence", "activity", "action"],
+      node_families: [],
+      node_kinds: [],
+      edge_kinds: [],
+      action_kinds: [],
+      direction: "both",
+      depth: mode === "current" ? depth : 1,
+      time: { mode },
+      budget: mode === "current"
+        ? { nodes: 250, edges: 750 }
+        : { nodes: 50, edges: 150 },
+      cursor: null,
+    },
+    projection_revision: 3,
+    generated_at: "2026-05-10T00:00:00Z",
+    nodes: actorVisibleNodes,
+    edges: actorVisibleEdges,
+    timeline: [],
+    mermaid: isDecisionLog
+      ? "flowchart LR\n  related --> seed"
+      : "flowchart LR\n  seed",
+    facets: {
+      node_families: ["document"],
+      node_kinds: isDecisionLog
+        ? ["context_page", libraryGraphNodeKind]
+        : ["context_page"],
+      edge_kinds: isDecisionLog
+        ? ["wikilink", "citation_source", "co_access"]
+        : [],
+      action_kinds: isDecisionLog ? ["cited"] : [],
+      layers: isDecisionLog ? ["knowledge", "evidence", "activity"] : [],
+      statuses: isDecisionLog ? ["published", "draft"] : ["published"],
+      time_from: "2026-05-09T00:00:00Z",
+      time_to: "2026-05-09T00:03:00Z",
+    },
+    budget: {
+      requested: mode === "current"
+        ? { nodes: 250, edges: 750 }
+        : { nodes: 50, edges: 150 },
+      applied: mode === "current"
+        ? { nodes: 250, edges: 750 }
+        : { nodes: 50, edges: 150 },
+    },
+    completeness: "complete",
+    truncated: false,
+    warnings: [],
+    history: {
+      mode,
+      status: "complete",
+      basis: mode === "current" ? "current_projection" : "observations",
+      coverage_from: "2026-05-09T00:00:00Z",
+      watermark: "2026-05-10T00:00:00Z",
+      warnings: [],
+    },
+    capabilities: {
+      timeline: true,
+      expand: true,
+      evidence: true,
+      export: true,
+      saved_view: false,
+      as_of: false,
+    },
+  };
 }
 
 function contextPage(id: string, title: string, slug: string) {

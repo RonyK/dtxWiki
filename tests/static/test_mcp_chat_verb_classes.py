@@ -14,13 +14,17 @@ from backend.models.mcp_chat import (
     EXPOSURE_VERBS,
     McpChatArtifactVerb,
 )
+from backend.services.indexing.edge_registry import CO_ACCESS_SOURCE_VERBS
 from backend.services.mcp_trace_capture import derive_artifact_links
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECTION_SOURCES = {
     "backend/services/indexing/edge_registry.py": 1,
-    "backend/services/trail_analysis.py": 2,
+    "backend/services/trail_analysis.py": 1,
 }
+# Projection verb filters may name only these allowlists. Both are pinned to
+# consumption below, so no filter can admit an exposure or authoring verb.
+PROJECTION_VERB_ALLOWLISTS = frozenset({"CONSUMPTION_VERBS", "CO_ACCESS_SOURCE_VERBS"})
 
 
 def test_artifact_verbs_are_partitioned_into_exactly_one_semantic_class():
@@ -28,6 +32,18 @@ def test_artifact_verbs_are_partitioned_into_exactly_one_semantic_class():
 
     assert _partition_violations(classes, set(McpChatArtifactVerb)) == []
     assert McpChatArtifactVerb.SEARCH_MATCH not in CONSUMPTION_VERBS
+
+
+def test_co_access_reads_only_focused_reads():
+    """Co-reads are a subset of consumption without per-write citation fan-out.
+
+    Trace capture writes one CITED row per citation candidate of a write, all
+    at the same instant, so admitting CITED would pair every candidate.
+    """
+
+    assert CO_ACCESS_SOURCE_VERBS <= CONSUMPTION_VERBS
+    assert McpChatArtifactVerb.CITED not in CO_ACCESS_SOURCE_VERBS
+    assert McpChatArtifactVerb.REFERENCED in CO_ACCESS_SOURCE_VERBS
 
 
 @pytest.mark.counterexample(
@@ -81,7 +97,11 @@ def test_projection_filters_use_the_consumption_allowlist_only():
             and isinstance(call.func, ast.Attribute)
             and call.func.attr == "in_"
             and _attribute_path(call.func.value).endswith(
-                "McpChatArtifactLink.verb"
+                # Co-reads (co_access and hot paths) project from the
+                # per-call edge, which has every read's own instant; the hot
+                # concept aggregate still reads the rollup. Every filter must
+                # name a consumption-pinned allowlist.
+                ("McpChatArtifactLink.verb", "McpChatToolCallArtifact.verb")
             )
             and call.args
         ]
@@ -89,7 +109,7 @@ def test_projection_filters_use_the_consumption_allowlist_only():
         assert len(arguments) == expected_count, relative_path
         assert all(
             isinstance(argument, ast.Name)
-            and argument.id == "CONSUMPTION_VERBS"
+            and argument.id in PROJECTION_VERB_ALLOWLISTS
             for argument in arguments
         ), relative_path
 

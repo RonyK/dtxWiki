@@ -70,6 +70,7 @@ class _UnresolvedLinkRule:
                     PageLink.workspace_id == workspace_id,
                     PageLink.source_page_id == target.id,
                     PageLink.source_version_id == version_id,
+                    PageLink.link_syntax == "wikilink",
                     PageLink.target_page_id.is_(None),
                 )
             ).all()
@@ -119,6 +120,7 @@ class _BrokenSlugLinkRule:
                     PageLink.workspace_id == workspace_id,
                     PageLink.source_page_id == target.id,
                     PageLink.source_version_id == version_id,
+                    PageLink.link_syntax == "wikilink",
                     PageLink.target_slug != ContextPage.slug,
                 )
             ).all()

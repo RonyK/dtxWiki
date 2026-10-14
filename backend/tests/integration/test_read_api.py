@@ -19,6 +19,7 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import MCPClient, Workspace
 from backend.schemas.read import SEARCH_QUERY_MAX_LENGTH
 from backend.services.extraction_service import ExtractionService
+from backend.services.graph_observation_service import GraphObservationService
 from backend.services.library_service import LibraryService
 from backend.services.public_page_exposure import grant_public_page_exposure
 from backend.tests.conftest import authenticate_test_client_in_workspace
@@ -676,6 +677,107 @@ def test_diff_versions_eager_loads_body_markdown(page_service):
     )
 
 
+@pytest.mark.parametrize(
+    ("mode", "field"),
+    [("action", "from"), ("action", "to"), ("as_of", "as_of")],
+)
+def test_graph_query_rejects_timezone_naive_time_values(page_service, mode, field):
+    client = make_client(page_service)
+    workspace_id = client.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
+    created = _create_published_page(
+        client,
+        workspace_id,
+        title=f"Naive graph time {field}",
+        body_md="# Naive graph time",
+    )
+
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/graph/query",
+        json={
+            "seeds": [{"kind": "context_page", "id": created["id"]}],
+            "time": {"mode": mode, field: "2026-08-04T00:00:00"},
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_graph_query_accepts_timezone_aware_time_values(page_service):
+    client = make_client(page_service)
+    workspace_id = client.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
+    created = _create_published_page(
+        client,
+        workspace_id,
+        title="Aware graph time",
+        body_md="# Aware graph time",
+    )
+    endpoint = f"/api/v1/workspaces/{workspace_id}/graph/query"
+    seed = [{"kind": "context_page", "id": created["id"]}]
+    with page_service.session_factory.begin() as session:
+        GraphObservationService().record(
+            session,
+            UUID(workspace_id),
+            operation="action_occurred",
+            source_kind="context_page",
+            source_id=UUID(created["id"]),
+            action_kind="edited",
+            occurred_at=datetime(2026, 8, 5, tzinfo=UTC),
+            idempotency_key="aware-graph-time:edited",
+        )
+
+    action = client.post(
+        endpoint,
+        json={
+            "seeds": seed,
+            "time": {
+                "mode": "action",
+                "from": "2026-08-05T09:00:00+09:00",
+                "to": "2026-08-05T09:00:00+09:00",
+            },
+        },
+    )
+    as_of = client.post(
+        endpoint,
+        json={
+            "seeds": seed,
+            "time": {"mode": "as_of", "as_of": "2026-08-04T00:00:00Z"},
+        },
+    )
+
+    assert action.status_code == 200, action.text
+    assert any(
+        event["action_kind"] == "edited" for event in action.json()["data"]["timeline"]
+    )
+    assert as_of.status_code == 200, as_of.text
+
+
+def test_graph_query_normalizes_long_seed_title(page_service):
+    client = make_client(page_service)
+    workspace_id = client.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
+    long_title = "Long graph seed " + ("x" * 220)
+    created = _create_published_page(
+        client,
+        workspace_id,
+        title=long_title,
+        body_md="# Long graph seed title",
+    )
+
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/graph/query",
+        json={"seeds": [{"kind": "context_page", "id": created["id"]}]},
+    )
+
+    assert response.status_code == 200, response.text
+    seed = next(node for node in response.json()["data"]["nodes"] if node["is_seed"])
+    assert seed["label"] == long_title[:200]
+
+
 def test_read_api_exposes_context_changes_and_search(page_service):
     client = make_client(page_service)
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
@@ -748,6 +850,34 @@ def test_read_api_exposes_context_changes_and_search(page_service):
         "citations": [],
         "co_access": [],
         "mermaid": None,
+        "truncated": False,
+        "warnings": [],
+    }
+
+    graph = client.post(
+        f"/api/v1/workspaces/{workspace_id}/graph/query",
+        json={
+            "seeds": [{"kind": "context_page", "id": created["id"]}],
+            "edge_kinds": ["wikilink"],
+            "layers": ["knowledge"],
+        },
+    )
+    assert graph.status_code == 200, graph.text
+    graph_data = graph.json()["data"]
+    assert graph_data["schema_version"] == "dtxwiki.graph-scene.v1"
+    assert graph_data["query"]["schema_version"] == "dtxwiki.graph-query.v1"
+    assert {node["entity_id"] for node in graph_data["nodes"]} == {
+        created["id"],
+        linked["id"],
+    }
+    assert [edge["edge_kind"] for edge in graph_data["edges"]] == ["wikilink"]
+    assert graph_data["history"] == {
+        "mode": "current",
+        "basis": "current_projection",
+        "status": "complete",
+        "coverage_from": None,
+        "watermark": None,
+        "warnings": [],
     }
 
     changes = client.get(
@@ -1120,6 +1250,17 @@ def test_context_neighbors_hide_draft_only_seed_from_viewer(page_service):
     viewer_result = viewer.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/neighbors"
     )
+    graph_request = {
+        "seeds": [{"kind": "context_page", "id": page_id}],
+    }
+    owner_graph = owner.post(
+        f"/api/v1/workspaces/{workspace_id}/graph/query",
+        json=graph_request,
+    )
+    viewer_graph = viewer.post(
+        f"/api/v1/workspaces/{workspace_id}/graph/query",
+        json=graph_request,
+    )
 
     assert owner_result.status_code == 200
     assert owner_result.json()["data"] == {
@@ -1128,9 +1269,14 @@ def test_context_neighbors_hide_draft_only_seed_from_viewer(page_service):
         "citations": [],
         "co_access": [],
         "mermaid": None,
+        "truncated": False,
+        "warnings": [],
     }
     assert viewer_result.status_code == 404
     assert viewer_result.json()["error_code"] == "not_found"
+    assert owner_graph.status_code == 200
+    assert viewer_graph.status_code == 404
+    assert viewer_graph.json()["error_code"] == "not_found"
 
 
 def test_context_page_draft_filter_requires_draft_read_capability(page_service):

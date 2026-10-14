@@ -45,7 +45,7 @@ scp "$WHEEL" operator@wiki.example.com:/tmp/
 scp dtxWiki/infra/prod/install.sh operator@wiki.example.com:/tmp/install.sh
 ```
 
-소스에서 wheel을 직접 만들 때는 Linux/WSL2, Git, GNU Make, Python 3.12, **Node.js 22.18+**, npm이
+소스에서 wheel을 직접 만들 때는 Linux/WSL2, Git, GNU Make, Python 3.12, **Node.js 22.18.x**, npm이
 필요합니다. raw `python -m build`는 gitignored SPA를 누락할 수 있으므로 반드시 `make build-wheel`을
 사용하고, 빌드 전에 `make install`로 Python·npm 의존성을 설치합니다.
 

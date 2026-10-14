@@ -21,6 +21,7 @@ from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.page_service import PageService
 from backend.services.tree_service import TreeService
 from backend.tests.conftest import authenticate_test_client
+from backend.tests.utils.postgres import create_isolated_postgres_metadata
 from backend.tests.utils.postgres_reset import reset_postgres_test_database
 
 
@@ -46,7 +47,7 @@ def _postgres_test_url() -> str | None:
 def test_same_parent_reorders_are_serialized_and_leave_consistent_order():
     engine = create_engine(_postgres_test_url())
     reset_postgres_test_database(engine)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     with session_factory.begin() as session:
         seed_default_workspace(session)

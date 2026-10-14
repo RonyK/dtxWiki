@@ -13,6 +13,7 @@ from backend.cli.commands import db as db_commands
 from backend.cli.main import app
 from backend.services.ops import db_revision_inventory as inventory
 from backend.services.ops import read_only_database
+from backend.services.ops.alembic_migration_graph import AlembicMigrationGraphSource
 
 
 def _db(path: Path, revisions=("bd62193d5cf6",)) -> None:
@@ -90,7 +91,7 @@ def test_sqlite_probe_does_not_create_sidecars_or_change_bytes_or_mtime(tmp_path
     assert _fingerprint(db) == before
     payload = json.loads(result.stdout)
     assert payload["code"] == {
-        "alembic_heads": ["efcbcf724889"],
+        "alembic_heads": list(AlembicMigrationGraphSource().current_heads()),
         "known_alternate_revisions": [
             "0005_library_multiformat_conversion",
             "0012_graph_view_observations",

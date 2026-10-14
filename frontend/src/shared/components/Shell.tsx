@@ -14,6 +14,7 @@ import {
   Menu,
   MessagesSquare,
   MessageSquare,
+  Network,
   Plus,
   Search,
   Settings,
@@ -30,6 +31,10 @@ import { useTranslation } from "react-i18next";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import { apiErrorMessage } from "../api/client";
+import {
+  invalidateWorkspaceGraphCapability,
+  useWorkspaceGraphCapability,
+} from "../../features/graph/useWorkspaceGraphCapability";
 import { searchWorkspace, type RankedSearchResult } from "../api/operations";
 import { createWorkspace, type WorkspaceSummary } from "../api/workspace";
 import {
@@ -77,6 +82,7 @@ type NavItemKey =
   | "dashboard"
   | "library"
   | "context"
+  | "graph"
   | "agent"
   | "chats"
   | "ask"
@@ -124,6 +130,7 @@ const SIDEBAR_NAV_GROUPS: Array<{ key: NavGroupKey; items: SidebarNavItem[] }> =
         { icon: LayoutDashboard, key: "dashboard", to: "/dashboard" },
         { icon: Library, key: "library", to: "/library" },
         { icon: FileText, key: "context", to: "/context" },
+        { icon: Network, key: "graph", preview: true, to: "/graph" },
         { icon: Bot, key: "agent", preview: true, to: "/agent" },
         { icon: MessagesSquare, key: "chats", to: "/chats" },
       ],
@@ -271,6 +278,7 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
       dashboard: t("nav.dashboard", { defaultValue: "Dashboard" }),
       library: t("nav.library", { defaultValue: "Library" }),
       context: t("nav.context", { defaultValue: "Context" }),
+      graph: t("nav.graph", { defaultValue: "Knowledge Map" }),
       agent: t("nav.agent", { defaultValue: "Agent" }),
       chats: t("nav.chats", { defaultValue: "Chats" }),
       ask: t("nav.ask", { defaultValue: "Ask" }),
@@ -330,13 +338,18 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
   };
 }
 
-function navGroupsForLabels(labels: ShellLabels) {
+export function navGroupsForLabels(
+  labels: ShellLabels,
+  workspaceGraphEnabled: boolean,
+) {
   return SIDEBAR_NAV_GROUPS.map((group) => ({
     label: labels.groups[group.key],
-    items: group.items.map((item) => ({
-      ...item,
-      label: labels.nav[item.key],
-    })),
+    items: group.items
+      .filter((item) => item.key !== "graph" || workspaceGraphEnabled)
+      .map((item) => ({
+        ...item,
+        label: labels.nav[item.key],
+      })),
   }));
 }
 
@@ -417,6 +430,16 @@ export function Shell({ children }: ShellProps) {
   const shellLabels = useMemo(() => shellLabelsFromT(t), [t]);
   const workspaceContext = useOptionalWorkspaceContext();
   const selectedRole = workspaceContext?.selectedWorkspace?.role;
+  // can_manage in the cached capability belongs to the signed-in user, so a
+  // different sign-in must not reuse it. Observed role changes are fenced by
+  // the capability hook itself before rendering a cached answer.
+  const signedInUserId = user?.user_id ?? null;
+  useEffect(() => {
+    invalidateWorkspaceGraphCapability();
+  }, [signedInUserId]);
+  const workspaceGraph = useWorkspaceGraphCapability(
+    isAuthenticated ? workspaceContext?.selectedId : null,
+  );
   const canWriteSelectedWorkspace = isEditorRole(selectedRole);
   // /chats is editor-gated end to end (backend + RequireEditor). Keep this
   // fail-closed until the selected role resolves so a Viewer never sees a
@@ -429,7 +452,7 @@ export function Shell({ children }: ShellProps) {
     language: nextLocaleLabel,
   });
   const navGroups = useMemo(() => {
-    const groups = navGroupsForLabels(shellLabels);
+    const groups = navGroupsForLabels(shellLabels, workspaceGraph.enabled);
     if (!hideChatsNav) {
       return groups;
     }
@@ -437,7 +460,7 @@ export function Shell({ children }: ShellProps) {
       ...group,
       items: group.items.filter((item) => item.key !== "chats"),
     }));
-  }, [hideChatsNav, shellLabels]);
+  }, [hideChatsNav, shellLabels, workspaceGraph.enabled]);
 
   function closeMobileNav() {
     restoreMobileNavFocusRef.current = true;
@@ -2277,7 +2300,11 @@ function Sidebar({
                     <NavLink
                       aria-label={collapsed ? title : undefined}
                       className={({ isActive }) =>
-                        `nav-item${isActive ? " active" : ""}`
+                        `nav-item${
+                          item.key === "graph" && item.preview
+                            ? " nav-item--graph-preview"
+                            : ""
+                        }${isActive ? " active" : ""}`
                       }
                       key={item.to}
                       title={title}

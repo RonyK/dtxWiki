@@ -4,7 +4,12 @@ import pytest
 from sqlalchemy import event, select
 
 import backend.services.lint  # noqa: F401  (registers knowledge rules)
-from backend.models.context import ContextPage, ContextPageVersion, PageNameIndex
+from backend.models.context import (
+    ContextPage,
+    ContextPageVersion,
+    PageLink,
+    PageNameIndex,
+)
 from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
 from backend.schemas.lint import LintRunCreateRequest
@@ -79,7 +84,7 @@ def test_missing_backlink_flagged(session_factory):
         _refresh(session, a, b)
         findings = _check(session, "kb.missing_backlink", a)
     assert len(findings) == 1
-    assert "does not link back" in findings[0].suggested_action
+    assert "has no authored link back" in findings[0].suggested_action
 
 
 def test_mutual_backlink_clean(session_factory):
@@ -90,6 +95,65 @@ def test_mutual_backlink_clean(session_factory):
         _refresh(session, a, b)
         findings = _check(session, "kb.missing_backlink", a)
     assert findings == []
+
+
+def test_context_urls_count_as_authored_links_and_use_syntax_neutral_wording(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        target = _page(session, wsid, "url-target")
+        source = _page(
+            session,
+            wsid,
+            "url-source",
+            body=f"See [target](/context?target={target.id}).",
+        )
+        _refresh(session, source, target)
+
+        assert _check(session, "kb.orphan_page", target) == []
+        missing = _check(session, "kb.missing_backlink", source)
+        assert len(missing) == 1
+        assert "authored link" in missing[0].suggested_action
+        assert "wikilink" not in missing[0].suggested_action.casefold()
+
+        target_version = session.get(
+            ContextPageVersion,
+            target.current_published_version_id,
+        )
+        target_version.body_md = f"See [source](/context?target={source.id})."
+        refresh_page_links(session, page=target, version=target_version)
+
+        assert _check(session, "kb.missing_backlink", source) == []
+
+
+def test_archived_authored_link_target_is_hidden_without_deleting_projection(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        target = _page(session, wsid, "archived-url-target")
+        source = _page(
+            session,
+            wsid,
+            "archived-url-source",
+            body=f"See [target](/context?target={target.id}).",
+        )
+        _refresh(session, source, target)
+        target.lifecycle_status = "archived"
+        session.flush()
+
+        stored = session.scalar(
+            select(PageLink).where(
+                PageLink.source_page_id == source.id,
+                PageLink.target_page_id == target.id,
+                PageLink.link_syntax == "context_url",
+            )
+        )
+
+        assert stored is not None
+        assert _check(session, "kb.missing_backlink", source) == []
+        assert _check(session, "kb.orphan_page", target) == []
 
 
 def test_duplicate_concept_flagged(session_factory):

@@ -23,7 +23,10 @@ from backend.models.media import SecurityBlockedBlobRow
 from backend.repositories.workspace_scoped import get_in_workspace
 from backend.services.preview_contracts import renderer_accepts_media_type
 
-_LEGACY_READY_STATUSES = frozenset({"completed", "ready", "ready_partial"})
+# Processing states in which a pre-0005 item's legacy current version counts
+# as its canonical one. Public so SQL mirrors of the rule use the same set.
+LEGACY_READY_PROCESSING_STATUSES = frozenset({"completed", "ready", "ready_partial"})
+_LEGACY_READY_STATUSES = LEGACY_READY_PROCESSING_STATUSES
 
 
 def library_original_content_url(

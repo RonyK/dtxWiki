@@ -693,16 +693,24 @@ def test_gfm_autolink_can_start_after_digit_or_underscore(prefix: str) -> None:
     assert browser_reachable_legacy_upload_identities(markdown)
 
 
-@pytest.mark.parametrize("prefix", ["0", "9", "_", "a", "Z"])
-def test_gfm_www_autolink_cannot_start_after_a_word_character(prefix: str) -> None:
-    """F-5: unlike the scheme-prefixed form, GFM's `www.` autolink requires a
-    non-word preceding character. A digit- or underscore-prefixed `www.` is
-    plain text, not a link, and must not be treated as a legacy reference."""
+@pytest.mark.parametrize("prefix", ["0", "9", "a", "Z", "é", "中", "９"])
+def test_gfm_www_autolink_cannot_start_after_alphanumeric(prefix: str) -> None:
+    """GFM does not open a `www.` autolink after a letter or digit."""
 
     markdown = f"{prefix}www.wiki.example{LEGACY_URL} tail"
 
     assert scan_legacy_upload_references(markdown, WORKSPACE_ID) == ()
     assert browser_reachable_legacy_upload_identities(markdown) == frozenset()
+
+
+def test_gfm_www_autolink_can_start_after_underscore() -> None:
+    markdown = f"_www.wiki.example{LEGACY_URL} tail"
+
+    with pytest.raises(LegacyMarkdownMediaError) as raised:
+        scan_legacy_upload_references(markdown, WORKSPACE_ID)
+
+    assert raised.value.reason_code == "unsupported_legacy_media_syntax"
+    assert browser_reachable_legacy_upload_identities(markdown)
 
 
 def test_gfm_autolink_stops_before_bom_whitespace() -> None:

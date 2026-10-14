@@ -58,6 +58,27 @@ MIGRATION_FILES = sorted(
     path.relative_to(REPO_ROOT).as_posix()
     for path in (REPO_ROOT / "backend" / "migrations" / "versions").rglob("*.py")
 )
+GRAPH_RUNTIME_FILES = [
+    "backend/api/graph.py",
+    "backend/api/middleware/workspace_graph_compression.py",
+    "backend/cli/commands/graph.py",
+    "backend/context_media/domain/rendered_markdown.py",
+    "backend/repositories/graph_density_repo.py",
+    "backend/schemas/graph.py",
+    "backend/schemas/workspace_graph.py",
+    "backend/services/context_link_advisory.py",
+    "backend/services/graph_density.py",
+    "backend/services/graph_observation_service.py",
+    "backend/services/graph_query_service.py",
+    "backend/services/graph_rank.py",
+    "backend/services/graph_reprojection.py",
+    "backend/services/graph_semantics.py",
+    "backend/services/indexing/co_read.py",
+    "backend/services/page_link_ordering.py",
+    "backend/services/workspace_graph_capability.py",
+    "backend/services/workspace_graph_service.py",
+    "backend/utils/markdown_links.py",
+]
 REVISION_0002_FILES = sorted(
     path.relative_to(REPO_ROOT).as_posix()
     for path in (
@@ -160,7 +181,9 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
         assert any(
             name.endswith(f"share/dtxwiki/{relative_path}") for name in wheel_names
         ), f"wheel missing {relative_path}"
-    for relative_path in [*CATALOG_FILES, *MIGRATION_FILES, *REVISION_0002_FILES]:
+    for relative_path in [
+        *CATALOG_FILES, *MIGRATION_FILES, *REVISION_0002_FILES, *GRAPH_RUNTIME_FILES
+    ]:
         assert any(name.endswith(relative_path) for name in wheel_names), (
             f"wheel missing {relative_path}"
         )
@@ -216,7 +239,7 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
     assert packaged_migrations.returncode == 0, (
         packaged_migrations.stdout + packaged_migrations.stderr
     )
-    assert packaged_migrations.stdout.strip() == "efcbcf724889"
+    assert packaged_migrations.stdout.strip() == "9aeab6944f25"
 
     with tarfile.open(sdist_path) as sdist:
         sdist_names = set(sdist.getnames())
@@ -224,7 +247,9 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
         assert any(name.endswith(relative_path) for name in sdist_names), (
             f"sdist missing {relative_path}"
         )
-    for relative_path in [*CATALOG_FILES, *MIGRATION_FILES, *REVISION_0002_FILES]:
+    for relative_path in [
+        *CATALOG_FILES, *MIGRATION_FILES, *REVISION_0002_FILES, *GRAPH_RUNTIME_FILES
+    ]:
         assert any(name.endswith(relative_path) for name in sdist_names), (
             f"sdist missing {relative_path}"
         )

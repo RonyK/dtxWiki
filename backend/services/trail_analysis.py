@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from itertools import combinations
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from backend.models.agent import AgentPage
@@ -35,7 +34,12 @@ from backend.services.entity_ref import (
     context_concept_path,
     library_concept_path,
 )
-from backend.services.indexing.edge_registry import refresh_co_access_edge_projection
+from backend.services.indexing.edge_registry import (
+    clear_co_access_edge_projection,
+    co_access_pairs,
+    co_read_source,
+    refresh_co_access_edge_projection,
+)
 
 TRAIL_WINDOW_DAYS = 30
 HOT_CONCEPT_LIMIT = 10
@@ -48,10 +52,24 @@ def run_trail_tick(
     workspace_id: UUID,
     *,
     now: datetime | None = None,
+    usage_signals_enabled: bool,
 ) -> dict[str, int]:
+    """One maintenance pass over the workspace's usage trail.
+
+    ``usage_signals_enabled`` is the owner's switch and has no default. Off,
+    the co_access projection is removed and no hot path is staged: hot paths
+    are the page-to-page co_access pairs, so they are the same signal.
+    """
+
     now = now or datetime.now(UTC)
-    hot_paths = _stage_hot_paths(session, workspace_id, now=now)
-    co_access = refresh_co_access_edge_projection(session, workspace_id, now=now)
+    if usage_signals_enabled:
+        hot_paths = _stage_hot_paths(session, workspace_id, now=now)
+        co_access = refresh_co_access_edge_projection(
+            session, workspace_id, now=now
+        )
+    else:
+        hot_paths = 0
+        co_access = clear_co_access_edge_projection(session, workspace_id)
     authority = recompute_authority(session, workspace_id, now=now)
     overview_tasks = _produce_folder_overview_tasks(session, workspace_id)
     return {
@@ -119,11 +137,18 @@ def recompute_authority(
     now: datetime | None = None,
 ) -> int:
     now = now or datetime.now(UTC)
-    workspace = session.get(Workspace, workspace_id)
-    if workspace is None:
+    # The frozen core migration also invokes this function. Select only its
+    # released version columns, since later Workspace settings do not exist yet.
+    versions = session.execute(
+        select(
+            Workspace.edge_projection_version,
+            Workspace.authority_projection_version,
+        ).where(Workspace.id == workspace_id)
+    ).one_or_none()
+    if versions is None:
         raise ValueError("workspace not found while computing authority")
-    projection_version = workspace.edge_projection_version
-    if workspace.authority_projection_version == projection_version:
+    projection_version, authority_version = versions
+    if authority_version == projection_version:
         return int(
             session.scalar(
                 select(func.count(KnowledgeNodeStat.id)).where(
@@ -154,7 +179,11 @@ def recompute_authority(
     )
     if stat_rows:
         session.connection().execute(KnowledgeNodeStat.__table__.insert(), stat_rows)
-    workspace.authority_projection_version = projection_version
+    session.execute(
+        update(Workspace)
+        .where(Workspace.id == workspace_id)
+        .values(authority_projection_version=projection_version)
+    )
     session.flush()
     return len(stat_rows)
 
@@ -310,28 +339,27 @@ def _stage_hot_paths(session: Session, workspace_id: UUID, *, now: datetime) -> 
 def _context_pair_session_counts(
     session: Session, workspace_id: UUID, *, now: datetime
 ) -> dict[tuple[UUID, UUID], int]:
-    cutoff = now - timedelta(days=TRAIL_WINDOW_DAYS)
-    rows = session.execute(
-        select(
-            McpChatArtifactLink.chat_session_id,
-            McpChatArtifactLink.resource_id,
-        )
-        .join(McpChatSession, McpChatArtifactLink.chat_session_id == McpChatSession.id)
-        .where(
-            McpChatSession.workspace_id == workspace_id,
-            McpChatArtifactLink.resource_kind == EntityKind.CONTEXT_PAGE.value,
-            McpChatArtifactLink.verb.in_(CONSUMPTION_VERBS),
-            McpChatArtifactLink.last_occurred_at >= cutoff,
-        )
-        .distinct()
-    ).all()
-    by_session: dict[UUID, set[UUID]] = defaultdict(set)
-    for session_id, page_id in rows:
-        by_session[session_id].add(page_id)
+    """Count the sessions that read each pair of context pages together.
+
+    A hot path is a co_access pair between two context pages: the same
+    streamed source, the same pairing, then only the page-to-page pairs. The
+    pairing runs over every kind first, so a Library item read between two
+    pages separates them here exactly as it does on the graph. The rollup
+    this used to read keeps no per-read instant, which forced a whole-session
+    clique: one session of 200 reads became 19,900 pairs.
+    """
+
+    page = EntityKind.CONTEXT_PAGE.value
+    reads = co_read_source(
+        session,
+        workspace_id,
+        since=now - timedelta(days=TRAIL_WINDOW_DAYS),
+    )
+    # A pair is yielded at most once per session, so this counts sessions.
     counts: defaultdict[tuple[UUID, UUID], int] = defaultdict(int)
-    for page_ids in by_session.values():
-        for left, right in combinations(sorted(page_ids, key=str), 2):
-            counts[(left, right)] += 1
+    for pair in co_access_pairs(reads):
+        if pair.left[0] == page and pair.right[0] == page:
+            counts[(pair.left[1], pair.right[1])] += 1
     return dict(counts)
 
 

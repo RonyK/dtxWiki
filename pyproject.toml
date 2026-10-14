@@ -51,7 +51,9 @@ dependencies = [
   # as a transitive.
   "jsonschema>=4.23",
   "mcp>=1.28.1,<2",
-  "markdown-it-py>=4.0",
+  # Graph relationship projection uses the shared Markdown parser profile.
+  "markdown-it-py>=4.1,<5",
+  "mdit-py-plugins>=0.6.1,<0.7",
   "packaging>=23",
   "pillow==12.3.0",
   "pydantic>=2.8",

@@ -15,6 +15,9 @@ from backend.services.delegated_tasks import produce_folder_summary_tasks
 from backend.services.indexing.edge_registry import rebuild_edge_projection
 from backend.services.page_service import sync_page_projections
 from backend.services.retrieval.protocol import Indexer
+from backend.services.workspace_graph_capability import (
+    usage_relation_signals_enabled,
+)
 
 
 def reindex_workspace(
@@ -23,6 +26,9 @@ def reindex_workspace(
     workspace_id: UUID,
 ) -> dict[str, int]:
     """Rebuild transactional projections, then the configured index planes."""
+    # The owner's usage-signal switch lives on the control plane.
+    with database_provider.control_session_factory()() as control_session:
+        usage_signals = usage_relation_signals_enabled(control_session, workspace_id)
     with database_provider.session_for(workspace_id).begin() as session:
         pages = session.scalars(
             select(ContextPage).where(ContextPage.workspace_id == workspace_id)
@@ -38,11 +44,23 @@ def reindex_workspace(
         for page in pages:
             live_versions = _live_context_versions(session, page)
             if not live_versions:
-                sync_page_projections(session, page=page, version=None)
+                sync_page_projections(
+                    session,
+                    page=page,
+                    version=None,
+                    record_graph_observations=False,
+                )
             for version in live_versions:
-                sync_page_projections(session, page=page, version=version)
+                sync_page_projections(
+                    session,
+                    page=page,
+                    version=version,
+                    record_graph_observations=False,
+                )
                 synced_versions += 1
-        edge_counts = rebuild_edge_projection(session, workspace_id)
+        edge_counts = rebuild_edge_projection(
+            session, workspace_id, usage_signals_enabled=usage_signals
+        )
         delegated = produce_folder_summary_tasks(session, workspace_id)
         counts = {
             "context_pages": len(page_ids),

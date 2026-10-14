@@ -109,7 +109,8 @@ class TreeService:
                 # A tree rename mutates the canonical page title without a
                 # new version, so the name projection must resync here or the
                 # entity lane keeps resolving the old title (Sprint-2 review
-                # BS-1). version=None leaves PageLink rows untouched.
+                # BS-1). version=None does not reparse a version body; it only
+                # prunes PageLink rows for versions that are no longer live.
                 sync_page_projections(session, page=page)
         elif node.target_kind == "agent_page" and node.target_id is not None:
             from backend.models.agent import AgentPage

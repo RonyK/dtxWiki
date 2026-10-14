@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from "../shared/auth/AuthContext";
 import { Shell } from "../shared/components/Shell";
 import { RouteLoading } from "../shared/components/RouteLoading";
 import { StatusBanner } from "../shared/components/StatusBanner";
+import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import {
   useWorkspaceContext,
   WorkspaceProvider,
@@ -88,6 +89,11 @@ const AskScreen = lazy(() =>
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
 );
+const WorkspaceGraphScreen = lazy(() =>
+  import("../features/graph/WorkspaceGraphScreen").then((module) => ({
+    default: module.WorkspaceGraphScreen,
+  })),
+);
 const ChatsListScreen = lazy(() =>
   import("../features/mcp-chats/ChatsListScreen").then((module) => ({
     default: module.ChatsListScreen,
@@ -135,7 +141,8 @@ const WorkspaceDirectoryScreen = lazy(() =>
 
 // Exported so route-level tests can mount the REAL config (e.g. assert the
 // public /w/:workspaceSlug/pages/:slug route is NOT under RequireAuth).
-export const appRoutes = createRoutesFromElements(
+export function createAppRoutes() {
+  return createRoutesFromElements(
     <Route errorElement={<RootRouteError />}>
       {/* Public, unauthenticated published-page reader (T16 27-a). Lives OUTSIDE
           RequireAuth and OUTSIDE AppFrame (no AuthProvider/WorkspaceProvider/Shell)
@@ -212,6 +219,19 @@ export const appRoutes = createRoutesFromElements(
         element={
           <RequireAuth>
             <ContextScreen />
+          </RequireAuth>
+        }
+      />
+      {/* Always registered: whether the map is on is a per-workspace
+          Settings choice the gate asks the server about, so a shared link
+          explains itself instead of 404ing. */}
+      <Route
+        path="/graph"
+        element={
+          <RequireAuth>
+            <WorkspaceGraphGate>
+              <WorkspaceGraphScreen />
+            </WorkspaceGraphGate>
           </RequireAuth>
         }
       />
@@ -376,7 +396,10 @@ export const appRoutes = createRoutesFromElements(
       />
       </Route>
     </Route>,
-);
+  );
+}
+
+export const appRoutes = createAppRoutes();
 
 const appRouter = createBrowserRouter(appRoutes);
 

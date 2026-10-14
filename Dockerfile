@@ -9,6 +9,7 @@ FROM node:22-slim AS frontend
 WORKDIR /build
 COPY package.json package-lock.json ./
 COPY frontend ./frontend
+COPY scripts/cosmos-rest-log-patch.mjs scripts/cosmos-gpu-simulation-patch.mjs scripts/generate-cosmos-rest-log.mjs ./scripts/
 RUN npm ci
 RUN npm --workspace frontend run build
 

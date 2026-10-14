@@ -41,6 +41,21 @@ describe("ContextEditPermalinkResolver", () => {
     expect(readContextPage).toHaveBeenCalledWith(workspaceId, pageId);
   });
 
+  it("ignores a query target and resolves the edit route's page id", async () => {
+    const queryTargetId = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA";
+    vi.mocked(readContextPage).mockResolvedValue({ slug: "current-title" } as never);
+    renderResolver(
+      `/workspaces/${workspaceId}/context/pages/${pageId}/edit?target=${queryTargetId}`,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/context/current-title/edit",
+      ),
+    );
+    expect(readContextPage).toHaveBeenCalledWith(workspaceId, pageId);
+  });
+
   it("keeps the id permalink stable when the page slug changes", async () => {
     vi.mocked(readContextPage).mockResolvedValue({ slug: "renamed-page" } as never);
     renderResolver(`/workspaces/${workspaceId}/context/pages/${pageId}/edit`);

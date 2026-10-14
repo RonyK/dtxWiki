@@ -474,6 +474,11 @@ def test_tree_rename_of_context_page_node_syncs_page_title(
             actor_role="owner",
         )
         node = _primary_node(session, workspace.id, "context_page", result.page_id)
+        revision_before = session.scalar(
+            select(Workspace.edge_projection_version).where(
+                Workspace.id == workspace.id
+            )
+        )
         renamed = tree_service.update_node(
             session=session,
             workspace_id=workspace.id,
@@ -485,6 +490,14 @@ def test_tree_rename_of_context_page_node_syncs_page_title(
         page = session.get(ContextPage, result.page_id)
         assert renamed.title == "Renamed Context Label"
         assert page.title == "Renamed Context Label"
+        assert (
+            session.scalar(
+                select(Workspace.edge_projection_version).where(
+                    Workspace.id == workspace.id
+                )
+            )
+            == revision_before
+        )
 
         # The next write-path placement sync copies page.title back onto the
         # node; the rename must survive it instead of silently reverting.

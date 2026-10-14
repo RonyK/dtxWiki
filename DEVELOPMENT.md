@@ -10,7 +10,7 @@ compose, 테스트, 그리고 코드를 수정한 뒤 설치된 dtxWiki 실행 �
 
 ## 개발 환경 빠른 시작 (development checkout)
 
-필요한 도구: Linux/WSL2, Git, GNU Make, **Python 3.12**(`.python-version`), **Node.js 22.18 이상**과
+필요한 도구: Linux/WSL2, Git, GNU Make, **Python 3.12**(`.python-version`), **Node.js 22.18.x**과
 npm(`.nvmrc`, `package.json`의 `engines`). CI와 같은 환경은 다음으로 맞춥니다.
 
 ```bash
@@ -39,6 +39,12 @@ frontend를 함께 serve합니다.
 make backend-dev        # uvicorn --reload (API only, 21080)
 make frontend-dev       # Vite dev server (21173, HMR)
 ```
+
+Workspace Knowledge Map은 workspace마다 기본적으로 꺼져 있습니다. Owner가
+Settings > Workspace의 Knowledge graph 카드에서 켜면 메뉴와 `/graph`가
+활성화되며, 재빌드나 서버 재시작은 필요 없습니다. 운영자는
+`DTXWIKI_GRAPH_SERVICE_AVAILABLE=false`로 모든 workspace의 지도를 일시적으로
+끌 수 있습니다. 문서별 Local Graph는 이 설정과 독립적으로 사용할 수 있습니다.
 
 `make backend-dev`는 API server만 실행합니다. source extraction/feedback/bundle job
 처리가 필요하면 worker를 별도 터미널에서 실행하세요:

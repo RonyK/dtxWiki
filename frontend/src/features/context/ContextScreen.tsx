@@ -27,15 +27,26 @@ import {
 } from "react-router-dom";
 
 import { NotFoundScreen } from "../errors/NotFoundScreen";
+import { GraphView } from "../graph/GraphView";
+import { useWorkspaceGraphCapability } from "../graph/useWorkspaceGraphCapability";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
 import { ContextReconciliationWorkbench } from "./ContextReconciliationWorkbench";
 import { citationKeyForSource } from "../pages/editorCompletions";
 import {
+  contextGraphQuery,
+  queryGraph,
+  type GraphDepth,
+  type GraphHistoryMode,
+  type GraphNode,
+  type GraphQueryPayload,
+} from "../../shared/api/graph";
+import {
   contextMediaPageVersionContentUrl,
   type ContextMediaAssetUrlResolver,
 } from "../../shared/api/contextMedia";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import {
   listLibraryTombstones,
   type LibraryItemTombstone,
@@ -53,8 +64,8 @@ import {
 } from "../../shared/api/context";
 import {
   decideReview,
-  getReview,
   getContextPageNeighbors,
+  getReview,
   listContextPageActivity,
 } from "../../shared/api/operations";
 import type {
@@ -146,6 +157,8 @@ import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceCon
 const CONTEXT_CHILD_PAGE_SIZE = 5;
 const CONTEXT_FOLDER_CHILD_PAGE_PARAM = "childrenPage";
 const CONTEXT_CHILD_TAB_PAGE_PARAM = "page";
+const STRICT_HYPHENATED_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type PublishedVersionInfo = {
   version_id: string;
@@ -180,12 +193,25 @@ type ContextState = {
   selectedNodeId: string | null;
   detail: ContextPageDetail | null;
   history: ContextChangeHistory | null;
-  neighbors: GraphNeighborsPayload | null;
-  neighborsFailed: boolean;
   tombstones: LibraryItemTombstone[];
 };
 
 export function ContextScreen() {
+  const actorId = useOptionalAuth()?.user?.user_id ?? null;
+  const workspaceContext = useOptionalWorkspaceContext();
+  const selectedWorkspace = workspaceContext?.selectedWorkspace;
+  const selectedId = workspaceContext?.selectedId ?? selectedWorkspace?.id ?? null;
+  const observedRole = !selectedWorkspace?.id || selectedWorkspace.id === selectedId
+    ? selectedWorkspace?.role ?? null
+    : null;
+  // This is the owner of the whole Context payload and Reader, not just its
+  // canvas. Replace it in this render so previous-authority content and pins
+  // disappear before fresh reads; unmount cleanup also fences late requests.
+  const authorityKey = JSON.stringify([actorId, selectedId, observedRole]);
+  return <ScopedContextScreen key={authorityKey} />;
+}
+
+function ScopedContextScreen() {
   const { t } = useTranslation("context");
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
   const workspaceContext = useOptionalWorkspaceContext();
@@ -232,8 +258,9 @@ export function ContextScreen() {
   const [publishArrivalPath] = useState(
     () => `${location.pathname}${location.search}`,
   );
-  const requestedTargetId =
-    searchParams.get(TREE_TARGET_PARAM) ?? routedPageId ?? null;
+  const requestedTargetId = normalizeContextTargetId(
+    searchParams.get(TREE_TARGET_PARAM) ?? routedPageId ?? null,
+  );
   const previousSearchRef = useRef(location.search);
   const searchChangedRef = useRef(false);
   const expansionWorkspaceRef = useRef<string | null>(null);
@@ -330,18 +357,13 @@ export function ContextScreen() {
       const selectedPageId = selectedPageIdForNode(tree, pages, selectedNodeId);
       let detail: ContextPageDetail | null = null;
       let history: ContextChangeHistory | null = null;
-      let neighbors: GraphNeighborsPayload | null = null;
-      let neighborsFailed = false;
       if (selectedPageId) {
-        const [nextDetail, nextHistory, neighborResult] = await Promise.all([
+        const [nextDetail, nextHistory] = await Promise.all([
           readContextPage(workspaceId, selectedPageId),
           listContextChanges(workspaceId, selectedPageId),
-          loadGraphNeighbors(workspaceId, selectedPageId),
         ]);
         detail = nextDetail;
         history = nextHistory;
-        neighbors = neighborResult.data;
-        neighborsFailed = neighborResult.failed;
       }
       return {
         workspaceId,
@@ -354,8 +376,6 @@ export function ContextScreen() {
         selectedNodeId,
         detail,
         history,
-        neighbors,
-        neighborsFailed,
         tombstones,
       };
     },
@@ -387,8 +407,6 @@ export function ContextScreen() {
         selectedNodeId: null,
         detail: null,
         history: null,
-        neighbors: null,
-        neighborsFailed: false,
         tombstones: [],
       },
       onSuccess: (nextState) => {
@@ -587,8 +605,6 @@ export function ContextScreen() {
             selectedNodeId: folder.id,
             detail: null,
             history: null,
-            neighbors: null,
-            neighborsFailed: false,
           }
         : current,
     );
@@ -657,10 +673,6 @@ export function ContextScreen() {
             selectedNodeId,
             detail: options.clearSelection ? null : current.detail,
             history: options.clearSelection ? null : current.history,
-            neighbors: options.clearSelection ? null : current.neighbors,
-            neighborsFailed: options.clearSelection
-              ? false
-              : current.neighborsFailed,
           }
         : current,
     );
@@ -840,7 +852,7 @@ export function ContextScreen() {
       return;
     }
     setError(null);
-    const [pageData, treeData, detail, history, neighborResult] =
+    const [pageData, treeData, detail, history] =
       await Promise.all([
         listContextPages(state.workspaceId, {
           has_draft: hasDraft,
@@ -849,7 +861,6 @@ export function ContextScreen() {
         listTreeData(state.workspaceId, "context"),
         readContextPage(state.workspaceId, pageId),
         listContextChanges(state.workspaceId, pageId),
-        loadGraphNeighbors(state.workspaceId, pageId),
       ]);
     const pages = pageData.data;
     const targetNodeId = nodeIdForPage(treeData.nodes, pageId) ?? pageId;
@@ -873,8 +884,6 @@ export function ContextScreen() {
             selectedNodeId: targetNodeId,
             detail,
             history,
-            neighbors: neighborResult.data,
-            neighborsFailed: neighborResult.failed,
           }
         : current,
     );
@@ -945,8 +954,7 @@ export function ContextScreen() {
         (requestedTargetId || searchChangedRef.current) &&
         (state.selectedNodeId ||
           state.detail ||
-          state.history ||
-          state.neighbors)
+          state.history)
       ) {
         setState((current) =>
           current
@@ -955,8 +963,6 @@ export function ContextScreen() {
                 selectedNodeId: null,
                 detail: null,
                 history: null,
-                neighbors: null,
-                neighborsFailed: false,
               }
             : current,
         );
@@ -1003,8 +1009,6 @@ export function ContextScreen() {
                 selectedNodeId: targetNodeId,
                 detail: null,
                 history: null,
-                neighbors: null,
-                neighborsFailed: false,
               }
             : current,
         );
@@ -1023,9 +1027,8 @@ export function ContextScreen() {
     void Promise.all([
       readContextPage(state.workspaceId, selectedPageId),
       listContextChanges(state.workspaceId, selectedPageId),
-      loadGraphNeighbors(state.workspaceId, selectedPageId),
     ])
-      .then(([detail, history, neighborResult]) => {
+      .then(([detail, history]) => {
         if (cancelled) {
           return;
         }
@@ -1036,8 +1039,6 @@ export function ContextScreen() {
                 selectedNodeId: targetNodeId,
                 detail,
                 history,
-                neighbors: neighborResult.data,
-                neighborsFailed: neighborResult.failed,
               }
             : current,
         );
@@ -1071,8 +1072,6 @@ export function ContextScreen() {
                   selectedNodeId: null,
                   detail: null,
                   history: null,
-                  neighbors: null,
-                  neighborsFailed: false,
                 }
               : current,
           );
@@ -1316,11 +1315,10 @@ export function ContextScreen() {
             ) : null}
             {state.detail ? (
               <ContextReader
+                key={`${state.workspaceId}:${state.detail.id}:${state.detail.version_info?.version_id ?? ""}`}
                 canEdit={canEdit}
                 detail={state.detail}
                 history={state.history}
-                neighbors={state.neighbors}
-                neighborsFailed={state.neighborsFailed}
                 node={selectedNode}
                 nodes={state.tree}
                 tombstones={state.tombstones}
@@ -1519,9 +1517,8 @@ export function ContextScreen() {
         inspector={
           state.detail ? (
             <ContextInspector
+              key={`${state.workspaceId}:${state.detail.id}:${state.detail.version_info?.version_id ?? ""}`}
               detail={state.detail}
-              neighbors={state.neighbors}
-              neighborsFailed={state.neighborsFailed}
               workspaceId={state.workspaceId}
             />
           ) : undefined
@@ -2098,8 +2095,6 @@ function ContextReader({
   canEdit,
   detail,
   history,
-  neighbors,
-  neighborsFailed,
   node,
   nodes,
   tombstones,
@@ -2115,8 +2110,6 @@ function ContextReader({
   canEdit: boolean;
   detail: ContextPageDetail;
   history: ContextChangeHistory | null;
-  neighbors: GraphNeighborsPayload | null;
-  neighborsFailed: boolean;
   node: TreeNodePayload | null;
   nodes: TreeNodePayload[];
   tombstones: LibraryItemTombstone[];
@@ -2131,6 +2124,7 @@ function ContextReader({
 }) {
   const { t } = useTranslation("context");
   const { t: tShell } = useTranslation("shell");
+  const workspaceGraph = useWorkspaceGraphCapability(workspaceId);
   const workspaceContext = useOptionalWorkspaceContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -2189,6 +2183,32 @@ function ContextReader({
   // remained on the previously clicked tab until another render happened.
   const tab: ContextReaderTab =
     routeTab === "children" && !hasChildren ? "view" : routeTab;
+  const [graphMountedPageId, setGraphMountedPageId] = useState<string | null>(
+    routeTab === "graph" ? detail.id : null,
+  );
+  // Reader identity is scoped to workspace, page, and visible head above. A
+  // scene is loaded only on first activation and stays mounted across tabs;
+  // neither its latency nor failure participates in body/Inspector loading.
+  const [graph, setGraph] = useState<GraphQueryPayload | null>(null);
+  const [graphFailed, setGraphFailed] = useState(false);
+  const currentGraphDepthRef = useRef<GraphDepth>(2);
+  useEffect(() => {
+    currentGraphDepthRef.current = 2;
+  }, [detail.id, workspaceId]);
+  useEffect(() => {
+    if (graph?.history.mode === "current") {
+      currentGraphDepthRef.current = graph.query.depth === 1 ? 1 : 2;
+    }
+  }, [graph]);
+  const graphRequestRef = useRef<{
+    controller: AbortController | null;
+    generation: number;
+    pageId: string | null;
+  }>({
+    controller: null,
+    generation: 0,
+    pageId: detail.id,
+  });
   const [comparePair, setComparePair] = useState<ComparePair | null>(null);
   const contextMediaVersionId = detail.version_info?.version_id ?? null;
   const resolveContextMediaAsset = useMemo<ContextMediaAssetUrlResolver>(
@@ -2262,6 +2282,34 @@ function ContextReader({
       appliedCompareRouteRef.current = null;
     }
   }, [detail.id, routeTab, searchParams, setSearchParams, tab]);
+  useEffect(() => {
+    if (tab === "graph") {
+      setGraphMountedPageId(detail.id);
+    }
+  }, [detail.id, tab]);
+  useEffect(() => {
+    // Abort both the deferred initial request and subsequent graph actions when
+    // this workspace/page/head-scoped Reader is replaced or unmounted.
+    const previous = graphRequestRef.current;
+    previous.controller?.abort();
+    graphRequestRef.current = {
+      controller: null,
+      generation: previous.generation + 1,
+      pageId: detail.id,
+    };
+    return () => {
+      const current = graphRequestRef.current;
+      if (current.pageId !== detail.id) {
+        return;
+      }
+      current.controller?.abort();
+      graphRequestRef.current = {
+        controller: null,
+        generation: current.generation + 1,
+        pageId: current.pageId,
+      };
+    };
+  }, [detail.id, workspaceId]);
 
   const loadOlderHistory = useCallback(
     async (targetVersionId?: string): Promise<ContextChangeHistory | null> => {
@@ -2502,6 +2550,152 @@ function ContextReader({
       setSearchParams(nextParams);
     }
   }
+
+  const replaceGraphPayload = useCallback(
+    async (query: GraphQueryPayload["query"]) => {
+      if (!workspaceId) {
+        return;
+      }
+      const pageId = detail.id;
+      const previous = graphRequestRef.current;
+      previous.controller?.abort();
+      const controller = new AbortController();
+      const generation = previous.generation + 1;
+      graphRequestRef.current = { controller, generation, pageId };
+      try {
+        const incoming = await queryGraph(workspaceId, query, {
+          signal: controller.signal,
+        });
+        const current = graphRequestRef.current;
+        if (
+          controller.signal.aborted ||
+          current.controller !== controller ||
+          current.generation !== generation ||
+          current.pageId !== pageId
+        ) {
+          return;
+        }
+        // Each query replaces the full actor-authorized scene. Relationships
+        // and visibility may have changed; never merge with an older payload.
+        setGraph(incoming);
+        setGraphFailed(false);
+      } catch (error) {
+        const current = graphRequestRef.current;
+        // Superseded requests are normal during rapid graph actions. Their
+        // transport may still settle after abort, so fence signal + generation.
+        if (
+          controller.signal.aborted ||
+          current.controller !== controller ||
+          current.generation !== generation ||
+          current.pageId !== pageId
+        ) {
+          return;
+        }
+        throw error;
+      } finally {
+        const current = graphRequestRef.current;
+        if (
+          current.controller === controller &&
+          current.generation === generation &&
+          current.pageId === pageId
+        ) {
+          current.controller = null;
+        }
+      }
+    },
+    [detail.id, workspaceId],
+  );
+
+  useEffect(() => {
+    if (graphMountedPageId !== detail.id || !workspaceId) return;
+    let cancelled = false;
+    setGraph(null);
+    setGraphFailed(false);
+    void replaceGraphPayload(contextGraphQuery(detail.id)).catch(() => {
+      if (!cancelled) setGraphFailed(true);
+    });
+    // Leaving Graph does not cancel this initial load: its result is cached
+    // for the selected page. Changing Reader identity/unmount aborts it via
+    // graphRequestRef and fences transports that still resolve after abort.
+    // A mutation reload supplies a fresh history snapshot even if publication
+    // kept the same visible version; revalidate that previously activated scene.
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.id, graphMountedPageId, history, replaceGraphPayload, workspaceId]);
+
+  async function expandGraphNode(graphNode: GraphNode) {
+    if (
+      !workspaceId ||
+      !graph ||
+      graph.capabilities?.expand === false ||
+      graphNode.entity_kind !== "context_page"
+    ) {
+      return;
+    }
+    const key = `${graphNode.entity_kind}:${graphNode.entity_id}`;
+    if (
+      graph.query.seeds.length >= 8 ||
+      graph.query.seeds.some((seed) => `${seed.kind}:${seed.id}` === key)
+    ) {
+      return;
+    }
+    await replaceGraphPayload({
+      ...graph.query,
+      cursor: null,
+      seeds: [
+        ...graph.query.seeds,
+        { kind: graphNode.entity_kind, id: graphNode.entity_id },
+      ],
+    });
+  }
+
+  async function collapseGraphNode(graphNode: GraphNode) {
+    if (
+      !workspaceId ||
+      !graph ||
+      graph.capabilities?.expand === false ||
+      graphNode.entity_kind !== "context_page"
+    ) {
+      return;
+    }
+    const key = `${graphNode.entity_kind}:${graphNode.entity_id}`;
+    const primarySeed = graph.query.seeds[0];
+    if (primarySeed && `${primarySeed.kind}:${primarySeed.id}` === key) {
+      return;
+    }
+    const seeds = graph.query.seeds.filter(
+      (seed) => `${seed.kind}:${seed.id}` !== key,
+    );
+    if (seeds.length === graph.query.seeds.length) {
+      return;
+    }
+    await replaceGraphPayload({
+      ...graph.query,
+      cursor: null,
+      seeds,
+    });
+  }
+
+  async function changeGraphHistoryMode(mode: GraphHistoryMode) {
+    if (!workspaceId || !graph) {
+      return;
+    }
+    await replaceGraphPayload({
+      ...contextGraphQuery(detail.id, mode, currentGraphDepthRef.current),
+      seeds: graph.query.seeds,
+    });
+  }
+
+  async function changeGraphDepth(depth: GraphDepth) {
+    if (!workspaceId || !graph || graph.history.mode !== "current") return;
+    await replaceGraphPayload({
+      ...graph.query,
+      cursor: null,
+      depth,
+    });
+  }
+
   function openPublishedHistory() {
     const versionId = detail.current_published_version_id;
     if (!versionId) {
@@ -2936,18 +3130,57 @@ function ContextReader({
           />
         </div>
       ) : null}
-      {tab === "graph" ? (
+      {graphMountedPageId === detail.id ? (
         <div
+          hidden={tab !== "graph"}
           id="context-reader-panel-graph"
           role="tabpanel"
           aria-labelledby="context-reader-tab-graph"
           tabIndex={0}
         >
-          <ContextGraphPanel
-            neighbors={neighbors}
-            neighborsFailed={neighborsFailed}
-            workspaceId={workspaceId}
-          />
+          {graphFailed ? (
+            <StatusBanner tone="warning">
+              {t("neighbors.graphLoadError", {
+                defaultValue: "Graph could not be loaded.",
+              })}
+            </StatusBanner>
+          ) : graph ? (
+            <GraphView
+              key={detail.id}
+              active={tab === "graph"}
+              onCollapse={collapseGraphNode}
+              onDepthChange={changeGraphDepth}
+              onExpand={expandGraphNode}
+              onHistoryModeChange={changeGraphHistoryMode}
+              payload={graph}
+              workspaceId={workspaceId}
+              workspaceGraphHref={
+                workspaceGraph.enabled
+                  ? (graphNode) => {
+                      // The Workspace Knowledge Map is published-head only.
+                      // For the current Context page we have authoritative
+                      // publication state, so do not create a link that its
+                      // destination must fail to represent.
+                      if (
+                        graphNode.entity_kind === "context_page" &&
+                        graphNode.entity_id === detail.id &&
+                        !detail.current_published_version_id
+                      ) {
+                        return null;
+                      }
+                      const focusId = workspaceGraphFocusId(graphNode);
+                      return focusId
+                        ? `/graph?focus=${encodeURIComponent(focusId)}`
+                        : null;
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <p className="inspector-empty-copy">
+              {t("neighbors.graphLoading", { defaultValue: "Loading graph..." })}
+            </p>
+          )}
         </div>
       ) : null}
       {tab === "activity" ? (
@@ -5012,16 +5245,23 @@ function versionStringField(entry: VersionEntry, field: string): string | null {
 
 function ContextInspector({
   detail,
-  neighbors,
-  neighborsFailed,
   workspaceId,
 }: {
   detail: ContextPageDetail | null;
-  neighbors: GraphNeighborsPayload | null;
-  neighborsFailed: boolean;
   workspaceId: string | null;
 }) {
   const { t } = useTranslation("context");
+  const {
+    data: neighbors,
+    error: neighborsError,
+    loading: neighborsLoading,
+  } = useAsyncLoad<GraphNeighborsPayload | null>(
+    () => workspaceId && detail
+      ? getContextPageNeighbors(workspaceId, detail.id)
+      : Promise.resolve(null),
+    [workspaceId, detail],
+    { errorMessage: t("neighbors.loadError"), fallbackData: null },
+  );
   // Inspector tab state lives here (not in WorkspaceLayout) so it survives the
   // panel re-render and resets when a different page is selected.
   const [tab, setTab] = useState<ContextInspectorTab>("summary");
@@ -5072,7 +5312,8 @@ function ContextInspector({
             <ContextBacklinksPanel
               detail={detail}
               neighbors={neighbors}
-              neighborsFailed={neighborsFailed}
+              neighborsFailed={Boolean(neighborsError)}
+              neighborsLoading={neighborsLoading}
               workspaceId={workspaceId}
             />
           ),
@@ -5154,18 +5395,29 @@ function ContextBacklinksPanel({
   detail,
   neighbors,
   neighborsFailed,
+  neighborsLoading,
   workspaceId,
 }: {
   detail: ContextPageDetail;
   neighbors: GraphNeighborsPayload | null;
   neighborsFailed: boolean;
+  neighborsLoading: boolean;
   workspaceId: string | null;
 }) {
   const { t } = useTranslation("context");
+  if (neighborsLoading) {
+    return (
+      <p role="status">
+        {t("neighbors.graphLoading", { defaultValue: "Loading graph..." })}
+      </p>
+    );
+  }
   const backlinks = neighbors?.backlinks ?? [];
   const citations = neighbors?.citations ?? [];
   const coAccess = neighbors?.co_access ?? [];
   const outboundCount = neighbors?.outbound?.length ?? 0;
+  const neighborsBounded =
+    neighbors?.truncated === true || Boolean(neighbors?.warnings?.length);
   return (
     <div className="context-backlinks-sections inspector-stack">
       {neighborsFailed ? (
@@ -5173,6 +5425,14 @@ function ContextBacklinksPanel({
           {t("neighbors.loadError", {
             defaultValue:
               "Neighbor details could not be loaded. Try again later.",
+          })}
+        </StatusBanner>
+      ) : null}
+      {!neighborsFailed && neighborsBounded ? (
+        <StatusBanner tone="warning">
+          {t("neighbors.boundedWarning", {
+            defaultValue:
+              "Some relationship results were limited. The lists below may be incomplete.",
           })}
         </StatusBanner>
       ) : null}
@@ -5235,115 +5495,6 @@ function ContextBacklinksPanel({
   );
 }
 
-function ContextGraphPanel({
-  neighbors,
-  neighborsFailed,
-  workspaceId,
-}: {
-  neighbors: GraphNeighborsPayload | null;
-  neighborsFailed: boolean;
-  workspaceId: string | null;
-}) {
-  const { t } = useTranslation("context");
-  if (neighborsFailed) {
-    return (
-      <StatusBanner tone="warning">
-        {t("neighbors.graphLoadError", {
-          defaultValue: "Graph could not be loaded.",
-        })}
-      </StatusBanner>
-    );
-  }
-  if (!neighbors) {
-    return (
-      <p className="inspector-empty-copy">
-        {t("neighbors.graphLoading", { defaultValue: "Loading graph…" })}
-      </p>
-    );
-  }
-  const relationshipGroups = [
-    {
-      key: "backlinks",
-      label: t("neighbors.backlinksHeading", { defaultValue: "Backlinks" }),
-      entries: neighbors.backlinks ?? [],
-    },
-    {
-      key: "outbound",
-      label: t("neighbors.outbound", { defaultValue: "Outbound links" }),
-      entries: neighbors.outbound ?? [],
-    },
-    {
-      key: "citations",
-      label: t("neighbors.citationsHeading", { defaultValue: "Citations" }),
-      entries: neighbors.citations ?? [],
-    },
-    {
-      key: "co-access",
-      label: t("neighbors.coAccessHeading", {
-        defaultValue: "Often read together",
-      }),
-      entries: neighbors.co_access ?? [],
-    },
-  ].filter((group) => group.entries.length > 0);
-  if (!neighbors.mermaid && relationshipGroups.length === 0) {
-    return (
-      <p className="inspector-empty-copy">
-        {t("neighbors.graphEmpty", {
-          defaultValue: "No graph relationships to show.",
-        })}
-      </p>
-    );
-  }
-  return (
-    <div className="context-local-graph" data-testid="context-local-graph">
-      {neighbors.mermaid ? (
-        <MarkdownView
-          body={`\`\`\`mermaid\n${neighbors.mermaid}\n\`\`\``}
-          wikilinkMode="plain"
-        />
-      ) : null}
-      {relationshipGroups.length > 0 ? (
-        <section
-          aria-labelledby="context-graph-relationships-heading"
-          className="context-graph-relationships"
-        >
-          <h3 id="context-graph-relationships-heading">
-            {t("neighbors.relationshipList", {
-              defaultValue: "Graph relationships",
-            })}
-          </h3>
-          <p>
-            {t("neighbors.relationshipListDescription", {
-              defaultValue:
-                "Use this list to open the same relationships shown in the diagram.",
-            })}
-          </p>
-          {relationshipGroups.map((group) => (
-            <div className="context-graph-relationship-group" key={group.key}>
-              <h4>{group.label}</h4>
-              <ul>
-                {group.entries.map((entry) => {
-                  const item = graphNeighborItem(entry, workspaceId);
-                  return (
-                    <li key={item.id}>
-                      {item.href ? (
-                        <Link to={item.href}>{item.title}</Link>
-                      ) : (
-                        item.title
-                      )}
-                      {item.meta ? <span>{item.meta}</span> : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
 function graphNeighborItem(
   entry: GraphNeighborEntry,
   workspaceId: string | null,
@@ -5365,14 +5516,31 @@ function graphNeighborItem(
   };
 }
 
-async function loadGraphNeighbors(workspaceId: string, pageId: string) {
+function workspaceGraphFocusId(graphNode: GraphNode) {
+  if (
+    graphNode.entity_kind === "context_page" ||
+    graphNode.entity_kind === "library_item"
+  ) {
+    return graphNode.entity_id;
+  }
+  if (
+    graphNode.entity_kind !== "library_artifact" &&
+    graphNode.entity_kind !== "library_item_version"
+  ) {
+    return null;
+  }
+  // Local Graph artifacts and versions are version-grain nodes, whereas the
+  // Workspace Knowledge Map has one canonical node per Library item. Its
+  // public canonical path is the safe bridge between those projections.
+  const itemMatch = /^\/library\/([^/?#]+)\.md$/u.exec(graphNode.path ?? "");
+  if (!itemMatch) {
+    return null;
+  }
   try {
-    return {
-      data: await getContextPageNeighbors(workspaceId, pageId, "mermaid"),
-      failed: false,
-    };
+    const itemId = decodeURIComponent(itemMatch[1]);
+    return itemId && !itemId.includes("/") ? itemId : null;
   } catch {
-    return { data: null, failed: true };
+    return null;
   }
 }
 
@@ -5390,6 +5558,12 @@ function resolveRequestedNodeId(
   // The target may be a page id past the flat-list cap; the tree is unbounded,
   // so resolve the owning node from the tree rather than the capped list.
   return nodeIdForPage(nodes, requestedTargetId);
+}
+
+function normalizeContextTargetId(targetId: string | null) {
+  return targetId && STRICT_HYPHENATED_UUID_PATTERN.test(targetId)
+    ? targetId.toLowerCase()
+    : targetId;
 }
 
 function selectedPageIdForNode(

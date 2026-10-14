@@ -39,7 +39,7 @@ jobs:
       # whatever the runner image ships.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       - name: Lint backend and tests
@@ -113,7 +113,7 @@ jobs:
       # coverage check), so pin it rather than inherit the runner's.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
       - name: Run packaging and acceptance tests with log capture
@@ -157,7 +157,7 @@ jobs:
           # the only job in which those 21 behavioural cases execute at all
           # (the `backend` job that runs `make test-static` has no
           # node_modules, so both tests/static wrappers skip there).
-          node-version: "22.18"
+          node-version: "22.18.0"
           cache: npm
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
@@ -192,7 +192,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
           cache: npm
       - name: Install Python dependencies
         run: uv sync --locked --extra dev
@@ -200,10 +200,16 @@ jobs:
         run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
+      - name: Verify Local Graph WebGL shaders
+        run: npm run test:graph-webgl
       # Standard profile: every spec on Chromium, @cross-browser specs on all
       # three. The whole suite meets all three engines weekly, in
       # .github/workflows/e2e-browsers.yml.
       - name: Run Playwright e2e
+        # The isolated wrapper and real-API 2K spec share this switch. Without
+        # it the acceptance silently skips on every PR despite a green suite.
+        env:
+          DTXWIKI_E2E_GRAPH_2K: "1"
         run: npm run test:e2e
       # The suite drives `/reset-password?token=<one-time token>`, and the HTML
       # reporter base64-inlines every step title into index.html on EVERY run,

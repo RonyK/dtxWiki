@@ -771,17 +771,23 @@ def update_settings_policy_batch(
             session_factory() as session,
             control_session_factory.begin() as control_session,
         ):
-            return {
-                "data": svc.settings_svc.update_policy_batch(
-                    control_session=control_session,
-                    workspace_session=session,
-                    workspace_id=workspace_id,
-                    actor=actor,
-                    group=request_body.group,
-                    changes=request_body.changes,
-                    expected_revision=request_body.expected_revision,
-                )
-            }
+            policies = svc.settings_svc.update_policy_batch(
+                control_session=control_session,
+                workspace_session=session,
+                workspace_id=workspace_id,
+                actor=actor,
+                group=request_body.group,
+                changes=request_body.changes,
+                expected_revision=request_body.expected_revision,
+            )
+        if (
+            request_body.group == "graph"
+            and "usage_relation_signals_enabled" in request_body.changes
+        ):
+            _request_trail_tick(
+                svc, session_factory, workspace_id, policies.graph.revision
+            )
+        return {"data": policies}
     except SettingsPolicyRevisionConflict as exc:
         return build_rest_error_response(
             error_code=exc.error_code,
@@ -796,6 +802,35 @@ def update_settings_policy_batch(
         )
     except ReadServiceError as exc:
         return read_service_error_response(exc)
+
+
+def _request_trail_tick(svc, session_factory, workspace_id, revision) -> None:
+    """Ask for a prompt trail tick after the usage-signal switch changed.
+
+    The co_access projection is read by the MCP neighbour tools, ranking and
+    the Local Graph; waiting for the scheduled tick (a day by default) would
+    leave a switched-off signal in use that long. This runs after the control
+    commit, on the workspace plane, and is best effort: the switch is already
+    saved, and the scheduled tick applies it if this enqueue fails.
+    """
+
+    try:
+        with session_factory.begin() as session:
+            svc.job_queue.enqueue(
+                session,
+                workspace_id,
+                "trail_tick",
+                "settings",
+                # The revision hashes policy content, so off/on/off returns
+                # to the same revision. A completed tick for the first off
+                # must not suppress cleanup for the next committed save.
+                idempotency_key=f"usage-signals:{revision}:{uuid4()}",
+            )
+    except Exception:
+        logger.exception(
+            "Could not queue a trail tick after the usage-signal switch changed",
+            extra={"workspace_id": str(workspace_id)},
+        )
 
 
 @router.patch(
@@ -830,17 +865,23 @@ def update_settings_policy(
             session_factory() as session,
             control_session_factory.begin() as control_session,
         ):
-            return {
-                "data": svc.settings_svc.update_policy(
-                    control_session=control_session,
-                    workspace_session=session,
-                    workspace_id=workspace_id,
-                    actor=actor,
-                    group=request_body.group,
-                    key=request_body.key,
-                    value=request_body.value,
-                )
-            }
+            policies = svc.settings_svc.update_policy(
+                control_session=control_session,
+                workspace_session=session,
+                workspace_id=workspace_id,
+                actor=actor,
+                group=request_body.group,
+                key=request_body.key,
+                value=request_body.value,
+            )
+        if (
+            request_body.group == "graph"
+            and request_body.key == "usage_relation_signals_enabled"
+        ):
+            _request_trail_tick(
+                svc, session_factory, workspace_id, policies.graph.revision
+            )
+        return {"data": policies}
     except SettingsPolicyUpdateRejected as exc:
         return build_rest_error_response(
             error_code=exc.error_code,

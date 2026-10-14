@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from importlib import import_module
 from uuid import uuid4
 
@@ -11,7 +12,13 @@ from alembic.operations import Operations
 from sqlalchemy import create_engine
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-from backend.models.workspace import Workspace
+from backend.models.workspace import (
+    default_actor_id,
+    default_agent_injection_policy,
+    default_citation_policy,
+    default_review_policy,
+    default_write_policy,
+)
 from backend.services.library_formats import DEFAULT_FORMATS
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
@@ -264,14 +271,32 @@ def test_alembic_upgrade_sanitizes_an_existing_v3_workspace_row(tmp_path):
         )
         workspace_id = uuid4()
         workspaces = sa.Table("workspace", sa.MetaData(), autoload_with=engine)
+        assert "workspace_graph_enabled" not in workspaces.c
+        now = datetime.now(UTC)
         with engine.begin() as connection:
+            # Seed only this frozen phase boundary's columns. Current Workspace
+            # inserts also include Graph View fields introduced by a later revision.
             connection.execute(
-                Workspace.__table__.insert().values(
-                    id=workspace_id,
+                workspaces.insert().values(
+                    id=workspace_id.hex,
                     slug="policy-migration",
                     title="Policy migration",
+                    directory_title_key="policy migration",
                     name="Policy migration",
+                    goal="Migration coverage",
+                    default_language="en",
                     library_policy=_v3_custom_policy(),
+                    write_policy=default_write_policy(),
+                    citation_policy=default_citation_policy(),
+                    agent_injection_policy=default_agent_injection_policy(),
+                    review_policy=default_review_policy(),
+                    lint_policy={},
+                    auto_fix_enabled=False,
+                    visibility="private",
+                    created_by_actor_id=default_actor_id().hex,
+                    owner_actor_id=default_actor_id().hex,
+                    updated_at=now,
+                    created_at=now,
                 )
             )
         _run_steps(engine, policy_migration.upgrade)

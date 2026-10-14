@@ -7,7 +7,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.settings import Settings
-from backend.models.base import Base
 from backend.models.user import User
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.credential_hashing import CredentialHasher
@@ -18,7 +17,10 @@ from backend.services.mail_delivery import (
 )
 from backend.services.password_recovery_service import PasswordRecoveryService
 from backend.services.personal_workspace_service import ensure_personal_workspace
-from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.tests.utils.postgres import (
+    create_isolated_postgres_metadata,
+    drop_reflected_postgres_metadata,
+)
 
 # Every test here reflects and drops the tables of whatever PostgreSQL database
 # it is pointed at, and CI aims several of these files at one database, so they
@@ -56,7 +58,7 @@ def test_postgres_outbox_lock_prevents_cli_worker_double_send():
     database_url = _postgres_url()
     assert database_url is not None
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     settings = Settings(
         database_url=database_url,

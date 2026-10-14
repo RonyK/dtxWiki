@@ -6079,7 +6079,8 @@
               "borrowed_query_rewrite_applied",
               "llm_provider_unavailable",
               "llm_composer_failed",
-              "job_fanout_incomplete"
+              "job_fanout_incomplete",
+              "context_page_has_no_graph_visible_links"
             ],
             "title": "Code",
             "type": "string"
@@ -6161,6 +6162,484 @@
           "data"
         ],
         "title": "FeedbackListResponse",
+        "type": "object"
+      },
+      "GraphBudget": {
+        "additionalProperties": false,
+        "properties": {
+          "edges": {
+            "default": 150,
+            "maximum": 750.0,
+            "minimum": 1.0,
+            "title": "Edges",
+            "type": "integer"
+          },
+          "nodes": {
+            "default": 50,
+            "maximum": 250.0,
+            "minimum": 1.0,
+            "title": "Nodes",
+            "type": "integer"
+          }
+        },
+        "title": "GraphBudget",
+        "type": "object"
+      },
+      "GraphBudgetResult": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "$ref": "#/components/schemas/GraphBudget"
+          },
+          "requested": {
+            "$ref": "#/components/schemas/GraphBudget"
+          }
+        },
+        "required": [
+          "requested",
+          "applied"
+        ],
+        "title": "GraphBudgetResult",
+        "type": "object"
+      },
+      "GraphCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "default": false,
+            "title": "As Of",
+            "type": "boolean"
+          },
+          "evidence": {
+            "default": false,
+            "title": "Evidence",
+            "type": "boolean"
+          },
+          "expand": {
+            "default": false,
+            "title": "Expand",
+            "type": "boolean"
+          },
+          "export": {
+            "default": false,
+            "title": "Export",
+            "type": "boolean"
+          },
+          "saved_view": {
+            "default": false,
+            "title": "Saved View",
+            "type": "boolean"
+          },
+          "timeline": {
+            "default": false,
+            "title": "Timeline",
+            "type": "boolean"
+          }
+        },
+        "title": "GraphCapabilities",
+        "type": "object"
+      },
+      "GraphEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "action_kind": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Kind"
+          },
+          "aggregate": {
+            "default": false,
+            "title": "Aggregate",
+            "type": "boolean"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "direction": {
+            "default": "directed",
+            "enum": [
+              "directed",
+              "undirected"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "edge_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Edge Kind",
+            "type": "string"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphEvidenceRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "first_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Observed At"
+          },
+          "id": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "layer": {
+            "enum": [
+              "knowledge",
+              "evidence",
+              "activity",
+              "action"
+            ],
+            "title": "Layer",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "provenance": {
+            "enum": [
+              "curated",
+              "derived",
+              "usage",
+              "domain",
+              "observed"
+            ],
+            "title": "Provenance",
+            "type": "string"
+          },
+          "rank_score": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Rank Score",
+            "type": "number"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence"
+          },
+          "source": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "support_session_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Session Count"
+          },
+          "target": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1.0,
+            "minimum": 0.0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "edge_kind",
+          "label",
+          "layer",
+          "provenance"
+        ],
+        "title": "GraphEdge",
+        "type": "object"
+      },
+      "GraphEvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "GraphEvidenceRef",
+        "type": "object"
+      },
+      "GraphFacets": {
+        "additionalProperties": false,
+        "properties": {
+          "action_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Action Kinds",
+            "type": "array"
+          },
+          "edge_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edge Kinds",
+            "type": "array"
+          },
+          "layers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Layers",
+            "type": "array"
+          },
+          "node_families": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Families",
+            "type": "array"
+          },
+          "node_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Kinds",
+            "type": "array"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Statuses",
+            "type": "array"
+          },
+          "time_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time From"
+          },
+          "time_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time To"
+          }
+        },
+        "title": "GraphFacets",
+        "type": "object"
+      },
+      "GraphHistoryMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "enum": [
+              "current_projection",
+              "domain_events",
+              "observations",
+              "mixed"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "coverage_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage From"
+          },
+          "mode": {
+            "enum": [
+              "current",
+              "appearance",
+              "action",
+              "as_of"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "partial",
+              "reconstructed",
+              "unsupported"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "watermark": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watermark"
+          }
+        },
+        "required": [
+          "mode",
+          "basis",
+          "status"
+        ],
+        "title": "GraphHistoryMetadata",
         "type": "object"
       },
       "GraphNeighborEntry": {
@@ -6254,6 +6733,18 @@
             },
             "title": "Outbound",
             "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "title": "GraphNeighborsPayload",
@@ -6273,6 +6764,602 @@
           "data"
         ],
         "title": "GraphNeighborsResponse",
+        "type": "object"
+      },
+      "GraphNode": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_label": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Label"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphEvidenceRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "family": {
+            "enum": [
+              "document",
+              "chat",
+              "ask",
+              "review",
+              "agent",
+              "event",
+              "structural"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "is_seed": {
+            "default": false,
+            "title": "Is Seed",
+            "type": "boolean"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "id",
+          "entity_kind",
+          "entity_id",
+          "family",
+          "label"
+        ],
+        "title": "GraphNode",
+        "type": "object"
+      },
+      "GraphOmission": {
+        "additionalProperties": false,
+        "properties": {
+          "hop": {
+            "anyOf": [
+              {
+                "enum": [
+                  1,
+                  2
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hop"
+          },
+          "reason": {
+            "enum": [
+              "node_quota",
+              "frontier_cap",
+              "folder_node",
+              "folder_source_cap",
+              "relation_quota",
+              "relation_source_cap"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "relation_class": {
+            "anyOf": [
+              {
+                "enum": [
+                  "folder",
+                  "seed",
+                  "h1",
+                  "h12",
+                  "h2"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation Class"
+          },
+          "scope": {
+            "enum": [
+              "node",
+              "relation"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "reason"
+        ],
+        "title": "GraphOmission",
+        "type": "object"
+      },
+      "GraphQueryPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/GraphBudgetResult"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/GraphCapabilities"
+          },
+          "completeness": {
+            "default": "complete",
+            "enum": [
+              "complete",
+              "capped",
+              "bounded_sample",
+              "privacy_suppressed"
+            ],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "facets": {
+            "$ref": "#/components/schemas/GraphFacets"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "history": {
+            "$ref": "#/components/schemas/GraphHistoryMetadata"
+          },
+          "mermaid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mermaid"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "omissions": {
+            "items": {
+              "$ref": "#/components/schemas/GraphOmission"
+            },
+            "title": "Omissions",
+            "type": "array"
+          },
+          "projection_revision": {
+            "minimum": 0.0,
+            "title": "Projection Revision",
+            "type": "integer"
+          },
+          "query": {
+            "$ref": "#/components/schemas/GraphQueryRequest"
+          },
+          "schema_version": {
+            "const": "dtxwiki.graph-scene.v1",
+            "default": "dtxwiki.graph-scene.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/GraphTimelineEvent"
+            },
+            "title": "Timeline",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "projection_revision",
+          "generated_at",
+          "nodes",
+          "edges",
+          "facets",
+          "budget",
+          "history"
+        ],
+        "title": "GraphQueryPayload",
+        "type": "object"
+      },
+      "GraphQueryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Action Kinds",
+            "type": "array"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/GraphBudget"
+          },
+          "cursor": {
+            "title": "Cursor",
+            "type": "null"
+          },
+          "depth": {
+            "default": 2,
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Depth",
+            "type": "integer"
+          },
+          "direction": {
+            "default": "both",
+            "enum": [
+              "in",
+              "out",
+              "both"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "edge_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Edge Kinds",
+            "type": "array"
+          },
+          "layers": {
+            "items": {
+              "enum": [
+                "knowledge",
+                "evidence",
+                "activity",
+                "action"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Layers",
+            "type": "array"
+          },
+          "node_families": {
+            "items": {
+              "enum": [
+                "document",
+                "chat",
+                "ask",
+                "review",
+                "agent",
+                "event",
+                "structural"
+              ],
+              "type": "string"
+            },
+            "maxItems": 7,
+            "title": "Node Families",
+            "type": "array"
+          },
+          "node_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Node Kinds",
+            "type": "array"
+          },
+          "preset": {
+            "default": "all",
+            "enum": [
+              "linked-knowledge",
+              "evidence",
+              "activity",
+              "all"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "dtxwiki.graph-query.v1",
+            "default": "dtxwiki.graph-query.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "scope": {
+            "const": "local",
+            "default": "local",
+            "title": "Scope",
+            "type": "string"
+          },
+          "seeds": {
+            "items": {
+              "$ref": "#/components/schemas/GraphSeed"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Seeds",
+            "type": "array"
+          },
+          "time": {
+            "$ref": "#/components/schemas/GraphTimeQuery"
+          }
+        },
+        "required": [
+          "seeds"
+        ],
+        "title": "GraphQueryRequest",
+        "type": "object"
+      },
+      "GraphQueryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GraphQueryPayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "GraphQueryResponse",
+        "type": "object"
+      },
+      "GraphSeed": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "GraphSeed",
+        "type": "object"
+      },
+      "GraphTimeQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "mode": {
+            "default": "current",
+            "enum": [
+              "current",
+              "appearance",
+              "action",
+              "as_of"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "title": "GraphTimeQuery",
+        "type": "object"
+      },
+      "GraphTimelineEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "action_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Action Kind",
+            "type": "string"
+          },
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edge Ids",
+            "type": "array"
+          },
+          "edge_snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edge Snapshots",
+            "type": "array"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphEvidenceRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "node_snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Node Snapshots",
+            "type": "array"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "node_created",
+              "edge_created",
+              "edge_removed",
+              "action_occurred"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "operation",
+          "action_kind",
+          "label",
+          "occurred_at",
+          "sequence"
+        ],
+        "title": "GraphTimelineEvent",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -16349,6 +17436,9 @@
           "context_write": {
             "$ref": "#/components/schemas/PolicyCard"
           },
+          "graph": {
+            "$ref": "#/components/schemas/PolicyCard"
+          },
           "library": {
             "$ref": "#/components/schemas/PolicyCard"
           },
@@ -16388,6 +17478,7 @@
           "agent_injection",
           "review",
           "lint",
+          "graph",
           "mcp_clients"
         ],
         "title": "SettingsPolicies",
@@ -16433,7 +17524,8 @@
               "context_write",
               "agent_injection",
               "review",
-              "lint"
+              "lint",
+              "graph"
             ],
             "title": "Group",
             "type": "string"
@@ -16458,7 +17550,8 @@
               "context_write",
               "agent_injection",
               "review",
-              "lint"
+              "lint",
+              "graph"
             ],
             "title": "Group",
             "type": "string"
@@ -18299,6 +19392,1170 @@
           "workspace_id"
         ],
         "title": "WorkspaceGrantInput",
+        "type": "object"
+      },
+      "WorkspaceGraphBudget": {
+        "additionalProperties": false,
+        "properties": {
+          "documents": {
+            "default": 250,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Documents",
+            "type": "integer"
+          },
+          "relations": {
+            "default": 750,
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Relations",
+            "type": "integer"
+          }
+        },
+        "title": "WorkspaceGraphBudget",
+        "type": "object"
+      },
+      "WorkspaceGraphCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "compare": {
+            "default": false,
+            "title": "Compare",
+            "type": "boolean"
+          },
+          "directory": {
+            "default": false,
+            "title": "Directory",
+            "type": "boolean"
+          },
+          "evidence": {
+            "default": false,
+            "title": "Evidence",
+            "type": "boolean"
+          },
+          "expand": {
+            "default": false,
+            "title": "Expand",
+            "type": "boolean"
+          },
+          "export": {
+            "default": false,
+            "title": "Export",
+            "type": "boolean"
+          },
+          "growth": {
+            "default": false,
+            "title": "Growth",
+            "type": "boolean"
+          },
+          "provenance": {
+            "default": false,
+            "title": "Provenance",
+            "type": "boolean"
+          }
+        },
+        "title": "WorkspaceGraphCapabilities",
+        "type": "object"
+      },
+      "WorkspaceGraphCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "can_manage": {
+            "title": "Can Manage",
+            "type": "boolean"
+          },
+          "usage_relation_signals_enabled": {
+            "title": "Usage Relation Signals Enabled",
+            "type": "boolean"
+          },
+          "workspace_map": {
+            "$ref": "#/components/schemas/WorkspaceGraphMapCapability"
+          }
+        },
+        "required": [
+          "workspace_map",
+          "usage_relation_signals_enabled",
+          "can_manage"
+        ],
+        "title": "WorkspaceGraphCapability",
+        "type": "object"
+      },
+      "WorkspaceGraphCapabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceGraphCapability"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceGraphCapabilityResponse",
+        "type": "object"
+      },
+      "WorkspaceGraphClusterNode": {
+        "additionalProperties": false,
+        "properties": {
+          "cluster_kind": {
+            "enum": [
+              "folder_cluster",
+              "link_cluster",
+              "other_cluster"
+            ],
+            "title": "Cluster Kind",
+            "type": "string"
+          },
+          "grain": {
+            "const": "cluster",
+            "default": "cluster",
+            "title": "Grain",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "member_count": {
+            "minimum": 1.0,
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "relation_count": {
+            "minimum": 0.0,
+            "title": "Relation Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "cluster_kind",
+          "label",
+          "member_count",
+          "relation_count"
+        ],
+        "title": "WorkspaceGraphClusterNode",
+        "type": "object"
+      },
+      "WorkspaceGraphDocumentNode": {
+        "additionalProperties": false,
+        "properties": {
+          "also_appears_in": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphPlacementRef"
+            },
+            "maxItems": 32,
+            "title": "Also Appears In",
+            "type": "array"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "enum": [
+              "context",
+              "library"
+            ],
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "evidence_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Evidence Count",
+            "type": "integer"
+          },
+          "grain": {
+            "const": "document",
+            "default": "document",
+            "title": "Grain",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "primary_folder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Folder Id"
+          },
+          "primary_folder_label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Primary Folder Label",
+            "type": "string"
+          },
+          "reference_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reference Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "entity_kind",
+          "entity_id",
+          "label",
+          "path",
+          "primary_folder_label"
+        ],
+        "title": "WorkspaceGraphDocumentNode",
+        "type": "object"
+      },
+      "WorkspaceGraphEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregate": {
+            "default": false,
+            "title": "Aggregate",
+            "type": "boolean"
+          },
+          "cross_folder": {
+            "default": false,
+            "title": "Cross Folder",
+            "type": "boolean"
+          },
+          "direction": {
+            "default": "directed",
+            "enum": [
+              "directed",
+              "undirected"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "layer": {
+            "enum": [
+              "knowledge",
+              "evidence",
+              "structure",
+              "provenance"
+            ],
+            "title": "Layer",
+            "type": "string"
+          },
+          "occurrence_weight": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence Weight"
+          },
+          "relation_count": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Relation Count",
+            "type": "integer"
+          },
+          "relation_kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Relation Kind",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "relation_kind",
+          "layer"
+        ],
+        "title": "WorkspaceGraphEdge",
+        "type": "object"
+      },
+      "WorkspaceGraphExpansion": {
+        "additionalProperties": false,
+        "properties": {
+          "cluster_id": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Cluster Id",
+            "type": "string"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          }
+        },
+        "required": [
+          "cluster_id"
+        ],
+        "title": "WorkspaceGraphExpansion",
+        "type": "object"
+      },
+      "WorkspaceGraphFacetCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "document_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFacetValue"
+            },
+            "title": "Document Kinds",
+            "type": "array"
+          },
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFacetValue"
+            },
+            "title": "Folders",
+            "type": "array"
+          },
+          "quick_filters": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFacetValue"
+            },
+            "title": "Quick Filters",
+            "type": "array"
+          },
+          "relation_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFacetValue"
+            },
+            "title": "Relation Kinds",
+            "type": "array"
+          }
+        },
+        "title": "WorkspaceGraphFacetCounts",
+        "type": "object"
+      },
+      "WorkspaceGraphFacetValue": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "count"
+        ],
+        "title": "WorkspaceGraphFacetValue",
+        "type": "object"
+      },
+      "WorkspaceGraphFocus": {
+        "additionalProperties": false,
+        "description": "Where the requested focus landed in this scene.\n\n``document`` is the target's own node, ``cluster`` the aggregate that\ncontains it when no slot could be reserved within the budget. Anything\nthe actor cannot see in this scene is ``unavailable``: missing, unpublished,\nhidden, and filtered-out targets are deliberately indistinguishable.",
+        "properties": {
+          "node_id": {
+            "anyOf": [
+              {
+                "maxLength": 220,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "status": {
+            "enum": [
+              "document",
+              "cluster",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkspaceGraphFocus",
+        "type": "object"
+      },
+      "WorkspaceGraphFolder": {
+        "additionalProperties": false,
+        "properties": {
+          "direct_member_count": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Direct Member Count",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "parent_folder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Folder Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "direct_member_count"
+        ],
+        "title": "WorkspaceGraphFolder",
+        "type": "object"
+      },
+      "WorkspaceGraphFolderEdgeSlice": {
+        "additionalProperties": false,
+        "properties": {
+          "edge_id": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Edge Id",
+            "type": "string"
+          },
+          "occurrence_weight": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Occurrence Weight",
+            "type": "integer"
+          },
+          "relation_count": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Relation Count",
+            "type": "integer"
+          },
+          "source_entity_kind": {
+            "enum": [
+              "context",
+              "library"
+            ],
+            "title": "Source Entity Kind",
+            "type": "string"
+          },
+          "source_folder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Folder Id"
+          },
+          "target_entity_kind": {
+            "enum": [
+              "context",
+              "library"
+            ],
+            "title": "Target Entity Kind",
+            "type": "string"
+          },
+          "target_folder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Folder Id"
+          }
+        },
+        "required": [
+          "edge_id",
+          "source_entity_kind",
+          "target_entity_kind",
+          "relation_count",
+          "occurrence_weight"
+        ],
+        "title": "WorkspaceGraphFolderEdgeSlice",
+        "type": "object"
+      },
+      "WorkspaceGraphFolderFilter": {
+        "additionalProperties": false,
+        "properties": {
+          "exclude": {
+            "items": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "const": "unplaced",
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 64,
+            "title": "Exclude",
+            "type": "array"
+          },
+          "include": {
+            "items": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "const": "unplaced",
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 64,
+            "title": "Include",
+            "type": "array"
+          },
+          "only": {
+            "items": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "const": "unplaced",
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 64,
+            "title": "Only",
+            "type": "array"
+          }
+        },
+        "title": "WorkspaceGraphFolderFilter",
+        "type": "object"
+      },
+      "WorkspaceGraphFolderMembership": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_kind": {
+            "enum": [
+              "context",
+              "library"
+            ],
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "member_count": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "node_id": {
+            "maxLength": 220,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "entity_kind",
+          "member_count"
+        ],
+        "title": "WorkspaceGraphFolderMembership",
+        "type": "object"
+      },
+      "WorkspaceGraphFolderTopology": {
+        "additionalProperties": false,
+        "description": "Lossless, actor-visible folder inputs, never layout coordinates.\n\nMembership distributions retain mixed aggregates. Correlated edge slices\nretain their real endpoint folder/kind pair, including aggregate self-edges;\nindependent source/target marginals cannot reconstruct that information.",
+        "properties": {
+          "edge_slices": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFolderEdgeSlice"
+            },
+            "maxItems": 200000,
+            "title": "Edge Slices",
+            "type": "array"
+          },
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFolder"
+            },
+            "maxItems": 200000,
+            "title": "Folders",
+            "type": "array"
+          },
+          "memberships": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphFolderMembership"
+            },
+            "maxItems": 200000,
+            "title": "Memberships",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "workspace-graph-folders.v1",
+            "default": "workspace-graph-folders.v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folders",
+          "memberships",
+          "edge_slices"
+        ],
+        "title": "WorkspaceGraphFolderTopology",
+        "type": "object"
+      },
+      "WorkspaceGraphMapCapability": {
+        "additionalProperties": false,
+        "description": "The workspace map's switch state as the product should present it.",
+        "properties": {
+          "effective_enabled": {
+            "title": "Effective Enabled",
+            "type": "boolean"
+          },
+          "reason": {
+            "enum": [
+              "enabled",
+              "disabled_by_workspace",
+              "service_unavailable"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "service_available": {
+            "title": "Service Available",
+            "type": "boolean"
+          },
+          "workspace_enabled": {
+            "title": "Workspace Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "effective_enabled",
+          "workspace_enabled",
+          "service_available",
+          "reason"
+        ],
+        "title": "WorkspaceGraphMapCapability",
+        "type": "object"
+      },
+      "WorkspaceGraphOverviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/WorkspaceGraphBudget"
+          },
+          "document_kinds": {
+            "items": {
+              "enum": [
+                "context",
+                "library"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Document Kinds",
+            "type": "array"
+          },
+          "expansion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceGraphExpansion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "focus_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focus Entity Id"
+          },
+          "folders": {
+            "$ref": "#/components/schemas/WorkspaceGraphFolderFilter"
+          },
+          "head_mode": {
+            "const": "published",
+            "default": "published",
+            "title": "Head Mode",
+            "type": "string"
+          },
+          "lens": {
+            "default": "combined",
+            "enum": [
+              "combined",
+              "links",
+              "evidence",
+              "directory",
+              "compare",
+              "growth",
+              "provenance"
+            ],
+            "title": "Lens",
+            "type": "string"
+          },
+          "quick_filters": {
+            "items": {
+              "enum": [
+                "orphans",
+                "highly_referenced",
+                "cross_folder",
+                "recently_connected"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Quick Filters",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "workspace-graph-overview.v1",
+            "default": "workspace-graph-overview.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "search": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search"
+          },
+          "time": {
+            "$ref": "#/components/schemas/WorkspaceGraphTimeFilter"
+          }
+        },
+        "title": "WorkspaceGraphOverviewRequest",
+        "type": "object"
+      },
+      "WorkspaceGraphPlacementRef": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "tree_node_id": {
+            "format": "uuid",
+            "title": "Tree Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tree_node_id",
+          "label",
+          "path"
+        ],
+        "title": "WorkspaceGraphPlacementRef",
+        "type": "object"
+      },
+      "WorkspaceGraphSceneCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_documents": {
+            "minimum": 0.0,
+            "title": "Candidate Documents",
+            "type": "integer"
+          },
+          "candidate_relations": {
+            "minimum": 0.0,
+            "title": "Candidate Relations",
+            "type": "integer"
+          },
+          "rendered_clusters": {
+            "minimum": 0.0,
+            "title": "Rendered Clusters",
+            "type": "integer"
+          },
+          "rendered_documents": {
+            "minimum": 0.0,
+            "title": "Rendered Documents",
+            "type": "integer"
+          },
+          "rendered_relations": {
+            "minimum": 0.0,
+            "title": "Rendered Relations",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candidate_documents",
+          "candidate_relations",
+          "rendered_documents",
+          "rendered_clusters",
+          "rendered_relations"
+        ],
+        "title": "WorkspaceGraphSceneCounts",
+        "type": "object"
+      },
+      "WorkspaceGraphScenePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm_version": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Algorithm Version",
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/WorkspaceGraphCapabilities"
+          },
+          "completeness": {
+            "enum": [
+              "complete",
+              "capped",
+              "partial",
+              "privacy_suppressed"
+            ],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/WorkspaceGraphSceneCounts"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceGraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "expansion_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expansion Cursor"
+          },
+          "facet_counts": {
+            "$ref": "#/components/schemas/WorkspaceGraphFacetCounts"
+          },
+          "focus": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceGraphFocus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "folder_topology": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceGraphFolderTopology"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "graph_revision": {
+            "maxLength": 160,
+            "minLength": 16,
+            "title": "Graph Revision",
+            "type": "string"
+          },
+          "head_mode": {
+            "const": "published",
+            "default": "published",
+            "title": "Head Mode",
+            "type": "string"
+          },
+          "metric_basis": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Metric Basis",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "cluster": "#/components/schemas/WorkspaceGraphClusterNode",
+                  "document": "#/components/schemas/WorkspaceGraphDocumentNode"
+                },
+                "propertyName": "grain"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/WorkspaceGraphDocumentNode"
+                },
+                {
+                  "$ref": "#/components/schemas/WorkspaceGraphClusterNode"
+                }
+              ]
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "omission_reasons": {
+            "items": {
+              "enum": [
+                "document_budget",
+                "relation_budget",
+                "projection_partial",
+                "privacy_policy",
+                "renderer_fallback"
+              ],
+              "type": "string"
+            },
+            "title": "Omission Reasons",
+            "type": "array"
+          },
+          "representation": {
+            "enum": [
+              "exact",
+              "aggregated"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "workspace-graph-scene.v1",
+            "default": "workspace-graph-scene.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_scope_considered": {
+            "const": true,
+            "default": true,
+            "title": "Workspace Scope Considered",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "graph_revision",
+          "generated_at",
+          "algorithm_version",
+          "metric_basis",
+          "representation",
+          "completeness",
+          "truncated",
+          "counts",
+          "nodes",
+          "edges",
+          "facet_counts"
+        ],
+        "title": "WorkspaceGraphScenePayload",
+        "type": "object"
+      },
+      "WorkspaceGraphSceneResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceGraphScenePayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceGraphSceneResponse",
+        "type": "object"
+      },
+      "WorkspaceGraphTimeFilter": {
+        "additionalProperties": false,
+        "description": "Actor-visible time constraint for the Workspace projection.\n\n``document_updated`` filters on the published Context page or canonical\ncurrent Library item ``updated_at``. ``relation_observed`` filters authored\nrelations on their projection timestamp and retains only their visible\nendpoints. Both operate after visibility and never count hidden history.",
+        "properties": {
+          "basis": {
+            "default": "document_updated",
+            "enum": [
+              "document_updated",
+              "relation_observed"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "title": "WorkspaceGraphTimeFilter",
         "type": "object"
       },
       "WorkspaceJoinDecisionRequest": {
@@ -28817,6 +31074,302 @@
         "summary": "Submit Feedback",
         "tags": [
           "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/graph/capability": {
+      "get": {
+        "description": "Report whether the Workspace Knowledge Map is available here.",
+        "operationId": "get_workspace_graph_capability_api_v1_workspaces__workspace_id__graph_capability_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceGraphCapabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Workspace Graph Capability",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/graph/overview/query": {
+      "post": {
+        "description": "Read the feature-gated actor-visible Workspace Knowledge Map.",
+        "operationId": "query_workspace_graph_api_v1_workspaces__workspace_id__graph_overview_query_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceGraphOverviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceGraphSceneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Query Workspace Graph",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/graph/query": {
+      "post": {
+        "description": "Read a bounded scene; POST carries a structured query, not a mutation.",
+        "operationId": "query_graph_api_v1_workspaces__workspace_id__graph_query_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphQueryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Query Graph",
+        "tags": [
+          "graph"
         ]
       }
     },

@@ -13,7 +13,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import MetaData, Table, create_engine, event, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -54,7 +54,15 @@ from backend.models.media import (
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
 )
-from backend.models.workspace import Workspace
+from backend.models.workspace import (
+    Workspace,
+    default_actor_id,
+    default_agent_injection_policy,
+    default_citation_policy,
+    default_library_policy,
+    default_review_policy,
+    default_write_policy,
+)
 from backend.tests.integration import test_context_media_repository as media_fixtures
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
@@ -294,7 +302,37 @@ def test_media_phase_downgrade_refuses_populated_context_media(tmp_path: Path) -
             raw_cursor.execute("PRAGMA foreign_keys=OFF")
             raw_cursor.close()
 
-            workspace_id = _create_workspace(session, "downgrade")
+            workspaces = Table(
+                "workspace", MetaData(), autoload_with=session.connection()
+            )
+            assert "workspace_graph_enabled" not in workspaces.c
+            workspace_id = uuid4()
+            # The frozen media phase predates Graph View columns. Preserve the
+            # fixture's normal defaults through its actual reflected table.
+            session.execute(
+                workspaces.insert().values(
+                    id=workspace_id.hex,
+                    slug=f"media-downgrade-{workspace_id.hex[:8]}",
+                    title="Media downgrade",
+                    directory_title_key="media downgrade",
+                    name="Media downgrade",
+                    goal="Migration coverage",
+                    default_language="en",
+                    library_policy=default_library_policy(),
+                    write_policy=default_write_policy(),
+                    citation_policy=default_citation_policy(),
+                    agent_injection_policy=default_agent_injection_policy(),
+                    review_policy=default_review_policy(),
+                    lint_policy={},
+                    auto_fix_enabled=False,
+                    visibility="private",
+                    created_by_actor_id=default_actor_id().hex,
+                    owner_actor_id=default_actor_id().hex,
+                    updated_at=now,
+                    created_at=now,
+                )
+            )
+            session.commit()
             blob, inspection_id = media_fixtures._seed_shared_image(
                 session, workspace_id
             )

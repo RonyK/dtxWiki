@@ -62,6 +62,39 @@ def _assert_security_headers(response, *, hsts=DEFAULT_HSTS_VALUE):
         assert response.headers[HSTS_HEADER] == hsts
 
 
+def _csp_directives(policy):
+    return {
+        name: sources
+        for directive in policy.split(";")
+        if directive.strip()
+        for name, *sources in [directive.split()]
+    }
+
+
+def test_blob_workers_are_allowed_without_widening_script_or_network_sources():
+    app = FastAPI()
+
+    @app.get("/graph")
+    def graph():
+        return PlainTextResponse("graph")
+
+    app.add_middleware(SecurityHeadersMiddleware, enabled=True)
+    response = TestClient(app).get("/graph")
+
+    directives = _csp_directives(response.headers["content-security-policy"])
+    assert directives["worker-src"] == ["'self'", "blob:"]
+    assert directives["script-src"] == ["'self'"]
+    assert directives["connect-src"] == ["'self'"]
+    assert directives["default-src"] == ["'self'"]
+    assert directives["object-src"] == ["'none'"]
+    assert all(
+        "blob:" not in sources
+        for name, sources in directives.items()
+        if name != "worker-src"
+    )
+    assert "'unsafe-eval'" not in response.headers["content-security-policy"]
+
+
 def test_production_headers_present(tmp_path, monkeypatch):
     app = create_app(settings=_production_settings(tmp_path, monkeypatch))
 
@@ -213,6 +246,7 @@ def test_header_values_exact_match(tmp_path, monkeypatch):
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; "
         "script-src 'self'; "
+        "worker-src 'self' blob:; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https:; "
         "font-src 'self' data:; "
@@ -239,17 +273,29 @@ def test_per_response_csp_override_only_changes_requested_directives():
     csp = response.headers["content-security-policy"]
     assert "form-action 'self' http://127.0.0.1:58713" in csp
     assert "script-src 'self' 'nonce-test-nonce'" in csp
+    directives = _csp_directives(csp)
+    assert directives["worker-src"] == ["'self'", "blob:"]
+    expected = _csp_directives(SECURITY_HEADERS["content-security-policy"])
+    expected["form-action"] = ["'self'", "http://127.0.0.1:58713"]
+    expected["script-src"] = ["'self'", "'nonce-test-nonce'"]
+    assert directives == expected
     for name, value in SECURITY_HEADERS.items():
         if name != "content-security-policy":
             assert response.headers[name] == value
 
 
-def test_sandboxed_document_uses_inert_csp_without_weakening_other_headers():
+@pytest.mark.parametrize("with_response_overrides", [False, True])
+def test_sandboxed_document_uses_inert_csp_without_weakening_other_headers(
+    with_response_overrides,
+):
     app = FastAPI()
 
     @app.get("/preview-content")
     def preview_content(request: Request):
         setattr(request.state, CSP_SANDBOXED_DOCUMENT_STATE_KEY, True)
+        if with_response_overrides:
+            request.state.csp_extra_form_action_origins = ["http://127.0.0.1:58713"]
+            request.state.csp_script_nonce = "test-nonce"
         return PlainTextResponse(
             "preview",
             headers={"Content-Security-Policy": "script-src * 'unsafe-inline'"},
@@ -261,6 +307,8 @@ def test_sandboxed_document_uses_inert_csp_without_weakening_other_headers():
     assert response.headers["content-security-policy"] == (
         "default-src 'none'; sandbox"
     )
+    assert "worker-src" not in response.headers["content-security-policy"]
+    assert "blob:" not in response.headers["content-security-policy"]
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
 

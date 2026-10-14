@@ -15,6 +15,11 @@ if TYPE_CHECKING:
     from backend.policy.auth import ActorContext
 
 
+PUBLISHED_CONTEXT_VERSION_STATUSES = frozenset(
+    {"published_snapshot", "superseded_snapshot"}
+)
+
+
 def editable_context_version_id(page: ContextPage) -> UUID | None:
     """Return the single Context version on which a new edit must be based."""
 

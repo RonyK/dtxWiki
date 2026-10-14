@@ -448,6 +448,17 @@ def test_workspace_lookup_inventory_matches_phase_e_baseline():
     )
 
 
+def test_graph_rank_dictionary_reads_are_not_tree_orm_lookups():
+    # The alias inventory is file-wide. Naming a tree ORM alias ``node``
+    # made PPR's ``ranks.get(node, ...)`` look like Session.get calls in an
+    # unrelated method; do not permanently baseline those dictionary reads.
+    hits = workspace_lookup_call_sites()
+    false_lookup_prefix = (
+        "backend/services/graph_service.py|GraphService.ppr|get|WorkspaceTreeNode|"
+    )
+    assert not any(key.startswith(false_lookup_prefix) for key in hits)
+
+
 def test_gate_detects_another_lookup_for_an_existing_file_model_pair(
     tmp_path: Path,
 ):

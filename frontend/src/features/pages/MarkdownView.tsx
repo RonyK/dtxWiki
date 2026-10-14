@@ -128,6 +128,8 @@ type MarkdownAnchorProps = ComponentPropsWithoutRef<"a"> & {
 const MAX_INLINE_TOKEN_TRANSFORM_DEPTH = 128;
 const MAX_INLINE_COMMENT_HIGHLIGHTS = 50;
 const MAX_INLINE_COMMENT_HIGHLIGHT_BODY_CHARS = 100_000;
+const WIKILINK_WWW_LITERAL = /(^|[^A-Za-z0-9])www\./i;
+const WIKILINK_EMAIL_LITERAL = /[A-Za-z0-9+._-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+/i;
 const MERMAID_LANGUAGE = "mermaid";
 const MERMAID_FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -690,6 +692,18 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
       nodes.push(textNode(node.value.slice(cursor, tokenStart)));
     }
     if (match[1]) {
+      if (
+        !isRelationshipWikilink(
+          match[1],
+          match[2],
+          node.value.slice(0, match.index),
+        )
+      ) {
+        nodes.push(textNode(match[0]));
+        cursor = match.index + match[0].length;
+        match = pattern.exec(node.value);
+        continue;
+      }
       // Public reader (plainWikilinks): emit the link text as plain text only.
       // We do NOT resolve targets here — resolving publicness per link would
       // require an authenticated lookup and could enumerate private slugs/titles
@@ -718,6 +732,36 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
     nodes.push(textNode(node.value.slice(cursor)));
   }
   return nodes;
+}
+
+function isRelationshipWikilink(
+  rawTarget: string,
+  alias: string | undefined,
+  prefix: string,
+) {
+  return !isAttachedToUrlLikeLiteral(prefix) && [rawTarget, alias].every((part) => {
+    if (part === undefined) {
+      return true;
+    }
+    return (
+      !part.includes("://") &&
+      !WIKILINK_WWW_LITERAL.test(part) &&
+      !WIKILINK_EMAIL_LITERAL.test(part)
+    );
+  });
+}
+
+function isAttachedToUrlLikeLiteral(prefix: string) {
+  let tokenStart = prefix.length;
+  while (
+    tokenStart > 0 &&
+    !/\s/.test(prefix[tokenStart - 1]) &&
+    !"<>]".includes(prefix[tokenStart - 1])
+  ) {
+    tokenStart -= 1;
+  }
+  const token = prefix.slice(tokenStart);
+  return token.includes("://") || WIKILINK_WWW_LITERAL.test(token);
 }
 
 function wikilinkNode(rawTarget: string, alias: string | undefined, options: DtxTokenOptions): DtxInline {
@@ -756,7 +800,7 @@ function buildWikilinkResolver(
           target.target_slug,
           {
             pageId: target.target_page_id,
-            slug: target.current_slug ?? "",
+            slug: target.current_slug ?? target.target_slug,
           },
         ] as const,
     ),

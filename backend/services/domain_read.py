@@ -918,14 +918,15 @@ class DomainReadService:
         parent_node_id = tree_node.parent_id if tree_node is not None else None
         backlink_count = (
             session.scalar(
-                select(func.count())
+                select(func.count(func.distinct(PageLink.source_page_id)))
                 .select_from(PageLink)
                 .join(ContextPage, ContextPage.id == PageLink.source_page_id)
                 .where(PageLink.workspace_id == workspace_id)
                 .where(
-                    (PageLink.target_page_id == page.id)
-                    | (
+                    or_(
+                        PageLink.target_page_id == page.id,
                         PageLink.target_page_id.is_(None)
+                        & (PageLink.link_syntax == "wikilink")
                         & (PageLink.target_slug == page.slug)
                     )
                 )
@@ -953,22 +954,29 @@ class DomainReadService:
             wikilink_targets = [
                 {
                     "target_slug": link.target_slug,
-                    "target_page_id": link.target_page_id or fallback_page_id,
+                    "target_page_id": resolved_page_id or fallback_page_id,
                     "current_slug": current_slug or fallback_slug,
                 }
                 for (
                     link,
+                    resolved_page_id,
                     current_slug,
                     fallback_page_id,
                     fallback_slug,
                 ) in session.execute(
                     select(
                         PageLink,
+                        target_page.id,
                         target_page.slug,
                         target_page_by_slug.id,
                         target_page_by_slug.slug,
                     )
-                    .outerjoin(target_page, target_page.id == PageLink.target_page_id)
+                    .outerjoin(
+                        target_page,
+                        (target_page.id == PageLink.target_page_id)
+                        & (target_page.workspace_id == PageLink.workspace_id)
+                        & (target_page.lifecycle_status != "archived"),
+                    )
                     .outerjoin(
                         target_page_by_slug,
                         (target_page_by_slug.workspace_id == PageLink.workspace_id)
@@ -979,6 +987,7 @@ class DomainReadService:
                     .where(
                         PageLink.source_page_id == page.id,
                         PageLink.source_version_id == version.id,
+                        PageLink.link_syntax == "wikilink",
                     )
                     .order_by(PageLink.target_slug.asc())
                 )

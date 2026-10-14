@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from mcp.types import Tool, ToolAnnotations
 
+from backend.mcp.protocol.instructions import CONTEXT_LINKING_INSTRUCTION
 from backend.mcp.protocol.output_validation import WIRE_ENVELOPE_FIELDS
 from backend.mcp.protocol.schema_projection import host_compatible_schema
 from backend.mcp.scopes import TOOL_REQUIRED_ROLES
@@ -198,7 +199,8 @@ TOOL_META = {
         "for human review. This tool, and the rest of the P8.6 editing-state-"
         "machine tools below (begin/update/submit/discard_context_edit, "
         "list_my_context_edits), are the current target surface -- prefer "
-        "them over submit_revision_for_review for new integrations."
+        "them over submit_revision_for_review for new integrations. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -235,6 +237,7 @@ TOOL_META = {
         "editing privately. data.edit_receipt reports the changed sections and "
         "line/char counts. Prefer patch_context_edit for local changes: it "
         "sends less and cannot overwrite text you did not mean to change. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -244,7 +247,12 @@ TOOL_META = {
         "Lock your own open editing content and submit it for human review "
         "('Save draft'). Requires the editing_revision you last saw. Once "
         "submitted, that version is never mutated again -- further changes "
-        "need a new begin_context_edit."
+        "need a new begin_context_edit. "
+        f"{CONTEXT_LINKING_INSTRUCTION} If the submitted version has no "
+        "authored link to another published Context page that can appear in "
+        "the graph, the envelope carries warning "
+        "context_page_has_no_graph_visible_links; the submission still "
+        "succeeds and changes require a new begin_context_edit. "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,
@@ -290,6 +298,7 @@ TOOL_META = {
         "read_structure_map call. "
         "Never creates a new version or a ReviewItem; use "
         "submit_context_edit_for_review for that. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
         False,

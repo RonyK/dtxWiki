@@ -7,7 +7,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.models.audit import AuditEvent
-from backend.models.base import Base
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.user import User
@@ -23,7 +22,10 @@ from backend.services.credential_hashing import CredentialHasher
 from backend.services.page_service import PageService
 from backend.services.read_errors import ReadValidationError
 from backend.services.review_service import ReviewService
-from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.tests.utils.postgres import (
+    create_isolated_postgres_metadata,
+    drop_reflected_postgres_metadata,
+)
 
 
 def _postgres_url() -> str | None:
@@ -61,7 +63,7 @@ def test_postgres_reviewed_replacement_serializes_before_review_approval(
     database_url = _postgres_url()
     assert database_url is not None
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     browser_at_review_lookup = threading.Event()
     release_browser = threading.Event()
@@ -228,7 +230,7 @@ def test_postgres_ghost_close_and_decision_share_page_then_review_lock_order():
                 close_review_locked.set()
             return result
 
-    Base.metadata.create_all(engine)
+    create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(
         bind=engine,
         class_=TrackingSession,

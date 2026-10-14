@@ -1,5 +1,7 @@
 """Edge-projection registry (G0 §19.5.4): completeness, vocabulary, rebuild."""
 
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import select
 
@@ -12,18 +14,22 @@ from backend.models.context import (
     PageLink,
     PageProvenance,
 )
+from backend.models.graph import GraphObservation
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.library_discovery import LibrarySyncRun
 from backend.models.mcp_chat import McpChatArtifactKind
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.services.entity_ref import EntityKind
+from backend.services.graph_service import HYDRATORS
 from backend.services.indexing.edge_registry import (
     DEFERRED_EDGE_RELATIONS,
     EDGE_BEARING_RELATIONS,
     EDGE_EXTRACTORS,
     EDGE_RELATION_SOURCES,
     rebuild_edge_projection,
+    reconcile_wikilink_edge_projection,
+    refresh_page_edge_projection,
 )
 
 pytestmark = pytest.mark.integration
@@ -307,98 +313,515 @@ def _seed_page(session, workspace_id, slug):
     return page, version
 
 
-def test_rebuild_edge_projection_projects_all_relations_idempotently(
+def test_page_edge_refresh_fixed_point_preserves_projection_state(
     session_factory,
 ):
     with session_factory.begin() as session:
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        node = session.scalar(
-            select(WorkspaceTreeNode).where(
-                WorkspaceTreeNode.workspace_id == workspace.id
-            )
+        source, source_version = _seed_page(
+            session,
+            workspace.id,
+            "fixed-point-source",
         )
-        page_a, version_a = _seed_page(session, workspace.id, "edge-source")
-        page_b, _ = _seed_page(session, workspace.id, "edge-target")
-
+        target, _target_version = _seed_page(
+            session,
+            workspace.id,
+            "fixed-point-target",
+        )
         session.add(
             PageLink(
                 workspace_id=workspace.id,
-                source_page_id=page_a.id,
-                source_version_id=version_a.id,
-                target_slug=page_b.slug,
-                target_page_id=page_b.id,
+                source_page_id=source.id,
+                source_version_id=source_version.id,
+                target_slug=target.slug,
+                target_page_id=target.id,
+                occurrence_count=2,
             )
+        )
+        refresh_page_edge_projection(session, workspace.id, source.id)
+        edge = session.scalar(
+            select(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace.id,
+                EdgeProjection.source_id == source.id,
+                EdgeProjection.target_id == target.id,
+                EdgeProjection.edge_kind == "wikilink",
+            )
+        )
+        assert edge is not None
+        session.flush()
+        workspace_id = workspace.id
+        source_id = source.id
+        edge_id = edge.id
+        fixed_point_state = (
+            edge.id,
+            edge.created_at,
+            edge.last_seen_at,
+        )
+        revision = session.scalar(
+            select(Workspace.edge_projection_version).where(
+                Workspace.id == workspace_id
+            )
+        )
+        observation_count = len(
+            session.scalars(
+                select(GraphObservation.id).where(
+                    GraphObservation.workspace_id == workspace_id
+                )
+            ).all()
         )
 
-        ask_session = AskSession(
-            workspace_id=workspace.id,
-            title="Edges",
-            actor_kind="human",
-            placement_tree_node_id=node.id,
-        )
-        session.add(ask_session)
-        session.flush()
-        turn = AskTurn(
-            workspace_id=ask_session.workspace_id,
-            ask_session_id=ask_session.id,
-            turn_no=1,
-            user_message="q",
-            assistant_message="a",
-            promoted_context_page_id=page_a.id,
-        )
-        session.add(turn)
-        session.flush()
-        session.add(
-            AskTurnCitation(
-                workspace_id=turn.workspace_id,
-                ask_turn_id=turn.id,
-                target_kind="context_page",
-                target_id=page_b.id,
-                rank=0,
+    with session_factory.begin() as session:
+        refresh_page_edge_projection(session, workspace_id, source_id)
+
+    with session_factory() as session:
+        edge = session.get(EdgeProjection, edge_id)
+        assert edge is not None
+        assert (edge.id, edge.created_at, edge.last_seen_at) == fixed_point_state
+        assert (
+            session.scalar(
+                select(Workspace.edge_projection_version).where(
+                    Workspace.id == workspace_id
+                )
             )
+            == revision
+        )
+        assert (
+            len(
+                session.scalars(
+                    select(GraphObservation.id).where(
+                        GraphObservation.workspace_id == workspace_id
+                    )
+                ).all()
+            )
+            == observation_count
+        )
+
+
+def test_page_edge_refresh_repairs_semantic_drift_in_place(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        source, source_version = _seed_page(
+            session,
+            workspace.id,
+            "semantic-drift-source",
+        )
+        target, _target_version = _seed_page(
+            session,
+            workspace.id,
+            "semantic-drift-target",
         )
         session.add(
-            PageProvenance(
+            PageLink(
                 workspace_id=workspace.id,
-                page_id=page_a.id,
-                source_kind="ask_turn",
-                source_id=turn.id,
+                source_page_id=source.id,
+                source_version_id=source_version.id,
+                target_slug=target.slug,
+                target_page_id=target.id,
+                occurrence_count=3,
             )
         )
-
-        item = LibraryItem(
-            workspace_id=workspace.id,
-            connector_type="url",
-            format_hint="html",
-            uri="https://example.com/edges",
-            metadata_json={},
-            trust_level="normal",
-            lifecycle_status="ready",
+        refresh_page_edge_projection(session, workspace.id, source.id)
+        edge = session.scalar(
+            select(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace.id,
+                EdgeProjection.source_id == source.id,
+                EdgeProjection.target_id == target.id,
+                EdgeProjection.edge_kind == "wikilink",
+            )
         )
-        session.add(item)
+        assert edge is not None
         session.flush()
-        sync_run = LibrarySyncRun(
+        workspace_id = workspace.id
+        source_id = source.id
+        edge_id = edge.id
+        edge_created_at = edge.created_at
+        wrong_occurred_at = source_version.created_at
+
+    with session_factory.begin() as session:
+        edge = session.get(EdgeProjection, edge_id)
+        assert edge is not None
+        edge.provenance = "usage"
+        edge.source_ref = {"table": "wrong_source"}
+        edge.occurred_at = wrong_occurred_at
+
+    with session_factory() as session:
+        revision_before = session.scalar(
+            select(Workspace.edge_projection_version).where(
+                Workspace.id == workspace_id
+            )
+        )
+        observation_count = len(
+            session.scalars(
+                select(GraphObservation.id).where(
+                    GraphObservation.workspace_id == workspace_id
+                )
+            ).all()
+        )
+
+    with session_factory.begin() as session:
+        refresh_page_edge_projection(session, workspace_id, source_id)
+
+    with session_factory() as session:
+        edge = session.get(EdgeProjection, edge_id)
+        assert edge is not None
+        assert edge.created_at == edge_created_at
+        assert edge.provenance == "curated"
+        assert edge.weight == 3.0
+        assert edge.occurred_at is None
+        assert edge.source_ref == {"table": "page_links"}
+        assert (
+            session.scalar(
+                select(Workspace.edge_projection_version).where(
+                    Workspace.id == workspace_id
+                )
+            )
+            == revision_before + 1
+        )
+        assert (
+            len(
+                session.scalars(
+                    select(GraphObservation.id).where(
+                        GraphObservation.workspace_id == workspace_id
+                    )
+                ).all()
+            )
+            == observation_count
+        )
+
+
+def test_page_edge_refresh_updates_weight_in_place_without_identity_observation(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        source, source_version = _seed_page(
+            session,
+            workspace.id,
+            "weight-change-source",
+        )
+        target, _target_version = _seed_page(
+            session,
+            workspace.id,
+            "weight-change-target",
+        )
+        link = PageLink(
+            workspace_id=workspace.id,
+            source_page_id=source.id,
+            source_version_id=source_version.id,
+            target_slug=target.slug,
+            target_page_id=target.id,
+            occurrence_count=1,
+        )
+        session.add(link)
+        refresh_page_edge_projection(session, workspace.id, source.id)
+        edge = session.scalar(
+            select(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace.id,
+                EdgeProjection.source_id == source.id,
+                EdgeProjection.target_id == target.id,
+                EdgeProjection.edge_kind == "wikilink",
+            )
+        )
+        assert edge is not None
+        session.flush()
+        workspace_id = workspace.id
+        source_id = source.id
+        link_id = link.id
+        edge_id = edge.id
+        edge_created_at = edge.created_at
+
+    with session_factory.begin() as session:
+        link = session.get(PageLink, link_id)
+        assert link is not None
+        link.occurrence_count = 5
+
+    with session_factory() as session:
+        revision_before = session.scalar(
+            select(Workspace.edge_projection_version).where(
+                Workspace.id == workspace_id
+            )
+        )
+        observation_count = len(
+            session.scalars(
+                select(GraphObservation.id).where(
+                    GraphObservation.workspace_id == workspace_id
+                )
+            ).all()
+        )
+
+    with session_factory.begin() as session:
+        refresh_page_edge_projection(session, workspace_id, source_id)
+
+    with session_factory() as session:
+        edge = session.get(EdgeProjection, edge_id)
+        assert edge is not None
+        assert edge.created_at == edge_created_at
+        assert edge.weight == 5.0
+        assert (
+            session.scalar(
+                select(Workspace.edge_projection_version).where(
+                    Workspace.id == workspace_id
+                )
+            )
+            == revision_before + 1
+        )
+        assert (
+            len(
+                session.scalars(
+                    select(GraphObservation.id).where(
+                        GraphObservation.workspace_id == workspace_id
+                    )
+                ).all()
+            )
+            == observation_count
+        )
+
+
+def test_narrow_wikilink_reconcile_never_mutates_sources_outside_lock_set(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        locked_source, locked_version = _seed_page(
+            session,
+            workspace.id,
+            "locked-source",
+        )
+        outside_stale, _outside_stale_version = _seed_page(
+            session,
+            workspace.id,
+            "outside-stale",
+        )
+        outside_changed, outside_changed_version = _seed_page(
+            session,
+            workspace.id,
+            "outside-changed",
+        )
+        target, _target_version = _seed_page(
+            session,
+            workspace.id,
+            "narrow-target",
+        )
+        session.add_all(
+            [
+                PageLink(
+                    workspace_id=workspace.id,
+                    source_page_id=locked_source.id,
+                    source_version_id=locked_version.id,
+                    target_slug=target.slug,
+                    target_page_id=target.id,
+                    occurrence_count=2,
+                ),
+                PageLink(
+                    workspace_id=workspace.id,
+                    source_page_id=outside_changed.id,
+                    source_version_id=outside_changed_version.id,
+                    target_slug=target.slug,
+                    target_page_id=target.id,
+                    occurrence_count=7,
+                ),
+            ]
+        )
+        locked_edge = EdgeProjection(
+            workspace_id=workspace.id,
+            source_kind="context_page",
+            source_id=locked_source.id,
+            target_kind="context_page",
+            target_id=target.id,
+            edge_kind="wikilink",
+            provenance="curated",
+            weight=1.0,
+            source_ref={"marker": "locked-before"},
+        )
+        outside_stale_edge = EdgeProjection(
+            workspace_id=workspace.id,
+            source_kind="context_page",
+            source_id=outside_stale.id,
+            target_kind="context_page",
+            target_id=target.id,
+            edge_kind="wikilink",
+            provenance="curated",
+            weight=13.0,
+            source_ref={"marker": "outside-stale"},
+        )
+        outside_changed_edge = EdgeProjection(
+            workspace_id=workspace.id,
+            source_kind="context_page",
+            source_id=outside_changed.id,
+            target_kind="context_page",
+            target_id=target.id,
+            edge_kind="wikilink",
+            provenance="usage",
+            weight=99.0,
+            source_ref={"marker": "outside-changed"},
+        )
+        session.add_all([locked_edge, outside_stale_edge, outside_changed_edge])
+        session.flush()
+        workspace_id = workspace.id
+        locked_source_id = locked_source.id
+        locked_edge_id = locked_edge.id
+        outside_edge_ids = {
+            outside_stale_edge.id,
+            outside_changed_edge.id,
+        }
+
+    with session_factory() as session:
+        outside_before = _edge_projection_snapshots(session, outside_edge_ids)
+
+    with session_factory.begin() as session:
+        delta = reconcile_wikilink_edge_projection(
+            session,
+            workspace_id,
+            source_page_ids=frozenset({locked_source_id}),
+        )
+
+    assert delta.desired_count == 1
+    assert delta.inserted == 0
+    assert delta.updated == 1
+    assert delta.deleted == 0
+    assert delta.affected_source_ids == frozenset({locked_source_id})
+    with session_factory() as session:
+        locked_after = session.get(EdgeProjection, locked_edge_id)
+        assert locked_after is not None
+        assert locked_after.weight == 2.0
+        assert _edge_projection_snapshots(session, outside_edge_ids) == outside_before
+
+
+def _edge_projection_snapshots(session, edge_ids):
+    rows = session.scalars(
+        select(EdgeProjection)
+        .where(EdgeProjection.id.in_(edge_ids))
+        .order_by(EdgeProjection.id)
+    ).all()
+    return [
+        (
+            edge.id,
+            edge.source_kind,
+            edge.source_id,
+            edge.target_kind,
+            edge.target_id,
+            edge.edge_kind,
+            edge.provenance,
+            edge.weight,
+            edge.occurred_at,
+            edge.source_ref,
+            edge.created_at,
+            edge.last_seen_at,
+        )
+        for edge in rows
+    ]
+
+
+def _seed_every_relation(session):
+    """One row for each relation the full rebuild projects, beside the tree."""
+
+    workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+    node = session.scalar(
+        select(WorkspaceTreeNode).where(WorkspaceTreeNode.workspace_id == workspace.id)
+    )
+    page_a, version_a = _seed_page(session, workspace.id, "edge-source")
+    page_b, _ = _seed_page(session, workspace.id, "edge-target")
+
+    session.add(
+        PageLink(
+            workspace_id=workspace.id,
+            source_page_id=page_a.id,
+            source_version_id=version_a.id,
+            target_slug=page_b.slug,
+            target_page_id=page_b.id,
+        )
+    )
+
+    ask_session = AskSession(
+        workspace_id=workspace.id,
+        title="Edges",
+        actor_kind="human",
+        placement_tree_node_id=node.id,
+    )
+    session.add(ask_session)
+    session.flush()
+    turn = AskTurn(
+        workspace_id=ask_session.workspace_id,
+        ask_session_id=ask_session.id,
+        turn_no=1,
+        user_message="q",
+        assistant_message="a",
+        promoted_context_page_id=page_a.id,
+    )
+    session.add(turn)
+    session.flush()
+    session.add(
+        AskTurnCitation(
+            workspace_id=turn.workspace_id,
+            ask_turn_id=turn.id,
+            target_kind="context_page",
+            target_id=page_b.id,
+            rank=0,
+        )
+    )
+    session.add(
+        PageProvenance(
+            workspace_id=workspace.id,
+            page_id=page_a.id,
+            source_kind="ask_turn",
+            source_id=turn.id,
+        )
+    )
+
+    item = LibraryItem(
+        workspace_id=workspace.id,
+        connector_type="url",
+        format_hint="html",
+        uri="https://example.com/edges",
+        metadata_json={},
+        trust_level="normal",
+        lifecycle_status="ready",
+    )
+    session.add(item)
+    session.flush()
+    sync_run = LibrarySyncRun(
+        workspace_id=workspace.id,
+        library_item_id=item.id,
+        trigger_type="manual",
+        status="completed",
+    )
+    session.add(sync_run)
+    session.flush()
+    session.add(
+        LibraryItemVersion(
             workspace_id=workspace.id,
             library_item_id=item.id,
-            trigger_type="manual",
-            status="completed",
+            version_no=1,
+            content_hash="hash",
+            raw_storage_ref="ref",
+            processing_status="ready",
+            sync_run_id=sync_run.id,
         )
-        session.add(sync_run)
-        session.flush()
-        session.add(
-            LibraryItemVersion(
-                workspace_id=workspace.id,
-                library_item_id=item.id,
-                version_no=1,
-                content_hash="hash",
-                raw_storage_ref="ref",
-                processing_status="ready",
-                sync_run_id=sync_run.id,
-            )
-        )
-        session.flush()
+    )
+    session.flush()
+    return SimpleNamespace(
+        workspace=workspace,
+        page_a=page_a,
+        version_a=version_a,
+        page_b=page_b,
+        turn=turn,
+        sync_run=sync_run,
+    )
 
-        counts = rebuild_edge_projection(session, workspace.id)
+
+def test_rebuild_edge_projection_projects_all_relations_idempotently(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        seeded = _seed_every_relation(session)
+        workspace, page_a, page_b = seeded.workspace, seeded.page_a, seeded.page_b
+        turn, sync_run = seeded.turn, seeded.sync_run
+
+        counts = rebuild_edge_projection(
+            session, workspace.id, usage_signals_enabled=True
+        )
         assert {
             key: counts[key]
             for key in (
@@ -423,7 +846,9 @@ def test_rebuild_edge_projection_projects_all_relations_idempotently(
         assert counts["version_parent"] == 0
 
         # Idempotent: a second rebuild replaces, never duplicates.
-        counts_again = rebuild_edge_projection(session, workspace.id)
+        counts_again = rebuild_edge_projection(
+            session, workspace.id, usage_signals_enabled=True
+        )
         assert counts_again == counts
         edges = session.scalars(
             select(EdgeProjection).where(EdgeProjection.workspace_id == workspace.id)
@@ -437,3 +862,76 @@ def test_rebuild_edge_projection_projects_all_relations_idempotently(
         assert by_kind["promoted_from"].source_id == page_a.id
         assert by_kind["page_provenance"].target_id == turn.id
         assert by_kind["library_sync_version"].target_id == sync_run.id
+
+
+HALF_LIFE_KINDS = (
+    "version_parent",
+    "version_merge",
+    "ask_citation",
+    "library_sync_version",
+)
+
+
+def test_half_life_kinds_never_join_a_page_and_a_hydratable_neighbor(
+    session_factory,
+):
+    """Guard: the Local Graph never ranks a relation that decays with time.
+
+    The ranked collector reads a row only when both of its ends hydrate (a
+    seed is a hydrated entity too), and no kind whose rank halves with age has
+    such a row: they link page versions, Ask turns and sync runs. The
+    collector keeps an overflowing partition's rows by raw weight, which for
+    these kinds is not rank order. When F09 gives ask_turn a hydrator,
+    ask_citation joins an Ask turn to a page and this fails; the partition
+    order has to change with it.
+    """
+
+    with session_factory.begin() as session:
+        seeded = _seed_every_relation(session)
+        workspace = seeded.workspace
+        # Lineage for both version families.
+        child = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=seeded.page_a.id,
+            version_no=2,
+            body_md="# edge-source v2",
+            content_hash="edge-source-v2",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="tester",
+            version_status="draft",
+            parent_version_id=seeded.version_a.id,
+        )
+        session.add(child)
+        session.flush()
+        merged = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=seeded.page_a.id,
+            version_no=3,
+            body_md="# edge-source v3",
+            content_hash="edge-source-v3",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="tester",
+            version_status="draft",
+            parent_version_id=seeded.version_a.id,
+            merged_into_version_id=child.id,
+        )
+        session.add(merged)
+        session.flush()
+
+        rebuild_edge_projection(session, workspace.id, usage_signals_enabled=True)
+        rows = session.scalars(
+            select(EdgeProjection).where(
+                EdgeProjection.workspace_id == workspace.id,
+                EdgeProjection.edge_kind.in_(HALF_LIFE_KINDS),
+            )
+        ).all()
+
+    assert {row.edge_kind for row in rows} == set(HALF_LIFE_KINDS)
+    for row in rows:
+        assert not (row.source_kind in HYDRATORS and row.target_kind in HYDRATORS), (
+            row.edge_kind,
+            row.source_kind,
+            row.target_kind,
+        )

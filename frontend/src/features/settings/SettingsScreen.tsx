@@ -87,6 +87,10 @@ import {
   updateSettingsPolicyBatch,
   updateSettingsMcpClientStatus,
 } from "../../shared/api/operations";
+import {
+  invalidateWorkspaceGraphCapability,
+  useWorkspaceGraphCapability,
+} from "../graph/useWorkspaceGraphCapability";
 import type {
   DeploymentStatus,
   McpClientStatus,
@@ -1916,6 +1920,11 @@ function SettingsScreenBody() {
       if (languageUpdate) {
         setLocale(String(languageUpdate.value), { persist: false });
       }
+      if (group === "graph") {
+        // Navigation, /graph and Context links read the switch from this
+        // cache; drop it so they follow the save without a reload.
+        invalidateWorkspaceGraphCapability(workspaceId);
+      }
       // Set in the same tick the write resolves, exactly where the page-level
       // banner used to be set; only where it renders has changed.
       setPolicySaved({
@@ -3725,6 +3734,23 @@ function SettingsScreenBody() {
                   readOnly={!canEditPolicies}
                   summary={t("summary.workspace")}
                 />
+                {/* A server that predates the Knowledge graph card omits it;
+                    the rest of Settings must still render. */}
+                {policies.graph ? (
+                  <>
+                    <PolicyGroupView
+                      card={policies.graph}
+                      fields={graphPolicyFields(policies.graph.policy)}
+                      group="graph"
+                      busyKey={policyBusyKey}
+                      onFieldsSave={onPolicyFieldsSave}
+                      saveNotice={policySaved}
+                      readOnly={!canEditPolicies}
+                      summary={t("summary.graph")}
+                    />
+                    <KnowledgeMapStatus />
+                  </>
+                ) : null}
                 <WorkspaceDangerZone
                   currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
                   onPoliciesChanged={setPolicies}
@@ -9342,6 +9368,37 @@ function ContextWriteGateCard({
         </li>
       </ul>
     </div>
+  );
+}
+
+function graphPolicyFields(policy: Record<string, unknown>) {
+  return labelledPolicyFields(policy, [
+    settingField(
+      "graph.workspaceMapEnabled",
+      "workspace_map_enabled",
+      "Workspace Knowledge Map",
+      "Let members open the map of published Context and Library documents in this workspace. The Graph tab on each document stays available either way.",
+    ),
+    settingField(
+      "graph.usageRelationSignalsEnabled",
+      "usage_relation_signals_enabled",
+      "Read-together relationships",
+      "Show documents that an MCP conversation read one after another, with no more than 30 minutes between reads, as “read together” relationships in Graph tabs, with how many conversations did so and over how many days. Turning this off hides them from Graph tabs at once and removes them everywhere at the next background run, usually within minutes; no new lint link suggestions are made from them. The MCP read history is kept, so turning this back on rebuilds them.",
+    ),
+  ]);
+}
+
+function KnowledgeMapStatus() {
+  const { t } = useTranslation("settings");
+  const selectedId = useOptionalWorkspaceContext()?.selectedId;
+  const { capability } = useWorkspaceGraphCapability(selectedId);
+  if (!capability) {
+    return null;
+  }
+  return (
+    <p className="field-hint" data-testid="knowledge-map-status">
+      {t(`graph.status.${capability.workspace_map.reason}`)}
+    </p>
   );
 }
 

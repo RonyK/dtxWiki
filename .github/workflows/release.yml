@@ -32,7 +32,7 @@ jobs:
           fi
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
       - run: npm ci
       # bundle-frontend runs $(PYTHON), not $(VENV_PYTHON): the VENV_PYTHON
       # override this step used to pass never reached it, so the bundler ran
@@ -106,7 +106,7 @@ jobs:
           path: dist-npm
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.18"
+          node-version: "22.18.0"
           registry-url: "https://registry.npmjs.org"
       # Node 22 ships npm 10; trusted publishing needs npm 11.5.1 or newer.
       - name: Install an npm that supports trusted publishing

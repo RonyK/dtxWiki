@@ -42,7 +42,7 @@ wiki.example.com {
 	header ?X-Content-Type-Options "nosniff"
 	header ?X-Frame-Options "DENY"
 	header ?Referrer-Policy "strict-origin-when-cross-origin"
-	header ?Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'"
+	header ?Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'"
 
 	# Access log without credentials: legacy password-reset and email
 	# verification links carried a one-time ?token=, and the Referer of a page

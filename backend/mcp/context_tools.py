@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 from backend.app.container import ToolCallContext
 from backend.app.settings import get_settings
 from backend.mcp.envelope import (
+    apply_payload_warnings,
     error_envelope,
     ok_envelope,
     validation_error_envelope,
@@ -44,6 +46,10 @@ from backend.services.client_round_state import (
     ClientRoundStateCodec,
     ClientRoundStateError,
 )
+from backend.services.context_link_advisory import (
+    CONTEXT_PAGE_HAS_NO_GRAPH_VISIBLE_LINKS,
+    context_link_advisory_state,
+)
 from backend.services.edit_receipt import build_edit_receipt
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
 from backend.services.page_service import (
@@ -53,6 +59,8 @@ from backend.services.page_service import (
     PageServiceError,
 )
 from backend.services.read_errors import ReadServiceError
+
+logger = logging.getLogger(__name__)
 
 
 def cite(payload: dict, ctx: ToolCallContext) -> CiteToolOutput:
@@ -546,7 +554,34 @@ def submit_context_edit_for_review(
         return SubmitContextEditForReviewToolOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    return SubmitContextEditForReviewToolOutput(envelope=ok_envelope(actor), data=data)
+    envelope = ok_envelope(actor)
+    try:
+        with ctx.session_factory() as session:
+            advisory = context_link_advisory_state(
+                session,
+                workspace_id=ctx.workspace_id,
+                page_id=data.id,
+                version_id=data.version_id,
+            )
+    except Exception:
+        # The submit transaction has already committed. This read is advisory,
+        # so an unavailable shard or a malformed legacy row must not turn a
+        # successful, idempotent submission into an apparent write failure.
+        logger.exception(
+            "Context link advisory lookup failed",
+            extra={
+                "workspace_id": str(ctx.workspace_id),
+                "page_id": str(data.id),
+                "version_id": str(data.version_id),
+            },
+        )
+    else:
+        if advisory.should_warn:
+            envelope = apply_payload_warnings(
+                envelope,
+                [CONTEXT_PAGE_HAS_NO_GRAPH_VISIBLE_LINKS],
+            )
+    return SubmitContextEditForReviewToolOutput(envelope=envelope, data=data)
 
 
 def discard_context_edit(

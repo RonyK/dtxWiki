@@ -341,9 +341,14 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "page_links"
     __table_args__ = (
+        CheckConstraint(
+            "link_syntax IN ('wikilink', 'context_url')",
+            name="page_links_link_syntax_check",
+        ),
         UniqueConstraint(
             "source_page_id",
             "source_version_id",
+            "link_syntax",
             "target_slug",
             name="uq_page_links_source_version_target",
         ),
@@ -351,6 +356,15 @@ class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         Index("idx_page_links_target_page", "workspace_id", "target_page_id"),
         Index("idx_page_links_source_version", "source_version_id"),
         Index("idx_page_links_source_page", "source_page_id"),
+        Index(
+            "idx_page_links_graph_head",
+            "workspace_id",
+            "source_page_id",
+            "source_version_id",
+            "target_page_id",
+            "occurrence_count",
+            "created_at",
+        ),
         # Epic-3 D-3 final schema: workspace-scoped, not just page-scoped.
         ForeignKeyConstraint(
             ["workspace_id", "source_page_id"],
@@ -385,6 +399,12 @@ class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     source_version_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
         nullable=False,
+    )
+    link_syntax: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="wikilink",
+        server_default="wikilink",
     )
     target_slug: Mapped[str] = mapped_column(Text, nullable=False)
     target_page_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
@@ -539,6 +559,10 @@ class EdgeProjection(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     occurred_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # co_access only: how many sessions read the pair together, and when the
+    # first of them did (occurred_at is the last). Other kinds leave both NULL.
+    support_session_count: Mapped[int | None] = mapped_column(Integer)
+    first_observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     source_ref: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     last_seen_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
@@ -585,6 +609,16 @@ class ContextClaim(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 class ContextCitation(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "context_citation"
     __table_args__ = (
+        Index(
+            "idx_context_citation_graph_head",
+            "workspace_id",
+            "target_kind",
+            "target_id",
+            "cited_context_page_version_id",
+            "library_item_version_id",
+            "library_artifact_id",
+            "created_at",
+        ),
         CheckConstraint(
             "(citation_type = 'raw_source' "
             "AND library_item_version_id IS NOT NULL "

@@ -13,6 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
+GRAPH_REVISION = "9aeab6944f25"
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"
@@ -163,7 +164,7 @@ def _write_revision(stage, revision, down_revision):
 
 
 def _write_stray_revision(stage):
-    _write_revision(stage, "0003_stray", "efcbcf724889")
+    _write_revision(stage, "0003_stray", GRAPH_REVISION)
 
 
 def _write_branch_revision(stage):
@@ -173,8 +174,8 @@ def _write_branch_revision(stage):
 
 
 def _write_merge_revision(stage):
-    _write_revision(stage, "0003_one", "efcbcf724889")
-    _write_revision(stage, "0003_two", "efcbcf724889")
+    _write_revision(stage, "0003_one", GRAPH_REVISION)
+    _write_revision(stage, "0003_two", GRAPH_REVISION)
     _write_revision(stage, "0004_merge", ("0003_one", "0003_two"))
 
 
@@ -269,7 +270,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
     assert REVISION_MODULES == 10
     for name in (WHEEL_NAME, SDIST_NAME):
         assert (
-            f"{name}: alembic head efcbcf724889, "
+            f"{name}: alembic head {GRAPH_REVISION}, "
             f"{REVISION_MODULES} packaged core revision modules, "
             "15 frozen migration files intact, "
             "frontend bundle intact"
@@ -339,7 +340,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     assert probe.returncode == 0, probe.stdout + probe.stderr
     resolved = json.loads(probe.stdout)
-    assert resolved["heads"] == ["efcbcf724889"], "cwd bought no isolation at all"
+    assert resolved["heads"] == [GRAPH_REVISION], "cwd bought no isolation at all"
     leaked = {
         name: origin
         for name, origin in resolved["foreign"].items()
@@ -356,7 +357,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
     [
         (
             _write_branch_revision,
-            "packaged Alembic heads are ['0003_branch', 'efcbcf724889'], expected "
+            f"packaged Alembic heads are ['0003_branch', '{GRAPH_REVISION}'], expected "
             "exactly one",
         ),
         (
@@ -396,6 +397,27 @@ def test_verifier_accepts_a_linear_revision_after_the_released_chain(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"{WHEEL_NAME}: alembic head 0003_stray, " in result.stdout
+
+
+@pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "backend/migrations/versions/v0_1/9aeab6944f25_add_graph_view.py",
+        "backend/services/workspace_graph_service.py",
+        "backend/utils/markdown_links.py",
+    ],
+)
+def test_verifier_rejects_missing_graph_payload(tmp_path, artifact_kind, relative):
+    dist = _dist_with_one_artifact_mutated(
+        tmp_path, artifact_kind, lambda stage: (stage / relative).unlink()
+    )
+
+    result = _run_verifier(dist)
+
+    assert result.returncode == 1
+    artifact = WHEEL_NAME if artifact_kind == "wheel" else SDIST_NAME
+    assert f"{artifact}: {relative} is missing" in result.stdout + result.stderr
 
 
 def _append_to(relative):

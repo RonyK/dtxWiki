@@ -48,6 +48,7 @@ from backend.models import (
     WorkspaceTreeNode,
 )
 from backend.models.base import utc_now
+from backend.models.graph import GRAPH_OBSERVATION_TEARDOWN_OPTION, GraphObservation
 from backend.models.mcp_chat import (
     McpChatArtifactLink,
     McpChatSession,
@@ -547,6 +548,22 @@ class WorkspaceWriteService:
         workspace = session.get(Workspace, workspace_id)
         if workspace is not None:
             session.delete(workspace)
+        session.flush()
+        # graph_observation is append-only while its workspace row exists: the
+        # database trigger rejects the DELETE and the ORM guard rejects the
+        # statement, so purge_workspace_data classifies it as terminal teardown
+        # and it is still populated here. Now that the parent row is gone the
+        # declared ON DELETE CASCADE has already emptied it wherever foreign
+        # keys are enforced; this statement mirrors that under the plain
+        # sessionmaker engines the test fixtures use, keeping this method's
+        # convention of never depending on a cascade. The trigger admits
+        # exactly this shape, and the option tells the ORM guard the same.
+        session.execute(
+            delete(GraphObservation).where(
+                GraphObservation.workspace_id == workspace_id
+            ),
+            execution_options={GRAPH_OBSERVATION_TEARDOWN_OPTION: True},
+        )
         session.flush()
 
     @staticmethod

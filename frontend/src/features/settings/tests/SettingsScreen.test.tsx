@@ -3125,6 +3125,140 @@ describe("SettingsScreen", () => {
     ]);
   });
 
+  it("switches the workspace Knowledge Map from its Settings card", async () => {
+    const user = userEvent.setup();
+    const patchBodies: SettingsPolicyBatchRequest[] = [];
+    const graphRevision = "d".repeat(64);
+    const policyState = {
+      ...basicSettingsPolicies(),
+      graph: {
+        ...policy("graph", "Knowledge graph", {
+          workspace_map_enabled: false,
+          usage_relation_signals_enabled: true,
+        }),
+        revision: graphRevision,
+      },
+    };
+    let capabilityRequests = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      const method = init?.method ?? "GET";
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({
+          data: {
+            current_workspace_id: WORKSPACE_ID,
+            workspaces: [
+              workspaceSummary(WORKSPACE_ID, "Default Workspace", "default"),
+            ],
+          },
+        });
+      }
+      if (url === `${BASE}/api/v1/auth/tokens`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${BASE}/oauth/consents`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/capability`) {
+        capabilityRequests += 1;
+        const enabled = Boolean(
+          (policyState.graph.policy as Record<string, unknown>).workspace_map_enabled,
+        );
+        return jsonResponse({
+          data: {
+            workspace_map: {
+              effective_enabled: enabled,
+              workspace_enabled: enabled,
+              service_available: true,
+              reason: enabled ? "enabled" : "disabled_by_workspace",
+            },
+            usage_relation_signals_enabled: true,
+            can_manage: true,
+          },
+        });
+      }
+      if (
+        url ===
+          `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch` &&
+        method === "PATCH"
+      ) {
+        const body = JSON.parse(
+          String(init?.body),
+        ) as SettingsPolicyBatchRequest;
+        patchBodies.push(body);
+        applyPolicyBatch(policyState, body);
+        return jsonResponse({ data: policyState });
+      }
+      if (
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies` &&
+        method === "GET"
+      ) {
+        return jsonResponse({ data: policyState });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter>
+        <WorkspaceProvider>
+          <WorkspaceRefreshGate>
+            <SettingsScreen />
+          </WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
+
+    const mapSwitch = await screen.findByRole("checkbox", {
+      name: "Workspace Knowledge Map",
+    });
+    expect(mapSwitch).not.toBeChecked();
+    expect(
+      await screen.findByText("Knowledge Map is off for this workspace."),
+    ).toBeInTheDocument();
+    const usageSwitch = screen.getByRole("checkbox", {
+      name: "Read-together relationships",
+    });
+    expect(usageSwitch).toBeChecked();
+
+    await user.click(mapSwitch);
+    await user.click(
+      within(mapSwitch.closest(".policy-card") as HTMLElement).getByRole(
+        "button",
+        { name: "Save changes" },
+      ),
+    );
+
+    expect(
+      await screen.findByText("Knowledge Map is on for this workspace."),
+    ).toBeInTheDocument();
+    expect(patchBodies).toEqual([
+      {
+        group: "graph",
+        expected_revision: graphRevision,
+        changes: { workspace_map_enabled: true },
+      },
+    ]);
+    // The save dropped the cached answer, so the status was asked again.
+    expect(capabilityRequests).toBe(2);
+
+    // The read-together switch saves from the same card.
+    await user.click(usageSwitch);
+    await user.click(
+      within(usageSwitch.closest(".policy-card") as HTMLElement).getByRole(
+        "button",
+        { name: "Save changes" },
+      ),
+    );
+    await waitFor(() => expect(patchBodies).toHaveLength(2));
+    expect(patchBodies[1]).toMatchObject({
+      group: "graph",
+      changes: { usage_relation_signals_enabled: false },
+    });
+    expect(
+      await screen.findByRole("checkbox", { name: "Read-together relationships" }),
+    ).not.toBeChecked();
+  });
+
   it("keeps every structured policy editor inert for a viewer", async () => {
     const user = userEvent.setup();
     mockFetch({
@@ -4909,6 +5043,17 @@ describe("SettingsScreen", () => {
       );
       expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
     };
+
+    // Policy inputs can appear before WorkspaceRefreshGate resolves ownership.
+    // Wait for the editable card before changing either related constraint.
+    const bundleTtlCard = defaultHours.closest(".policy-card") as HTMLElement;
+    await waitFor(() => {
+      expect(defaultHours).toBeEnabled();
+      expect(maxHours).toBeEnabled();
+      expect(
+        within(bundleTtlCard).getByRole("button", { name: "Save changes" }),
+      ).toBeInTheDocument();
+    });
 
     // Both related constraints travel in one request, so no invalid
     // intermediate state is observable by the server.

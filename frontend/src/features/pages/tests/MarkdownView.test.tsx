@@ -612,6 +612,52 @@ describe("MarkdownView", () => {
     expect(citation).toHaveClass("cite-ref");
   });
 
+  it("keeps URL- and email-like wikilinks out of the relationship UI", () => {
+    render(
+      <MemoryRouter>
+        <MarkdownView
+          body={[
+            "[[https://example.com]]",
+            "[[target|https&#58;//example.com_]]",
+            "[[target|http://.]]",
+            "[[target|www.example.com]]",
+            "[[target|user@example.com]]",
+            "https://e.test/x/[[target]]",
+            "www.e.test/x/[[target]]",
+            "https&#58;//e.test/x/[[target]]",
+            "www&#46;e.test/x/[[target]]",
+            "www\\.e.test/x/[[target]]",
+            "https://e.test/x&#93;[[target]]",
+            "https://e.test/x&#32;[[target]]",
+            "https://e.test/x]&#91;&#91;target]]",
+            "https://e.test/x]\\[\\[target]]",
+          ].join("\n\n")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(document.querySelector("a.wikilink")).toBeNull();
+    expect(document.body).toHaveTextContent("[[target|http://.]]");
+  });
+
+  it("keeps ordinary underscores available in wikilink targets and aliases", () => {
+    render(
+      <MemoryRouter>
+        <MarkdownView
+          body={[
+            "[[tar_get]], [[target|a_alias_b]], and user@example.com/[[email_path_target]]",
+            "https://e.test/x][[url_boundary_target]]",
+          ].join("\n\n")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "tar_get" })).toHaveClass("wikilink");
+    expect(screen.getByRole("link", { name: "a_alias_b" })).toHaveClass("wikilink");
+    expect(screen.getByRole("link", { name: "email_path_target" })).toHaveClass("wikilink");
+    expect(screen.getByRole("link", { name: "url_boundary_target" })).toHaveClass("wikilink");
+  });
+
   it("renders deleted Library citations as tombstone markers", () => {
     render(
       <MemoryRouter>
@@ -658,6 +704,27 @@ describe("MarkdownView", () => {
     const launchPlanLink = screen.getByRole("link", { name: "Launch Plan" });
     expect(launchPlanLink).toHaveAttribute("href", "#");
     expect(launchPlanLink).toHaveClass("wikilink-broken");
+  });
+
+  it("keeps an unresolved pinned cross-page heading link broken", () => {
+    render(
+      <MemoryRouter>
+        <MarkdownView
+          body="See [[Archived Page#Some Heading]]."
+          wikilinkTargets={[
+            {
+              target_slug: "archived-page",
+              target_page_id: null,
+              current_slug: null,
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", { name: "Archived Page#Some Heading" });
+    expect(link).toHaveAttribute("href", "#");
+    expect(link).toHaveClass("wikilink-broken");
   });
 
   it("uses a stable canonical Context target after the target is renamed", () => {

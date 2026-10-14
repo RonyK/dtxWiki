@@ -3360,7 +3360,7 @@ def test_full_round_trip_streamable(page_service):
     )
 
 
-def test_round_trip_oauth_token(page_service):
+def test_round_trip_oauth_token(page_service, monkeypatch):
     """Plan-named test: OAuth-issued JWT bearer drives the same round
     trip. Confirms the ``mcp_http`` cross-transport row's SDK-client
     analogue — the SDK + transport stack is credential-agnostic
@@ -3372,7 +3372,9 @@ def test_round_trip_oauth_token(page_service):
     handling on the streamable path would surface here as a 401.
     """
     import asyncio
+    from collections import Counter
 
+    from backend.services.oauth_service import InvalidOAuthGrantError, OAuthService
     from backend.tests.integration._cross_transport_helpers import (
         issue_oauth_access_token,
         make_client,
@@ -3397,6 +3399,40 @@ def test_round_trip_oauth_token(page_service):
         page_service=page_service,
     )
 
+    # Diagnose the intermittent full-suite 401 without recording tokens,
+    # claims, keys, headers or arbitrary exception messages. Verification and
+    # SDK failures still propagate unchanged; this adds only bounded labels.
+    verification = Counter()
+    original_verify = OAuthService.verify_access_token
+    grant_categories = {
+        "access token is invalid": "invalid_jwt",
+        "access token is revoked": "revoked",
+        "access token user is invalid": "invalid_user",
+    }
+    jwt_causes = {
+        "ExpiredSignatureError", "ImmatureSignatureError", "InvalidAudienceError",
+        "InvalidIssuerError", "InvalidSignatureError", "InvalidAlgorithmError",
+        "DecodeError", "MissingRequiredClaimError", "InvalidIssuedAtError",
+    }
+
+    def verify_with_categories(service, token):
+        verification["attempts"] += 1
+        try:
+            result = original_verify(service, token)
+        except InvalidOAuthGrantError as exc:
+            verification[grant_categories.get(str(exc), "other_grant_rejection")] += 1
+            cause = type(exc.__cause__).__name__
+            if cause in jwt_causes:
+                verification[cause] += 1
+            raise
+        except Exception:
+            verification["unexpected_verification_error"] += 1
+            raise
+        verification["succeeded"] += 1
+        return result
+
+    monkeypatch.setattr(OAuthService, "verify_access_token", verify_with_categories)
+
     async def _run():
         with _UvicornServer(streamable_app) as server:
             tools_result, _ = await _round_trip_via_sdk(
@@ -3404,8 +3440,15 @@ def test_round_trip_oauth_token(page_service):
             )
         return tools_result
 
-    tools_result = asyncio.run(_run())
+    try:
+        tools_result = asyncio.run(_run())
+    except Exception as exc:
+        exc.add_note(
+            f"OAuth verification categories: {dict(sorted(verification.items()))}"
+        )
+        raise
     assert tools_result is not None
+    assert verification["succeeded"] > 0
     assert len(tools_result.tools) > 0
     assert "search" in {t.name for t in tools_result.tools}
 

@@ -6,7 +6,8 @@ from uuid import UUID, uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, delete, select, text
+from sqlalchemy import create_engine, delete, inspect, select, text
+from sqlalchemy.orm import Session
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema import (
@@ -23,6 +24,7 @@ from backend.models.mcp_chat import (
 )
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient, Workspace
+from backend.services.indexing import edge_registry
 from backend.services.indexing.edge_registry import refresh_co_access_edge_projection
 from backend.services.mcp_chat_service import McpChatService
 from backend.services.trail_analysis import recompute_authority
@@ -36,9 +38,7 @@ def sqlite_templates(tmp_path_factory):
     return shared_templates(tmp_path_factory)
 
 
-def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
-    tmp_path: Path, sqlite_templates
-):
+def _seed_initial_release_search_matches(tmp_path: Path, sqlite_templates):
     database_url = sqlite_templates.clone("base_0001", tmp_path / "search-match.db")
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
@@ -188,7 +188,51 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
             },
         )
 
-    command.upgrade(config, "efcbcf724889")
+    return config, engine, workspace_id, chat_id, edge_id
+
+
+@pytest.mark.parametrize("target", ["efcbcf724889", "head"])
+def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
+    tmp_path: Path, sqlite_templates, monkeypatch, target
+):
+    config, engine, workspace_id, chat_id, edge_id = (
+        _seed_initial_release_search_matches(tmp_path, sqlite_templates)
+    )
+    original_reclassify = search_schema.reclassify_search_matches
+
+    def seed_stale_projection(connection, **kwargs):
+        # The core tables exist at this seam, before the frozen normalizer runs.
+        # Seed a stale edge and authority row without newer ORM column defaults.
+        connection.execute(
+            EdgeProjection.__table__.insert(),
+            {
+                "workspace_id": workspace_id,
+                "source_kind": "context_page",
+                "source_id": uuid4(),
+                "target_kind": "context_page",
+                "target_id": uuid4(),
+                "edge_kind": "co_access",
+                "provenance": "usage",
+                "weight": 1.0,
+                "occurred_at": NOW,
+                "source_ref": {},
+                "last_seen_at": NOW,
+            },
+        )
+        connection.execute(
+            KnowledgeNodeStat.__table__.insert(),
+            {
+                "workspace_id": workspace_id,
+                "kind": "context_page",
+                "entity_id": uuid4(),
+            },
+        )
+        return original_reclassify(connection, **kwargs)
+
+    monkeypatch.setattr(
+        search_schema, "reclassify_search_matches", seed_stale_projection
+    )
+    command.upgrade(config, target)
 
     with engine.connect() as connection:
         assert connection.execute(
@@ -208,8 +252,79 @@ def test_core_schema_upgrade_reclassifies_rows_from_the_initial_release(
             == "search_match"
         )
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "efcbcf724889"
+            "9aeab6944f25" if target == "head" else target
         )
+        assert connection.scalar(text("SELECT COUNT(*) FROM edge_projection")) == 0
+        assert connection.scalar(text("SELECT COUNT(*) FROM knowledge_node_stat")) == 0
+        assert connection.execute(
+            text(
+                "SELECT edge_projection_version, authority_projection_version "
+                "FROM workspace"
+            )
+        ).one() == (1, 1)
+        if target == "head":
+            assert (
+                connection.scalar(text("SELECT COUNT(*) FROM graph_observation")) == 0
+            )
+    engine.dispose()
+
+
+def test_released_core_projection_can_insert_and_refresh_without_graph_columns(
+    tmp_path: Path, sqlite_templates, monkeypatch
+):
+    config, engine, workspace_id, _chat_id, _edge_id = (
+        _seed_initial_release_search_matches(tmp_path, sqlite_templates)
+    )
+    command.upgrade(config, "efcbcf724889")
+    rows = [
+        {
+            "workspace_id": workspace_id,
+            "source_kind": "context_page",
+            "source_id": uuid4(),
+            "target_kind": "context_page",
+            "target_id": uuid4(),
+            "edge_kind": "co_access",
+            "provenance": "usage",
+            "weight": 2.0,
+            "occurred_at": NOW,
+            "source_ref": {"table": "mcp_chat_tool_call_artifact"},
+            "support_session_count": 2,
+            "first_observed_at": NOW - timedelta(days=1),
+        }
+    ]
+    # Isolate storage compatibility from the independently tested co-read source.
+    monkeypatch.setattr(
+        edge_registry, "_co_access_rows", lambda *_args, **_kwargs: rows
+    )
+    with engine.begin() as connection:
+        assert {"support_session_count", "first_observed_at"}.isdisjoint(
+            column["name"]
+            for column in inspect(connection).get_columns("edge_projection")
+        )
+        with Session(bind=connection, join_transaction_mode="rollback_only") as session:
+            assert (
+                refresh_co_access_edge_projection(session, workspace_id, now=NOW) == 1
+            )
+            assert recompute_authority(session, workspace_id, now=NOW) == 2
+            stored = connection.execute(
+                select(EdgeProjection.id, EdgeProjection.weight)
+            ).one()
+            assert stored.weight == 2.0
+            assert (
+                refresh_co_access_edge_projection(session, workspace_id, now=NOW) == 1
+            )
+            assert (
+                connection.execute(
+                    select(EdgeProjection.id, EdgeProjection.weight)
+                ).one()
+                == stored
+            )
+            assert connection.execute(
+                select(
+                    Workspace.edge_projection_version,
+                    Workspace.authority_projection_version,
+                ).where(Workspace.id == workspace_id)
+            ).one() == (1, 1)
     engine.dispose()
 
 

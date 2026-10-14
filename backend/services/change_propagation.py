@@ -16,6 +16,7 @@ from backend.services.delegated_tasks import (
     produce_page_meta_refresh_task,
 )
 from backend.services.entity_ref import context_concept_path
+from backend.services.page_link_ordering import page_link_snippet_order
 
 _LIVE_FINDING_STATUSES = ("open", "acknowledged")
 _OPEN_TASK_STATUSES = ("pending", "leased", "answered", "dismissed")
@@ -102,6 +103,7 @@ def mark_dependent_pages_stale(
                 == dependent.current_published_version_id,
                 PageLink.target_page_id == published_page_id,
             )
+            .order_by(*page_link_snippet_order())
             .limit(1)
         )
         fingerprint = _stale_fingerprint(dependent.id, published_page_id, anchor)

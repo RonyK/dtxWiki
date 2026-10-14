@@ -12,6 +12,8 @@ from backend.policy.trust_boundaries import actor_workspace_filter
 from backend.policy.workspace_resolution import repair_default_workspace_to_personal
 from backend.schemas.read import (
     GuidePayload,
+    LinkingGuidance,
+    LinkSyntaxGuidance,
     WorkspaceDetail,
     WorkspaceListData,
     WorkspaceSummary,
@@ -373,6 +375,32 @@ class WorkspaceReadService:
                 session, workspace_id, actor
             ),
             required_workflow=REQUIRED_WORKFLOW,
+            linking=LinkingGuidance(
+                syntaxes=[
+                    LinkSyntaxGuidance(
+                        link_syntax="wikilink",
+                        template="[[slug]]",
+                        target_source=(
+                            "For a search result with type=context_page, use the "
+                            "slug from concept_path (/context/<slug>.md)."
+                        ),
+                    ),
+                    LinkSyntaxGuidance(
+                        link_syntax="context_url",
+                        template="[title](/context?target=<page_id>)",
+                        target_source=(
+                            "Use /context?target=<id> with a context_page search "
+                            "result id, or reuse the url returned by fetch."
+                        ),
+                    ),
+                ],
+                graph_visibility="published_head_only",
+                note=(
+                    "Links in a draft appear in the graph only after the page is "
+                    "published."
+                ),
+                missing_links_warning="context_page_has_no_graph_visible_links",
+            ),
         )
 
     @staticmethod

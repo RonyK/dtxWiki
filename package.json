@@ -3,7 +3,7 @@
   "private": true,
   "license": "AGPL-3.0-only OR Elastic-2.0",
   "engines": {
-    "node": ">=22.18"
+    "node": "22.18.x"
   },
   "workspaces": [
     "frontend",
@@ -17,11 +17,15 @@
     "desktop:mac": "npm --workspace desktop run build:mac",
     "lint:md": "markdownlint-cli2",
     "test:e2e": "node tests/e2e/run-e2e.mjs",
+    "pretest:graph-webgl": "node --test scripts/cosmos-rest-log-patch.test.mjs scripts/cosmos-gpu-simulation-patch.test.mjs tests/graph-webgl/forceatlas2-reference.test.mjs && npm --workspace frontend run generate:cosmos",
+    "test:graph-webgl": "tsc --noEmit -p tests/graph-webgl/tsconfig.json && playwright test --config tests/graph-webgl/playwright.config.ts",
+    "test:graph-reference": "node --test tests/graph-webgl/forceatlas2-reference.test.mjs",
     "playwright:install": "playwright install chromium firefox webkit"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@redocly/openapi-core": "^1.34.7",
+    "graphology-layout-forceatlas2": "0.10.1",
     "markdownlint-cli2": "^0.23.1"
   },
   "overrides": {

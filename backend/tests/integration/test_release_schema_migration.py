@@ -2,6 +2,7 @@ import re
 import shutil
 from collections import Counter
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -9,16 +10,23 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-from backend.models import Base
+from backend.models import Base, ContextPage, ContextPageVersion, PageLink
+from backend.models.graph import GraphHistoryCoverage, GraphObservation
 from backend.models.search_index import include_non_fts5_object
+from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.workspace_purge import purge_workspace_data
+from backend.services.workspace_write import WorkspaceWriteService
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 INITIAL_REVISION = "bd62193d5cf6"
 HEAD_REVISION = "efcbcf724889"
+GRAPH_REVISION = "9aeab6944f25"
 
 
 def _config(database_url: str) -> Config:
@@ -26,6 +34,16 @@ def _config(database_url: str) -> Config:
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
     return config
+
+
+def _database_url(tmp_path, filename: str) -> str:
+    return f"sqlite:///{tmp_path / filename}"
+
+
+def _upgrade_head(tmp_path, filename: str):
+    config = _config(_database_url(tmp_path, filename))
+    command.upgrade(config, "head")
+    return config, create_engine(config.get_main_option("sqlalchemy.url"))
 
 
 def _insert_initial_release_workspace(connection, *, workspace_id, slug: str) -> None:
@@ -150,6 +168,133 @@ def _insert_initial_release_tree_node(
             "sort_key": sort_key,
             "title": slug.replace("-", " ").title(),
             "workspace_id": workspace_id.hex,
+        },
+    )
+
+
+def _insert_initial_release_page_link_source(
+    connection,
+    *,
+    workspace_id,
+    page_id,
+    version_id,
+) -> None:
+    """Seed the 0001 source rows needed by a raw PageLink insert."""
+
+    connection.execute(
+        text(
+            """
+            INSERT INTO context_page (
+                workspace_id,
+                slug,
+                title,
+                current_version_id,
+                page_type,
+                tags,
+                aliases,
+                lifecycle_status,
+                current_published_version_id,
+                is_public,
+                latest_draft_version_id,
+                created_from_ask_session_id,
+                created_from_ask_turn_ids,
+                placement_parent_node_id,
+                placement_reason,
+                placement_confidence,
+                created_by_actor_type,
+                created_by_actor_id,
+                updated_at,
+                id,
+                created_at
+            ) VALUES (
+                :workspace_id,
+                'page-link-source',
+                'Page Link Source',
+                NULL,
+                'concept',
+                '[]',
+                '[]',
+                'draft',
+                NULL,
+                0,
+                NULL,
+                NULL,
+                '[]',
+                NULL,
+                NULL,
+                NULL,
+                'human',
+                NULL,
+                CURRENT_TIMESTAMP,
+                :page_id,
+                CURRENT_TIMESTAMP
+            )
+            """
+        ),
+        {
+            "page_id": page_id.hex,
+            "workspace_id": workspace_id.hex,
+        },
+    )
+    connection.execute(
+        text(
+            """
+            INSERT INTO context_page_version (
+                page_id,
+                parent_version_id,
+                version_no,
+                body_md,
+                rendering_profile,
+                content_hash,
+                graph_status,
+                actor_type,
+                actor_id,
+                actor_display_name,
+                change_set_id,
+                version_status,
+                search_doc,
+                created_by_actor_kind,
+                created_by_actor_id,
+                id,
+                created_at
+            ) VALUES (
+                :page_id,
+                NULL,
+                1,
+                '# Page Link Source',
+                'markdown',
+                'page-link-source-v1',
+                'linear',
+                'human',
+                NULL,
+                NULL,
+                NULL,
+                'draft',
+                NULL,
+                'human',
+                'migration-test',
+                :version_id,
+                CURRENT_TIMESTAMP
+            )
+            """
+        ),
+        {
+            "page_id": page_id.hex,
+            "version_id": version_id.hex,
+        },
+    )
+    connection.execute(
+        text(
+            """
+            UPDATE context_page
+            SET current_version_id = :version_id,
+                latest_draft_version_id = :version_id
+            WHERE id = :page_id
+            """
+        ),
+        {
+            "page_id": page_id.hex,
+            "version_id": version_id.hex,
         },
     )
 
@@ -342,7 +487,7 @@ def test_release_head_matches_current_model_schema(head_engine):
             column["name"] for column in inspector.get_columns("library_item_version")
         }
 
-    assert version == HEAD_REVISION
+    assert version == GRAPH_REVISION
     assert set(Base.metadata.tables).issubset(table_names)
     assert diffs == []
     assert {"refresh_ttl_seconds", "sliding_enabled"}.issubset(consent_columns)
@@ -602,6 +747,266 @@ def test_core_revision_round_trips_from_initial_release(tmp_path, sqlite_templat
         engine.dispose()
 
 
+def test_page_link_syntax_downgrade_preserves_wikilink_projection(tmp_path):
+    config, engine = _upgrade_head(tmp_path, "page-link-syntax-downgrade.db")
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        with session_factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            source = ContextPage(
+                workspace_id=workspace.id,
+                slug="source",
+                title="Source",
+                page_type="concept",
+                tags=[],
+                aliases=[],
+                lifecycle_status="published",
+            )
+            target = ContextPage(
+                workspace_id=workspace.id,
+                slug="target",
+                title="Target",
+                page_type="concept",
+                tags=[],
+                aliases=[],
+                lifecycle_status="published",
+            )
+            session.add_all((source, target))
+            session.flush()
+            source_version = ContextPageVersion(
+                workspace_id=workspace.id,
+                page_id=source.id,
+                version_no=1,
+                body_md="# Source",
+                content_hash="source-v1",
+                actor_type="human",
+                version_status="published_snapshot",
+                created_by_actor_kind="human",
+                created_by_actor_id="migration-test",
+            )
+            target_version = ContextPageVersion(
+                workspace_id=workspace.id,
+                page_id=target.id,
+                version_no=1,
+                body_md="# Target",
+                content_hash="target-v1",
+                actor_type="human",
+                version_status="published_snapshot",
+                created_by_actor_kind="human",
+                created_by_actor_id="migration-test",
+            )
+            session.add_all((source_version, target_version))
+            session.flush()
+            source.current_version_id = source_version.id
+            source.current_published_version_id = source_version.id
+            target.current_version_id = target_version.id
+            target.current_published_version_id = target_version.id
+            wikilink_created_at = datetime(2026, 9, 20, 1, tzinfo=UTC)
+            context_url_created_at = datetime(2026, 9, 20, 2, tzinfo=UTC)
+            session.add_all(
+                (
+                    PageLink(
+                        workspace_id=workspace.id,
+                        source_page_id=source.id,
+                        source_version_id=source_version.id,
+                        link_syntax="wikilink",
+                        target_slug=target.slug,
+                        target_page_id=target.id,
+                        occurrence_count=1,
+                        first_snippet="keep",
+                        created_at=wikilink_created_at,
+                    ),
+                    PageLink(
+                        workspace_id=workspace.id,
+                        source_page_id=source.id,
+                        source_version_id=source_version.id,
+                        link_syntax="context_url",
+                        target_slug=target.slug,
+                        target_page_id=target.id,
+                        occurrence_count=1,
+                        first_snippet="drop",
+                        created_at=context_url_created_at,
+                    ),
+                )
+            )
+
+        engine.dispose()
+        command.downgrade(config, INITIAL_REVISION)
+        engine = create_engine(config.get_main_option("sqlalchemy.url"))
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            columns = {column["name"] for column in inspector.get_columns("page_links")}
+            unique_columns = {
+                tuple(constraint["column_names"])
+                for constraint in inspector.get_unique_constraints("page_links")
+            }
+            snippets = connection.scalars(
+                text("SELECT first_snippet FROM page_links ORDER BY first_snippet")
+            ).all()
+
+        assert "link_syntax" not in columns
+        assert ("source_page_id", "target_slug") in unique_columns
+        assert snippets == ["keep"]
+    finally:
+        engine.dispose()
+
+
+def test_page_link_syntax_upgrade_backfills_and_enforces_server_contract(tmp_path):
+    database_url = _database_url(tmp_path, "page-link-syntax-upgrade.db")
+    config = _config(database_url)
+    command.upgrade(config, INITIAL_REVISION)
+
+    workspace_id = uuid4()
+    source_page_id = uuid4()
+    source_version_id = uuid4()
+    upgraded_link_id = uuid4()
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_initial_release_workspace(
+                connection,
+                workspace_id=workspace_id,
+                slug="workspace-page-link-syntax",
+            )
+            _insert_initial_release_page_link_source(
+                connection,
+                workspace_id=workspace_id,
+                page_id=source_page_id,
+                version_id=source_version_id,
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO page_links (
+                        workspace_id,
+                        source_page_id,
+                        source_version_id,
+                        target_slug,
+                        target_page_id,
+                        occurrence_count,
+                        first_snippet,
+                        id,
+                        created_at
+                    ) VALUES (
+                        :workspace_id,
+                        :source_page_id,
+                        :source_version_id,
+                        'existing-target',
+                        NULL,
+                        1,
+                        'pre-upgrade',
+                        :link_id,
+                        :created_at
+                    )
+                    """
+                ),
+                {
+                    "created_at": datetime(2026, 9, 19, tzinfo=UTC),
+                    "link_id": upgraded_link_id.hex,
+                    "source_page_id": source_page_id.hex,
+                    "source_version_id": source_version_id.hex,
+                    "workspace_id": workspace_id.hex,
+                },
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, GRAPH_REVISION)
+    engine = create_engine(database_url)
+    defaulted_link_id = uuid4()
+    try:
+        with engine.begin() as connection:
+            assert (
+                connection.scalar(
+                    text("SELECT link_syntax FROM page_links WHERE id = :link_id"),
+                    {"link_id": upgraded_link_id.hex},
+                )
+                == "wikilink"
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO page_links (
+                        workspace_id,
+                        source_page_id,
+                        source_version_id,
+                        target_slug,
+                        target_page_id,
+                        occurrence_count,
+                        first_snippet,
+                        id,
+                        created_at
+                    ) VALUES (
+                        :workspace_id,
+                        :source_page_id,
+                        :source_version_id,
+                        'defaulted-target',
+                        NULL,
+                        1,
+                        'post-upgrade default',
+                        :link_id,
+                        :created_at
+                    )
+                    """
+                ),
+                {
+                    "created_at": datetime(2026, 9, 20, tzinfo=UTC),
+                    "link_id": defaulted_link_id.hex,
+                    "source_page_id": source_page_id.hex,
+                    "source_version_id": source_version_id.hex,
+                    "workspace_id": workspace_id.hex,
+                },
+            )
+            assert (
+                connection.scalar(
+                    text("SELECT link_syntax FROM page_links WHERE id = :link_id"),
+                    {"link_id": defaulted_link_id.hex},
+                )
+                == "wikilink"
+            )
+
+        with pytest.raises(IntegrityError, match="page_links_link_syntax_check"):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO page_links (
+                            workspace_id,
+                            source_page_id,
+                            source_version_id,
+                            link_syntax,
+                            target_slug,
+                            target_page_id,
+                            occurrence_count,
+                            first_snippet,
+                            id,
+                            created_at
+                        ) VALUES (
+                            :workspace_id,
+                            :source_page_id,
+                            :source_version_id,
+                            'markdown_link',
+                            'invalid-target',
+                            NULL,
+                            1,
+                            'invalid syntax',
+                            :link_id,
+                            :created_at
+                        )
+                        """
+                    ),
+                    {
+                        "created_at": datetime(2026, 9, 21, tzinfo=UTC),
+                        "link_id": uuid4().hex,
+                        "source_page_id": source_page_id.hex,
+                        "source_version_id": source_version_id.hex,
+                        "workspace_id": workspace_id.hex,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+
 def test_initial_release_downgrade_returns_to_base(tmp_path, sqlite_templates):
     database_url = sqlite_templates.clone("head", tmp_path / "downgrade.db")
     command.downgrade(_config(database_url), "base")
@@ -727,3 +1132,174 @@ def test_audit_event_workspace_fk_ondelete_is_set_null(head_engine):
             for fk in inspect(connection).get_foreign_keys("audit_event")
         }
     assert audit_fks[("workspace_id",)]["options"].get("ondelete") == "SET NULL"
+
+
+def _observation(workspace_id, *, sequence: int, key: str) -> GraphObservation:
+    return GraphObservation(
+        workspace_id=workspace_id,
+        operation="node_created",
+        workspace_sequence=sequence,
+        source_kind="context_page",
+        source_id=uuid4(),
+        occurred_at=datetime.now(UTC),
+        idempotency_key=key,
+    )
+
+
+def _ledger_rows(session, workspace_id) -> int:
+    return session.scalar(
+        text(
+            "SELECT COUNT(*) FROM graph_observation WHERE workspace_id = :workspace_id"
+        ),
+        {"workspace_id": workspace_id.hex},
+    )
+
+
+def test_graph_observation_migration_enforces_append_only_at_database_boundary(
+    tmp_path,
+):
+    _, engine = _upgrade_head(tmp_path, "graph-observation-guards.db")
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        with session_factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            observation = _observation(workspace.id, sequence=1, key="guard-1")
+            session.add(observation)
+            session.flush()
+            observation_id = observation.id
+
+        with engine.begin() as connection:
+            with pytest.raises(DBAPIError, match="append-only"):
+                connection.execute(
+                    text(
+                        "UPDATE graph_observation SET action_kind = 'edited' "
+                        "WHERE id = :observation_id"
+                    ),
+                    {"observation_id": observation_id.hex},
+                )
+
+        with engine.begin() as connection:
+            with pytest.raises(DBAPIError, match="append-only"):
+                connection.execute(
+                    text("DELETE FROM graph_observation WHERE id = :observation_id"),
+                    {"observation_id": observation_id.hex},
+                )
+    finally:
+        engine.dispose()
+
+
+def test_graph_observation_guard_allows_workspace_cascade_delete(tmp_path):
+    _, engine = _upgrade_head(tmp_path, "graph-observation-cascade.db")
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys = ON"))
+            with session_factory(bind=connection) as session:
+                workspace = seed_default_workspace(session)
+                workspace_id = workspace.id
+                session.add(_observation(workspace_id, sequence=1, key="cascade-1"))
+                session.flush()
+
+                # The ledger is append-only while its parent exists, but the
+                # real workspace lifecycle path must still be able to invoke
+                # the declared ON DELETE CASCADE.
+                media_intent = WorkspaceWriteService._begin_media_delete(
+                    session=session,
+                    workspace_id=workspace_id,
+                )
+                WorkspaceWriteService._delete_seed_workspace(
+                    session,
+                    workspace_id,
+                    media_intent=media_intent,
+                )
+                assert _ledger_rows(session, workspace_id) == 0
+    finally:
+        engine.dispose()
+
+
+def test_graph_observation_teardown_empties_ledger_without_fk_enforcement(
+    tmp_path,
+):
+    """The explicit teardown delete passes the trigger once the parent is gone.
+
+    Without ``PRAGMA foreign_keys`` the cascade never fires, which is the shape
+    every plain ``sessionmaker`` fixture in this suite runs under. The teardown
+    therefore deletes the ledger itself, after the workspace row, and both the
+    database trigger and the ORM guard must admit exactly that statement.
+    """
+
+    _, engine = _upgrade_head(tmp_path, "graph-observation-teardown.db")
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        with session_factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            workspace_id = workspace.id
+            session.add(_observation(workspace_id, sequence=1, key="teardown-1"))
+            session.flush()
+            media_intent = WorkspaceWriteService._begin_media_delete(
+                session=session,
+                workspace_id=workspace_id,
+            )
+            WorkspaceWriteService._delete_seed_workspace(
+                session,
+                workspace_id,
+                media_intent=media_intent,
+            )
+            assert _ledger_rows(session, workspace_id) == 0
+    finally:
+        engine.dispose()
+
+
+def test_workspace_purge_then_teardown_clears_graph_ledger_tables(tmp_path):
+    """The production delete order against the migrated schema and triggers.
+
+    ``purge_workspace_data`` must not touch ``graph_observation`` (the trigger
+    would abort the whole purge while the workspace row exists) while still
+    deleting ``graph_history_coverage`` like any other scoped table; the
+    terminal teardown then empties the ledger.
+    """
+
+    _, engine = _upgrade_head(tmp_path, "graph-purge-order.db")
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        with session_factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            workspace_id = workspace.id
+            session.add(_observation(workspace_id, sequence=1, key="purge-1"))
+            session.add(
+                GraphHistoryCoverage(
+                    workspace_id=workspace_id,
+                    stream_kind="context_page",
+                    stream_id=uuid4(),
+                    basis="observations",
+                    status="partial",
+                    extractor_version="test",
+                )
+            )
+            session.flush()
+
+            deleted = purge_workspace_data(session, workspace_id)
+            assert deleted["graph_history_coverage"] == 1
+            assert "graph_observation" not in deleted
+            assert _ledger_rows(session, workspace_id) == 1
+            assert (
+                session.scalar(
+                    select(GraphHistoryCoverage).where(
+                        GraphHistoryCoverage.workspace_id == workspace_id
+                    )
+                )
+                is None
+            )
+
+            media_intent = WorkspaceWriteService._begin_media_delete(
+                session=session,
+                workspace_id=workspace_id,
+            )
+            WorkspaceWriteService._delete_seed_workspace(
+                session,
+                workspace_id,
+                media_intent=media_intent,
+            )
+            assert _ledger_rows(session, workspace_id) == 0
+    finally:
+        engine.dispose()

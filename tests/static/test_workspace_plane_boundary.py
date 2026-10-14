@@ -86,6 +86,18 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "the actual page read/write. (P9.1: renamed from the deleted "
         "backend/api/pages.py, same allowlisted shape.)"
     ),
+    "backend/cli/commands/graph.py": (
+        "graph reproject lists or resolves only Workspace id/slug on the "
+        "control plane, then opens database_provider.session_for(workspace_id) "
+        "for every Context/PageLink/EdgeProjection read and write."
+    ),
+    "backend/services/indexing/reindex.py": (
+        "reindex_workspace reads only the owner's usage-signal switch "
+        "(Workspace.usage_relation_signals_enabled) on the control plane, so "
+        "the edge rebuild does not regenerate co_access the owner turned "
+        "off; every projection read and write runs on "
+        "database_provider.session_for(workspace_id)."
+    ),
     "backend/spi/context.py": (
         "Defines the DB-routing seam itself (DatabaseProvider Protocol, "
         "ToolCallContext.session_factory): falls back to "
@@ -408,6 +420,15 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "require_server_admin's server-admin grant check -- all "
         "identity-plane by construction; nothing in this file resolves a "
         "workspace_id to read a domain table."
+    ),
+    "backend/api/graph.py": (
+        "Two control_session_factory uses, both reading only the two "
+        "Knowledge graph Settings columns on the Workspace row "
+        "(workspace_graph_enabled, usage_relation_signals_enabled) through "
+        "services/workspace_graph_capability.py: get_workspace_graph_"
+        "capability reports them, and query_workspace_graph re-checks them "
+        "before opening its WorkspaceSessionFactoryDep for the map itself. "
+        "No domain table is read on the control session."
     ),
     "backend/api/oauth.py": (
         "MIXED. Every route delegates through oauth_service.py, which reads "

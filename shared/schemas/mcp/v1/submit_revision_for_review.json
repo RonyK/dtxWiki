@@ -536,7 +536,8 @@
               "borrowed_query_rewrite_applied",
               "llm_provider_unavailable",
               "llm_composer_failed",
-              "job_fanout_incomplete"
+              "job_fanout_incomplete",
+              "context_page_has_no_graph_visible_links"
             ],
             "title": "Code",
             "type": "string"

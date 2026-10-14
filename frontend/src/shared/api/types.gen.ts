@@ -1464,6 +1464,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/graph/capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Graph Capability
+         * @description Report whether the Workspace Knowledge Map is available here.
+         */
+        get: operations["get_workspace_graph_capability_api_v1_workspaces__workspace_id__graph_capability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/graph/overview/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query Workspace Graph
+         * @description Read the feature-gated actor-visible Workspace Knowledge Map.
+         */
+        post: operations["query_workspace_graph_api_v1_workspaces__workspace_id__graph_overview_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/graph/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query Graph
+         * @description Read a bounded scene; POST carries a structured query, not a mutation.
+         */
+        post: operations["query_graph_api_v1_workspaces__workspace_id__graph_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/jobs": {
         parameters: {
             query?: never;
@@ -4989,7 +5049,7 @@ export interface components {
              * @description Stable warning code; must be drawn from WARNING_CODES.
              * @enum {string}
              */
-            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "disambiguation_required" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete";
+            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "disambiguation_required" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
             /** Message */
             message: string;
         };
@@ -5025,6 +5085,177 @@ export interface components {
             data: components["schemas"]["FeedbackEntry"][];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** GraphBudget */
+        GraphBudget: {
+            /**
+             * Edges
+             * @default 150
+             */
+            edges: number;
+            /**
+             * Nodes
+             * @default 50
+             */
+            nodes: number;
+        };
+        /** GraphBudgetResult */
+        GraphBudgetResult: {
+            applied: components["schemas"]["GraphBudget"];
+            requested: components["schemas"]["GraphBudget"];
+        };
+        /** GraphCapabilities */
+        GraphCapabilities: {
+            /**
+             * As Of
+             * @default false
+             */
+            as_of: boolean;
+            /**
+             * Evidence
+             * @default false
+             */
+            evidence: boolean;
+            /**
+             * Expand
+             * @default false
+             */
+            expand: boolean;
+            /**
+             * Export
+             * @default false
+             */
+            export: boolean;
+            /**
+             * Saved View
+             * @default false
+             */
+            saved_view: boolean;
+            /**
+             * Timeline
+             * @default false
+             */
+            timeline: boolean;
+        };
+        /** GraphEdge */
+        GraphEdge: {
+            /** Action Kind */
+            action_kind?: string | null;
+            /**
+             * Aggregate
+             * @default false
+             */
+            aggregate: boolean;
+            /** Count */
+            count?: number | null;
+            /**
+             * Direction
+             * @default directed
+             * @enum {string}
+             */
+            direction: "directed" | "undirected";
+            /** Edge Kind */
+            edge_kind: string;
+            evidence?: components["schemas"]["GraphEvidenceRef"] | null;
+            /** First Observed At */
+            first_observed_at?: string | null;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "knowledge" | "evidence" | "activity" | "action";
+            /** Occurred At */
+            occurred_at?: string | null;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "curated" | "derived" | "usage" | "domain" | "observed";
+            /**
+             * Rank Score
+             * @default 0
+             */
+            rank_score: number;
+            /** Sequence */
+            sequence?: number | null;
+            /** Source */
+            source: string;
+            /** Support Session Count */
+            support_session_count?: number | null;
+            /** Target */
+            target: string;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+            /** Window From */
+            window_from?: string | null;
+            /** Window To */
+            window_to?: string | null;
+        };
+        /** GraphEvidenceRef */
+        GraphEvidenceRef: {
+            /**
+             * Available
+             * @default true
+             */
+            available: boolean;
+            /** Id */
+            id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label?: string | null;
+            /** Ref */
+            ref?: string | null;
+        };
+        /** GraphFacets */
+        GraphFacets: {
+            /** Action Kinds */
+            action_kinds?: string[];
+            /** Edge Kinds */
+            edge_kinds?: string[];
+            /** Layers */
+            layers?: string[];
+            /** Node Families */
+            node_families?: string[];
+            /** Node Kinds */
+            node_kinds?: string[];
+            /** Statuses */
+            statuses?: string[];
+            /** Time From */
+            time_from?: string | null;
+            /** Time To */
+            time_to?: string | null;
+        };
+        /** GraphHistoryMetadata */
+        GraphHistoryMetadata: {
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "current_projection" | "domain_events" | "observations" | "mixed";
+            /** Coverage From */
+            coverage_from?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "current" | "appearance" | "action" | "as_of";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "complete" | "partial" | "reconstructed" | "unsupported";
+            /** Warnings */
+            warnings?: string[];
+            /** Watermark */
+            watermark?: string | null;
+        };
         /** GraphNeighborEntry */
         GraphNeighborEntry: {
             /**
@@ -5058,11 +5289,221 @@ export interface components {
             mermaid?: string | null;
             /** Outbound */
             outbound?: components["schemas"]["GraphNeighborEntry"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Warnings */
+            warnings?: string[];
         };
         /** GraphNeighborsResponse */
         GraphNeighborsResponse: {
             data: components["schemas"]["GraphNeighborsPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** GraphNode */
+        GraphNode: {
+            /** Actor Label */
+            actor_label?: string | null;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Entity Kind */
+            entity_kind: string;
+            evidence?: components["schemas"]["GraphEvidenceRef"] | null;
+            /**
+             * Family
+             * @enum {string}
+             */
+            family: "document" | "chat" | "ask" | "review" | "agent" | "event" | "structural";
+            /** Id */
+            id: string;
+            /**
+             * Is Seed
+             * @default false
+             */
+            is_seed: boolean;
+            /** Label */
+            label: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Status */
+            status?: string | null;
+        };
+        /** GraphOmission */
+        GraphOmission: {
+            /** Hop */
+            hop?: (1 | 2) | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "node_quota" | "frontier_cap" | "folder_node" | "folder_source_cap" | "relation_quota" | "relation_source_cap";
+            /** Relation Class */
+            relation_class?: ("folder" | "seed" | "h1" | "h12" | "h2") | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "node" | "relation";
+        };
+        /** GraphQueryPayload */
+        GraphQueryPayload: {
+            budget: components["schemas"]["GraphBudgetResult"];
+            capabilities?: components["schemas"]["GraphCapabilities"];
+            /**
+             * Completeness
+             * @default complete
+             * @enum {string}
+             */
+            completeness: "complete" | "capped" | "bounded_sample" | "privacy_suppressed";
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+            facets: components["schemas"]["GraphFacets"];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            history: components["schemas"]["GraphHistoryMetadata"];
+            /** Mermaid */
+            mermaid?: string | null;
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /** Omissions */
+            omissions?: components["schemas"]["GraphOmission"][];
+            /** Projection Revision */
+            projection_revision: number;
+            query: components["schemas"]["GraphQueryRequest"];
+            /**
+             * Schema Version
+             * @default dtxwiki.graph-scene.v1
+             * @constant
+             */
+            schema_version: "dtxwiki.graph-scene.v1";
+            /** Timeline */
+            timeline?: components["schemas"]["GraphTimelineEvent"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** GraphQueryRequest */
+        GraphQueryRequest: {
+            /** Action Kinds */
+            action_kinds?: string[];
+            budget?: components["schemas"]["GraphBudget"];
+            /** Cursor */
+            cursor?: null;
+            /**
+             * Depth
+             * @default 2
+             * @enum {integer}
+             */
+            depth: 1 | 2;
+            /**
+             * Direction
+             * @default both
+             * @enum {string}
+             */
+            direction: "in" | "out" | "both";
+            /** Edge Kinds */
+            edge_kinds?: string[];
+            /** Layers */
+            layers?: ("knowledge" | "evidence" | "activity" | "action")[];
+            /** Node Families */
+            node_families?: ("document" | "chat" | "ask" | "review" | "agent" | "event" | "structural")[];
+            /** Node Kinds */
+            node_kinds?: string[];
+            /**
+             * Preset
+             * @default all
+             * @enum {string}
+             */
+            preset: "linked-knowledge" | "evidence" | "activity" | "all";
+            /**
+             * Schema Version
+             * @default dtxwiki.graph-query.v1
+             * @constant
+             */
+            schema_version: "dtxwiki.graph-query.v1";
+            /**
+             * Scope
+             * @default local
+             * @constant
+             */
+            scope: "local";
+            /** Seeds */
+            seeds: components["schemas"]["GraphSeed"][];
+            time?: components["schemas"]["GraphTimeQuery"];
+        };
+        /** GraphQueryResponse */
+        GraphQueryResponse: {
+            data: components["schemas"]["GraphQueryPayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** GraphSeed */
+        GraphSeed: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+        };
+        /** GraphTimeQuery */
+        GraphTimeQuery: {
+            /** As Of */
+            as_of?: string | null;
+            /** From */
+            from?: string | null;
+            /**
+             * Mode
+             * @default current
+             * @enum {string}
+             */
+            mode: "current" | "appearance" | "action" | "as_of";
+            /** To */
+            to?: string | null;
+        };
+        /** GraphTimelineEvent */
+        GraphTimelineEvent: {
+            /** Action Kind */
+            action_kind: string;
+            /** Edge Ids */
+            edge_ids?: string[];
+            /** Edge Snapshots */
+            edge_snapshots?: components["schemas"]["GraphEdge"][];
+            evidence?: components["schemas"]["GraphEvidenceRef"] | null;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Node Ids */
+            node_ids?: string[];
+            /** Node Snapshots */
+            node_snapshots?: components["schemas"]["GraphNode"][];
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "node_created" | "edge_created" | "edge_removed" | "action_occurred";
+            /** Sequence */
+            sequence: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -8584,6 +9025,7 @@ export interface components {
             agent_injection: components["schemas"]["PolicyCard"];
             citation: components["schemas"]["PolicyCard"];
             context_write: components["schemas"]["PolicyCard"];
+            graph: components["schemas"]["PolicyCard"];
             library: components["schemas"]["PolicyCard"];
             lint: components["schemas"]["PolicyCard"];
             /** Mcp Clients */
@@ -8610,7 +9052,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint";
+            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph";
         };
         /** SettingsPolicyUpdateRequest */
         SettingsPolicyUpdateRequest: {
@@ -8618,7 +9060,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint";
+            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph";
             /** Key */
             key: string;
             /** Value */
@@ -9344,6 +9786,459 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /** WorkspaceGraphBudget */
+        WorkspaceGraphBudget: {
+            /**
+             * Documents
+             * @default 250
+             */
+            documents: number;
+            /**
+             * Relations
+             * @default 750
+             */
+            relations: number;
+        };
+        /** WorkspaceGraphCapabilities */
+        WorkspaceGraphCapabilities: {
+            /**
+             * Compare
+             * @default false
+             */
+            compare: boolean;
+            /**
+             * Directory
+             * @default false
+             */
+            directory: boolean;
+            /**
+             * Evidence
+             * @default false
+             */
+            evidence: boolean;
+            /**
+             * Expand
+             * @default false
+             */
+            expand: boolean;
+            /**
+             * Export
+             * @default false
+             */
+            export: boolean;
+            /**
+             * Growth
+             * @default false
+             */
+            growth: boolean;
+            /**
+             * Provenance
+             * @default false
+             */
+            provenance: boolean;
+        };
+        /** WorkspaceGraphCapability */
+        WorkspaceGraphCapability: {
+            /** Can Manage */
+            can_manage: boolean;
+            /** Usage Relation Signals Enabled */
+            usage_relation_signals_enabled: boolean;
+            workspace_map: components["schemas"]["WorkspaceGraphMapCapability"];
+        };
+        /** WorkspaceGraphCapabilityResponse */
+        WorkspaceGraphCapabilityResponse: {
+            data: components["schemas"]["WorkspaceGraphCapability"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** WorkspaceGraphClusterNode */
+        WorkspaceGraphClusterNode: {
+            /**
+             * Cluster Kind
+             * @enum {string}
+             */
+            cluster_kind: "folder_cluster" | "link_cluster" | "other_cluster";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            grain: "cluster";
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Member Count */
+            member_count: number;
+            /** Relation Count */
+            relation_count: number;
+        };
+        /** WorkspaceGraphDocumentNode */
+        WorkspaceGraphDocumentNode: {
+            /** Also Appears In */
+            also_appears_in?: components["schemas"]["WorkspaceGraphPlacementRef"][];
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @enum {string}
+             */
+            entity_kind: "context" | "library";
+            /**
+             * Evidence Count
+             * @default 0
+             */
+            evidence_count: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            grain: "document";
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Path */
+            path: string;
+            /** Primary Folder Id */
+            primary_folder_id?: string | null;
+            /** Primary Folder Label */
+            primary_folder_label: string;
+            /**
+             * Reference Count
+             * @default 0
+             */
+            reference_count: number;
+        };
+        /** WorkspaceGraphEdge */
+        WorkspaceGraphEdge: {
+            /**
+             * Aggregate
+             * @default false
+             */
+            aggregate: boolean;
+            /**
+             * Cross Folder
+             * @default false
+             */
+            cross_folder: boolean;
+            /**
+             * Direction
+             * @default directed
+             * @enum {string}
+             */
+            direction: "directed" | "undirected";
+            /** Id */
+            id: string;
+            /** Label */
+            label?: string | null;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "knowledge" | "evidence" | "structure" | "provenance";
+            /** Occurrence Weight */
+            occurrence_weight?: number | null;
+            /**
+             * Relation Count
+             * @default 1
+             */
+            relation_count: number;
+            /** Relation Kind */
+            relation_kind: string;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+        };
+        /** WorkspaceGraphExpansion */
+        WorkspaceGraphExpansion: {
+            /** Cluster Id */
+            cluster_id: string;
+            /** Cursor */
+            cursor?: string | null;
+        };
+        /** WorkspaceGraphFacetCounts */
+        WorkspaceGraphFacetCounts: {
+            /** Document Kinds */
+            document_kinds?: components["schemas"]["WorkspaceGraphFacetValue"][];
+            /** Folders */
+            folders?: components["schemas"]["WorkspaceGraphFacetValue"][];
+            /** Quick Filters */
+            quick_filters?: components["schemas"]["WorkspaceGraphFacetValue"][];
+            /** Relation Kinds */
+            relation_kinds?: components["schemas"]["WorkspaceGraphFacetValue"][];
+        };
+        /** WorkspaceGraphFacetValue */
+        WorkspaceGraphFacetValue: {
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * WorkspaceGraphFocus
+         * @description Where the requested focus landed in this scene.
+         *
+         *     ``document`` is the target's own node, ``cluster`` the aggregate that
+         *     contains it when no slot could be reserved within the budget. Anything
+         *     the actor cannot see in this scene is ``unavailable``: missing, unpublished,
+         *     hidden, and filtered-out targets are deliberately indistinguishable.
+         */
+        WorkspaceGraphFocus: {
+            /** Node Id */
+            node_id?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "document" | "cluster" | "unavailable";
+        };
+        /** WorkspaceGraphFolder */
+        WorkspaceGraphFolder: {
+            /** Direct Member Count */
+            direct_member_count: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Parent Folder Id */
+            parent_folder_id?: string | null;
+        };
+        /** WorkspaceGraphFolderEdgeSlice */
+        WorkspaceGraphFolderEdgeSlice: {
+            /** Edge Id */
+            edge_id: string;
+            /** Occurrence Weight */
+            occurrence_weight: number;
+            /** Relation Count */
+            relation_count: number;
+            /**
+             * Source Entity Kind
+             * @enum {string}
+             */
+            source_entity_kind: "context" | "library";
+            /** Source Folder Id */
+            source_folder_id?: string | null;
+            /**
+             * Target Entity Kind
+             * @enum {string}
+             */
+            target_entity_kind: "context" | "library";
+            /** Target Folder Id */
+            target_folder_id?: string | null;
+        };
+        /** WorkspaceGraphFolderFilter */
+        WorkspaceGraphFolderFilter: {
+            /** Exclude */
+            exclude?: (string | "unplaced")[];
+            /** Include */
+            include?: (string | "unplaced")[];
+            /** Only */
+            only?: (string | "unplaced")[];
+        };
+        /** WorkspaceGraphFolderMembership */
+        WorkspaceGraphFolderMembership: {
+            /**
+             * Entity Kind
+             * @enum {string}
+             */
+            entity_kind: "context" | "library";
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Member Count */
+            member_count: number;
+            /** Node Id */
+            node_id: string;
+        };
+        /**
+         * WorkspaceGraphFolderTopology
+         * @description Lossless, actor-visible folder inputs, never layout coordinates.
+         *
+         *     Membership distributions retain mixed aggregates. Correlated edge slices
+         *     retain their real endpoint folder/kind pair, including aggregate self-edges;
+         *     independent source/target marginals cannot reconstruct that information.
+         */
+        WorkspaceGraphFolderTopology: {
+            /** Edge Slices */
+            edge_slices: components["schemas"]["WorkspaceGraphFolderEdgeSlice"][];
+            /** Folders */
+            folders: components["schemas"]["WorkspaceGraphFolder"][];
+            /** Memberships */
+            memberships: components["schemas"]["WorkspaceGraphFolderMembership"][];
+            /**
+             * Schema Version
+             * @default workspace-graph-folders.v1
+             * @constant
+             */
+            schema_version: "workspace-graph-folders.v1";
+        };
+        /**
+         * WorkspaceGraphMapCapability
+         * @description The workspace map's switch state as the product should present it.
+         */
+        WorkspaceGraphMapCapability: {
+            /** Effective Enabled */
+            effective_enabled: boolean;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "enabled" | "disabled_by_workspace" | "service_unavailable";
+            /** Service Available */
+            service_available: boolean;
+            /** Workspace Enabled */
+            workspace_enabled: boolean;
+        };
+        /** WorkspaceGraphOverviewRequest */
+        WorkspaceGraphOverviewRequest: {
+            budget?: components["schemas"]["WorkspaceGraphBudget"];
+            /** Document Kinds */
+            document_kinds?: ("context" | "library")[];
+            expansion?: components["schemas"]["WorkspaceGraphExpansion"] | null;
+            /** Focus Entity Id */
+            focus_entity_id?: string | null;
+            folders?: components["schemas"]["WorkspaceGraphFolderFilter"];
+            /**
+             * Head Mode
+             * @default published
+             * @constant
+             */
+            head_mode: "published";
+            /**
+             * Lens
+             * @default combined
+             * @enum {string}
+             */
+            lens: "combined" | "links" | "evidence" | "directory" | "compare" | "growth" | "provenance";
+            /** Quick Filters */
+            quick_filters?: ("orphans" | "highly_referenced" | "cross_folder" | "recently_connected")[];
+            /**
+             * Schema Version
+             * @default workspace-graph-overview.v1
+             * @constant
+             */
+            schema_version: "workspace-graph-overview.v1";
+            /** Search */
+            search?: string | null;
+            time?: components["schemas"]["WorkspaceGraphTimeFilter"];
+        };
+        /** WorkspaceGraphPlacementRef */
+        WorkspaceGraphPlacementRef: {
+            /** Label */
+            label: string;
+            /** Path */
+            path: string;
+            /**
+             * Tree Node Id
+             * Format: uuid
+             */
+            tree_node_id: string;
+        };
+        /** WorkspaceGraphSceneCounts */
+        WorkspaceGraphSceneCounts: {
+            /** Candidate Documents */
+            candidate_documents: number;
+            /** Candidate Relations */
+            candidate_relations: number;
+            /** Rendered Clusters */
+            rendered_clusters: number;
+            /** Rendered Documents */
+            rendered_documents: number;
+            /** Rendered Relations */
+            rendered_relations: number;
+        };
+        /** WorkspaceGraphScenePayload */
+        WorkspaceGraphScenePayload: {
+            /** Algorithm Version */
+            algorithm_version: string;
+            capabilities?: components["schemas"]["WorkspaceGraphCapabilities"];
+            /**
+             * Completeness
+             * @enum {string}
+             */
+            completeness: "complete" | "capped" | "partial" | "privacy_suppressed";
+            counts: components["schemas"]["WorkspaceGraphSceneCounts"];
+            /** Edges */
+            edges: components["schemas"]["WorkspaceGraphEdge"][];
+            /** Expansion Cursor */
+            expansion_cursor?: string | null;
+            facet_counts: components["schemas"]["WorkspaceGraphFacetCounts"];
+            focus?: components["schemas"]["WorkspaceGraphFocus"] | null;
+            folder_topology?: components["schemas"]["WorkspaceGraphFolderTopology"] | null;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Graph Revision */
+            graph_revision: string;
+            /**
+             * Head Mode
+             * @default published
+             * @constant
+             */
+            head_mode: "published";
+            /** Metric Basis */
+            metric_basis: string;
+            /** Nodes */
+            nodes: (components["schemas"]["WorkspaceGraphDocumentNode"] | components["schemas"]["WorkspaceGraphClusterNode"])[];
+            /** Omission Reasons */
+            omission_reasons?: ("document_budget" | "relation_budget" | "projection_partial" | "privacy_policy" | "renderer_fallback")[];
+            /**
+             * Representation
+             * @enum {string}
+             */
+            representation: "exact" | "aggregated";
+            /**
+             * Schema Version
+             * @default workspace-graph-scene.v1
+             * @constant
+             */
+            schema_version: "workspace-graph-scene.v1";
+            /** Truncated */
+            truncated: boolean;
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Workspace Scope Considered
+             * @default true
+             * @constant
+             */
+            workspace_scope_considered: true;
+        };
+        /** WorkspaceGraphSceneResponse */
+        WorkspaceGraphSceneResponse: {
+            data: components["schemas"]["WorkspaceGraphScenePayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /**
+         * WorkspaceGraphTimeFilter
+         * @description Actor-visible time constraint for the Workspace projection.
+         *
+         *     ``document_updated`` filters on the published Context page or canonical
+         *     current Library item ``updated_at``. ``relation_observed`` filters authored
+         *     relations on their projection timestamp and retains only their visible
+         *     endpoints. Both operate after visibility and never count hidden history.
+         */
+        WorkspaceGraphTimeFilter: {
+            /**
+             * Basis
+             * @default document_updated
+             * @enum {string}
+             */
+            basis: "document_updated" | "relation_observed";
+            /** From */
+            from?: string | null;
+            /** To */
+            to?: string | null;
         };
         /** WorkspaceJoinDecisionRequest */
         WorkspaceJoinDecisionRequest: {
@@ -15966,6 +16861,215 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitFeedbackResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    get_workspace_graph_capability_api_v1_workspaces__workspace_id__graph_capability_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceGraphCapabilityResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    query_workspace_graph_api_v1_workspaces__workspace_id__graph_overview_query_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceGraphOverviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceGraphSceneResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    query_graph_api_v1_workspaces__workspace_id__graph_query_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphQueryResponse"];
                 };
             };
             /** @description Unauthorized */

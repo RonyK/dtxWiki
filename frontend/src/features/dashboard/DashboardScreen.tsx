@@ -821,6 +821,7 @@ function emptyPolicies(): SettingsPolicies {
     agent_injection: policy("agent_injection", "Agent policy"),
     review: policy("review", "Review policy"),
     lint: policy("lint", "Lint rules"),
+    graph: policy("graph", "Knowledge graph"),
     mcp_clients: [],
   };
 }

@@ -39,6 +39,35 @@ RELEASED_CHAIN_BASE = [
     ["bd62193d5cf6", None],
     ["efcbcf724889", "bd62193d5cf6"],
 ]
+# This feature needs its own revision; an artifact containing only the frozen
+# core chain would still resolve a valid Alembic head but could not run Graph View.
+GRAPH_MIGRATION = Path(
+    "backend/migrations/versions/v0_1/9aeab6944f25_add_graph_view.py"
+)
+GRAPH_RUNTIME_FILES = tuple(
+    Path(path)
+    for path in (
+        "backend/api/graph.py",
+        "backend/api/middleware/workspace_graph_compression.py",
+        "backend/cli/commands/graph.py",
+        "backend/context_media/domain/rendered_markdown.py",
+        "backend/repositories/graph_density_repo.py",
+        "backend/schemas/graph.py",
+        "backend/schemas/workspace_graph.py",
+        "backend/services/context_link_advisory.py",
+        "backend/services/graph_density.py",
+        "backend/services/graph_observation_service.py",
+        "backend/services/graph_query_service.py",
+        "backend/services/graph_rank.py",
+        "backend/services/graph_reprojection.py",
+        "backend/services/graph_semantics.py",
+        "backend/services/indexing/co_read.py",
+        "backend/services/page_link_ordering.py",
+        "backend/services/workspace_graph_capability.py",
+        "backend/services/workspace_graph_service.py",
+        "backend/utils/markdown_links.py",
+    )
+)
 # SHA-256 of the renamed baseline and its implementation modules, relative to
 # backend/migrations. A deliberate second copy of
 # backend/migrations/frozen_revisions.json: editing a released revision and
@@ -238,6 +267,8 @@ def _check_alembic_payload(root: Path) -> list[str]:
     failures: list[str] = []
     if not (root / "backend" / "alembic.ini").is_file():
         failures.append("backend/alembic.ini is missing")
+    if not (root / GRAPH_MIGRATION).is_file():
+        failures.append(f"{GRAPH_MIGRATION.as_posix()} is missing")
     modules = (
         root
         / "backend"
@@ -277,6 +308,14 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "backend/migrations/release_manifest.json is missing or invalid"
         )
     return failures
+
+
+def _check_graph_runtime_payload(root: Path) -> list[str]:
+    return [
+        f"{relative.as_posix()} is missing"
+        for relative in GRAPH_RUNTIME_FILES
+        if not (root / relative).is_file()
+    ]
 
 
 def _check_frozen_migrations(root: Path) -> list[str]:
@@ -523,6 +562,7 @@ def verify_artifact(artifact: Path, extract: Path) -> tuple[list[str], str | Non
         *_check_retired_mcp_transport(root),
         *_check_env_files(root),
         *_check_alembic_payload(root),
+        *_check_graph_runtime_payload(root),
         *_check_frozen_migrations(root),
         *graph_failures,
     ]

@@ -64,6 +64,9 @@ process.env.DTXWIKI_E2E_STATIC_ROOT = spaBuildDir;
 // origin-relative (frontend/src/shared/api/client.ts falls through to the
 // packaged default in a production build).
 process.env.VITE_API_BASE_URL = "";
+// The Workspace Knowledge Map needs no build flag: /graph asks the backend,
+// which answers from the workspace owner's Settings switch
+// (prepare_backend_db.py seeds it on for the graph corpus).
 
 let exitCode = 1;
 let cleanupError;

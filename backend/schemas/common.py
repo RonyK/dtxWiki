@@ -132,7 +132,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        revision. Descriptions of update/patch_context_edit and the edit
 #        receipt say when a block keeps its id and that update_context_edit
 #        with no open edit stages a reviewed draft. No tool added/removed.
-MCP_TOOL_CONTRACT_REVISION = 11
+#  12 -- Context write tools and guide gained authored-link guidance; every
+#        envelope gained the context_page_has_no_graph_visible_links advisory.
+#        Existing edit receipts and version-bound saves remain supported.
+MCP_TOOL_CONTRACT_REVISION = 12
 ERROR_CODES = (
     "not_found",
     "stale_base_version",
@@ -313,6 +316,7 @@ WARNING_CODES = (
     # cross-workspace admin job listing/summary, so the result is a partial
     # one -- the reachable workspaces' data, not every workspace's.
     "job_fanout_incomplete",
+    "context_page_has_no_graph_visible_links",
 )
 
 # Single source for retrieval capability + search scope (REST, MCP, services).

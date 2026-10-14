@@ -93,9 +93,13 @@ PRESERVED_TABLES = frozenset({"audit_event"})
 # The media rows in particular must survive the purge -- _delete_empty_media_
 # scope re-checks the write-intent fence it took before the purge ran, and
 # deleting the fence row here would strand that check on a detached object.
+# graph_observation is append-only while its workspace row exists (a database
+# trigger and an ORM guard both reject the DELETE this module would issue), so
+# the teardown removes it only after the workspace row itself is gone.
 TERMINAL_TEARDOWN_TABLES = frozenset(
     {
         "context_media_logical_quota_usage",
+        "graph_observation",
         "library_logical_quota_usage",
         "tree_policy",
         "workspace_media_quota_usage",
