@@ -25,19 +25,28 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import zipfile
 from collections.abc import Sequence
+from email.parser import Parser
 from pathlib import Path
 
 from deploy_static_bundle import _local_entry_files
+from packaging.utils import (
+    InvalidSdistFilename,
+    InvalidWheelFilename,
+    parse_sdist_filename,
+    parse_wheel_filename,
+)
+from packaging.version import InvalidVersion, Version
 
 # This is Vite's emitted URL literal for our one module collision Worker,
 # not a general JavaScript/import parser. Match its quoted content hash so an
 # unrelated old Worker file cannot stand in for the adapter's required asset.
 _COLLISION_WORKER_URL = re.compile(
     r'new\s+URL\(\s*(?P<quote>["\'])'
-    r'(?P<path>/assets/forceAtlas2Collision\.worker-[A-Za-z0-9_-]+\.js)'
-    r'(?P=quote)\s*,\s*import\.meta\.url\s*\)'
+    r"(?P<path>/assets/forceAtlas2Collision\.worker-[A-Za-z0-9_-]+\.js)"
+    r"(?P=quote)\s*,\s*import\.meta\.url\s*\)"
 )
 
 # Canonical IDs of the historical schema boundaries, base first. Every later release
@@ -366,6 +375,159 @@ def _check_alembic_payload(root: Path) -> list[str]:
     return failures
 
 
+def _check_release_schema(
+    root: Path, artifact: Path, head: str | None, release_version: str
+) -> list[str]:
+    """Tie a tag to the metadata and schema boundary inside each artifact.
+
+    A patch with no database changes inherits its nearest earlier boundary.
+    A future entry must not make an older package with a new migration pass.
+    This is an explicit publishing check: development artifacts may qualify
+    their runtime before the owner chooses the next release version.
+    """
+
+    try:
+        expected = Version(release_version)
+    except InvalidVersion:
+        return [f"invalid expected release version {release_version!r}"]
+
+    return [
+        *_check_release_identity(root, artifact, release_version, expected),
+        *_check_schema_boundary(root, head, expected),
+    ]
+
+
+def _check_release_identity(
+    root: Path, artifact: Path, release_version: str, expected: Version
+) -> list[str]:
+    """Read built metadata, never the checkout's package version."""
+
+    failures: list[str] = []
+    try:
+        if artifact.suffix == ".whl":
+            name, version, _, _ = parse_wheel_filename(artifact.name)
+        else:
+            name, version = parse_sdist_filename(artifact.name)
+    except (InvalidWheelFilename, InvalidSdistFilename) as error:
+        failures.append(f"invalid release artifact filename: {error}")
+    else:
+        if name != "dtxwiki" or version != expected:
+            failures.append(
+                f"artifact filename identifies {name} version {version}, "
+                f"expected dtxwiki release version {release_version}"
+            )
+
+    if artifact.suffix == ".whl":
+        metadata_dirs = sorted(root.glob("*.dist-info"))
+        expected_directory = f"dtxwiki-{expected}.dist-info"
+        if (
+            len(metadata_dirs) != 1
+            or metadata_dirs[0].name != expected_directory
+            or not metadata_dirs[0].is_dir()
+        ):
+            return [
+                *failures,
+                "wheel release metadata directory must be exactly "
+                f"{expected_directory}",
+            ]
+        metadata_path = metadata_dirs[0] / "METADATA"
+    else:
+        metadata_path = root / "PKG-INFO"
+    if not metadata_path.is_file():
+        failures.append("release metadata is missing or ambiguous")
+    else:
+        try:
+            metadata = Parser().parsestr(
+                metadata_path.read_text(encoding="utf-8"), headersonly=True
+            )
+        except (OSError, UnicodeError):
+            failures.append("release metadata is unreadable")
+        else:
+            if metadata.get_all("Name") != ["dtxwiki"]:
+                failures.append(
+                    "release metadata must identify Name: dtxwiki exactly once"
+                )
+            if metadata.get_all("Version") != [release_version]:
+                failures.append(
+                    f"release metadata must identify Version: {release_version} "
+                    "exactly once"
+                )
+
+    if artifact.suffix != ".whl":
+        try:
+            project = tomllib.loads(
+                (root / "pyproject.toml").read_text(encoding="utf-8")
+            )["project"]
+            valid = (
+                project["name"] == "dtxwiki" and project["version"] == release_version
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            valid = False
+        if not valid:
+            failures.append(
+                "sdist pyproject metadata name/version does not match "
+                f"dtxwiki release version {release_version}"
+            )
+    return failures
+
+
+def _check_schema_boundary(
+    root: Path, head: str | None, expected: Version
+) -> list[str]:
+    """Require this version's effective packaged schema boundary to be its head."""
+
+    try:
+        manifest = json.loads(
+            (root / "backend/migrations/release_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        entries = manifest["schema_releases"]
+        if not isinstance(entries, dict) or not entries:
+            raise ValueError("schema_releases must be a nonempty mapping")
+        applicable: list[tuple[Version, str, str]] = []
+        for release, entry in entries.items():
+            boundary = Version(release)
+            if (
+                len(boundary.release) != 3
+                or boundary.epoch
+                or boundary.local
+                or str(boundary) != release
+            ):
+                raise ValueError(f"noncanonical schema release version {release!r}")
+            group = f"v{boundary.major}_{boundary.minor}"
+            revision = entry["head"]
+            if entry["group"] != group or not isinstance(revision, str):
+                raise ValueError(f"invalid schema group/head for {release}")
+            if (
+                not re.fullmatch(r"[A-Za-z0-9_]+", revision)
+                or len(
+                    list(
+                        (root / "backend/migrations/versions" / group).glob(
+                            f"{revision}_*.py"
+                        )
+                    )
+                )
+                != 1
+            ):
+                raise ValueError(f"schema head {revision!r} is not in group {group}")
+            if boundary <= expected:
+                applicable.append((boundary, release, revision))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"invalid release_manifest schema mapping: {error}"]
+
+    if not applicable:
+        return [f"no schema release boundary applies to version {expected}"]
+    _, boundary_version, mapped_head = max(applicable)
+    if mapped_head != head:
+        return [
+            f"release version {expected} inherits schema boundary "
+            f"{boundary_version} head {mapped_head}, but packaged Alembic "
+            f"head is {head}; record the new schema boundary before release"
+        ]
+    return []
+
+
 def _check_graph_runtime_payload(root: Path) -> list[str]:
     return [
         f"{relative.as_posix()} is missing"
@@ -605,7 +767,9 @@ def _unpack(artifact: Path, extract: Path) -> tuple[Path | None, list[str]]:
     return entries[0], []
 
 
-def verify_artifact(artifact: Path, extract: Path) -> tuple[list[str], str | None]:
+def verify_artifact(
+    artifact: Path, extract: Path, *, release_version: str | None = None
+) -> tuple[list[str], str | None]:
     """Return this artifact's release-blocking problems and its evidence line."""
 
     root, failures = _unpack(artifact, extract)
@@ -622,6 +786,8 @@ def verify_artifact(artifact: Path, extract: Path) -> tuple[list[str], str | Non
         *_check_frozen_migrations(root),
         *graph_failures,
     ]
+    if release_version is not None:
+        problems.extend(_check_release_schema(root, artifact, head, release_version))
     if problems:
         return [f"{artifact.name}: {problem}" for problem in problems], None
     return [], (
@@ -638,6 +804,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "dist", help="path to the dist/ directory upload-artifact will publish"
+    )
+    parser.add_argument(
+        "--release-version",
+        help=(
+            "require artifact metadata and effective schema boundary to match "
+            "this tag version"
+        ),
     )
     arguments = parser.parse_args(argv)
 
@@ -656,7 +829,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     evidence: list[str] = []
     for artifact in artifacts:
         with tempfile.TemporaryDirectory() as workspace:
-            problems, line = verify_artifact(artifact, Path(workspace) / "artifact")
+            problems, line = verify_artifact(
+                artifact,
+                Path(workspace) / "artifact",
+                release_version=arguments.release_version,
+            )
         failures.extend(problems)
         if line is not None:
             evidence.append(line)

@@ -6,8 +6,11 @@ other workflow ever built. These tests keep the gate from being narrowed back
 to the three `test -f` calls it used to be.
 """
 
+import shlex
+from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +42,33 @@ def _verify_index(steps):
     return verify[0]
 
 
+def _assert_strict_artifact_gate(workflow):
+    build = workflow["jobs"]["build"]
+    assert "if" not in build, "The release build must not be conditional."
+    assert not build.get("continue-on-error", False)
+    steps = build["steps"]
+    index = _verify_index(steps)
+    assert index < _upload_index(steps)
+    step = steps[index]
+    assert "if" not in step, "The release artifact gate must not be conditional."
+    assert not step.get("continue-on-error", False)
+    arguments = shlex.split(step["run"])
+    assert len(arguments) == 5, (
+        "Run the strict verifier directly, without shell bypasses."
+    )
+    assert arguments[:2] == [
+        ".venv/bin/python",
+        "scripts/verify_wheel_artifact.py",
+    ]
+    uploaded = steps[_upload_index(steps)]["with"]["path"]
+    assert arguments[2].rstrip("/") == uploaded.rstrip("/"), (
+        f"verify is handed {arguments[2]!r} but upload-artifact publishes {uploaded!r}"
+    )
+    assert arguments[3:] == ["--release-version", "${GITHUB_REF_NAME#v}"], (
+        "The artifact metadata and effective schema head must match the pushed tag."
+    )
+
+
 def test_release_build_verifies_the_artifacts_before_uploading_them():
     steps = _build_steps()
 
@@ -54,23 +84,67 @@ def test_release_verifies_everything_it_uploads_not_one_glob_out_of_it():
     uploaded path itself.
     """
 
-    steps = _build_steps()
-    command = steps[_verify_index(steps)]["run"]
-    uploaded = steps[_upload_index(steps)]["with"]["path"]
-    argument = command.split("scripts/verify_wheel_artifact.py", 1)[1].strip()
+    _assert_strict_artifact_gate(_workflow())
 
-    assert argument.rstrip("/") == uploaded.rstrip("/"), (
-        f"verify is handed {argument!r} but upload-artifact publishes "
-        f"{uploaded!r}"
-    )
+
+@pytest.mark.counterexample(
+    "a skipped, nonblocking or unbound release artifact verification is rejected"
+)
+@pytest.mark.parametrize(
+    "violation",
+    [
+        "missing_gate",
+        "missing_option",
+        "fixed_version",
+        "other_dist",
+        "wheel_glob",
+        "conditional",
+        "nonblocking",
+        "build_conditional",
+        "build_nonblocking",
+        "shell_success",
+        "commented_gate",
+        "after_upload",
+    ],
+)
+def test_release_guard_rejects_bypassed_strict_artifact_verification(violation):
+    workflow = deepcopy(_workflow())
+    build = workflow["jobs"]["build"]
+    steps = build["steps"]
+    step = steps[_verify_index(steps)]
+    if violation == "missing_gate":
+        steps.remove(step)
+    elif violation == "missing_option":
+        step["run"] = ".venv/bin/python scripts/verify_wheel_artifact.py dist"
+    elif violation == "fixed_version":
+        step["run"] = step["run"].replace("${GITHUB_REF_NAME#v}", "0.1.3")
+    elif violation == "other_dist":
+        step["run"] = step["run"].replace(" dist ", " previous-dist ")
+    elif violation == "wheel_glob":
+        step["run"] = step["run"].replace(" dist ", " dist/*.whl ")
+    elif violation == "conditional":
+        step["if"] = "github.event_name == 'workflow_dispatch'"
+    elif violation == "nonblocking":
+        step["continue-on-error"] = True
+    elif violation == "build_conditional":
+        build["if"] = "github.event_name == 'workflow_dispatch'"
+    elif violation == "build_nonblocking":
+        build["continue-on-error"] = True
+    elif violation == "shell_success":
+        step["run"] += " || true"
+    elif violation == "commented_gate":
+        step["run"] = "# " + step["run"]
+    else:
+        steps.remove(step)
+        steps.append(step)
+    with pytest.raises(AssertionError):
+        _assert_strict_artifact_gate(workflow)
 
 
 def test_release_build_runs_packaging_and_static_tests_before_publish():
     steps = _build_steps()
     suites = [
-        index
-        for index, step in enumerate(steps)
-        if "-m pytest" in step.get("run", "")
+        index for index, step in enumerate(steps) if "-m pytest" in step.get("run", "")
     ]
 
     assert len(suites) == 1, "the build job must run the packaged test suites"
