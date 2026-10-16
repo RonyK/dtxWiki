@@ -8,9 +8,8 @@ Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
 이 릴리스의 storage topology는 `single_database` 하나뿐이며, workspace별 DB 물리 분리는
 지원하지 않습니다(자세한 내용은 [데이터베이스](#데이터베이스) 절).
 
-> 설치 빠른 경로(solo·systemd·Docker) 요약은 루트 [README](README.md#설치) 에 있다. 이
-> 문서는 그 production self-host 의 **전체 절차 + Day-2 운영 + 수동/디버그 + 트러블슈팅**
-> 정본이다. (install.sh 한 명령은 README·이 문서 동일 — 방법이 갈라지지 않는다.)
+> 개인 설치와 첫 사용은 루트 [README의 Get started](README.md#get-started)를 참고하세요.
+> 이 문서는 팀이 함께 사용할 서버의 설치, 설정 변경, 백업, 업데이트와 문제 해결을 다룹니다.
 
 ## 배포 전 체크리스트
 
@@ -158,9 +157,16 @@ sudo dtxwiki setup production --tls internal --domain wiki.lan --email admin@cor
 설치 후 CLI 가 출력하는 root CA 신뢰 절차를 **모든 클라이언트에 1회** 적용한다:
 `/etc/dtxwiki/dtxwiki-root-ca.crt` 를 배포하고 — Linux `update-ca-certificates`,
 macOS `security add-trusted-cert`, Windows `Import-Certificate … Cert:\LocalMachine\Root`,
-Firefox 는 별도 Authorities import. **MCP 클라이언트(Claude Desktop·Code 등 Node/Electron)**
-는 `NODE_EXTRA_CA_CERTS=/path/dtxwiki-root-ca.crt`, curl/python 은 `SSL_CERT_FILE`/
-`CURL_CA_BUNDLE`. Caddy 의 `pki/` (root CA) 는 백업 세트에 포함한다.
+Firefox 는 별도 Authorities import. **로컬에서 서버에 직접 접속하는 Node.js 기반 MCP
+클라이언트(예: Claude Code)** 에는 `NODE_EXTRA_CA_CERTS=/path/dtxwiki-root-ca.crt`를
+설정합니다. curl/python 은 `SSL_CERT_FILE`/`CURL_CA_BUNDLE`을 사용합니다.
+Caddy 의 `pki/` (root CA) 는 백업 세트에 포함한다.
+
+Claude 웹과 Claude Desktop의 **remote custom connector**는 Anthropic 클라우드에서
+서버에 접속합니다. PC에 내부 CA를 설치하거나 `NODE_EXTRA_CA_CERTS`를 설정해도 이
+클라우드 연결에는 적용되지 않습니다. 인터넷에서 접속할 수 있고 공인 인증서가 적용된
+HTTPS 주소가 필요합니다. 자세한 네트워크 조건은
+[Claude의 custom connector 안내](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)를 참고하세요.
 
 `custom` 은 Docker+IP 처럼 `internal` 의 IP-SAN 발급이 까다로운 환경에 권장한다.
 `external` 은 기존 도메인의 서브도메인을 붙일 때 Caddy 자동 ACME 와의 80/443·인증서
@@ -272,9 +278,10 @@ remembered 갱신은 `auth.session.renewed` audit event 로 Activity 에 남습�
 
 **SMTP 설정은 선택 사항입니다.** SMTP 없이도 회원가입·로그인·위키 기본 기능을 사용할
 수 있습니다. 기본 `DTXWIKI_MAIL_PROVIDER=none`에서는 이메일 인증, 이메일을 통한
-비밀번호 복구, 이메일 알림이 동작하지 않습니다. 이 경우 비밀번호 복구는 server-admin의
-지원으로 진행합니다. 비밀번호 원문은 저장되지 않으므로 운영자가 조회할 수 없습니다.
-응급 복구는 다음처럼 사용자 본인만 새 비밀번호를 선택하는 일회용 링크를 발급합니다.
+비밀번호 복구를 사용할 수 없습니다. SMTP 없이도 **HTTPS 대표 URL이 설정되어 있으면**
+server-admin이나 서버 운영자가 일회용 복구 링크를 발급할 수 있습니다. 비밀번호 원문은
+저장되지 않으므로 운영자가 조회할 수 없습니다. 사용자 본인이 새 비밀번호를 선택하는
+일회용 링크는 다음처럼 발급합니다.
 
 ```bash
 sudo dtxwiki users issue-password-reset user@example.com --delivery link
@@ -287,30 +294,57 @@ docker compose exec app dtxwiki users issue-password-reset user@example.com --de
 서버에서도 명시적으로 선택할 수 있고 TTY에 단 한 번만 표시됩니다. 재발급 시 사용되지 않은 이전
 토큰은 즉시 무효화됩니다.
 
-검증된 이메일의 self-service 복구를 켜려면 canonical HTTPS URL과 SMTP를 설정한 뒤 app과
-worker를 함께 재시작합니다. Reset URL은 요청의 `Host`가 아니라 `DTXWIKI_PUBLIC_BASE_URL`로만
-생성됩니다.
+### 로컬 설치에서 비밀번호를 잊은 경우
+
+`http://127.0.0.1:21080`처럼 HTTPS 대표 URL이 없는 설치에서는 위의 일회용 링크를
+발급할 수 없습니다. dtxWiki를 설치하고 실행한 **같은 OS 계정과 데이터 디렉터리 설정**으로
+터미널에서 다음 명령을 실행합니다.
 
 ```bash
-sudo dtxwiki config set DTXWIKI_PUBLIC_BASE_URL=https://wiki.example.com
-sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
-sudo dtxwiki config set DTXWIKI_MAIL_FROM_ADDRESS=wiki@example.com
-sudo dtxwiki config set DTXWIKI_SMTP_HOST=smtp.example.com
-sudo dtxwiki config set DTXWIKI_SMTP_PORT=587
-sudo dtxwiki config set DTXWIKI_SMTP_USERNAME='<username>'
-sudo dtxwiki config set DTXWIKI_SMTP_PASSWORD='<secret>' --i-understand
-sudo systemctl restart dtxwiki dtxwiki-worker
+dtxwiki users reset-password you@example.com
 ```
 
-SMTP 기본 전송 방식은 587/STARTTLS(`DTXWIKI_SMTP_STARTTLS=true`,
-`DTXWIKI_SMTP_USE_SSL=false`)입니다. 제공자가 465/TLS를 요구하면 포트와 두 TLS
-플래그를 함께 바꿔야 합니다. 이미 SMTP가 켜진 환경에서 `config set`으로 전환할 때는
-다음 순서로 저장한 후 두 서비스를 재시작하세요. SMTP provider를 잠시 `none`으로
-저장하는 것은 TLS 플래그가 둘 다 꺼지거나 켜진 중간 상태를 검증에서 거부하기 때문입니다.
-실행 중인 프로세스는 재시작 전까지 기존 설정을 사용합니다.
+가입에 사용한 이메일을 지정하면 새 비밀번호를 숨김 입력으로 두 번 받습니다. 기존 브라우저
+세션은 무효화되므로 새 비밀번호로 다시 로그인합니다. 액세스 키와 AI 연결은 자동으로
+폐기하지 않습니다. 이 명령에는 `deprecated` 경고가 표시됩니다. HTTPS 대표 URL을
+사용하는 서버에서는 위의 일회용 링크 방식을 우선 사용하세요.
+
+### SMTP로 이메일 인증과 비밀번호 복구 켜기
+
+로그인 화면의 비밀번호 찾기를 통한 복구는 **이미 이메일 인증을 마친 계정**에만 메일을
+보냅니다. canonical HTTPS URL과 SMTP를 설정하고, 웹에서 요청한 이메일 인증·비밀번호
+복구 메일을 발송할 worker도 실행해야 합니다. Reset URL은 요청의 `Host`가 아니라
+`DTXWIKI_PUBLIC_BASE_URL`로만 생성됩니다.
+
+처음 설정할 때와 기존 SMTP 설정을 바꿀 때 모두, 먼저 provider를 `none`으로 저장하고
+공통 값을 설정합니다. 아래 예시의 주소와 인증 값은 메일 제공자가 허용하는 값으로
+교체하세요. HTTPS 대표 URL은 실제로 접속할 수 있는 주소여야 합니다.
 
 ```bash
 sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=none
+sudo dtxwiki config set DTXWIKI_PUBLIC_BASE_URL=https://wiki.example.com
+sudo dtxwiki config set DTXWIKI_MAIL_FROM_ADDRESS=wiki@example.com
+sudo dtxwiki config set DTXWIKI_SMTP_HOST=smtp.example.com
+sudo dtxwiki config set DTXWIKI_SMTP_USERNAME='<username>'
+sudo dtxwiki config set DTXWIKI_SMTP_PASSWORD='<secret>' --i-understand
+```
+
+그다음 메일 제공자가 지정한 포트에 따라 **아래 두 가지 중 하나**를 적용합니다.
+provider를 `smtp`로 바꾸는 명령은 항상 마지막 설정으로 실행합니다.
+
+**587 / STARTTLS:**
+
+```bash
+sudo dtxwiki config set DTXWIKI_SMTP_PORT=587
+sudo dtxwiki config set DTXWIKI_SMTP_STARTTLS=true
+sudo dtxwiki config set DTXWIKI_SMTP_USE_SSL=false
+sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
+sudo systemctl restart dtxwiki dtxwiki-worker
+```
+
+**465 / TLS:** 위의 공통 설정부터 진행하고 다음을 적용합니다.
+
+```bash
 sudo dtxwiki config set DTXWIKI_SMTP_PORT=465
 sudo dtxwiki config set DTXWIKI_SMTP_STARTTLS=false
 sudo dtxwiki config set DTXWIKI_SMTP_USE_SSL=true
@@ -318,19 +352,31 @@ sudo dtxwiki config set DTXWIKI_MAIL_PROVIDER=smtp
 sudo systemctl restart dtxwiki dtxwiki-worker
 ```
 
+provider가 `smtp`일 때 두 TLS 플래그가 모두 `true`이거나 모두 `false`이면 설정 검증에
+실패하며 **서버와 worker가 시작하지 못합니다.** 중간 상태를 피하도록 provider를 잠시
+`none`으로 두고 TLS 값을 저장한 뒤 `smtp`를 마지막에 설정합니다. 실행 중인 프로세스는
+재시작 전까지 기존 설정을 사용합니다.
+
 메일 활성화에는 발신 주소·SMTP 호스트·TLS 설정뿐 아니라 실제 HTTPS 대표 URL도
 필요합니다. 대표 URL을 HTTP로 설정하면 현재 제품의 메일 기능은 켜지지 않습니다.
 설정 변경은 서버와 worker에 모두 적용해야 합니다. SMTP 인증 값은 제공자가 발급한
 값을 사용하고, SMTP가 허용하는 발신 주소를 지정하세요.
 
-메일 상태의 `configured`는 설정값 검사이며 SMTP 인증 확인이 아닙니다. 최근 outbox의
-`sent`는 SMTP 서버가 전송을 수락했다는 의미로, 수신함 도착을 보장하지 않습니다.
+Settings → Deployment → **Identity & Recovery**에서 `Mail configuration: Configured`
+(한국어 UI: 설정 → 배포 → 계정 및 복구 → 메일 설정: 설정됨)는 설정값 검사를 뜻하며
+SMTP 인증 확인이 아닙니다. `Last observed mail delivery`(마지막으로 관찰된 메일 전달)의
+`Last delivery succeeded`(마지막 전달 성공)와 outbox의 `sent`는 SMTP 서버가 전송을
+수락했다는 의미로, 수신함 도착을 보장하지 않습니다.
 설정 후 이메일 확인이나 복구 메일을 실제로 요청하고 발송 상태와 수신함을 함께 확인하세요.
 전용 SMTP 테스트 명령은 없습니다. `users issue-password-reset --delivery email`은
 실제 재설정 토큰을 발급·전송하므로 단순 연결 확인 명령으로 사용하지 않습니다.
 
-복구 성공은 모든 브라우저 세션과 다른 재설정 토큰을 폐기합니다. PAT/MCP/OAuth 자격 증명은
-별도이며, 복구 화면이나 server-admin 조치에서 명시적으로 선택한 경우에만 전부 폐기합니다.
+일회용 링크로 복구를 완료하면 모든 브라우저 세션과 다른 재설정 토큰을 폐기합니다.
+로그인 화면의 **비밀번호를 잊으셨나요?**에서 요청한 이메일 복구는 액세스 키와
+MCP/OAuth 자격 증명도 **항상 폐기**합니다. 연결된 AI 도구에서 새 자격 증명으로 다시
+연결해야 합니다. server-admin 또는 CLI가 발급한 링크는 발급 시 폐기를 지정하거나
+복구 화면에서 폐기를 선택했을 때 자격 증명도 폐기합니다. CLI에서는
+`--revoke-api-tokens` 옵션으로, server-admin 화면에서는 발급 시 선택으로 지정합니다.
 Settings → Deployment의 `Identity & Recovery`는 provider·발신자·canonical URL·outbox 상태만
 표시하며 SMTP 비밀번호 값은 절대 반환하지 않습니다.
 
@@ -802,9 +848,12 @@ table: main.<parent>`). FK column 이 NULL 이어도 마찬가지입니다 — �
 ## Cross-platform dev PC 참조
 
 외부 PC (Linux / Windows) 의 Claude Code / Codex CLI / Gemini CLI / Google Antigravity
-등록과 OS 경로 차이(`%USERPROFILE%\.claude.json`, `%USERPROFILE%\.codex\config.toml`,
-`%USERPROFILE%\.gemini\settings.json`, `%USERPROFILE%\.gemini\config\mcp_config.json` 등)는
-[README.md](README.md) 의 "팀원 PC 에서 MCP client 연결" 섹션을 참조하세요.
+등록은 dtxWiki의 **Settings → MCP access**에서 해당 앱의 설정 안내를 확인합니다.
+Claude Code와 Codex의 연결 예시는
+[README의 Connect your AI tool](README.md#4-connect-your-ai-tool)을 참고하세요.
+앱과 OS에 따라 설정 파일 위치가 다르므로 화면에 표시된 명령을 연결할 PC에서 실행합니다.
+Codex의 기본 사용자 설정 파일은 Linux/macOS에서 `~/.codex/config.toml`, Windows에서
+`%USERPROFILE%\.codex\config.toml`입니다.
 Antigravity release evidence는 `agy mcp list`의 등록 inventory, `/mcp`의 client 상태/로그,
 인증된 dtxWiki MCP 읽기 호출을 별도로 기록합니다. 앞 단계의 성공은 뒤 단계의 성공을
 증명하지 않습니다.

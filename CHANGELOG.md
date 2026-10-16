@@ -1,6 +1,17 @@
 # Changelog
 
-## 0.1.2 — Unreleased
+## Unreleased
+
+### Documentation
+
+- Rework the English and Korean getting-started guides around installation,
+  publishing a first page, Library processing, and connecting AI tools.
+- Clarify access-key permissions, local and remote AI connections, account
+  recovery, and optional team setup.
+- Correct deployment-guide recovery and SMTP instructions and stale README
+  links, and simplify the npm launcher's guide.
+
+## 0.1.2 — 2026-10-14
 
 ### Release distribution
 
