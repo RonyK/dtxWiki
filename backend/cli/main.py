@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import uvicorn
 
 from backend.app.bootstrap import (
     bootstrap as bootstrap_app,
@@ -135,6 +136,15 @@ def run_server(
         _warn_solo_local_network_bind(host, settings)
     app_instance = create_app(settings=settings)
     try:
+        # Preserve uvicorn.run's automatic uvloop/platform selection. Older
+        # supported Uvicorn versions configure the event-loop policy instead.
+        loop_config = uvicorn.Config(app_instance, log_level=log_level)
+        get_loop_factory = getattr(loop_config, "get_loop_factory", None)
+        if get_loop_factory is not None:
+            loop_factory = get_loop_factory()
+        else:
+            loop_config.setup_event_loop()
+            loop_factory = None
         asyncio.run(
             serve_runtime(
                 app_instance,
@@ -148,7 +158,8 @@ def run_server(
                 if open_browser
                 else None,
                 bootstrap=lambda: bootstrap_app(settings, app_instance),
-            )
+            ),
+            loop_factory=loop_factory,
         )
     except RuntimeStartupError as exc:
         typer.echo(str(exc), err=True)

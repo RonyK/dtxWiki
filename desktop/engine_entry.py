@@ -16,7 +16,7 @@ import uvicorn
 from backend.app.bootstrap import bootstrap
 from backend.app.data_dir import data_dir
 from backend.app.main import create_app
-from backend.app.runtime import serve_runtime
+from backend.app.runtime import RuntimeStartupError, serve_runtime
 from backend.app.settings import Settings
 from backend.cli.prod_setup import generate_jwt_key
 
@@ -195,6 +195,10 @@ def _watch_parent(server: uvicorn.Server) -> None:
             return
 
 
+def _emit_runtime_event(**event: str) -> None:
+    print(json.dumps({"event": "dtxwiki-runtime", **event}), flush=True)
+
+
 async def _serve(host: str, port: int) -> None:
     if host not in {"127.0.0.1", "::1"}:
         raise ValueError("desktop engine only accepts a loopback host")
@@ -223,6 +227,7 @@ async def _serve(host: str, port: int) -> None:
         log_level="info",
         bootstrap=lambda: bootstrap(settings, application),
         on_server=watch_parent,
+        on_progress=lambda phase: _emit_runtime_event(phase=phase),
         # A frozen executable is this entry point, not a Python interpreter.
         worker_command=[sys.executable, "worker"]
         if getattr(sys, "frozen", False)
@@ -249,7 +254,11 @@ def main() -> None:
         _emit_bridge_result(operation)
         return
     arguments = _serve_arguments(sys.argv[1:])
-    asyncio.run(_serve(arguments.host, arguments.port))
+    try:
+        asyncio.run(_serve(arguments.host, arguments.port))
+    except RuntimeStartupError as exc:
+        _emit_runtime_event(error=str(exc))
+        raise
 
 
 if __name__ == "__main__":

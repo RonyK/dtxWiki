@@ -70,10 +70,14 @@ def test_backend_exec_start_uses_cli_not_module_main():
     assert "dtxwiki serve" in content
 
 
-def test_split_backend_declares_external_worker():
-    assert (
-        "DTXWIKI_WORKER_MODE=external"
-        in _section(BACKEND_UNIT, "[Service]")["Environment"]
+def test_backend_worker_mode_is_restored_with_the_env_file_on_rollback():
+    service = _section(BACKEND_UNIT, "[Service]")
+    assert service["EnvironmentFile"] == ["/etc/dtxwiki/dtxwiki.env"]
+    # An inline setting survives an env-file rollback and makes 0.1.2 reject
+    # this unknown DTXWIKI_* key during its production startup check.
+    assert all(
+        "DTXWIKI_WORKER_MODE=" not in value
+        for value in service.get("Environment", [])
     )
 
 

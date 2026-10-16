@@ -134,7 +134,7 @@ def test_startup_order_lock_bootstrap_worker_bind_browser(environment, monkeypat
         events.append("bootstrap")
 
     async def start_worker(*_args):
-        assert events == ["bootstrap"]
+        assert events == ["bootstrap", "worker-starting"]
         events.append("worker")
         return FakeWorker(), null_guard()
 
@@ -156,9 +156,16 @@ def test_startup_order_lock_bootstrap_worker_bind_browser(environment, monkeypat
             log_level="error",
             bootstrap=bootstrap,
             on_started=started,
+            on_progress=events.append,
         )
     )
-    assert events == ["bootstrap", "worker", "browser"]
+    assert events == [
+        "bootstrap",
+        "worker-starting",
+        "worker",
+        "worker-ready",
+        "browser",
+    ]
     assert application.state.worker_ready is False
     runtime_lock.acquire_exclusive(runtime._instance_lock_dir(environment)).release()
 
@@ -169,6 +176,7 @@ def test_handshake_failure_never_serves_or_opens_browser(
 ):
     application = SimpleNamespace(state=SimpleNamespace())
     children = []
+    progress = []
 
     async def start_worker(*_args):
         child = FakeWorker(reply)
@@ -189,9 +197,11 @@ def test_handshake_failure_never_serves_or_opens_browser(
                 port=21080,
                 log_level="error",
                 on_started=unexpected,
+                on_progress=progress.append,
             )
         )
     assert children[0].returncode == 0
+    assert progress == ["worker-starting"]
     assert application.state.worker_ready is False
     runtime_lock.acquire_exclusive(runtime._instance_lock_dir(environment)).release()
 
@@ -242,6 +252,9 @@ def test_external_worker_mode_never_spawns_child(environment, monkeypatch):
             log_level="error",
             on_server=servers.append,
             on_started=lambda: setattr(servers[0], "should_exit", True),
+            on_progress=lambda _phase: pytest.fail(
+                "external mode reported worker startup"
+            ),
         )
     )
     assert application.state.worker_mode == "external"

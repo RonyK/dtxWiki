@@ -462,9 +462,21 @@ def test_effective_env_file_prefers_explicit_on_any_tier():
     )
 
 
-def test_run_update_threads_custom_env_file_to_backup(monkeypatch):
+@pytest.mark.parametrize(
+    ("method", "env_file", "expected"),
+    [
+        ("systemd", "/etc/dtxwiki/custom.env", Path("/etc/dtxwiki/custom.env")),
+        ("venv", "/srv/custom.env", Path("/srv/custom.env")),
+        ("systemd", None, us.PROD_ENV_FILE),
+        ("venv", None, None),
+    ],
+)
+def test_run_update_uses_the_same_env_file_for_backup_and_finalization(
+    monkeypatch, method, env_file, expected
+):
     captured = {}
-    _patch_common(monkeypatch)
+    calls = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append(argv))
 
     def fake_create_backup(*a, **k):
         captured.update(k)
@@ -473,14 +485,20 @@ def test_run_update_threads_custom_env_file_to_backup(monkeypatch):
     monkeypatch.setattr(us.backup_service, "create_backup", fake_create_backup)
     monkeypatch.setattr(us.svc, "run_systemctl", lambda action, services: None)
     monkeypatch.setattr(us.healthcheck, "poll_health_ready", lambda base, **k: True)
-    us.run_update(
+    result = us.run_update(
         _settings(),
-        method="systemd",
-        env_file="/etc/dtxwiki/custom.env",
+        method=method,
+        env_file=env_file,
         yes=True,
         echo=lambda *a: None,
     )
-    assert captured["env_file"] == Path("/etc/dtxwiki/custom.env")
+    assert result.ok
+    assert captured["env_file"] == expected
+    finalize = next(argv for argv in calls if "--finalize-bootstrap" in argv)
+    if expected is None:
+        assert "--env-file" not in finalize
+    else:
+        assert finalize[finalize.index("--env-file") + 1] == str(expected)
 
 
 # --- Group G: --channel normalization (#15) ------------------------------

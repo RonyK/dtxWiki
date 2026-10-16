@@ -1,7 +1,9 @@
 """CLI-level tests for `dtxwiki update` / `dtxwiki rollback` wrappers."""
 
 import os
+import subprocess
 
+import pytest
 import typer
 from typer.testing import CliRunner
 
@@ -132,8 +134,15 @@ def test_finalize_bootstrap_echoes_redacted_db_url(monkeypatch):
     assert "sslpassword=****" in result.stdout
 
 
-def test_old_systemd_update_finalization_preserves_split_worker(monkeypatch, tmp_path):
-    env = tmp_path / "dtxwiki.env"
+@pytest.mark.parametrize("custom_env", [False, True])
+@pytest.mark.parametrize("explicit_env", [False, True])
+def test_systemd_update_finalization_preserves_split_worker(
+    monkeypatch, tmp_path, custom_env, explicit_env
+):
+    default_env = tmp_path / "default.env"
+    default_env.write_text("# Default file is untouched by a custom deployment\n")
+    monkeypatch.setattr(cmd.prod_setup, "DEFAULT_ENV_FILE", default_env)
+    env = tmp_path / "custom deployment.env" if custom_env else default_env
     original = "# Existing deployment\nDTXWIKI_SESSION_SECRET=preserve-this-value\n"
     env.write_text(original, encoding="utf-8")
     monkeypatch.setenv("DTXWIKI_WORKER_MODE", "managed")
@@ -152,28 +161,120 @@ def test_old_systemd_update_finalization_preserves_split_worker(monkeypatch, tmp
         assert cmd.prod_setup.get_env_value(env, "DTXWIKI_WORKER_MODE") == "external"
 
     monkeypatch.setattr(cmd, "bootstrap_app", bootstrap)
+    queries = []
 
-    # This is the invocation already made by the previous release's updater;
-    # no new installer, rewritten unit, or operator action is involved.
+    def systemctl_show(argv, **kwargs):
+        assert not explicit_env, "an explicit --env-file must skip discovery"
+        queries.append(argv)
+        assert argv == [
+            "systemctl", "show", "dtxwiki.service",
+            "--property=EnvironmentFiles", "--value",
+        ]
+        assert kwargs == {
+            "check": True, "capture_output": True, "text": True, "timeout": 5,
+        }
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"{env} (ignore_errors=no)\n", stderr=""
+        )
+
+    monkeypatch.setattr(cmd.subprocess, "run", systemctl_show)
+
+    # The previous updater omits --env-file, even for custom deployments. The
+    # current updater explicitly forwards either the default or custom path.
+    args = ["update", "--finalize-bootstrap", "--method", "systemd"]
+    if explicit_env:
+        args.extend(["--env-file", str(env)])
     result = runner.invoke(
         app,
-        [
-            "update",
-            "--finalize-bootstrap",
-            "--method",
-            "systemd",
-            "--env-file",
-            str(env),
-        ],
+        args,
     )
 
     assert result.exit_code == 0, result.output
+    assert len(queries) == (0 if explicit_env else 1)
     assert seen == ["external"]
     assert (
         cmd.prod_setup.get_env_value(env, "DTXWIKI_SESSION_SECRET")
         == "preserve-this-value"
     )
     assert env.with_name(env.name + ".bak").read_text(encoding="utf-8") == original
+    if custom_env:
+        assert default_env.read_text() == (
+            "# Default file is untouched by a custom deployment\n"
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_output",
+    [
+        "",
+        "{env} (ignore_errors=no) {env} (ignore_errors=yes)",
+        "{env} (ignore_errors=no)\n{env} (ignore_errors=yes)",
+        "relative.env (ignore_errors=no)",
+        "{directory}/missing.env (ignore_errors=no)",
+        "{directory} (ignore_errors=no)",
+        "{env}",
+        "{env} (ignore_errors=invalid)",
+        "unexpected\n{env} (ignore_errors=no)",
+    ],
+)
+def test_legacy_finalization_refuses_ambiguous_or_invalid_systemd_env(
+    monkeypatch, tmp_path, invalid_output
+):
+    env = tmp_path / "default.env"
+    original = "# Must remain untouched\n"
+    env.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(cmd.prod_setup, "DEFAULT_ENV_FILE", env)
+    monkeypatch.setattr(
+        cmd.install_method,
+        "detect_install_method",
+        lambda override=None: InstallMethod(
+            "systemd", None, None, (), None, ("dtxwiki", "dtxwiki-worker")
+        ),
+    )
+    monkeypatch.setattr(
+        cmd.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, stdout=invalid_output.format(env=env, directory=tmp_path),
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        cmd, "_load_prod_env",
+        lambda *args: pytest.fail("must discover the env file before sourcing it"),
+    )
+    monkeypatch.setattr(
+        cmd, "bootstrap_app", lambda settings: pytest.fail("must not migrate"),
+    )
+
+    result = runner.invoke(
+        app, ["update", "--finalize-bootstrap", "--method", "systemd"]
+    )
+
+    assert result.exit_code == 3, result.output
+    assert "Keep services stopped" in result.output
+    assert "--env-file /path/to/dtxwiki.env" in result.output
+    assert env.read_text(encoding="utf-8") == original
+    assert not env.with_name(env.name + ".bak").exists()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        FileNotFoundError("systemctl missing"),
+        subprocess.TimeoutExpired(["systemctl"], 5),
+        subprocess.CalledProcessError(1, ["systemctl"]),
+    ],
+)
+def test_legacy_finalization_refuses_failed_systemd_lookup(monkeypatch, failure):
+    def failed_lookup(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(cmd.subprocess, "run", failed_lookup)
+
+    with pytest.raises(typer.Exit) as exc:
+        cmd._legacy_systemd_env_file()
+
+    assert exc.value.exit_code == 3
 
 
 def test_venv_finalization_keeps_managed_worker_default(monkeypatch, tmp_path):

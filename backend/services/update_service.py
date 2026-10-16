@@ -292,14 +292,21 @@ def run_update(
             # half-migrated failure (the _STEP_TIMEOUT_SEC cap stays on the
             # index/install step only). The subprocess takes no runtime lock
             # of its own, so the exclusive one held here does not stop it.
+            finalize_argv = [
+                str(install.dtxwiki_bin),
+                "update",
+                "--finalize-bootstrap",
+                "--method",
+                install.kind,
+            ]
+            # Inheriting the values is insufficient: finalization also updates
+            # the env file (for example, to retain an existing worker unit).
+            # Use the same path that was backed up and that the services read.
+            effective_env = _effective_env_file(install, env_file)
+            if effective_env is not None:
+                finalize_argv.extend(["--env-file", str(effective_env)])
             _run_argv(
-                [
-                    str(install.dtxwiki_bin),
-                    "update",
-                    "--finalize-bootstrap",
-                    "--method",
-                    install.kind,
-                ],
+                finalize_argv,
                 echo=echo,
                 timeout=None,
             )

@@ -14,6 +14,7 @@ import stat
 import subprocess
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -181,6 +182,41 @@ def test_setup_without_bootstrap_says_the_services_will_refuse(
     assert result.exit_code == 0, _out(result)
     assert "until 'dtxwiki bootstrap' has migrated the database" in _out(result)
     assert _db_revision(paths["db"]) is None
+
+
+@pytest.mark.parametrize("reconfigure", [False, True])
+def test_windows_setup_uses_managed_worker_when_systemd_is_skipped(
+    tmp_path: Path, unit_dir: Path, monkeypatch: pytest.MonkeyPatch, reconfigure: bool
+):
+    paths = _paths(tmp_path)
+    if reconfigure:
+        paths["env"].parent.mkdir(parents=True)
+        paths["env"].write_text(
+            "DTXWIKI_SESSION_SECRET=" + "s" * 80 + "\n",
+            encoding="utf-8",
+        )
+    events: list[str] = []
+    # Patch the command module's platform view without altering the host that
+    # pytest, pathlib, and the other setup helpers actually run on.
+    monkeypatch.setattr(
+        prod_commands, "sys",
+        SimpleNamespace(platform="win32", stdin=prod_commands.sys.stdin),
+    )
+    monkeypatch.setattr(prod_setup.subprocess, "run", _Systemctl(events))
+
+    result = runner.invoke(
+        cli_main.app,
+        _setup_args(
+            paths, "--no-caddy", "--no-bootstrap", "--no-admin",
+            *(["--reconfigure"] if reconfigure else []),
+        ),
+    )
+
+    assert result.exit_code == 0, _out(result)
+    assert "systemd not available on this platform; skipping" in _out(result)
+    assert prod_setup.get_env_value(paths["env"], "DTXWIKI_WORKER_MODE") == "managed"
+    assert list(unit_dir.iterdir()) == []
+    assert events == []
 
 
 # --------------------------------------------------------------------------- #

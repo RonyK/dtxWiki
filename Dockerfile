@@ -19,6 +19,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+# Container deployments historically run a separate worker service. Keep that
+# behavior even when an operator upgrades the image with an older Compose file.
+# A single-container deployment can opt in with DTXWIKI_WORKER_MODE=managed.
+# Keep this default in the image: a rollback to 0.1.2 then also removes the new
+# setting, which that version's unknown-environment guard would reject.
+ENV DTXWIKI_WORKER_MODE=external
+
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="dtxWiki" \

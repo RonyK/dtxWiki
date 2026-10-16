@@ -420,6 +420,7 @@ def setup_production(
         )
         raise typer.Exit(2)
     is_fresh = not env_file.exists()
+    install_systemd = systemd and sys.platform != "win32"
 
     tls_mode = _resolve_tls_mode(
         tls, existing, dry_run=dry_run, insecure_eval=insecure_eval
@@ -522,7 +523,7 @@ def setup_production(
             database_url=db_url,
             tls_mode=tls_mode,
             forwarded_allow_ips=forwarded_allow_ips,
-            worker_mode="external" if systemd else "managed",
+            worker_mode="external" if install_systemd else "managed",
         )
         runner.action(
             f"write {env_file}",
@@ -555,7 +556,7 @@ def setup_production(
             "DTXWIKI_APP_ENV": "production",
             "DTXWIKI_APP_MODE": app_mode,
             "DTXWIKI_WORKER_MODE": (
-                "external" if systemd
+                "external" if install_systemd
                 else existing.get("DTXWIKI_WORKER_MODE", "managed")
             ),
             # Backfill the mode-derived safe default for legacy env files, but

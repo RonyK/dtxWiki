@@ -31,6 +31,7 @@ def serve(monkeypatch, tmp_path):
 
     async def fake_runtime(_app, _settings, **kwargs):
         calls.update(uvicorn=kwargs)
+        calls["loop"] = asyncio.get_running_loop()
         kwargs["bootstrap"]()
         if kwargs["on_started"] is not None:
             kwargs["on_started"]()
@@ -48,6 +49,52 @@ def serve(monkeypatch, tmp_path):
         return result, calls
 
     return invoke
+
+
+def test_serve_uses_uvicorn_selected_event_loop(serve, monkeypatch):
+    selected_loops = []
+
+    def loop_factory():
+        loop = asyncio.new_event_loop()
+        selected_loops.append(loop)
+        return loop
+
+    monkeypatch.setattr(
+        cli_main.uvicorn.Config,
+        "get_loop_factory",
+        lambda _config: loop_factory,
+        raising=False,
+    )
+
+    _, calls = serve("--no-open")
+
+    assert len(selected_loops) == 1
+    assert calls["loop"] is selected_loops[0]
+    assert selected_loops[0].is_closed()
+
+
+def test_serve_uses_uvloop_when_installed(serve):
+    uvloop = pytest.importorskip("uvloop")
+
+    _, calls = serve("--no-open")
+
+    assert isinstance(calls["loop"], uvloop.Loop)
+
+
+def test_serve_supports_uvicorn_with_policy_based_loop_setup(serve, monkeypatch):
+    configured = []
+    monkeypatch.setattr(
+        cli_main.uvicorn,
+        "Config",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            setup_event_loop=lambda: configured.append(True)
+        ),
+    )
+
+    _, calls = serve("--no-open")
+
+    assert configured == [True]
+    assert calls["loop"].is_closed()
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.20", "wiki-box"])

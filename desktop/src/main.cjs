@@ -165,6 +165,19 @@ async function stopAllEngines() {
   await Promise.all(engines.map((engine) => stopLocalEngine(engine)));
 }
 
+async function handleLocalEngineFailure(engine, error) {
+  if (quitting || localEngine !== engine) return;
+  const failureGeneration = ++connectionGeneration;
+  localEngine = null;
+  await stopLocalEngine(engine);
+  if (failureGeneration !== connectionGeneration || quitting) return;
+  dialog.showErrorBox(
+    "dtxWiki 로컬 엔진이 중지되었습니다",
+    `${error.message}\n\n로그: ${engine.logPath}`,
+  );
+  await showWelcome();
+}
+
 async function connectLocal() {
   const generation = ++connectionGeneration;
   await stopAllEngines();
@@ -184,6 +197,9 @@ async function connectLocal() {
           throw new Error("local engine start cancelled");
         }
         pendingEngine = engine;
+      },
+      onUnexpectedExit: (engine, error) => {
+        void handleLocalEngineFailure(engine, error);
       },
     });
     const candidateEngine = localEngine;

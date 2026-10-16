@@ -12,6 +12,26 @@
   temporary 0.1.1 recovery workflow is removed.
 - Desktop installers remain outside this release.
 
+### Runtime and upgrades
+
+- `dtxwiki` and `dtxwiki serve` now start and stop the required background
+  worker together. If another process manager already runs `dtxwiki-worker run`,
+  set `DTXWIKI_WORKER_MODE=external` or pass `--worker-mode external` before
+  starting the upgraded web server, so only one worker uses the database.
+- Production setup and systemd updates write `external` to the backed-up env
+  file, including custom `--env-file` paths. Finalization invoked by an older
+  updater recovers the env path from the installed systemd unit. Rolling back
+  restores that file, and the unit adds no setting that older versions cannot
+  read. Setup without installed systemd units, including Windows, defaults to a
+  managed worker; reconfiguration preserves an existing worker-mode selection.
+- Docker images default to `external`, preserving existing Compose deployments
+  with a separate worker service. Compose adds no new worker-mode variable, so
+  it remains usable when rolling back to an older image. For a single container
+  with a managed worker, explicitly set `DTXWIKI_WORKER_MODE=managed`.
+- Preserve Uvicorn's automatic event-loop selection, including uvloop when
+  available. Desktop reports unexpected engine/worker failures and gives
+  bootstrap, worker startup and HTTP startup separate bounded phases.
+
 ### Fixes
 
 - Select the Context publish replay audit by version and change-set identity.

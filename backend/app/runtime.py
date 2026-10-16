@@ -126,8 +126,9 @@ async def _stop_worker(process: asyncio.subprocess.Process) -> None:
         await process.wait()
     finally:
         if os.name != "nt":
-            # The worker owns a fresh session. Reap converter descendants too,
-            # including any that outlived the worker after an interrupted job.
+            # Reap members of the worker's own process group. Bundled converter
+            # and preview hosts use separate sessions with guard_managed_parent;
+            # detached third-party converters need their own parent-death guard.
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
 
@@ -187,6 +188,7 @@ async def serve_runtime(
     forwarded_allow_ips: str | None = None,
     on_started: Callable[[], None] | None = None,
     on_server: Callable[[uvicorn.Server], None] | None = None,
+    on_progress: Callable[[str], None] | None = None,
     worker_command: Sequence[str] | None = None,
     bootstrap: Callable[[], None] | None = None,
 ) -> None:
@@ -195,6 +197,7 @@ async def serve_runtime(
     ``bootstrap`` runs under the managed instance lock, before starting a child.
     ``on_server`` lets the desktop parent watcher request server shutdown.
     ``on_started`` runs only after worker readiness and actual socket binding.
+    ``on_progress`` reports the worker-starting and worker-ready phases once.
     An unexpected worker exit stops HTTP serving and raises RuntimeStartupError.
     """
     mode = settings.worker_mode
@@ -236,6 +239,8 @@ async def serve_runtime(
                 if server.should_exit:
                     return
                 if mode == "managed":
+                    if on_progress is not None:
+                        on_progress("worker-starting")
                     try:
                         process, worker_tree = await _start_worker(
                             settings, worker_command
@@ -271,6 +276,8 @@ async def serve_runtime(
                             "see the preceding error"
                         )
                     application.state.worker_ready = True
+                    if on_progress is not None:
+                        on_progress("worker-ready")
                     drain_task = asyncio.create_task(_drain_output(process.stdout))
                     exit_task = asyncio.create_task(process.wait())
                 server_task = asyncio.create_task(server.serve())

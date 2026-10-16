@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,7 +22,7 @@ def test_desktop_engine_arguments_require_port(monkeypatch):
 
 @pytest.mark.parametrize("frozen", [False, True])
 def test_desktop_engine_manages_worker_and_watches_parent(
-    monkeypatch, tmp_path, frozen
+    monkeypatch, tmp_path, frozen, capsys
 ):
     application = object()
     calls = {}
@@ -48,6 +49,8 @@ def test_desktop_engine_manages_worker_and_watches_parent(
         calls.update(app=app, settings=settings, options=kwargs)
         kwargs["bootstrap"]()
         kwargs["on_server"](server)
+        kwargs["on_progress"]("worker-starting")
+        kwargs["on_progress"]("worker-ready")
 
     server = SimpleNamespace(should_exit=False)
     monkeypatch.setattr(engine_entry.threading, "Thread", Thread)
@@ -65,6 +68,30 @@ def test_desktop_engine_manages_worker_and_watches_parent(
     assert calls["watcher_started"] is True
     assert threads[0]["target"] is engine_entry._watch_parent
     assert threads[0]["args"] == (server,)
+    assert [json.loads(line) for line in capsys.readouterr().out.splitlines()] == [
+        {"event": "dtxwiki-runtime", "phase": "worker-starting"},
+        {"event": "dtxwiki-runtime", "phase": "worker-ready"},
+    ]
+
+
+def test_desktop_runtime_failure_is_reported_to_shell_and_remains_a_failure(
+    monkeypatch, capsys
+):
+    async def failed_runtime(*_args):
+        raise engine_entry.RuntimeStartupError(
+            "dtxWiki background worker stopped unexpectedly (exit code 7)"
+        )
+
+    monkeypatch.setattr(engine_entry, "_serve", failed_runtime)
+    monkeypatch.setattr(engine_entry.sys, "argv", ["dtxwiki-engine", "--port", "23456"])
+
+    with pytest.raises(engine_entry.RuntimeStartupError, match="exit code 7"):
+        engine_entry.main()
+
+    assert json.loads(capsys.readouterr().out) == {
+        "event": "dtxwiki-runtime",
+        "error": "dtxWiki background worker stopped unexpectedly (exit code 7)",
+    }
 
 
 @pytest.mark.parametrize("parent_input", ["shutdown\n", ""])

@@ -23,13 +23,23 @@ Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
   app/worker를 수평 확장하지 않습니다.
 
 개인용 `dtxwiki`/`dtxwiki serve`와 Desktop 로컬 엔진은 서버와 worker를 함께
-시작하고 종료합니다. systemd 설치와 이 저장소의 production Compose는 worker를
-별도 서비스로 자동 구성하므로 웹 서버에 `DTXWIKI_WORKER_MODE=external`을 설정합니다.
+시작하고 종료합니다. systemd 설치는 worker를 별도 서비스로 구성하고 env 파일에
+`DTXWIKI_WORKER_MODE=external`을 기록합니다. Docker 이미지는 기존 Compose의 별도
+worker 서비스와 호환되도록 image 자체에서 `external`을 기본값으로 사용합니다.
 일반 설치에서는 이 설정이나 별도 worker 명령이 필요하지 않습니다.
 기존 systemd 설치도 `dtxwiki update`의 마이그레이션 단계에서 env 파일에 이 설정을
-자동 반영합니다. 로컬 wheel을 수동 교체한다면 최신 `setup production --reconfigure`를
+자동 반영합니다. 이전 updater가 custom env 경로를 전달하지 않으면 설치된 systemd unit의
+env 경로를 조회합니다. 경로를 하나로 확정할 수 없으면 서비스를 중지한 채 실패하므로
+출력된 `--env-file` 복구 명령으로 마이그레이션을 마친 뒤 서비스를 시작하세요.
+로컬 wheel을 수동 교체한다면 최신 `setup production --reconfigure`를
 실행해 서비스 설정을 갱신하거나, 기존 env 파일에 `DTXWIKI_WORKER_MODE=external`을
 추가한 뒤 서비스를 다시 시작하세요.
+다른 process manager에서 이미 `dtxwiki-worker run`을 실행 중이라면 새 버전의 웹 서버를
+처음 시작하기 전에 `DTXWIKI_WORKER_MODE=external` 또는 `--worker-mode external`을
+설정하세요. 이전 버전의 env 백업에는 이 설정을 추가하지 마세요.
+별도 worker 서비스가 없는 `--no-systemd` 설치와 Windows에서는 기본 `managed`를
+사용하며, `dtxwiki serve`가 worker도 실행합니다. 재구성 시에는 기존 worker-mode
+설정을 유지합니다.
 
 | 환경 | 권장 경로 | 비고 |
 | --- | --- | --- |
@@ -526,6 +536,12 @@ JWT 키·session secret(`DTXWIKI_SESSION_SECRET_FILE=/var/lib/dtxwiki/session_se
 전제는 self-host 와 동일: 도메인 DNS A 레코드 → 호스트, 80/443 개방.
 production 스택은 dtxWiki 이미지 + `caddy:2` 만 사용하며 개발 전용 사이드카는 포함하지
 않는다.
+
+기존 Compose 파일을 유지하고 이미지만 교체해도 새 이미지의 `external` 기본값으로
+app 내부 worker와 별도 worker가 중복 실행되지 않습니다. Compose의 app `environment`에
+`DTXWIKI_WORKER_MODE`를 추가하지 마세요. 이 설정을 모르는 0.1.2 이미지로 rollback할 때
+production 설정 검증이 실패할 수 있습니다. 별도 worker 서비스 없이 컨테이너 하나로
+실행하려면 `DTXWIKI_WORKER_MODE=managed`를 명시하고 worker 서비스를 실행하지 마세요.
 
 ---
 

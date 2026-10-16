@@ -132,6 +132,15 @@ def test_compose_uses_full_image_var_not_image_tag():
 
 
 @pytest.mark.parametrize("service", DTXWIKI_SERVICES)
+def test_compose_worker_mode_does_not_break_0_1_2_image_rollback(service: str):
+    # 0.1.2 rejects this unknown DTXWIKI_ variable in production. The image
+    # owns the new default, so changing only DTXWIKI_IMAGE back removes it.
+    assert "DTXWIKI_WORKER_MODE" not in _service_env(
+        service, {"DTXWIKI_DOMAIN": "wiki.example.test"}
+    )
+
+
+@pytest.mark.parametrize("service", DTXWIKI_SERVICES)
 def test_compose_gives_every_dtxwiki_service_the_secrets_as_files(service: str):
     """`docker compose exec` never runs the entrypoint; it sees only this env."""
 
@@ -352,6 +361,10 @@ def test_docker_image_actually_builds(built_image: str):
     )
     assert config["User"] == "dtxwiki"
     assert config["Entrypoint"] == ["/usr/local/bin/docker-entrypoint.sh"]
+    # An older/custom Compose file has no worker-mode override. The image
+    # itself must preserve its existing separate-worker topology.
+    image_env = dict(entry.split("=", 1) for entry in config["Env"])
+    assert image_env["DTXWIKI_WORKER_MODE"] == "external"
     assert (
         config["Labels"]["org.opencontainers.image.licenses"]
         == "AGPL-3.0-only OR Elastic-2.0"
@@ -394,6 +407,19 @@ for pid in os.listdir('/proc'):
 print(','.join(leaks))
 """
 
+_MANAGED_WORKER_PIDS = """
+from pathlib import Path
+pids = []
+for path in Path('/proc').glob('[0-9]*/cmdline'):
+    try:
+        args = path.read_bytes().split(b'\\0')
+    except OSError:
+        continue
+    if b'backend.worker.managed' in args:
+        pids.append(path.parent.name)
+print(','.join(pids))
+"""
+
 
 @DOCKER_SMOKE
 def test_docker_exec_cli_works_with_the_compose_environment(built_image: str):
@@ -429,6 +455,20 @@ def test_docker_exec_cli_works_with_the_compose_environment(built_image: str):
         )
         app = containers[0]
         _wait_until_live(app)
+
+        worker_component = _docker(
+            "exec", app, "python", "-c",
+            "import json, urllib.request; "
+            "print(json.load(urllib.request.urlopen("
+            "'http://127.0.0.1:21080/health/ready'))['components']['worker'])",
+        ).stdout.strip()
+        # No worker mode is supplied by Compose. This therefore exercises the
+        # image default used by existing deployments that only pull an image.
+        assert worker_component == "n/a", "app started a second, managed worker"
+        managed_pids = _docker(
+            "exec", app, "python", "-c", _MANAGED_WORKER_PIDS,
+        ).stdout.strip()
+        assert managed_pids == "", f"app spawned managed workers: {managed_pids}"
 
         password = secrets.token_urlsafe(18)
         added = _docker(
