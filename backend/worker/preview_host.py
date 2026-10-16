@@ -494,6 +494,9 @@ def _error_payload(error: PreviewProviderError) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from backend.app.process_tree import guard_managed_parent
+
+    guard_managed_parent()
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", required=True)
     args = parser.parse_args(argv)

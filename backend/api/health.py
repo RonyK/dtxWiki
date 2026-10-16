@@ -40,6 +40,7 @@ def _ready_payload(request: Request) -> tuple[HealthReadyResponse, int]:
         "app_version": _check_app_version(request),
         "mcp": _check_mcp(request),
         "oauth_jwk": _check_oauth_jwk(request),
+        "worker": _check_worker(request),
     }
     ready = all(value in {"ok", "n/a"} for value in components.values())
     return (
@@ -49,6 +50,14 @@ def _ready_payload(request: Request) -> tuple[HealthReadyResponse, int]:
         }),
         200 if ready else 503,
     )
+
+
+def _check_worker(request: Request) -> str:
+    # Raw ASGI hosts and split deployments manage workers outside this app.
+    # Only a managed runtime can attest to its worker's initialization/liveness.
+    if getattr(request.app.state, "worker_mode", None) != "managed":
+        return "n/a"
+    return "ok" if getattr(request.app.state, "worker_ready", False) else "error"
 
 
 def _check_db(request: Request) -> str:

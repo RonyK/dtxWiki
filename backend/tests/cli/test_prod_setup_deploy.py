@@ -163,6 +163,7 @@ def test_setup_bootstraps_and_hands_over_data_before_units_start(
         "units": ["dtxwiki-worker.service", "dtxwiki.service"],
     }
     assert state_when_started == {"enable": expected, "restart": expected}
+    assert prod_setup.get_env_value(paths["env"], "DTXWIKI_WORKER_MODE") == "external"
 
 
 def test_setup_without_bootstrap_says_the_services_will_refuse(

@@ -6,7 +6,8 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const ENGINE_START_TIMEOUT_MS = 60_000;
-const ENGINE_STOP_TIMEOUT_MS = 5_000;
+// The runtime allows up to 10 seconds each for HTTP drain and worker shutdown.
+const ENGINE_STOP_TIMEOUT_MS = 25_000;
 
 function engineExecutableName(platform = process.platform) {
   return platform === "win32" ? "dtxwiki-engine.exe" : "dtxwiki-engine";

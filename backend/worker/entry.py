@@ -2,7 +2,7 @@ import json
 import logging
 import signal
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Annotated
@@ -82,9 +82,7 @@ class _ShutdownSignals:
         previous = {}
         try:
             for shutdown_signal in _SHUTDOWN_SIGNALS:
-                previous[shutdown_signal] = signal.signal(
-                    shutdown_signal, self.handle
-                )
+                previous[shutdown_signal] = signal.signal(shutdown_signal, self.handle)
         except ValueError:
             # Not the main thread (an embedding host): the host owns signals.
             pass
@@ -303,6 +301,8 @@ def _run_loop(
     poll_interval_seconds: float,
     max_jobs: int | None,
     idle_exit_after: int | None,
+    on_ready: Callable[[], None] | None = None,
+    report_idle: bool = True,
 ) -> None:
     database_provider = DatabaseProvider(settings)
     blob_store_provider = BlobStoreProvider(settings)
@@ -313,6 +313,8 @@ def _run_loop(
         blob_store_provider=blob_store_provider,
     )
     worker.business_phase_guard = shutdown.interruptible
+    if on_ready is not None:
+        on_ready()
     processed_count = 0
     idle_count = 0
     job_types = set(job_type) if job_type else None
@@ -408,7 +410,8 @@ def _run_loop(
         consecutive_dispatch_errors = 0
         if result is None:
             idle_count += 1
-            typer.echo(json.dumps({"status": "idle"}, sort_keys=True))
+            if report_idle:
+                typer.echo(json.dumps({"status": "idle"}, sort_keys=True))
             if idle_exit_after is not None and idle_count >= idle_exit_after:
                 return
             shutdown.sleep(poll_interval_seconds)

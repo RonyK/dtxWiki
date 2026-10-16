@@ -33,6 +33,10 @@ make bundle-frontend    # SPA를 backend/static 에 번들 (packaged UI를 직�
 자동 생성합니다. 브라우저에서 `http://127.0.0.1:21080/`로 접속하면 backend가 번들된
 frontend를 함께 serve합니다.
 
+`dtxwiki`와 `dtxwiki serve`는 worker도 자동으로 시작하고 종료합니다.
+`--db`를 지정하면 worker도 같은 DB를 사용합니다. 별도 worker를 띄우지 마세요.
+Desktop 로컬 엔진도 같은 실행 관리 코드를 사용합니다.
+
 개발 중에는 보통 dev 서버 두 개를 띄웁니다(번들 없이 HMR):
 
 ```bash
@@ -102,16 +106,16 @@ DB 복사이며 workspace 분할 이전, PG→SQLite, live read/write 중 이전
 
 ## Docker 없이 데모 실행 (SQLite)
 
-명시적인 `DTXWIKI_DATABASE_URL` 을 공유해서 backend/worker 가 같은 DB 를 보도록
-구성합니다.
+별도 데이터 경로를 지정하고 `dtxwiki` 하나로 서버와 작업 처리를 실행합니다.
 
 ```bash
 make install
 export DTXWIKI_DEMO_DIR="$(mktemp -d -t dtxwiki-demo-XXXXXX)"
+export DTXWIKI_DATA_DIR="$DTXWIKI_DEMO_DIR"
 export DTXWIKI_DATABASE_URL="sqlite+pysqlite:///${DTXWIKI_DEMO_DIR}/dtxwiki-demo.sqlite"
 .venv/bin/dtxwiki bootstrap
 .venv/bin/dtxwiki users add admin@example.com --password 'change-me-please'
-.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 21080
+.venv/bin/dtxwiki --no-open
 ```
 
 ## 테스트와 검증
@@ -242,13 +246,17 @@ Backend Python 코드만 바꾼 경우:
 make backend-dev
 ```
 
-`dtxwiki --no-open`과 worker를 직접 실행 중이었다면 process를
-종료한 뒤 다시 실행합니다.
+`dtxwiki --no-open`을 실행 중이었다면 `Ctrl+C`로 종료한 뒤 다시 실행합니다.
+함께 실행된 worker도 이 과정에서 교체됩니다.
 
 ```bash
 .venv/bin/dtxwiki --no-open
-.venv/bin/python -m backend.worker.entry run
 ```
+
+외부 process manager로 worker를 따로 관리할 때만 웹 서버에
+`DTXWIKI_WORKER_MODE=external`을 지정하고 `dtxwiki-worker run`을 실행합니다.
+systemd/production Compose 설정은 이 구성을 자동으로 적용합니다.
+`make backend-dev`나 ASGI 직접 실행은 기존처럼 worker를 따로 실행합니다.
 
 Python dependency나 `pyproject.toml`의 entry point를 바꾼 경우:
 

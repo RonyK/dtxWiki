@@ -522,6 +522,7 @@ def setup_production(
             database_url=db_url,
             tls_mode=tls_mode,
             forwarded_allow_ips=forwarded_allow_ips,
+            worker_mode="external" if systemd else "managed",
         )
         runner.action(
             f"write {env_file}",
@@ -553,6 +554,10 @@ def setup_production(
             ),
             "DTXWIKI_APP_ENV": "production",
             "DTXWIKI_APP_MODE": app_mode,
+            "DTXWIKI_WORKER_MODE": (
+                "external" if systemd
+                else existing.get("DTXWIKI_WORKER_MODE", "managed")
+            ),
             # Backfill the mode-derived safe default for legacy env files, but
             # never replace an operator's explicit true/false choice.
             "DTXWIKI_SIGNUP_ENABLED": signup_enabled,

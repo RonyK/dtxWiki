@@ -483,6 +483,7 @@ def _bundled_distribution_digest() -> str:
     backend_root = Path(__file__).resolve().parents[1]
     paths = {
         Path(__file__).resolve(),
+        (backend_root / "app" / "process_tree.py").resolve(),
         (backend_root / "preview_providers" / "__init__.py").resolve(),
         (backend_root / "services" / "bounded_subprocess.py").resolve(),
         (backend_root / "services" / "preview_contracts.py").resolve(),

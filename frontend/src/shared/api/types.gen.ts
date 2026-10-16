@@ -5091,6 +5091,12 @@ export interface components {
              * @enum {string}
              */
             oauth_jwk: "ok" | "n/a" | "error" | "not_configured" | "unsynced" | "drift" | "manager_missing" | "ephemeral_unsafe" | "invalid";
+            /**
+             * Worker
+             * @default n/a
+             * @enum {string}
+             */
+            worker: "ok" | "n/a" | "error" | "not_configured" | "unsynced" | "drift" | "manager_missing" | "ephemeral_unsafe" | "invalid";
         };
         /** HealthLiveResponse */
         HealthLiveResponse: {

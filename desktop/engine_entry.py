@@ -16,6 +16,7 @@ import uvicorn
 from backend.app.bootstrap import bootstrap
 from backend.app.data_dir import data_dir
 from backend.app.main import create_app
+from backend.app.runtime import serve_runtime
 from backend.app.settings import Settings
 from backend.cli.prod_setup import generate_jwt_key
 
@@ -202,30 +203,48 @@ async def _serve(host: str, port: int) -> None:
     settings = Settings(
         backend_port=port,
         oauth_jwt_private_key_path=str(oauth_key),
+        worker_mode="managed",
     )
     application = create_app(settings=settings)
-    bootstrap(settings, application)
-    server = uvicorn.Server(
-        uvicorn.Config(
-            application,
-            host=host,
-            port=port,
-            log_level="info",
-            access_log=False,
-            proxy_headers=False,
-        )
+
+    def watch_parent(server: uvicorn.Server) -> None:
+        threading.Thread(
+            target=_watch_parent,
+            args=(server,),
+            name="dtxwiki-desktop-parent-watch",
+            daemon=True,
+        ).start()
+
+    await serve_runtime(
+        application,
+        settings,
+        host=host,
+        port=port,
+        log_level="info",
+        bootstrap=lambda: bootstrap(settings, application),
+        on_server=watch_parent,
+        # A frozen executable is this entry point, not a Python interpreter.
+        worker_command=[sys.executable, "worker"]
+        if getattr(sys, "frozen", False)
+        else None,
     )
-    threading.Thread(
-        target=_watch_parent,
-        args=(server,),
-        name="dtxwiki-desktop-parent-watch",
-        daemon=True,
-    ).start()
-    await server.serve()
 
 
 def main() -> None:
     operation = sys.argv[1] if len(sys.argv) > 1 else "serve"
+    if operation == "worker":
+        from backend.worker.managed import main as worker_main
+
+        worker_main()
+        return
+    if operation == "converter-host":
+        from backend.worker.converter_host import main as converter_main
+
+        raise SystemExit(converter_main(sys.argv[2:]))
+    if operation == "preview-host":
+        from backend.worker.preview_host import main as preview_main
+
+        raise SystemExit(preview_main(sys.argv[2:]))
     if operation in {"mcp-detect", "mcp-register"}:
         _emit_bridge_result(operation)
         return

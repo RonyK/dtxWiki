@@ -390,7 +390,8 @@
       "db": "데이터베이스",
       "app_version": "앱 버전",
       "mcp": "MCP 서비스",
-      "oauth_jwk": "OAuth 서명 키"
+      "oauth_jwk": "OAuth 서명 키",
+      "worker": "백그라운드 처리"
     },
     "healthStatus": {
       "ok": "정상",

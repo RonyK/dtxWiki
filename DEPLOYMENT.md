@@ -22,6 +22,15 @@ Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
 - production은 SQLite 단일 노드입니다. app 1개 + worker 1개만 실행하고 DB를 NFS에 두거나
   app/worker를 수평 확장하지 않습니다.
 
+개인용 `dtxwiki`/`dtxwiki serve`와 Desktop 로컬 엔진은 서버와 worker를 함께
+시작하고 종료합니다. systemd 설치와 이 저장소의 production Compose는 worker를
+별도 서비스로 자동 구성하므로 웹 서버에 `DTXWIKI_WORKER_MODE=external`을 설정합니다.
+일반 설치에서는 이 설정이나 별도 worker 명령이 필요하지 않습니다.
+기존 systemd 설치도 `dtxwiki update`의 마이그레이션 단계에서 env 파일에 이 설정을
+자동 반영합니다. 로컬 wheel을 수동 교체한다면 최신 `setup production --reconfigure`를
+실행해 서비스 설정을 갱신하거나, 기존 env 파일에 `DTXWIKI_WORKER_MODE=external`을
+추가한 뒤 서비스를 다시 시작하세요.
+
 | 환경 | 권장 경로 | 비고 |
 | --- | --- | --- |
 | 일반 Ubuntu VM/VPS | wheel + `install.sh` + systemd | 권장, Caddy/서비스/초기 admin 자동 구성 |

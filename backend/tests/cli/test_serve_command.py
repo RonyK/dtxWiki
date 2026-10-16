@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
+from backend.app import runtime
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.cli import main as cli_main
@@ -25,9 +28,14 @@ def serve(monkeypatch, tmp_path):
     calls: dict = {}
     monkeypatch.setattr(cli_main, "create_app", lambda **_kwargs: object())
     monkeypatch.setattr(cli_main, "bootstrap_app", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        cli_main.uvicorn, "run", lambda _app, **kwargs: calls.update(uvicorn=kwargs)
-    )
+
+    async def fake_runtime(_app, _settings, **kwargs):
+        calls.update(uvicorn=kwargs)
+        kwargs["bootstrap"]()
+        if kwargs["on_started"] is not None:
+            kwargs["on_started"]()
+
+    monkeypatch.setattr(cli_main, "serve_runtime", fake_runtime)
     monkeypatch.setattr(
         cli_main.webbrowser, "open", lambda url: calls.update(browser=url)
     )
@@ -80,11 +88,27 @@ def test_remote_modes_do_not_get_the_solo_local_warning(serve, monkeypatch):
     assert "WARNING" not in result.stderr
 
 
-def test_uvicorn_access_log_is_disabled(serve):
-    _, calls = serve("--host", "127.0.0.1", "--no-open")
+def test_uvicorn_access_log_is_disabled(monkeypatch):
+    # Inspect the real runtime config: uvicorn's access log records the full
+    # request target, including password-reset and email-verification tokens.
+    class ConfigCaptured(Exception):
+        pass
 
-    # uvicorn's access log records the request target, query string and all.
-    assert calls["uvicorn"]["access_log"] is False
+    def capture_config(config):
+        assert config.access_log is False
+        raise ConfigCaptured
+
+    monkeypatch.setattr(runtime, "_RuntimeServer", capture_config)
+    with pytest.raises(ConfigCaptured):
+        asyncio.run(
+            runtime.serve_runtime(
+                SimpleNamespace(state=SimpleNamespace()),
+                Settings(),
+                host="127.0.0.1",
+                port=21999,
+                log_level="info",
+            )
+        )
 
 
 @pytest.mark.parametrize(

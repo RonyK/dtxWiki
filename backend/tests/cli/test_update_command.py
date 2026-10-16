@@ -132,6 +132,70 @@ def test_finalize_bootstrap_echoes_redacted_db_url(monkeypatch):
     assert "sslpassword=****" in result.stdout
 
 
+def test_old_systemd_update_finalization_preserves_split_worker(monkeypatch, tmp_path):
+    env = tmp_path / "dtxwiki.env"
+    original = "# Existing deployment\nDTXWIKI_SESSION_SECRET=preserve-this-value\n"
+    env.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("DTXWIKI_WORKER_MODE", "managed")
+    monkeypatch.setenv("DTXWIKI_SESSION_SECRET", "outer-test-session-secret")
+    monkeypatch.setattr(
+        cmd.install_method,
+        "detect_install_method",
+        lambda override=None: InstallMethod(
+            "systemd", None, None, (), None, ("dtxwiki", "dtxwiki-worker")
+        ),
+    )
+    seen = []
+
+    def bootstrap(settings):
+        seen.append(settings.worker_mode)
+        assert cmd.prod_setup.get_env_value(env, "DTXWIKI_WORKER_MODE") == "external"
+
+    monkeypatch.setattr(cmd, "bootstrap_app", bootstrap)
+
+    # This is the invocation already made by the previous release's updater;
+    # no new installer, rewritten unit, or operator action is involved.
+    result = runner.invoke(
+        app,
+        [
+            "update",
+            "--finalize-bootstrap",
+            "--method",
+            "systemd",
+            "--env-file",
+            str(env),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == ["external"]
+    assert (
+        cmd.prod_setup.get_env_value(env, "DTXWIKI_SESSION_SECRET")
+        == "preserve-this-value"
+    )
+    assert env.with_name(env.name + ".bak").read_text(encoding="utf-8") == original
+
+
+def test_venv_finalization_keeps_managed_worker_default(monkeypatch, tmp_path):
+    env = tmp_path / "dtxwiki.env"
+    original = "# Custom environment\n"
+    env.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("DTXWIKI_WORKER_MODE", "managed")
+    seen = []
+    monkeypatch.setattr(
+        cmd, "bootstrap_app", lambda settings: seen.append(settings.worker_mode)
+    )
+
+    result = runner.invoke(
+        app,
+        ["update", "--finalize-bootstrap", "--method", "venv", "--env-file", str(env)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == ["managed"]
+    assert env.read_text(encoding="utf-8") == original
+
+
 def test_update_invalid_method_is_usage_error():
     # An unknown --method must be a clean exit-2 usage error, not the raw
     # ValueError detect_install_method raises (unhandled-exception box, exit 1).

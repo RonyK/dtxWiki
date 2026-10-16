@@ -99,7 +99,19 @@ def update_command(
 
     # Internal step: run migrations under the freshly-installed (NEW) code.
     if finalize_bootstrap:
-        _load_prod_env(method, env_file)
+        loaded_env = _load_prod_env(method, env_file)
+        install = install_method.detect_install_method(
+            override=None if method == "auto" else method
+        )
+        if install.kind == "systemd":
+            # Older installers already provision a separate worker unit. The
+            # old updater invokes this step from the newly installed package,
+            # so persist the mode before those unchanged units start again.
+            prod_setup.set_env_values(
+                loaded_env or prod_setup.DEFAULT_ENV_FILE,
+                {"DTXWIKI_WORKER_MODE": "external"},
+            )
+            os.environ["DTXWIKI_WORKER_MODE"] = "external"
         settings = Settings(auto_bootstrap=True)
         bootstrap_app(settings)
         typer.echo(

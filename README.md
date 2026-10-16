@@ -72,7 +72,8 @@ dtxwiki
 
 Open **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)** if your browser does not open automatically.
 Create an account on your first visit. Keep the command running while using
-dtxWiki; press `Ctrl+C` to stop it.
+dtxWiki; file processing and other background tasks start automatically. Press
+`Ctrl+C` to stop dtxWiki and its background tasks together.
 
 If you prefer npm, run `npx @dtxsuite/dtxwiki`. This requires Node.js 22 or newer
 and uv or pipx; with pipx, Python 3.12 or newer must also be installed.

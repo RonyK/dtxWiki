@@ -70,6 +70,7 @@ _ENV_ALLOWLIST = {
     "TEMP",
     "TMP",
     "WINDIR",
+    "_DTXWIKI_MANAGED_WORKER_PID",
 }
 
 
@@ -554,28 +555,31 @@ def _run_bounded(
     assert process.stdout is not None
     assert process.stderr is not None
     with ThreadPoolExecutor(max_workers=3) as pool:
-        stdout_future = pool.submit(_read_limited, process.stdout, stdout_limit)
-        stderr_future = pool.submit(_read_limited, process.stderr, _STDERR_LIMIT)
-        stdin_future = pool.submit(_write_input, process.stdin, stdin)
         try:
-            return_code = process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired as exc:
+            stdout_future = pool.submit(_read_limited, process.stdout, stdout_limit)
+            stderr_future = pool.submit(_read_limited, process.stderr, _STDERR_LIMIT)
+            stdin_future = pool.submit(_write_input, process.stdin, stdin)
+            try:
+                return_code = process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                raise ConversionError(
+                    "converter_timed_out",
+                    "The converter exceeded its time limit.",
+                    # An interrupted process has no trustworthy completion.
+                    retryable=False,
+                    fallback_allowed=False,
+                ) from exc
+            try:
+                stdin_future.result()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+            stdout, stdout_exceeded = stdout_future.result()
+            _stderr, stderr_exceeded = stderr_future.result()
+        except BaseException:
+            # Kill before leaving the pool context, whose exit waits for the
+            # pipe readers. Otherwise a shutdown signal can hang indefinitely.
             _terminate_process(process)
-            raise ConversionError(
-                "converter_timed_out",
-                "The converter exceeded its time limit.",
-                # A killed process has no trustworthy completion state. Treat
-                # the attempt as terminal instead of rerunning or handing the
-                # same untrusted bytes to a different provider profile.
-                retryable=False,
-                fallback_allowed=False,
-            ) from exc
-        try:
-            stdin_future.result()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
-        stdout, stdout_exceeded = stdout_future.result()
-        _stderr, stderr_exceeded = stderr_future.result()
+            raise
     if stdout_exceeded:
         raise ConversionError(
             "converter_transport_output_limit",

@@ -107,6 +107,8 @@ services:
     init: true
     environment:
       <<: *dtxwiki-env
+      # Compose provisions the worker service below; do not spawn a second one.
+      DTXWIKI_WORKER_MODE: external
       # NOT a DTXWIKI_ key: those are validated by the startup guard and an
       # unknown one crash-loops the app. Plain env consumed by docker-entrypoint.sh
       # + the worker; init (no flag) performs the single bootstrap.

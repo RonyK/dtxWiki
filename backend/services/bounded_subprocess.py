@@ -22,6 +22,7 @@ _ENV_ALLOWLIST = {
     "TEMP",
     "TMP",
     "WINDIR",
+    "_DTXWIKI_MANAGED_WORKER_PID",
 }
 
 type BoundedSubprocessFailure = Literal[
@@ -105,6 +106,28 @@ def run_bounded_subprocess(
     except OSError as exc:
         raise BoundedSubprocessError("start_failed") from exc
 
+    try:
+        return _communicate_bounded(
+            process,
+            stdin,
+            stdout_limit,
+            stderr_limit,
+            deadline,
+        )
+    except BaseException:
+        # Shutdown can interrupt any business-phase wait. Close the detached
+        # converter session before the dispatcher returns the job to the queue.
+        _terminate_process_tree(process)
+        raise
+
+
+def _communicate_bounded(
+    process: subprocess.Popen,
+    stdin: bytes,
+    stdout_limit: int,
+    stderr_limit: int,
+    deadline: float,
+) -> BoundedSubprocessResult:
     assert process.stdin is not None
     assert process.stdout is not None
     assert process.stderr is not None
@@ -239,9 +262,7 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
         else:
             system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
             taskkill = (
-                Path(system_root) / "System32" / "taskkill.exe"
-                if system_root
-                else None
+                Path(system_root) / "System32" / "taskkill.exe" if system_root else None
             )
             if taskkill is not None and taskkill.is_file():
                 try:
