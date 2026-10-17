@@ -43,15 +43,16 @@ from backend.services.ops import (
     runtime_lock,
 )
 from backend.services.ops import service_control as svc
+from backend.services.ops.maintenance_handoff import (
+    HANDOFF_ENV,
+    HandoffError,
+    finalizer_handoff,
+)
 from backend.utils.redact import redact_url
 
 # Documented production env file (systemd tier). Kept here to avoid a
 # services -> cli import; mirrors backend.cli.prod_setup.DEFAULT_ENV_FILE.
 PROD_ENV_FILE = Path("/etc/dtxwiki/dtxwiki.env")
-
-# This process-scoped handoff is never written to a deployment env file. Old
-# callers do not set it: their finalizer acquires the newly introduced DB guard.
-MAINTENANCE_DB_LOCK_PARENT_ENV = "_DTXWIKI_MAINTENANCE_DB_LOCK_PARENT"
 
 # Upper bound for a single update step (index fetch / migration). Without it a
 # hung mirror or a migration stuck on a lock would wedge the update forever with
@@ -314,16 +315,17 @@ def run_update(
             effective_env = _effective_env_file(install, env_file)
             if effective_env is not None:
                 finalize_argv.extend(["--env-file", str(effective_env)])
-            _run_argv(
-                finalize_argv,
-                echo=echo,
-                timeout=None,
-                env={
-                    **os.environ,
-                    MAINTENANCE_DB_LOCK_PARENT_ENV: str(os.getpid()),
-                },
-            )
-        except UpdateStepError as exc:
+            # Confirm the actual guards through a private invocation-scoped
+            # challenge. Windows console/venv launchers introduce intermediate
+            # PIDs, so direct parent identity cannot establish this handoff.
+            with finalizer_handoff(held) as handoff:
+                _run_argv(
+                    finalize_argv,
+                    echo=echo,
+                    timeout=None,
+                    env={**os.environ, HANDOFF_ENV: handoff},
+                )
+        except (UpdateStepError, HandoffError) as exc:
             # Post-migration failure: the DB may be partially migrated. Leave
             # services stopped (notify-only) rather than serve a half-migrated
             # DB, and say so.

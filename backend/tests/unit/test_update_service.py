@@ -1,5 +1,6 @@
 """Tests for the update/rollback orchestration (notify-only, anti-brick)."""
 
+import os
 import sqlite3
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from backend.app.runtime_resources import RuntimeResources, acquire_paths
 from backend.app.settings import Settings
 from backend.services import backup_service
 from backend.services import update_service as us
+from backend.services.ops.maintenance_handoff import verify_finalizer_handoff
 from backend.services.update_check_service import UpdateInfo
 
 
@@ -92,13 +94,59 @@ def test_update_refuses_db_activity_from_another_data_root(monkeypatch, tmp_path
 
 def test_finalize_private_guard_handoff_is_subprocess_only(monkeypatch):
     calls = []
-    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append((argv, kw)))
-    result = us.run_update(_settings(), method="venv", yes=True, echo=lambda *a: None)
+    settings = _settings()
+    expected = RuntimeResources.for_settings(settings).activity_paths
+    monkeypatch.delenv(us.HANDOFF_ENV, raising=False)
+
+    def run(argv, echo, **kw):
+        assert us.HANDOFF_ENV not in os.environ
+        calls.append((argv, kw))
+        if "--finalize-bootstrap" in argv:
+            with monkeypatch.context() as child_environment:
+                child_environment.setenv(us.HANDOFF_ENV, kw["env"][us.HANDOFF_ENV])
+                assert verify_finalizer_handoff(expected)
+
+    _patch_common(monkeypatch, run=run)
+    result = us.run_update(settings, method="venv", yes=True, echo=lambda *a: None)
     assert result.ok
     install = next(kw for argv, kw in calls if "install" in argv)
     finalize = next(kw for argv, kw in calls if "--finalize-bootstrap" in argv)
     assert "env" not in install
-    assert finalize["env"][us.MAINTENANCE_DB_LOCK_PARENT_ENV] == str(us.os.getpid())
+    assert us.HANDOFF_ENV in finalize["env"]
+    assert us.HANDOFF_ENV not in os.environ
+
+
+def test_handoff_setup_failure_after_install_keeps_services_stopped(
+    monkeypatch, tmp_path
+):
+    calls = []
+    services = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append(argv))
+    monkeypatch.setattr(
+        us.svc, "run_systemctl", lambda action, names: services.append(action)
+    )
+    monkeypatch.setattr(
+        us,
+        "finalizer_handoff",
+        _raise(us.HandoffError("handoff listener unavailable")),
+    )
+
+    result = us.run_update(
+        _settings(),
+        method="systemd",
+        yes=True,
+        data_dir=tmp_path,
+        echo=lambda *a: None,
+    )
+
+    assert result.exit_code == 3
+    assert any("install" in argv for argv in calls)
+    assert not any("--finalize-bootstrap" in argv for argv in calls)
+    assert services == ["stop"]
+    with us.runtime_lock.acquire_path(
+        tmp_path / ".runtime.lock", "shared", strict=True
+    ):
+        pass
 
 
 def test_run_update_dry_run_executes_nothing(monkeypatch):

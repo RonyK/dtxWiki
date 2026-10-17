@@ -44,6 +44,9 @@
 - Persist local OAuth signing keys and session secrets across launches, retaining
   explicitly configured values and existing local keys. Desktop shutdown now
   confirms engine exit after graceful stop and force escalation.
+- Preserve maintenance lock handoff through Windows console and venv launchers.
+  Finalization verifies the updater's live data-directory and database guards
+  before migrating, while retaining compatibility with older updaters.
 
 ### Fixes
 

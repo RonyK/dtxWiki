@@ -13,6 +13,7 @@ from backend.cli.commands import update as cmd
 from backend.cli.main import app
 from backend.services.ops import runtime_lock
 from backend.services.ops.install_method import InstallMethod
+from backend.services.ops.maintenance_handoff import HANDOFF_ENV, finalizer_handoff
 
 runner = CliRunner()
 
@@ -23,7 +24,7 @@ def test_old_updater_finalizer_adds_db_guard_without_retaking_parent_root(
     root = tmp_path / "root"
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(root))
     monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
-    monkeypatch.delenv(cmd.update_service.MAINTENANCE_DB_LOCK_PARENT_ENV, raising=False)
+    monkeypatch.delenv(HANDOFF_ENV, raising=False)
     monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
     resources = RuntimeResources.for_settings(Settings())
     db_path = resources.activity_paths[1]
@@ -46,25 +47,42 @@ def test_old_updater_finalizer_adds_db_guard_without_retaking_parent_root(
 def test_new_updater_finalizer_uses_parent_db_guard(tmp_path, monkeypatch):
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
     monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
-    monkeypatch.setenv(
-        cmd.update_service.MAINTENANCE_DB_LOCK_PARENT_ENV, str(os.getppid())
-    )
     monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
+    monkeypatch.setattr(os, "getppid", lambda: pytest.fail("launchers change PPID"))
     calls = []
     monkeypatch.setattr(cmd, "bootstrap_app", lambda settings: calls.append(True))
     resources = RuntimeResources.for_settings(Settings())
-    with resources.acquire_activity("exclusive"):
+    with (
+        resources.acquire_activity("exclusive") as held,
+        finalizer_handoff(held) as token,
+    ):
+        monkeypatch.setenv(HANDOFF_ENV, token)
         result = runner.invoke(
             app, ["update", "--finalize-bootstrap", "--method", "venv"]
         )
     assert result.exit_code == 0, result.output
     assert calls == [True]
+    assert HANDOFF_ENV not in os.environ
+
+
+def test_invalid_new_updater_handoff_refuses_before_bootstrap(tmp_path, monkeypatch):
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
+    monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.setenv(HANDOFF_ENV, "invalid")
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
+    monkeypatch.setattr(cmd, "bootstrap_app", lambda _: pytest.fail("must not write"))
+
+    result = runner.invoke(app, ["update", "--finalize-bootstrap", "--method", "venv"])
+
+    assert result.exit_code == 3, result.output
+    assert "finalize-bootstrap refused" in result.output
+    assert HANDOFF_ENV not in os.environ
 
 
 def test_old_updater_finalizer_refuses_remaining_db_activity(tmp_path, monkeypatch):
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
     monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
-    monkeypatch.delenv(cmd.update_service.MAINTENANCE_DB_LOCK_PARENT_ENV, raising=False)
+    monkeypatch.delenv(HANDOFF_ENV, raising=False)
     monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
     monkeypatch.setattr(
         cmd, "bootstrap_app", lambda settings: pytest.fail("must not write")

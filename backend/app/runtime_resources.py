@@ -39,6 +39,13 @@ class LockSet:
     def held(self) -> bool:
         return bool(self._locks) and all(lock.held for lock in self._locks)
 
+    @property
+    def paths(self) -> tuple[Path, ...]:
+        paths = []
+        for lock in self._locks:
+            paths.extend(lock.paths if isinstance(lock, LockSet) else (lock.path,))
+        return tuple(paths)
+
     def __enter__(self):
         return self
 

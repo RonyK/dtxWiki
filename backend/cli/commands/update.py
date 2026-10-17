@@ -20,6 +20,10 @@ from backend.app.settings import Settings
 from backend.cli import prod_setup
 from backend.services import backup_service, update_service
 from backend.services.ops import install_method, runtime_lock
+from backend.services.ops.maintenance_handoff import (
+    HandoffError,
+    verify_finalizer_handoff,
+)
 from backend.utils.redact import redact_url
 
 
@@ -163,25 +167,24 @@ def update_command(
             os.environ["DTXWIKI_WORKER_MODE"] = "external"
         settings = Settings(auto_bootstrap=True)
         resources = RuntimeResources.for_settings(settings)
-        inherited_db_guard = os.environ.get(
-            update_service.MAINTENANCE_DB_LOCK_PARENT_ENV
-        ) == str(os.getppid())
         # The old updater already holds root EX. It does not know about the
         # DB-side lock, so acquire that lock here without retaking root EX.
-        # A new updater owns both and supplies a private parent-PID handoff.
+        # A new updater confirms its exact root/DB guards without depending on
+        # the finalizer interpreter's immediate parent PID.
         database_paths = [
             path
             for path in resources.activity_paths
             if path != resources.root / ".runtime.lock"
         ]
         try:
+            inherited_db_guard = verify_finalizer_handoff(resources.activity_paths)
             with (
                 nullcontext()
                 if inherited_db_guard
                 else acquire_paths(database_paths, "exclusive")
             ):
                 bootstrap_app(settings)
-        except (runtime_lock.RuntimeLockHeldError, OSError) as exc:
+        except (runtime_lock.RuntimeLockHeldError, OSError, HandoffError) as exc:
             typer.echo(f"finalize-bootstrap refused: {exc}", err=True)
             raise typer.Exit(3) from exc
         typer.echo(f"finalize-bootstrap: migrated {redact_url(settings.database_url)}")
