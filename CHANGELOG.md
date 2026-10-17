@@ -31,6 +31,19 @@
 - Preserve Uvicorn's automatic event-loop selection, including uvloop when
   available. Desktop reports unexpected engine/worker failures and gives
   bootstrap, worker startup and HTTP startup separate bounded phases.
+- Run startup initialization in a temporary child so database waits can be
+  interrupted while the API parent remains responsive to stop requests. Keep
+  the API and bundled SPA in the parent and the worker in its own process.
+- Guard the data directory and physical SQLite database independently. URL
+  driver/query aliases and a different data directory cannot start a second
+  consumer or bypass maintenance checks. Managed mode requires a regular local
+  SQLite file; memory and SQLite URI databases require external mode.
+- Report worker readiness after the initial stale-job recovery pass. A control
+  database failure prevents readiness; an unavailable workspace is logged and
+  deferred without blocking healthy workspaces. Mail delivery runs after ready.
+- Persist local OAuth signing keys and session secrets across launches, retaining
+  explicitly configured values and existing local keys. Desktop shutdown now
+  confirms engine exit after graceful stop and force escalation.
 
 ### Fixes
 

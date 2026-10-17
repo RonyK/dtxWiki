@@ -30,9 +30,12 @@ let configPath;
 let desktopConfig = defaultConfig();
 let localEngine = null;
 let pendingEngine = null;
+const engineRegistry = new Set();
 let mainWindow = null;
 let mcpWindow = null;
 let quitting = false;
+let quitAuthorized = false;
+let quitPromise = null;
 let updateManager = null;
 let connectionGeneration = 0;
 
@@ -65,6 +68,10 @@ function requireMcpSender(event) {
 
 function saveConfig() {
   desktopConfig = writeConfig(configPath, desktopConfig);
+}
+
+function reportConnectionFailure(error) {
+  dialog.showErrorBox("dtxWiki 연결을 변경할 수 없습니다", error.message);
 }
 
 function safeExternalUrl(rawUrl) {
@@ -159,17 +166,29 @@ async function showWelcome() {
 }
 
 async function stopAllEngines() {
-  const engines = [...new Set([localEngine, pendingEngine].filter(Boolean))];
-  localEngine = null;
-  pendingEngine = null;
-  await Promise.all(engines.map((engine) => stopLocalEngine(engine)));
+  const engines = [...new Set([...engineRegistry, localEngine, pendingEngine].filter(Boolean))];
+  const results = await Promise.allSettled(engines.map(stopTrackedEngine));
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length) throw new Error(failures.map((result) => result.reason.message).join("\n"));
+}
+
+async function stopTrackedEngine(engine) {
+  await stopLocalEngine(engine);
+  engineRegistry.delete(engine);
+  if (localEngine === engine) localEngine = null;
+  if (pendingEngine === engine) pendingEngine = null;
 }
 
 async function handleLocalEngineFailure(engine, error) {
-  if (quitting || localEngine !== engine) return;
+  if (quitting || engine.failureHandling || localEngine !== engine) return;
+  engine.failureHandling = true;
   const failureGeneration = ++connectionGeneration;
-  localEngine = null;
-  await stopLocalEngine(engine);
+  try {
+    await stopTrackedEngine(engine);
+  } catch (stopError) {
+    dialog.showErrorBox("dtxWiki 로컬 엔진 종료 실패", stopError.message);
+    return;
+  }
   if (failureGeneration !== connectionGeneration || quitting) return;
   dialog.showErrorBox(
     "dtxWiki 로컬 엔진이 중지되었습니다",
@@ -188,32 +207,33 @@ async function connectLocal() {
 
   const executable = engineExecutable();
   try {
-    localEngine = await startLocalEngine({
+    const candidateEngine = await startLocalEngine({
       executable,
       logsDirectory: app.getPath("logs"),
       preferredPort: desktopConfig.localPort,
       onSpawn: (engine) => {
+        engineRegistry.add(engine);
         if (generation !== connectionGeneration || quitting) {
           throw new Error("local engine start cancelled");
         }
         pendingEngine = engine;
       },
       onUnexpectedExit: (engine, error) => {
-        void handleLocalEngineFailure(engine, error);
+        void handleLocalEngineFailure(engine, error).catch(reportConnectionFailure);
       },
     });
-    const candidateEngine = localEngine;
-    if (pendingEngine === candidateEngine) pendingEngine = null;
     if (
       generation !== connectionGeneration ||
       quitting ||
       mainWindow !== loading ||
       loading.isDestroyed()
     ) {
-      if (localEngine === candidateEngine) localEngine = null;
-      await stopLocalEngine(candidateEngine);
+      await stopTrackedEngine(candidateEngine);
       return;
     }
+    if (candidateEngine.exitError) throw candidateEngine.exitError;
+    localEngine = candidateEngine;
+    if (pendingEngine === candidateEngine) pendingEngine = null;
     lockWindowToLocation(loading, localEngine.origin);
     await loading.loadURL(localEngine.origin);
     desktopConfig.localPort = localEngine.port;
@@ -239,8 +259,7 @@ async function connectRemote(serverId) {
   }
   if (pendingEngine) {
     const engine = pendingEngine;
-    pendingEngine = null;
-    await stopLocalEngine(engine);
+    await stopTrackedEngine(engine);
   }
   if (generation !== connectionGeneration || quitting) return;
   const window = createBrowserWindow();
@@ -311,7 +330,7 @@ function rebuildMenu() {
       label: "내 컴퓨터",
       type: "radio",
       checked: desktopConfig.lastConnection?.type === "local",
-      click: () => void connectLocal(),
+      click: () => void connectLocal().catch(reportConnectionFailure),
     },
     ...desktopConfig.remoteServers.map((server) => ({
       label: server.name,
@@ -326,7 +345,7 @@ function rebuildMenu() {
       },
     })),
     { type: "separator" },
-    { label: "연결 관리…", click: () => void showWelcome() },
+    { label: "연결 관리…", click: () => void showWelcome().catch(reportConnectionFailure) },
   ];
 
   const template = [
@@ -435,7 +454,7 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", () => {
     if (!mainWindow) {
-      void openLastConnection();
+      void openLastConnection().catch(reportConnectionFailure);
       return;
     }
     if (mainWindow.isMinimized()) {
@@ -446,11 +465,20 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on("before-quit", (event) => {
-    if (quitting) return;
+    if (quitAuthorized) return;
     event.preventDefault();
+    if (quitPromise) return;
     quitting = true;
     connectionGeneration += 1;
-    void stopAllEngines().finally(() => app.quit());
+    quitPromise = stopAllEngines().then(() => {
+      quitAuthorized = true;
+      app.quit();
+    }).catch((error) => {
+      dialog.showErrorBox(
+        "dtxWiki 로컬 엔진 종료 실패",
+        `${error.message}\n\n앱 종료를 보류했습니다. 다시 종료하여 재시도하거나 작업 관리자/활성 상태 보기에서 표시된 엔진 PID와 dtxWiki를 강제 종료할 수 있습니다.`,
+      );
+    }).finally(() => { quitPromise = null; });
   });
 
   app.on("window-all-closed", () => {
@@ -487,12 +515,18 @@ if (!hasSingleInstanceLock) {
       beforeInstall: async () => {
         quitting = true;
         connectionGeneration += 1;
-        await stopAllEngines();
+        try {
+          await stopAllEngines();
+          quitAuthorized = true;
+        } catch (error) {
+          quitting = false;
+          throw error;
+        }
       },
     });
     registerIpc();
     rebuildMenu();
     await openLastConnection();
     updateManager.schedule();
-  });
+  }).catch(reportConnectionFailure);
 }

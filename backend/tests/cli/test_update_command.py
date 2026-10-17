@@ -7,11 +7,76 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
+from backend.app.settings import Settings
 from backend.cli.commands import update as cmd
 from backend.cli.main import app
+from backend.services.ops import runtime_lock
 from backend.services.ops.install_method import InstallMethod
 
 runner = CliRunner()
+
+
+def test_old_updater_finalizer_adds_db_guard_without_retaking_parent_root(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "root"
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(root))
+    monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.delenv(cmd.update_service.MAINTENANCE_DB_LOCK_PARENT_ENV, raising=False)
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
+    resources = RuntimeResources.for_settings(Settings())
+    db_path = resources.activity_paths[1]
+    calls = []
+
+    def bootstrap(settings):
+        with pytest.raises(runtime_lock.RuntimeLockHeldError):
+            runtime_lock.acquire_path(db_path, "shared", strict=True)
+        calls.append(True)
+
+    monkeypatch.setattr(cmd, "bootstrap_app", bootstrap)
+    with runtime_lock.acquire_exclusive(root):
+        result = runner.invoke(
+            app, ["update", "--finalize-bootstrap", "--method", "venv"]
+        )
+    assert result.exit_code == 0, result.output
+    assert calls == [True]
+
+
+def test_new_updater_finalizer_uses_parent_db_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
+    monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.setenv(
+        cmd.update_service.MAINTENANCE_DB_LOCK_PARENT_ENV, str(os.getppid())
+    )
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
+    calls = []
+    monkeypatch.setattr(cmd, "bootstrap_app", lambda settings: calls.append(True))
+    resources = RuntimeResources.for_settings(Settings())
+    with resources.acquire_activity("exclusive"):
+        result = runner.invoke(
+            app, ["update", "--finalize-bootstrap", "--method", "venv"]
+        )
+    assert result.exit_code == 0, result.output
+    assert calls == [True]
+
+
+def test_old_updater_finalizer_refuses_remaining_db_activity(tmp_path, monkeypatch):
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
+    monkeypatch.setenv("DTXWIKI_DATABASE_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.delenv(cmd.update_service.MAINTENANCE_DB_LOCK_PARENT_ENV, raising=False)
+    monkeypatch.setattr(cmd, "_load_prod_env", lambda *a: None)
+    monkeypatch.setattr(
+        cmd, "bootstrap_app", lambda settings: pytest.fail("must not write")
+    )
+    resources = RuntimeResources.for_settings(Settings())
+    with acquire_paths([resources.activity_paths[1]], "shared"):
+        with runtime_lock.acquire_exclusive(resources.root):
+            result = runner.invoke(
+                app, ["update", "--finalize-bootstrap", "--method", "venv"]
+            )
+    assert result.exit_code == 3
+    assert "finalize-bootstrap refused" in result.output
 
 
 def test_update_abort_maps_to_exit_2(monkeypatch):
@@ -167,11 +232,17 @@ def test_systemd_update_finalization_preserves_split_worker(
         assert not explicit_env, "an explicit --env-file must skip discovery"
         queries.append(argv)
         assert argv == [
-            "systemctl", "show", "dtxwiki.service",
-            "--property=EnvironmentFiles", "--value",
+            "systemctl",
+            "show",
+            "dtxwiki.service",
+            "--property=EnvironmentFiles",
+            "--value",
         ]
         assert kwargs == {
-            "check": True, "capture_output": True, "text": True, "timeout": 5,
+            "check": True,
+            "capture_output": True,
+            "text": True,
+            "timeout": 5,
         }
         return subprocess.CompletedProcess(
             argv, 0, stdout=f"{env} (ignore_errors=no)\n", stderr=""
@@ -232,18 +303,24 @@ def test_legacy_finalization_refuses_ambiguous_or_invalid_systemd_env(
         ),
     )
     monkeypatch.setattr(
-        cmd.subprocess, "run",
+        cmd.subprocess,
+        "run",
         lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 0, stdout=invalid_output.format(env=env, directory=tmp_path),
+            argv,
+            0,
+            stdout=invalid_output.format(env=env, directory=tmp_path),
             stderr="",
         ),
     )
     monkeypatch.setattr(
-        cmd, "_load_prod_env",
+        cmd,
+        "_load_prod_env",
         lambda *args: pytest.fail("must discover the env file before sourcing it"),
     )
     monkeypatch.setattr(
-        cmd, "bootstrap_app", lambda settings: pytest.fail("must not migrate"),
+        cmd,
+        "bootstrap_app",
+        lambda settings: pytest.fail("must not migrate"),
     )
 
     result = runner.invoke(

@@ -8,6 +8,8 @@ const { spawn } = require("node:child_process");
 const ENGINE_START_TIMEOUT_MS = 60_000;
 // The runtime allows up to 10 seconds each for HTTP drain and worker shutdown.
 const ENGINE_STOP_TIMEOUT_MS = 25_000;
+const ENGINE_TERM_TIMEOUT_MS = 2_000;
+const ENGINE_KILL_TIMEOUT_MS = 2_000;
 // Allow the runtime's bounded worker startup and its cleanup to finish before
 // enforcing the desktop deadline, so its failure reason can reach the shell.
 const ENGINE_WORKER_START_TIMEOUT_MS = 60_000 + ENGINE_STOP_TIMEOUT_MS;
@@ -161,7 +163,10 @@ async function startLocalEngine({
   };
   observeEngine(engine, onUnexpectedExit);
   const spawnError = new Promise((_resolve, reject) => {
-    child.once("error", reject);
+    child.once("error", (error) => {
+      engine.spawnError = error;
+      reject(error);
+    });
   });
 
   try {
@@ -190,21 +195,26 @@ async function waitForExit(child, timeoutMs) {
   });
 }
 
-async function stopLocalEngine(engine) {
-  if (!engine) {
-    return;
-  }
+async function stopEngine(engine) {
   engine.stopping = true;
   const { child, logStream } = engine;
-  if (child.exitCode === null && child.signalCode === null) {
+  const neverSpawned = engine.spawnError && child.pid === undefined;
+  if (!neverSpawned && child.exitCode === null && child.signalCode === null) {
     try {
       child.stdin?.end("shutdown\n");
     } catch {
       // The process may already have closed its stdin while shutting down.
     }
     if (!(await waitForExit(child, ENGINE_STOP_TIMEOUT_MS))) {
-      child.kill();
-      await waitForExit(child, 2_000);
+      try { child.kill("SIGTERM"); } catch { /* Exit confirmation decides success. */ }
+      if (!(await waitForExit(child, ENGINE_TERM_TIMEOUT_MS))) {
+        try { child.kill("SIGKILL"); } catch { /* Keep the engine reference on failure. */ }
+        if (!(await waitForExit(child, ENGINE_KILL_TIMEOUT_MS))) {
+          throw new Error(
+            `로컬 엔진 종료를 확인하지 못했습니다 (PID ${child.pid ?? "unknown"}). 로그: ${engine.logPath}`,
+          );
+        }
+      }
     }
   }
   child.stdout?.unpipe(logStream);
@@ -215,6 +225,19 @@ async function stopLocalEngine(engine) {
       logStream.end();
     });
   }
+}
+
+function stopLocalEngine(engine) {
+  if (!engine) return Promise.resolve();
+  if (engine.stopPromise) return engine.stopPromise;
+  const stopping = stopEngine(engine);
+  engine.stopPromise = stopping;
+  // Concurrent callers share one attempt. A failed attempt may be retried,
+  // while its process and log stream remain owned by the caller.
+  void stopping.catch(() => {
+    if (engine.stopPromise === stopping) engine.stopPromise = null;
+  });
+  return stopping;
 }
 
 module.exports = {

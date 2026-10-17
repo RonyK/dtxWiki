@@ -14,6 +14,13 @@ from threading import Thread
 from time import monotonic
 from typing import Literal
 
+from backend.app.process_tree import (
+    WorkerTree,
+    managed_host_environment,
+    prepare_worker_tree,
+    start_managed_host,
+)
+
 _COPY_CHUNK_BYTES = 64 * 1024
 _ENV_ALLOWLIST = {
     "LANG",
@@ -84,12 +91,22 @@ def run_bounded_subprocess(
     environment["TMP"] = str(cwd)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment["PYTHONNOUSERSITE"] = "1"
+    managed_host_environment(command, environment)
     creationflags = 0
     start_new_session = os.name != "nt"
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
 
     deadline = monotonic() + float(timeout_seconds)
+    try:
+        tree = (
+            prepare_worker_tree()
+            if environment.get("_DTXWIKI_HOST_BARRIER") == "1"
+            else WorkerTree()
+        )
+    except OSError as exc:
+        raise BoundedSubprocessError("start_failed") from exc
+    environment.update(tree.environment())
     try:
         process = subprocess.Popen(
             command,
@@ -104,9 +121,17 @@ def run_bounded_subprocess(
             start_new_session=start_new_session,
         )
     except OSError as exc:
+        tree.close()
         raise BoundedSubprocessError("start_failed") from exc
 
     try:
+        try:
+            tree.attach(process.pid)
+            start_managed_host(process, environment, deadline - monotonic())
+        except TimeoutError as exc:
+            raise BoundedSubprocessError("timed_out") from exc
+        except (OSError, RuntimeError) as exc:
+            raise BoundedSubprocessError("process_failed") from exc
         return _communicate_bounded(
             process,
             stdin,
@@ -119,6 +144,8 @@ def run_bounded_subprocess(
         # converter session before the dispatcher returns the job to the queue.
         _terminate_process_tree(process)
         raise
+    finally:
+        tree.close()
 
 
 def _communicate_bounded(

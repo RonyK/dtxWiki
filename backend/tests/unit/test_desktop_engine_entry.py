@@ -24,6 +24,8 @@ def test_desktop_engine_arguments_require_port(monkeypatch):
 def test_desktop_engine_manages_worker_and_watches_parent(
     monkeypatch, tmp_path, frozen, capsys
 ):
+    from backend.app import main, runtime
+
     application = object()
     calls = {}
     threads = []
@@ -31,12 +33,7 @@ def test_desktop_engine_manages_worker_and_watches_parent(
     # A shell configured for a split systemd deployment must not disable the
     # local Desktop worker.
     monkeypatch.setenv("DTXWIKI_WORKER_MODE", "external")
-    monkeypatch.setattr(engine_entry, "data_dir", lambda: tmp_path)
-    monkeypatch.setattr(engine_entry, "generate_jwt_key", lambda path: None)
-    monkeypatch.setattr(engine_entry, "create_app", lambda **kwargs: application)
-    monkeypatch.setattr(
-        engine_entry, "bootstrap", lambda *args: calls.update(bootstrapped=args)
-    )
+    monkeypatch.setattr(main, "create_app", lambda **kwargs: application)
 
     class Thread:
         def __init__(self, **kwargs):
@@ -47,23 +44,27 @@ def test_desktop_engine_manages_worker_and_watches_parent(
 
     async def serve_runtime(app, settings, **kwargs):
         calls.update(app=app, settings=settings, options=kwargs)
-        kwargs["bootstrap"]()
+        assert app is None
+        assert "bootstrap" not in kwargs
         kwargs["on_server"](server)
+        calls["created_app"] = kwargs["application_factory"](settings)
         kwargs["on_progress"]("worker-starting")
         kwargs["on_progress"]("worker-ready")
 
     server = SimpleNamespace(should_exit=False)
     monkeypatch.setattr(engine_entry.threading, "Thread", Thread)
-    monkeypatch.setattr(engine_entry, "serve_runtime", serve_runtime)
+    monkeypatch.setattr(runtime, "serve_runtime", serve_runtime)
 
     asyncio.run(engine_entry._serve("127.0.0.1", 23456))
 
-    assert calls["app"] is application
+    assert calls["created_app"] is application
     assert calls["settings"].worker_mode == "managed"
     assert calls["settings"].backend_port == 23456
-    assert calls["bootstrapped"] == (calls["settings"], application)
     assert calls["options"]["worker_command"] == (
         [engine_entry.sys.executable, "worker"] if frozen else None
+    )
+    assert calls["options"]["init_command"] == (
+        [engine_entry.sys.executable, "init"] if frozen else None
     )
     assert calls["watcher_started"] is True
     assert threads[0]["target"] is engine_entry._watch_parent
@@ -77,15 +78,17 @@ def test_desktop_engine_manages_worker_and_watches_parent(
 def test_desktop_runtime_failure_is_reported_to_shell_and_remains_a_failure(
     monkeypatch, capsys
 ):
+    from backend.app.runtime import RuntimeStartupError
+
     async def failed_runtime(*_args):
-        raise engine_entry.RuntimeStartupError(
+        raise RuntimeStartupError(
             "dtxWiki background worker stopped unexpectedly (exit code 7)"
         )
 
     monkeypatch.setattr(engine_entry, "_serve", failed_runtime)
     monkeypatch.setattr(engine_entry.sys, "argv", ["dtxwiki-engine", "--port", "23456"])
 
-    with pytest.raises(engine_entry.RuntimeStartupError, match="exit code 7"):
+    with pytest.raises(RuntimeStartupError, match="exit code 7"):
         engine_entry.main()
 
     assert json.loads(capsys.readouterr().out) == {

@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const { spawn } = require("node:child_process");
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
 const test = require("node:test");
@@ -153,4 +154,73 @@ test("intentional shutdown is marked before sending the shutdown message", async
   await stopLocalEngine(engine);
   assert.equal(failures.length, 0);
   assert.equal(engine.stopping, true);
+});
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("concurrent stops share graceful, TERM and KILL and wait for actual exit", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { engine, child } = observedEngine();
+  let requests = 0;
+  const signals = [];
+  child.stdin = { end: () => { requests += 1; } };
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const stopping = stopLocalEngine(engine);
+  assert.equal(stopLocalEngine(engine), stopping);
+  let completed = false;
+  void stopping.then(() => { completed = true; });
+  t.mock.timers.tick(25_000);
+  await settle();
+  assert.deepEqual(signals, ["SIGTERM"]);
+  t.mock.timers.tick(2_000);
+  await settle();
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(completed, false);
+  child.signalCode = "SIGKILL";
+  child.emit("exit", null, "SIGKILL");
+  await stopping;
+  assert.equal(requests, 1);
+  assert.equal(completed, true);
+  assert.equal(stopLocalEngine(engine), stopping);
+});
+
+test("unconfirmed hard kill fails with the process and log still owned and allows retry", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { engine, child } = observedEngine();
+  child.pid = 1234;
+  child.stdin = { end: () => {} };
+  child.kill = () => true;
+  engine.logPath = "/logs/engine.log";
+  engine.logStream = { end: () => assert.fail("closed log for a live engine") };
+  const stopping = stopLocalEngine(engine);
+  const rejected = assert.rejects(stopping, /PID 1234.*engine\.log/);
+  t.mock.timers.tick(25_000);
+  await settle();
+  t.mock.timers.tick(2_000);
+  await settle();
+  t.mock.timers.tick(2_000);
+  await rejected;
+  assert.equal(engine.child, child);
+  assert.equal(engine.stopPromise, null);
+  child.exitCode = 0;
+  engine.logStream = null;
+  await stopLocalEngine(engine);
+});
+
+test("hard stop reaps a real engine that ignores stdin and TERM", { skip: process.platform === "win32" }, async (t) => {
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume(); process.on('SIGTERM', () => {}); process.stdout.write('armed\\n');"], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.stdout.once("data", resolve);
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const engine = { child, logPath: "/logs/fake-engine.log" };
+  const stopping = stopLocalEngine(engine);
+  t.mock.timers.tick(25_000);
+  await settle();
+  t.mock.timers.tick(2_000);
+  await stopping;
+  assert.equal(child.signalCode, "SIGKILL");
+  assert.throws(() => process.kill(child.pid, 0), /ESRCH/);
 });

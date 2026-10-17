@@ -131,7 +131,8 @@ def test_root_invocation_uses_env_backed_default_port(monkeypatch):
     assert calls[0]["proxy_headers"] is False
     assert calls[0]["forwarded_allow_ips"] == "127.0.0.1"
     assert calls[0]["on_started"] is None
-    assert callable(calls[0]["bootstrap"])
+    assert calls[0]["app"] is None
+    assert callable(calls[0]["application_factory"])
 
 
 def test_cli_import_does_not_create_global_asgi_app_under_production_guard():

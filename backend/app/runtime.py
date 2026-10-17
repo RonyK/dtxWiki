@@ -1,9 +1,8 @@
-"""Serve one dtxWiki instance and supervise its required background worker."""
+"""Serve one dtxWiki app while supervising initialization and its worker."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -11,34 +10,41 @@ import signal
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 
 import uvicorn
-from sqlalchemy.engine import make_url
 
 from backend.app.data_dir import data_dir
-from backend.app.process_tree import attach_worker_tree
+from backend.app.process_tree import prepare_worker_tree
+from backend.app.runtime_resources import RuntimeResourceError, RuntimeResources
 from backend.app.settings import Settings
 from backend.services.ops import runtime_lock
 
 logger = logging.getLogger("dtxwiki.runtime")
+INIT_START_TIMEOUT_SECONDS = 60.0
 WORKER_START_TIMEOUT_SECONDS = 60.0
 WORKER_STOP_TIMEOUT_SECONDS = 10.0
+CHILD_KILL_TIMEOUT_SECONDS = 5.0
+HTTP_STOP_TIMEOUT_SECONDS = 12.0
 
 
 class RuntimeStartupError(RuntimeError):
-    """The required worker or HTTP server could not start or keep running."""
+    """Initialization, a required child, or HTTP could not start or stop."""
 
 
-def _instance_lock_dir(settings: Settings) -> Path:
-    url = make_url(settings.database_url)
-    if url.get_backend_name() == "sqlite" and url.database not in {None, ":memory:"}:
-        url = url.set(database=str(Path(url.database).expanduser().resolve()))
-    identity = f"{data_dir().resolve()}\n{url.render_as_string(hide_password=False)}"
-    digest = hashlib.sha256(identity.encode()).hexdigest()
-    return data_dir() / ".managed-runtime" / digest
+class _RuntimeStopping(Exception):
+    """A normal stop interrupted an initialization phase."""
+
+
+@dataclass
+class _Child:
+    process: asyncio.subprocess.Process
+    role: str
+    tree: object | None = None
+    drain_task: asyncio.Task | None = None
 
 
 class _RuntimeServer(uvicorn.Server):
@@ -58,7 +64,6 @@ class _RuntimeServer(uvicorn.Server):
         self._should_exit = value
         loop = getattr(self, "_runtime_loop", None)
         if value and loop is not None and not loop.is_closed():
-            # The desktop stdin watcher requests shutdown from another thread.
             loop.call_soon_threadsafe(self.stopping.set)
 
     async def startup(self, sockets=None) -> None:
@@ -72,8 +77,6 @@ class _RuntimeServer(uvicorn.Server):
         try:
             await super().serve(sockets=sockets)
         except SystemExit as exc:
-            # SystemExit inside an asyncio task escapes the event loop before
-            # other tasks finish. Keep bind failures inside supervisor cleanup.
             raise RuntimeStartupError("dtxWiki HTTP server could not start") from exc
 
     def handle_exit(self, sig, frame) -> None:
@@ -82,9 +85,8 @@ class _RuntimeServer(uvicorn.Server):
 
     @contextmanager
     def capture_signals(self) -> Iterator[None]:
-        # Cover worker startup as well as serving, and defer process exit until
-        # the child has been reaped. Uvicorn's default context re-raises SIGTERM
-        # before an outer supervisor can clean up its child.
+        # Cover initialization and worker launch; reap children before allowing
+        # the entry point to return. No database operation runs in this parent.
         if (
             self._signals_installed
             or threading.current_thread() is not threading.main_thread()
@@ -92,8 +94,10 @@ class _RuntimeServer(uvicorn.Server):
             yield
             return
         self._signals_installed = True
-        signals = (signal.SIGINT, signal.SIGTERM)
-        previous = {sig: signal.signal(sig, self.handle_exit) for sig in signals}
+        previous = {
+            sig: signal.signal(sig, self.handle_exit)
+            for sig in (signal.SIGINT, signal.SIGTERM)
+        }
         try:
             yield
         finally:
@@ -109,72 +113,227 @@ async def _cancel_task(task: asyncio.Task | None) -> None:
             await task
 
 
-async def _stop_worker(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None and process.stdin is not None:
-        try:
-            process.stdin.write(b"shutdown\n")
-            await process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        process.stdin.close()
+async def _phase[T](
+    operation: Awaitable[T], server: _RuntimeServer, seconds: float, label: str
+) -> T:
+    """One deadline covers spawn, configure, registration and completion."""
+    task = asyncio.create_task(operation)
+    stopping = asyncio.create_task(server.stopping.wait())
     try:
-        await asyncio.wait_for(process.wait(), WORKER_STOP_TIMEOUT_SECONDS)
+        done, _ = await asyncio.wait(
+            (task, stopping), timeout=seconds, return_when=asyncio.FIRST_COMPLETED
+        )
+        if server.should_exit or stopping in done:
+            raise _RuntimeStopping()
+        if task not in done:
+            raise RuntimeStartupError(
+                f"dtxWiki {label} did not become ready before its deadline"
+            )
+        return await task
+    finally:
+        await _cancel_task(task)
+        await _cancel_task(stopping)
+
+
+async def _stop_worker(process: asyncio.subprocess.Process) -> None:
+    """Preserve the ten-second grace period, then kill and confirm reaping."""
+    try:
+        async with asyncio.timeout(WORKER_STOP_TIMEOUT_SECONDS):
+            if process.returncode is None and process.stdin is not None:
+                try:
+                    process.stdin.write(b"shutdown\n")
+                    await process.stdin.drain()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                process.stdin.close()
+            await process.wait()
     except TimeoutError:
-        logger.error("background worker did not stop; terminating it")
+        logger.error("runtime child %s did not stop; terminating it", process.pid)
         with suppress(ProcessLookupError):
+            if os.name != "nt":
+                os.killpg(process.pid, signal.SIGKILL)
             process.kill()
-        await process.wait()
+        try:
+            await asyncio.wait_for(process.wait(), CHILD_KILL_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            raise RuntimeStartupError(
+                f"dtxWiki could not confirm child {process.pid} exit"
+            ) from exc
     finally:
         if os.name != "nt":
-            # Reap members of the worker's own process group. Bundled converter
-            # and preview hosts use separate sessions with guard_managed_parent;
-            # detached third-party converters need their own parent-death guard.
+            # Bundled detached hosts hold their own activity guards and parent
+            # watchers. This group cleanup does not claim third-party coverage.
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
 
 
+async def _stop_child(child: _Child) -> None:
+    try:
+        await _stop_worker(child.process)
+    finally:
+        if child.tree is not None:
+            child.tree.close()
+        await _cancel_task(child.drain_task)
+
+
 async def _drain_output(stream: asyncio.StreamReader) -> None:
-    # stdout is reserved for the handshake; drain unexpected native-library
-    # output too, so it can never fill the pipe and block a running job.
     while await stream.read(65536):
         pass
 
 
-async def _start_worker(settings: Settings, command: Sequence[str] | None):
-    environment = {
-        **os.environ,
-        "DTXWIKI_DATA_DIR": str(data_dir()),
-        "PYTHONUNBUFFERED": "1",
-        # Resolve the child from this same checkout/wheel even if the launch
-        # directory contains an unrelated backend package.
-        "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
-        "PYTHONSAFEPATH": "1",
-    }
-    process = await asyncio.create_subprocess_exec(
-        *(command or (sys.executable, "-P", "-m", "backend.worker.managed")),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        env=environment,
-        start_new_session=os.name != "nt",
-        **(
-            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-            if os.name == "nt"
-            else {}
-        ),
-    )
-    tree = None
+async def _read_message(child: _Child) -> dict:
+    assert child.process.stdout is not None
     try:
-        tree = attach_worker_tree(process.pid)
-        packet = {"protocol": 1, "settings": settings.model_dump(mode="json")}
+        raw = await child.process.stdout.readline()
+        message = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeStartupError(
+            f"dtxWiki {child.role} could not start; see the preceding error"
+        ) from exc
+    if not isinstance(message, dict):
+        raise RuntimeStartupError(
+            f"dtxWiki {child.role} sent an invalid startup message"
+        )
+    return message
+
+
+async def _start_child(
+    settings: Settings, command: Sequence[str] | None, role: str, children: list[_Child]
+) -> _Child:
+    # A venv launcher can create the real Windows interpreter before its PID
+    # is returned. Pre-create a named job so ChildControl joins that same job
+    # before it reads configuration or imports database/application code.
+    tree = prepare_worker_tree()
+    try:
+        environment = {
+            **os.environ,
+            "DTXWIKI_DATA_DIR": str(data_dir()),
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+            "PYTHONSAFEPATH": "1",
+            **RuntimeResources.for_settings(
+                settings, managed=settings.worker_mode == "managed"
+            ).export_environment(),
+            **tree.environment(),
+        }
+        module = (
+            "backend.app.runtime_init" if role == "init" else "backend.worker.managed"
+        )
+        spawning = asyncio.create_task(
+            asyncio.create_subprocess_exec(
+                *(command or (sys.executable, "-P", "-m", module)),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                env=environment,
+                start_new_session=os.name != "nt",
+                **(
+                    {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                    if os.name == "nt"
+                    else {}
+                ),
+            )
+        )
+        try:
+            process = await asyncio.shield(spawning)
+        except asyncio.CancelledError:
+            # Recover a process created before cancellation reached its
+            # transport. Its job/EOF guard remains active during cleanup.
+            process = await asyncio.shield(spawning)
+            children.append(_Child(process, role, tree))
+            raise
+        child = _Child(process, role, tree)
+        children.append(child)
+        tree.attach(process.pid)
+        packet = {
+            "protocol": 2,
+            "role": role,
+            "settings": settings.model_dump(mode="json"),
+        }
+        raw = (json.dumps(packet) + "\n").encode()
+        from backend.app.runtime_protocol import PACKET_LIMIT
+
+        if len(raw) > PACKET_LIMIT:
+            raise RuntimeStartupError(
+                "dtxWiki runtime configuration exceeds the private protocol limit"
+            )
         assert process.stdin is not None
-        process.stdin.write((json.dumps(packet) + "\n").encode())
+        process.stdin.write(raw)
         await process.stdin.drain()
+        registered = await _read_message(child)
+        if (
+            registered != {"status": "registered", "role": role}
+            or process.returncode is not None
+        ):
+            raise RuntimeStartupError(
+                f"dtxWiki {role} did not register its activity guards"
+            )
+        process.stdin.write(b'{"command":"start"}\n')
+        await process.stdin.drain()
+        return child
     except BaseException:
-        await _stop_worker(process)
-        if tree is not None:
-            tree.close()
+        tree.close()
         raise
-    return process, tree
+
+
+async def _initialize(
+    settings: Settings, command: Sequence[str] | None, children: list[_Child]
+) -> Settings:
+    child = await _start_child(settings, command, "init", children)
+    result = await _read_message(child)
+    config = result.get("config")
+    if (
+        set(result) != {"status", "app_version_synced", "config"}
+        or result["status"] != "result"
+        or result["app_version_synced"] is not True
+        or not isinstance(config, dict)
+        or set(config) != {"oauth_jwt_private_key_path"}
+        or not (
+            config["oauth_jwt_private_key_path"] is None
+            or isinstance(config["oauth_jwt_private_key_path"], str)
+        )
+    ):
+        raise RuntimeStartupError("dtxWiki init sent an invalid verification result")
+    assert child.process.stdout is not None
+    child.drain_task = asyncio.create_task(_drain_output(child.process.stdout))
+    code = await child.process.wait()
+    if code != 0:
+        raise RuntimeStartupError(
+            f"dtxWiki init failed after its result (exit code {code})"
+        )
+    # Reap before application creation, not merely after a success message.
+    await _stop_child(child)
+    children.remove(child)
+    return settings.model_copy(update=config)
+
+
+async def _start_worker(
+    settings: Settings, command: Sequence[str] | None, children: list[_Child]
+) -> _Child:
+    child = await _start_child(settings, command, "worker", children)
+    if (
+        await _read_message(child) != {"status": "ready"}
+        or child.process.returncode is not None
+    ):
+        raise RuntimeStartupError(
+            "dtxWiki background worker could not start; see the preceding error"
+        )
+    assert child.process.stdout is not None
+    child.drain_task = asyncio.create_task(_drain_output(child.process.stdout))
+    return child
+
+
+async def _finish_http(server: _RuntimeServer, task: asyncio.Task | None) -> None:
+    server.should_exit = True
+    if task is None:
+        return
+    done, _ = await asyncio.wait((task,), timeout=HTTP_STOP_TIMEOUT_SECONDS)
+    if not done:
+        task.cancel()
+        done, _ = await asyncio.wait((task,), timeout=2.0)
+        if not done:
+            raise RuntimeStartupError("dtxWiki HTTP teardown did not complete")
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 async def serve_runtime(
@@ -184,25 +343,26 @@ async def serve_runtime(
     host: str,
     port: int,
     log_level: str,
+    application_factory: Callable[[Settings], object] | None = None,
+    init_command: Sequence[str] | None = None,
     proxy_headers: bool = False,
     forwarded_allow_ips: str | None = None,
     on_started: Callable[[], None] | None = None,
     on_server: Callable[[uvicorn.Server], None] | None = None,
     on_progress: Callable[[str], None] | None = None,
     worker_command: Sequence[str] | None = None,
-    bootstrap: Callable[[], None] | None = None,
 ) -> None:
-    """Serve a bootstrapped app, managing one worker unless explicitly external.
+    """Run supervised initialization, then serve API/SPA with one worker.
 
-    ``bootstrap`` runs under the managed instance lock, before starting a child.
-    ``on_server`` lets the desktop parent watcher request server shutdown.
-    ``on_started`` runs only after worker readiness and actual socket binding.
-    ``on_progress`` reports the worker-starting and worker-ready phases once.
-    An unexpected worker exit stops HTTP serving and raises RuntimeStartupError.
+    Entry points supply a lazy factory. An explicitly supplied application is
+    for already-prepared embedding hosts and does not request initialization.
+    The API parent remains in this process; only blocking init and the worker
+    are supervised children. Arbitrary parent-native hangs remain an OS/outer
+    process management concern.
     """
+    if application is None and application_factory is None:
+        raise ValueError("an application or application_factory is required")
     mode = settings.worker_mode
-    application.state.worker_mode = mode
-    application.state.worker_ready = False
     server = _RuntimeServer(
         uvicorn.Config(
             application,
@@ -215,74 +375,58 @@ async def serve_runtime(
             timeout_graceful_shutdown=10.0,
         )
     )
-    process = None
-    worker_tree = None
-    owner_lock = None
-    server_task = ready_task = exit_task = bound_task = stop_task = drain_task = None
+    children: list[_Child] = []
+    guard = None
+    previous_resource_environment = {}
+    worker = None
+    server_task = bound_task = exit_task = stop_task = None
     try:
         with server.capture_signals():
             if on_server is not None:
                 on_server(server)
             try:
-                if mode == "managed":
-                    try:
-                        owner_lock = runtime_lock.acquire_exclusive(
-                            _instance_lock_dir(settings)
-                        )
-                    except runtime_lock.RuntimeLockHeldError as exc:
-                        raise RuntimeStartupError(
-                            "dtxWiki is already running for this "
-                            "data directory and database"
-                        ) from exc
-                if bootstrap is not None:
-                    bootstrap()
+                resources = RuntimeResources.for_settings(
+                    settings, managed=mode == "managed"
+                )
+                guard = resources.acquire_parent(managed=mode == "managed")
+                for key, value in resources.export_environment().items():
+                    previous_resource_environment[key] = os.environ.get(key)
+                    os.environ[key] = value
                 if server.should_exit:
                     return
-                if mode == "managed":
-                    if on_progress is not None:
-                        on_progress("worker-starting")
-                    try:
-                        process, worker_tree = await _start_worker(
-                            settings, worker_command
-                        )
-                    except OSError as exc:
-                        raise RuntimeStartupError(
-                            "dtxWiki background worker could not be launched"
-                        ) from exc
-                    assert process.stdout is not None
-                    ready_task = asyncio.create_task(process.stdout.readline())
-                    stop_task = asyncio.create_task(server.stopping.wait())
-                    done, _ = await asyncio.wait(
-                        (ready_task, stop_task),
-                        timeout=WORKER_START_TIMEOUT_SECONDS,
-                        return_when=asyncio.FIRST_COMPLETED,
+                if application_factory is not None:
+                    settings = await _phase(
+                        _initialize(settings, init_command, children),
+                        server,
+                        INIT_START_TIMEOUT_SECONDS,
+                        "initialization",
                     )
                     if server.should_exit:
                         return
-                    if ready_task not in done:
-                        raise RuntimeStartupError(
-                            "dtxWiki background worker did not become ready"
-                        )
-                    try:
-                        ready = json.loads(ready_task.result())
-                    except (ValueError, TypeError) as exc:
-                        raise RuntimeStartupError(
-                            "dtxWiki background worker could not start; "
-                            "see the preceding error"
-                        ) from exc
-                    if ready != {"status": "ready"} or process.returncode is not None:
-                        raise RuntimeStartupError(
-                            "dtxWiki background worker could not start; "
-                            "see the preceding error"
-                        )
+                    application = application_factory(settings)
+                    application.state.app_version_synced = True
+                    server.config.app = application
+                application.state.worker_mode = mode
+                application.state.worker_ready = False
+                if mode == "managed":
+                    if on_progress is not None:
+                        on_progress("worker-starting")
+                    worker = await _phase(
+                        _start_worker(settings, worker_command, children),
+                        server,
+                        WORKER_START_TIMEOUT_SECONDS,
+                        "background worker",
+                    )
+                    if server.should_exit:
+                        return
                     application.state.worker_ready = True
                     if on_progress is not None:
                         on_progress("worker-ready")
-                    drain_task = asyncio.create_task(_drain_output(process.stdout))
-                    exit_task = asyncio.create_task(process.wait())
+                    exit_task = asyncio.create_task(worker.process.wait())
                 server_task = asyncio.create_task(server.serve())
                 bound_task = asyncio.create_task(server.bound.wait())
-                pending = {server_task, bound_task}
+                stop_task = asyncio.create_task(server.stopping.wait())
+                pending = {server_task, bound_task, stop_task}
                 if exit_task is not None:
                     pending.add(exit_task)
                 while pending:
@@ -292,11 +436,12 @@ async def serve_runtime(
                     if exit_task is not None and exit_task in done:
                         application.state.worker_ready = False
                         server.should_exit = True
-                        await server_task
                         raise RuntimeStartupError(
                             "dtxWiki background worker stopped unexpectedly "
                             f"(exit code {exit_task.result()}); dtxWiki has stopped"
                         )
+                    if stop_task in done:
+                        return
                     if server_task in done:
                         await server_task
                         if not server.bound.is_set() and not server.stopping.is_set():
@@ -310,29 +455,43 @@ async def serve_runtime(
                         if (
                             on_started is not None
                             and not server.should_exit
-                            and (process is None or process.returncode is None)
+                            and (worker is None or worker.process.returncode is None)
                         ):
                             on_started()
+            except _RuntimeStopping:
+                return
+            except runtime_lock.RuntimeLockHeldError as exc:
+                raise RuntimeStartupError(
+                    "dtxWiki is already running or storage is still active; "
+                    "stop the existing processes first"
+                ) from exc
+            except RuntimeResourceError as exc:
+                raise RuntimeStartupError(str(exc)) from exc
+            except OSError as exc:
+                raise RuntimeStartupError(
+                    "dtxWiki runtime child or storage guard could not start"
+                ) from exc
             finally:
-                application.state.worker_ready = False
-                server.should_exit = True
+                if application is not None:
+                    application.state.worker_ready = False
                 try:
-                    for task in (ready_task, bound_task, stop_task):
-                        await _cancel_task(task)
-                    if server_task is not None and not server_task.done():
-                        await server_task
+                    await _finish_http(server, server_task)
                 finally:
                     try:
-                        if process is not None:
-                            await _stop_worker(process)
+                        for child in reversed(children):
+                            await _stop_child(child)
                     finally:
-                        if worker_tree is not None:
-                            worker_tree.close()
-                        for task in (exit_task, drain_task):
-                            await _cancel_task(task)
+                        await _cancel_task(bound_task)
+                        await _cancel_task(exit_task)
+                        await _cancel_task(stop_task)
     finally:
-        if owner_lock is not None:
-            owner_lock.release()
-        lock = getattr(application.state, "runtime_lock", None)
+        for key, previous in previous_resource_environment.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+        if guard is not None:
+            guard.release()
+        lock = getattr(getattr(application, "state", None), "runtime_lock", None)
         if lock is not None:
             lock.release()

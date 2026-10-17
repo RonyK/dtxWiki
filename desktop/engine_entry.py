@@ -8,17 +8,11 @@ import json
 import sys
 import threading
 from dataclasses import asdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-import uvicorn
-
-from backend.app.bootstrap import bootstrap
-from backend.app.data_dir import data_dir
-from backend.app.main import create_app
-from backend.app.runtime import RuntimeStartupError, serve_runtime
-from backend.app.settings import Settings
-from backend.cli.prod_setup import generate_jwt_key
+if TYPE_CHECKING:
+    import uvicorn
 
 
 def _serve_arguments(arguments: list[str]) -> argparse.Namespace:
@@ -202,14 +196,14 @@ def _emit_runtime_event(**event: str) -> None:
 async def _serve(host: str, port: int) -> None:
     if host not in {"127.0.0.1", "::1"}:
         raise ValueError("desktop engine only accepts a loopback host")
-    oauth_key = data_dir() / "desktop-oauth-jwt.pem"
-    generate_jwt_key(oauth_key)
+    from backend.app.main import create_app
+    from backend.app.runtime import serve_runtime
+    from backend.app.settings import Settings
+
     settings = Settings(
         backend_port=port,
-        oauth_jwt_private_key_path=str(oauth_key),
         worker_mode="managed",
     )
-    application = create_app(settings=settings)
 
     def watch_parent(server: uvicorn.Server) -> None:
         threading.Thread(
@@ -220,16 +214,19 @@ async def _serve(host: str, port: int) -> None:
         ).start()
 
     await serve_runtime(
-        application,
+        None,
         settings,
         host=host,
         port=port,
         log_level="info",
-        bootstrap=lambda: bootstrap(settings, application),
+        application_factory=lambda effective: create_app(settings=effective),
         on_server=watch_parent,
         on_progress=lambda phase: _emit_runtime_event(phase=phase),
         # A frozen executable is this entry point, not a Python interpreter.
         worker_command=[sys.executable, "worker"]
+        if getattr(sys, "frozen", False)
+        else None,
+        init_command=[sys.executable, "init"]
         if getattr(sys, "frozen", False)
         else None,
     )
@@ -237,6 +234,13 @@ async def _serve(host: str, port: int) -> None:
 
 def main() -> None:
     operation = sys.argv[1] if len(sys.argv) > 1 else "serve"
+    if operation == "init":
+        # Dispatch before importing application/DB code so the init role can
+        # install its parent-loss watcher before any blocking backend work.
+        from backend.app.runtime_init import main as init_main
+
+        init_main()
+        return
     if operation == "worker":
         from backend.worker.managed import main as worker_main
 
@@ -254,6 +258,8 @@ def main() -> None:
         _emit_bridge_result(operation)
         return
     arguments = _serve_arguments(sys.argv[1:])
+    from backend.app.runtime import RuntimeStartupError
+
     try:
         asyncio.run(_serve(arguments.host, arguments.port))
     except RuntimeStartupError as exc:

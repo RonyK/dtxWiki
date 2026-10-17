@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
 from backend.app.settings import Settings
 from backend.services import backup_service
 from backend.services import update_service as us
@@ -69,6 +70,35 @@ def test_run_update_venv_happy(monkeypatch):
     assert result.to_version == "0.2.0"
     assert any("install" in argv for argv in calls)  # pip install ran
     assert any("--finalize-bootstrap" in argv for argv in calls)  # migrations ran
+
+
+def test_update_refuses_db_activity_from_another_data_root(monkeypatch, tmp_path):
+    calls = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append(argv))
+    settings = _settings(database_url=f"sqlite:///{tmp_path / 'db.sqlite'}")
+    resources = RuntimeResources.for_settings(settings)
+    with acquire_paths([resources.activity_paths[1]], "shared"):
+        result = us.run_update(
+            settings,
+            method="venv",
+            yes=True,
+            data_dir=tmp_path / "other",
+            echo=lambda *a: None,
+        )
+    assert result.exit_code == 2
+    assert "dtxwiki-activity.lock" in result.message
+    assert calls == []
+
+
+def test_finalize_private_guard_handoff_is_subprocess_only(monkeypatch):
+    calls = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append((argv, kw)))
+    result = us.run_update(_settings(), method="venv", yes=True, echo=lambda *a: None)
+    assert result.ok
+    install = next(kw for argv, kw in calls if "install" in argv)
+    finalize = next(kw for argv, kw in calls if "--finalize-bootstrap" in argv)
+    assert "env" not in install
+    assert finalize["env"][us.MAINTENANCE_DB_LOCK_PARENT_ENV] == str(us.os.getpid())
 
 
 def test_run_update_dry_run_executes_nothing(monkeypatch):
@@ -137,15 +167,11 @@ def _npm_run(monkeypatch, operation, **kwargs):
     monkeypatch.setattr(us, "_take_runtime_lock", forbidden)
     monkeypatch.setenv("DTXWIKI_DATA_DIR", "/srv/dtxwiki-data")
     lines = []
-    result = operation(
-        _settings(), method="npm", yes=True, echo=lines.append, **kwargs
-    )
+    result = operation(_settings(), method="npm", yes=True, echo=lines.append, **kwargs)
     return result, "\n".join(lines)
 
 
-@pytest.mark.parametrize(
-    ("version", "target"), [("0.2.0", "0.2.0"), (None, "latest")]
-)
+@pytest.mark.parametrize(("version", "target"), [("0.2.0", "0.2.0"), (None, "latest")])
 def test_run_update_npm_points_at_the_launcher(monkeypatch, version, target):
     result, text = _npm_run(monkeypatch, us.run_update, version=version)
 
@@ -441,9 +467,7 @@ def test_run_update_finalize_step_runs_without_timeout(monkeypatch):
     # #7: the migration (finalize-bootstrap) step must NOT inherit the bounded
     # install timeout, so a long real migration is not killed mid-flight.
     calls = []
-    _patch_common(
-        monkeypatch, run=lambda argv, echo, **kw: calls.append((argv, kw))
-    )
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append((argv, kw)))
     us.run_update(_settings(), method="venv", yes=True, echo=lambda *a: None)
     finalize = next(c for c in calls if "--finalize-bootstrap" in c[0])
     assert finalize[1].get("timeout", "MISSING") is None
@@ -895,8 +919,7 @@ def test_docker_instructions_redact_index_url():
     )
     assert not result.ok and result.exit_code == 2
     assert any(
-        "PIP_INDEX_URL=https://user:****@pypi.internal/simple" in line
-        for line in lines
+        "PIP_INDEX_URL=https://user:****@pypi.internal/simple" in line for line in lines
     )
     assert not any("t0ken" in line for line in lines)
 

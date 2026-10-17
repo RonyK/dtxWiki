@@ -9,15 +9,17 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 
 import typer
 
-from backend.app.bootstrap import bootstrap as bootstrap_app
+from backend.app.bootstrap import bootstrap_core as bootstrap_app
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
 from backend.app.settings import Settings
 from backend.cli import prod_setup
 from backend.services import backup_service, update_service
-from backend.services.ops import install_method
+from backend.services.ops import install_method, runtime_lock
 from backend.utils.redact import redact_url
 
 
@@ -64,8 +66,11 @@ def _legacy_systemd_env_file() -> Path:
     try:
         result = subprocess.run(
             [
-                "systemctl", "show", "dtxwiki.service",
-                "--property=EnvironmentFiles", "--value",
+                "systemctl",
+                "show",
+                "dtxwiki.service",
+                "--property=EnvironmentFiles",
+                "--value",
             ],
             check=True,
             capture_output=True,
@@ -157,19 +162,36 @@ def update_command(
             )
             os.environ["DTXWIKI_WORKER_MODE"] = "external"
         settings = Settings(auto_bootstrap=True)
-        bootstrap_app(settings)
-        typer.echo(
-            f"finalize-bootstrap: migrated {redact_url(settings.database_url)}"
-        )
+        resources = RuntimeResources.for_settings(settings)
+        inherited_db_guard = os.environ.get(
+            update_service.MAINTENANCE_DB_LOCK_PARENT_ENV
+        ) == str(os.getppid())
+        # The old updater already holds root EX. It does not know about the
+        # DB-side lock, so acquire that lock here without retaking root EX.
+        # A new updater owns both and supplies a private parent-PID handoff.
+        database_paths = [
+            path
+            for path in resources.activity_paths
+            if path != resources.root / ".runtime.lock"
+        ]
+        try:
+            with (
+                nullcontext()
+                if inherited_db_guard
+                else acquire_paths(database_paths, "exclusive")
+            ):
+                bootstrap_app(settings)
+        except (runtime_lock.RuntimeLockHeldError, OSError) as exc:
+            typer.echo(f"finalize-bootstrap refused: {exc}", err=True)
+            raise typer.Exit(3) from exc
+        typer.echo(f"finalize-bootstrap: migrated {redact_url(settings.database_url)}")
         return
 
     _load_prod_env(method, env_file)
     settings = Settings()
 
     if check:
-        info = update_service.run_check(
-            settings, index_url=index_url, channel=channel
-        )
+        info = update_service.run_check(settings, index_url=index_url, channel=channel)
         if info is None:
             typer.echo("update check unavailable (disabled or index unreachable).")
             raise typer.Exit(0)

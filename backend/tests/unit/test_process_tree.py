@@ -66,7 +66,7 @@ def test_windows_job_resource_ownership(monkeypatch, failure):
     if failure is not None:
         with pytest.raises(OSError, match="denied"):
             _attach_windows_worker_tree(12345)
-        assert closed == ([101, 202] if failure == "assign" else [101])
+        assert closed == ([202, 101] if failure == "assign" else [101])
     else:
         tree = _attach_windows_worker_tree(12345)
         # The process handle is never retained by the supervisor.
@@ -74,6 +74,24 @@ def test_windows_job_resource_ownership(monkeypatch, failure):
         tree.close()
         tree.close()
         assert closed == [202, 101]
+
+
+def test_windows_job_is_created_before_a_launcher_can_spawn(monkeypatch):
+    events = []
+    kernel = SimpleNamespace(
+        CreateJobObjectW=_Function(lambda security, name: events.append(name) or 101),
+        SetInformationJobObject=_Function(lambda *_args: True),
+        OpenProcess=_Function(lambda *args: events.append(args[-1]) or 202),
+        AssignProcessToJobObject=_Function(lambda *_args: True),
+        CloseHandle=_Function(lambda handle: events.append(("close", handle)) or True),
+    )
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_k: kernel, raising=False)
+    tree = _attach_windows_worker_tree(None, name="private-runtime-job")
+    assert events == ["private-runtime-job"]
+    assert tree.environment() == {"_DTXWIKI_RUNTIME_JOB_NAME": "private-runtime-job"}
+    tree.attach(12345)
+    tree.close()
+    assert events == ["private-runtime-job", 12345, ("close", 202), ("close", 101)]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires native Windows job objects")

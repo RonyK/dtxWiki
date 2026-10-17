@@ -7,12 +7,22 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-function desktopFixture({ failDuringLoad = false } = {}) {
+function desktopFixture({ failDuringLoad = false, singleInstance = false, stopEngine, afterSpawn } = {}) {
   const windows = [];
   const dialogs = [];
   const engines = [];
+  const menus = [];
   const stopped = [];
   const workerError = new Error("dtxWiki background worker stopped unexpectedly (exit code 7)");
+  const app = new EventEmitter();
+  let quits = 0;
+  Object.assign(app, {
+    requestSingleInstanceLock: () => singleInstance,
+    quit: () => { quits += 1; },
+    getPath: () => "/logs",
+    getAppPath: () => "/app",
+    whenReady: () => new Promise(() => {}),
+  });
   class BrowserWindow extends EventEmitter {
     constructor() {
       super();
@@ -36,15 +46,10 @@ function desktopFixture({ failDuringLoad = false } = {}) {
   }
   const mocks = {
     electron: {
-      app: {
-        requestSingleInstanceLock: () => false,
-        quit: () => {},
-        getPath: () => "/logs",
-        getAppPath: () => "/app",
-      },
+      app,
       BrowserWindow,
       dialog: { showErrorBox: (...args) => dialogs.push(args) },
-      Menu: { buildFromTemplate: (items) => items, setApplicationMenu: () => {} },
+      Menu: { buildFromTemplate: (items) => items, setApplicationMenu: (menu) => menus.push(menu) },
     },
     "electron-updater": {},
     "./config.cjs": {
@@ -61,9 +66,10 @@ function desktopFixture({ failDuringLoad = false } = {}) {
         engine.onUnexpectedExit = options.onUnexpectedExit;
         engines.push(engine);
         options.onSpawn(engine);
+        await afterSpawn?.(engine, engines.length);
         return engine;
       },
-      async stopLocalEngine(engine) { stopped.push(engine); },
+      async stopLocalEngine(engine) { stopped.push(engine); await stopEngine?.(engine); },
     },
     "./mcp.cjs": {},
     "./security.cjs": {},
@@ -78,11 +84,11 @@ function desktopFixture({ failDuringLoad = false } = {}) {
     module: { exports: {} },
   });
   vm.runInContext(
-    fs.readFileSync(filename, "utf8") + "\nmodule.exports = { connectLocal, connectRemote, showWelcome };",
+    fs.readFileSync(filename, "utf8") + "\nmodule.exports = { connectLocal, connectRemote, showWelcome, stopAllEngines, state: () => ({ localEngine, pendingEngine, engines: [...engineRegistry], quitting, quitAuthorized }) };",
     context,
     { filename },
   );
-  return { ...context.module.exports, dialogs, engines, stopped, windows, workerError };
+  return { ...context.module.exports, app, dialogs, engines, stopped, windows, menus, workerError, quits: () => quits };
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -140,4 +146,91 @@ test("the active local engine still reports failure after a remote connection at
   await settle();
   assert.equal(desktop.dialogs.length, 1);
   assert.match(desktop.dialogs[0][1], /worker stopped unexpectedly/);
+});
+
+test("engine references survive a stop failure and prevent a new local start", async () => {
+  let fail = true;
+  const desktop = desktopFixture({ stopEngine: async () => { if (fail) throw new Error("unconfirmed PID 1234"); } });
+  await desktop.connectLocal();
+  const engine = desktop.engines[0];
+  await assert.rejects(desktop.connectLocal(), /unconfirmed PID/);
+  assert.equal(desktop.engines.length, 1);
+  assert.equal(desktop.state().localEngine, engine);
+  assert.ok(desktop.state().engines.includes(engine));
+  fail = false;
+  await desktop.stopAllEngines();
+  assert.equal(desktop.state().localEngine, null);
+  assert.equal(desktop.state().engines.length, 0);
+});
+
+test("switching connections keeps the engine reference until stop completes", async () => {
+  let confirmExit;
+  const exited = new Promise((resolve) => { confirmExit = resolve; });
+  const desktop = desktopFixture({ stopEngine: () => exited });
+  await desktop.connectLocal();
+  const engine = desktop.engines[0];
+  const switching = desktop.showWelcome();
+  await settle();
+  assert.equal(desktop.state().localEngine, engine);
+  assert.ok(desktop.state().engines.includes(engine));
+  assert.ok(!desktop.windows.at(-1).file.endsWith("index.html"));
+  confirmExit();
+  await switching;
+  assert.equal(desktop.state().localEngine, null);
+  assert.equal(desktop.state().engines.length, 0);
+  assert.match(desktop.windows.at(-1).file, /welcome[/\\]index\.html$/);
+});
+
+test("repeated quit after failed stop cannot bypass engine shutdown", async () => {
+  let fail = true;
+  const desktop = desktopFixture({ singleInstance: true, stopEngine: async () => { if (fail) throw new Error("unconfirmed PID 1234"); } });
+  await desktop.connectLocal();
+  let prevented = 0;
+  const quit = () => desktop.app.emit("before-quit", { preventDefault: () => { prevented += 1; } });
+  quit();
+  quit();
+  await settle();
+  assert.equal(prevented, 2);
+  assert.equal(desktop.quits(), 0);
+  assert.equal(desktop.state().quitAuthorized, false);
+  assert.equal(desktop.state().engines.length, 1);
+  quit();
+  await settle();
+  assert.equal(prevented, 3);
+  assert.equal(desktop.quits(), 0);
+  assert.equal(desktop.dialogs.length, 2);
+  fail = false;
+  quit();
+  await settle();
+  assert.equal(desktop.quits(), 1);
+  assert.equal(desktop.state().quitAuthorized, true);
+  quit();
+  assert.equal(prevented, 4);
+});
+
+test("a stale start resolving later cannot replace or stop the current engine", async () => {
+  let releaseFirst;
+  const first = new Promise((resolve) => { releaseFirst = resolve; });
+  const desktop = desktopFixture({ afterSpawn: (_engine, number) => number === 1 ? first : undefined });
+  const firstConnection = desktop.connectLocal();
+  await settle();
+  await desktop.connectLocal();
+  const current = desktop.engines[1];
+  assert.equal(desktop.state().localEngine, current);
+  releaseFirst();
+  await firstConnection;
+  assert.equal(desktop.state().localEngine, current);
+  assert.ok(!desktop.stopped.includes(current));
+});
+
+test("menu connection changes report stop rejection and retain the live engine", async () => {
+  const desktop = desktopFixture({ stopEngine: async () => { throw new Error("unconfirmed PID 1234"); } });
+  await desktop.connectLocal();
+  const engine = desktop.engines[0];
+  const connection = desktop.menus.at(-1).find((item) => item.label === "연결");
+  connection.submenu.find((item) => item.label === "연결 관리…").click();
+  await settle();
+  assert.equal(desktop.dialogs.length, 1);
+  assert.match(desktop.dialogs[0][1], /unconfirmed PID 1234/);
+  assert.equal(desktop.state().localEngine, engine);
 });

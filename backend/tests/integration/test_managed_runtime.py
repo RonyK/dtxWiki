@@ -46,7 +46,11 @@ class _Runtime:
 
 @contextmanager
 def _running_cli(
-    tmp_path: Path, free_tcp_port: int, command: tuple[str, ...]
+    tmp_path: Path,
+    free_tcp_port: int,
+    command: tuple[str, ...],
+    *,
+    default_credentials: bool = False,
 ) -> Iterator[tuple[_Runtime, Path, Path, Path]]:
     selected_db = tmp_path / "selected.sqlite"
     selected_url = copy_migrated_sqlite(selected_db)
@@ -60,8 +64,9 @@ def _running_cli(
         DTXWIKI_DATABASE_URL=f"sqlite:///{ignored_db}",
         DTXWIKI_AUTO_BOOTSTRAP="false",
         DTXWIKI_LIBRARY_BLOB_ROOT=str(blob_root),
-        DTXWIKI_SESSION_SECRET="managed-runtime-acceptance-session-secret",
     )
+    if not default_credentials:
+        env["DTXWIKI_SESSION_SECRET"] = "managed-runtime-acceptance-session-secret"
     log_path = tmp_path / "runtime.log"
     with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
@@ -255,6 +260,40 @@ def test_managed_worker_death_stops_server_with_failure(
         assert not Path(f"/proc/{worker_pid}").exists(), runtime.logs()
         with pytest.raises(httpx.ConnectError):
             runtime.client.get("/api/v1/auth/capabilities")
+
+
+def test_default_local_credentials_are_stable_and_health_is_ready(
+    tmp_path: Path, free_tcp_port: int
+) -> None:
+    credentials = []
+    for _launch in range(2):
+        with _running_cli(tmp_path, free_tcp_port, (), default_credentials=True) as (
+            runtime,
+            _selected_db,
+            _ignored_db,
+            _blob_root,
+        ):
+            _await_api(runtime)
+            worker_pid = _managed_worker_pid(runtime)
+            ready = runtime.client.get("/health/ready")
+            assert ready.status_code == 200, ready.text
+            assert ready.json()["components"]["oauth_jwk"] == "ok"
+            assert ready.json()["components"]["worker"] == "ok"
+            root = tmp_path / "data-dir"
+            credentials.append(
+                (
+                    (root / "oauth-jwt.pem").read_bytes(),
+                    (root / "session_secret").read_bytes(),
+                )
+            )
+            children = Path(
+                f"/proc/{runtime.process.pid}/task/{runtime.process.pid}/children"
+            )
+            assert children.read_text().split() == [str(worker_pid)]
+            runtime.process.terminate()
+            assert runtime.process.wait(timeout=15) == 0, runtime.logs()
+            assert not Path(f"/proc/{worker_pid}").exists()
+    assert credentials[0] == credentials[1]
 
 
 def test_parent_sigkill_does_not_leave_a_running_worker(

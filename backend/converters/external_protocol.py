@@ -12,12 +12,20 @@ import re
 import signal
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from backend.app.process_tree import (
+    WorkerTree,
+    managed_host_environment,
+    prepare_worker_tree,
+    start_managed_host,
+)
 from backend.spi.conversion import (
     CONVERSION_OUTPUT_SCHEMA_VERSION,
     CONVERTER_SPI_VERSION,
@@ -527,10 +535,26 @@ def _run_bounded(
     # this parent exchange explicitly encoded UTF-8 bytes.
     environment["PYTHONUTF8"] = "1"
     environment["PYTHONIOENCODING"] = "utf-8"
+    managed_host_environment(command, environment)
     creationflags = 0
     start_new_session = os.name != "nt"
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        tree = (
+            prepare_worker_tree()
+            if environment.get("_DTXWIKI_HOST_BARRIER") == "1"
+            else WorkerTree()
+        )
+    except OSError as exc:
+        raise ConversionError(
+            "converter_process_unavailable",
+            "The converter process could not be started.",
+            retryable=False,
+            fallback_allowed=True,
+        ) from exc
+    environment.update(tree.environment())
     try:
         process = subprocess.Popen(
             command,
@@ -545,6 +569,7 @@ def _run_bounded(
             start_new_session=start_new_session,
         )
     except OSError as exc:
+        tree.close()
         raise ConversionError(
             "converter_process_unavailable",
             "The converter process could not be started.",
@@ -554,13 +579,32 @@ def _run_bounded(
     assert process.stdin is not None
     assert process.stdout is not None
     assert process.stderr is not None
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with closing(tree), ThreadPoolExecutor(max_workers=3) as pool:
         try:
+            try:
+                tree.attach(process.pid)
+                start_managed_host(process, environment, deadline - time.monotonic())
+            except TimeoutError as exc:
+                raise ConversionError(
+                    "converter_timed_out",
+                    "The converter exceeded its time limit.",
+                    retryable=False,
+                    fallback_allowed=False,
+                ) from exc
+            except (OSError, RuntimeError) as exc:
+                raise ConversionError(
+                    "converter_process_failed",
+                    "The converter could not initialize.",
+                    retryable=False,
+                    fallback_allowed=True,
+                ) from exc
             stdout_future = pool.submit(_read_limited, process.stdout, stdout_limit)
             stderr_future = pool.submit(_read_limited, process.stderr, _STDERR_LIMIT)
             stdin_future = pool.submit(_write_input, process.stdin, stdin)
             try:
-                return_code = process.wait(timeout=timeout_seconds)
+                return_code = process.wait(
+                    timeout=max(0.001, deadline - time.monotonic())
+                )
             except subprocess.TimeoutExpired as exc:
                 raise ConversionError(
                     "converter_timed_out",

@@ -134,11 +134,10 @@ def run_server(
     resolved_port = port if port is not None else settings.backend_port
     if settings.app_mode == "solo_local" and not is_loopback_bind_host(host):
         _warn_solo_local_network_bind(host, settings)
-    app_instance = create_app(settings=settings)
     try:
         # Preserve uvicorn.run's automatic uvloop/platform selection. Older
         # supported Uvicorn versions configure the event-loop policy instead.
-        loop_config = uvicorn.Config(app_instance, log_level=log_level)
+        loop_config = uvicorn.Config(None, log_level=log_level)
         get_loop_factory = getattr(loop_config, "get_loop_factory", None)
         if get_loop_factory is not None:
             loop_factory = get_loop_factory()
@@ -147,7 +146,7 @@ def run_server(
             loop_factory = None
         asyncio.run(
             serve_runtime(
-                app_instance,
+                None,
                 settings,
                 host=host,
                 port=resolved_port,
@@ -157,7 +156,7 @@ def run_server(
                 on_started=(lambda: webbrowser.open(_browser_url(host, resolved_port)))
                 if open_browser
                 else None,
-                bootstrap=lambda: bootstrap_app(settings, app_instance),
+                application_factory=lambda effective: create_app(settings=effective),
             ),
             loop_factory=loop_factory,
         )

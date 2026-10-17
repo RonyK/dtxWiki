@@ -1265,6 +1265,48 @@ def test_worker_reclaim_with_session_factory_swallows_reclaim_errors(monkeypatch
     assert reclaimed_count == 0
 
 
+def test_initial_recovery_reports_control_roster_failure(monkeypatch):
+    factory = make_session_factory()
+    worker = OneShotWorker()
+
+    def unavailable(_session):
+        raise RuntimeError("roster unavailable")
+
+    monkeypatch.setattr(worker, "_workspace_roster", unavailable)
+    result = worker.recover_initial_stale_jobs_with_session_factory(factory, 600)
+    assert result.status == "roster_failed"
+    assert not result.roster_available
+    # Periodic recovery retains its existing best-effort count contract.
+    assert worker.reclaim_stale_jobs_with_session_factory(factory, 600) == 0
+
+
+def test_initial_recovery_reports_partial_without_skipping_healthy_workspace(
+    monkeypatch,
+):
+    factory = make_session_factory()
+    worker = OneShotWorker()
+    with factory.begin() as session:
+        broken = seed_default_workspace(session)
+        healthy = Workspace(slug="initial-healthy", title="Healthy", name="Healthy")
+        session.add(healthy)
+        session.flush()
+        broken_id, healthy_id = broken.id, healthy.id
+    visited = []
+
+    def reclaim(*, workspace_id, **kwargs):
+        visited.append(workspace_id)
+        if workspace_id == broken_id:
+            raise RuntimeError("workspace unavailable")
+        return []
+
+    monkeypatch.setattr(worker.job_queue, "reclaim_stale_jobs", reclaim)
+    result = worker.recover_initial_stale_jobs_with_session_factory(factory, 600)
+    assert result.status == "partial"
+    assert result.failed_workspace_ids == (broken_id,)
+    assert set(visited) == {broken_id, healthy_id}
+    assert result.reclaimed_count == 0
+
+
 def test_reclaim_stale_jobs_fans_out_and_reclaims_every_workspace():
     """Phase 6a (plan §3 D-2 point 1): the pre-fan-out reclaim_stale_jobs had
     no workspace filter and scanned every 'running' row in one query, which
