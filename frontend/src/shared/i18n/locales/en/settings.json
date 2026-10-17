@@ -87,6 +87,10 @@
     "deployment": {
       "label": "Deployment",
       "description": "Domain, TLS, and service status. Changes are made with the dtxwiki CLI."
+    },
+    "labs": {
+      "label": "Labs",
+      "description": "Choose which experimental menus appear."
     }
   },
   "crossLinks": {
@@ -424,21 +428,21 @@
     "loadError": "Failed to load Setup",
     "eyebrow": "Get your workspace ready",
     "title": "Setup",
-    "description": "Add the sources, pages, and rules your AI will use to answer.",
+    "description": "Add source materials and organize your workspace knowledge.",
     "status": {
-      "ready": "3 of 3 · Ready",
-      "pending": "0 of 3 · Pending",
-      "partial": "{{count}} of 3 · Partial"
+      "ready": "{{total}} of {{total}} · Ready",
+      "pending": "0 of {{total}} · Pending",
+      "partial": "{{count}} of {{total}} · Partial"
     },
     "itemCount_one": "{{count}} item",
     "itemCount_other": "{{count}} items",
     "itemCountAtLeast": "{{count}}+ items loaded",
     "callout": {
-      "allSetTitle": "All set. Try asking a question.",
-      "allSetBody": "Your workspace has sources, knowledge pages, and AI rules.",
-      "openAsk": "Open Ask",
+      "allSetTitle": "Your workspace is ready.",
+      "allSetBody": "Your workspace has sources and knowledge pages.",
+      "openContext": "Open Context",
       "emptyTitle": "Library is empty. Start by adding a source.",
-      "emptyBody": "Even one PDF or page is enough to ask your first question.",
+      "emptyBody": "Add a PDF or page to start building your workspace knowledge.",
       "addFirstSource": "Add your first source",
       "partialTitle": "Keep going.",
       "partialFallback": "Review the remaining setup items."
@@ -1891,5 +1895,12 @@
     "blocked": "Use blocked",
     "granted": "Granted",
     "expiry": "Expiry"
+  },
+  "labs": {
+    "title": "Experimental menus",
+    "description": "These features are still being developed. Turn on the menus you want to try.",
+    "showChats": "Show Chats menu",
+    "showAgent": "Show Agent menu",
+    "savedLocally": "Changes apply immediately and are saved for your account in this browser."
   }
 }

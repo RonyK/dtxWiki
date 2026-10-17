@@ -252,8 +252,8 @@ export type SettingsDestinationMatch = SettingsDestination & {
  * Deliberately not a search over the `settings` namespace: policy field labels
  * are computed at render from the live policy JSON (`labelledPolicyFields`
  * walks `Object.keys(policy).sort()`), so there is no static table to index.
- * The searchable set is 8 destination labels, 8 descriptions and 5 tab labels
- * -- 21 strings, not the namespace's 1345.
+ * The searchable set is destination labels, descriptions and policy tab
+ * labels, rather than every string in the settings namespace.
  *
  * The tab arm is the half that earns its keep: the Content policies merge put
  * five surfaces behind one entry, so without it typing "lint" from anywhere

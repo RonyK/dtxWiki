@@ -1,10 +1,38 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SettingsSectionPicker } from "../SettingsSectionPicker";
 
 describe("SettingsSectionPicker", () => {
+  it("finds Labs in the account group and selects its destination", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <SettingsSectionPicker
+        activeSection="workspace"
+        consentCount={0}
+        onSelect={onSelect}
+        showAttachments={false}
+        showDeployment={false}
+        showUsers={false}
+        tokenCount={0}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { expanded: false }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByRole("searchbox", { name: "Filter settings sections" }),
+      "experimental",
+    );
+    const group = within(dialog).getByRole("group", { name: "Your account" });
+    await user.click(within(group).getByRole("button", { name: /^Labs/ }));
+
+    expect(onSelect).toHaveBeenCalledWith("labs", undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("shows an up-to-date badge while open, without retyping the filter", async () => {
     // 260912 review, P6d: `matches` used to depend on `[query]` alone while
     // `sections`/`policyTabs` were rebuilt fresh every render from `t` and

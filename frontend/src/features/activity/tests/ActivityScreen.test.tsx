@@ -12,11 +12,27 @@ import { ActivityLanePage, ActivityScreen } from "../ActivityScreen";
 
 const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "workspace-1";
+const activityPreferences = vi.hoisted(() => ({
+  chats: false,
+  agent: false,
+  role: "editor",
+}));
+
+vi.mock("../../../shared/hooks/useLabsPreferences", () => ({
+  useLabsPreferences: () => ({ preferences: activityPreferences }),
+}));
+vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
+  useOptionalWorkspaceContext: () => ({
+    selectedWorkspace: { role: activityPreferences.role },
+  }),
+}));
 
 describe("ActivityScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    activityPreferences.chats = false;
+    activityPreferences.role = "editor";
   });
 
   it("renders three activity lanes and review deeplinks", async () => {
@@ -740,6 +756,29 @@ describe("ActivityScreen", () => {
     expect(screen.queryByText("change set")).toBeNull();
   });
 
+  it.each([
+    { role: "editor", chats: false, visible: false },
+    { role: "editor", chats: true, visible: true },
+    { role: "viewer", chats: true, visible: false },
+  ])("shows empty MCP Chats actions only when enabled for editors ($role, enabled=$chats)", async ({ role, chats, visible }) => {
+    activityPreferences.role = role;
+    activityPreferences.chats = chats;
+    renderWithActivity({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=all&sub_tab=traces&limit=50`]: {
+        data: { items: [], next_cursor: null, unread_count: 0 },
+      },
+    }, "/activity?kind=mcp");
+
+    await screen.findByRole("heading", { name: "Activity" });
+    expect(screen.getAllByRole("link", { name: "Open MCP setup" })).toHaveLength(3);
+    const links = screen.queryAllByRole("link", { name: "Open Chats" });
+    expect(links).toHaveLength(visible ? 3 : 0);
+    for (const link of links) expect(link).toHaveAttribute("href", "/chats");
+  });
+
   it("does not offer Context creation actions for empty system activity", async () => {
     renderWithActivity({
       [`${BASE}/api/v1/workspaces`]: {
@@ -776,6 +815,8 @@ function renderWithActivity(responses: Record<string, unknown>, initialEntry = "
 describe("ActivityLanePage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    activityPreferences.chats = false;
+    activityPreferences.role = "editor";
   });
 
   it("appends the next cursor page when Load more is clicked", async () => {

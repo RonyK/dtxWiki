@@ -8753,6 +8753,35 @@ describe("SettingsScreen", () => {
     };
   }
 
+  it("opens Labs from a shared link and through the searchable account navigation", async () => {
+    const user = userEvent.setup();
+    mockFetch(navFixture(false));
+    render(
+      <MemoryRouter initialEntries={["/settings?section=labs"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show Chats menu" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show Agent menu" })).not.toBeChecked();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const labs = within(nav).getByRole("button", { name: "Labs" });
+    expect(labs).toHaveAttribute("aria-current", "page");
+    expect(labs.closest(".settings-subnav-group")).toHaveTextContent("Your account");
+
+    await user.click(within(nav).getByRole("button", { name: "Workspace" }));
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
+    await user.type(
+      within(nav).getByRole("searchbox", { name: "Filter settings sections" }),
+      "experimental",
+    );
+    expect(within(nav).queryByRole("button", { name: "Workspace" })).not.toBeInTheDocument();
+    await user.click(within(nav).getByRole("button", { name: "Labs" }));
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+  });
+
   it("groups Settings sections and marks the server-wide ones for an admin", async () => {
     mockFetch(navFixture(true));
     render(

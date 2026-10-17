@@ -82,9 +82,6 @@ const VerifyEmailScreen = lazy(() =>
     default: module.VerifyEmailScreen,
   })),
 );
-const AskScreen = lazy(() =>
-  import("../features/ask/AskScreen").then((module) => ({ default: module.AskScreen })),
-);
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
 );
@@ -177,14 +174,6 @@ export const appRoutes = createRoutesFromElements(
         element={
           <RequireAuth>
             <WorkspaceDirectoryScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/ask"
-        element={
-          <RequireAuth>
-            <AskScreen />
           </RequireAuth>
         }
       />

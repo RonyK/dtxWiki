@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../../auth/AuthContext";
 import type { WorkspaceSummary } from "../../api/workspace";
 import { i18n } from "../../i18n";
+import { useLabsPreferences } from "../../hooks/useLabsPreferences";
 import { WorkspaceProvider } from "../../workspace/WorkspaceContext";
 import { Shell } from "../Shell";
 
@@ -37,14 +38,11 @@ const EXPECTED_SIDEBAR_NAV: Array<{
       ["Dashboard", "/dashboard"],
       ["Library", "/library"],
       ["Context", "/context"],
-      ["Agent", "/agent"],
-      ["Chats", "/chats"],
     ],
   },
   {
     group: "Workflow",
     links: [
-      ["Ask", "/ask"],
       ["Review queue", "/review"],
       ["Lint queue", "/lint"],
       ["Activity", "/activity"],
@@ -72,7 +70,7 @@ describe("Shell", () => {
     ).toHaveAttribute("href", "#main-content");
     expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-    await within(sidebar).findByText("Chats");
+    await screen.findByRole("button", { name: /Create/ });
 
     // Whole-sidebar assertion first — catches silent swaps between groups
     // or links being moved out of a group entirely.
@@ -89,7 +87,7 @@ describe("Shell", () => {
     expect(allSidebarLinks.map((link) => link.getAttribute("href"))).toEqual(
       expectedFlatLinks.map((item) => item.href),
     );
-    for (const label of ["Agent", "Ask"]) {
+    for (const label of ["Review queue"]) {
       const link = within(sidebar).getByText(label).closest("a");
       expect(link).not.toBeNull();
       expect(within(link as HTMLElement).getByText("Preview")).toHaveClass(
@@ -126,8 +124,8 @@ describe("Shell", () => {
       screen.getByRole("menuitem", { name: "New Context page" }),
     ).toHaveAttribute("href", "/context/new?from=context");
     expect(
-      screen.getByRole("menuitem", { name: "New Ask session" }),
-    ).toBeVisible();
+      screen.queryByRole("menuitem", { name: "New Ask session" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("menuitem", { name: "New folder" }),
     ).toHaveAttribute("href", "/context?newFolder=1");
@@ -138,13 +136,11 @@ describe("Shell", () => {
       "href",
       "/search",
     );
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "New Ask session" }),
-    );
-    expect(screen.getByTestId("location").textContent).toMatch(/^\/ask\?new=/);
+    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
   });
 
   it("hides write-only Shell controls for viewer-role members", async () => {
+    window.localStorage.setItem("dtxwiki:labs:user-1", JSON.stringify({ agent: true, chats: true }));
     mockSession(true, [
       { ...workspace("workspace-1", "Default", "en"), role: "viewer" },
     ]);
@@ -159,6 +155,41 @@ describe("Shell", () => {
     expect(
       screen.queryByRole("button", { name: /Create/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("updates navigation and route commands when Labs menus are toggled independently", async () => {
+    const user = userEvent.setup();
+    mockSession(true);
+    renderShell(["/dashboard"], <LabsControlsProbe />);
+
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+    const agentToggle = await screen.findByRole("button", { name: "Toggle Agent menu" });
+    const chatsToggle = screen.getByRole("button", { name: "Toggle Chats menu" });
+    await waitFor(() => expect(agentToggle).toBeEnabled());
+    expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
+
+    await user.click(agentToggle);
+    expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/agent");
+    expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
+
+    await user.click(chatsToggle);
+    expect(within(sidebar).getByText("Chats").closest("a")).toHaveAttribute("href", "/chats");
+    const searchbox = screen.getByRole("combobox", { name: "Search workspace" });
+    await user.click(searchbox);
+    expect(screen.getByRole("option", { name: "AgentKnowledge" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "ChatsKnowledge" })).toBeInTheDocument();
+
+    await user.click(agentToggle);
+    await user.click(searchbox);
+    expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "AgentKnowledge" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "ChatsKnowledge" })).toBeInTheDocument();
+
+    await user.click(chatsToggle);
+    await user.click(searchbox);
+    expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "ChatsKnowledge" })).not.toBeInTheDocument();
   });
 
   it("collapses and restores the desktop sidebar", async () => {
@@ -1626,9 +1657,14 @@ describe("Shell", () => {
     expect(searchbox).toHaveFocus();
 
     await user.type(searchbox, "ask");
-    await user.click(screen.getByRole("option", { name: "AskWorkflow" }));
+    expect(
+      screen.queryByRole("option", { name: "AskWorkflow" }),
+    ).not.toBeInTheDocument();
+    await user.clear(searchbox);
+    await user.type(searchbox, "review");
+    await user.click(screen.getByRole("option", { name: "Review queueWorkflow" }));
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/ask");
+    expect(screen.getByTestId("location")).toHaveTextContent("/review");
   });
 
   it("activates highlighted topbar route commands with Enter", async () => {
@@ -1642,13 +1678,13 @@ describe("Shell", () => {
     const searchbox = screen.getByRole("combobox", {
       name: "Search workspace",
     });
-    await user.type(searchbox, "ask");
-    const askOption = screen.getByRole("option", { name: "AskWorkflow" });
-    expect(searchbox).toHaveAttribute("aria-activedescendant", askOption.id);
+    await user.type(searchbox, "review");
+    const reviewOption = screen.getByRole("option", { name: "Review queueWorkflow" });
+    expect(searchbox).toHaveAttribute("aria-activedescendant", reviewOption.id);
 
     await user.keyboard("{Enter}");
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/ask");
+    expect(screen.getByTestId("location")).toHaveTextContent("/review");
   });
 
   it("leaves the command shortcut to editable surfaces", async () => {
@@ -1968,6 +2004,20 @@ function LocationProbe() {
   const location = useLocation();
   return (
     <div data-testid="location">{location.pathname + location.search}</div>
+  );
+}
+
+function LabsControlsProbe() {
+  const { preferences, setMenuVisible, ready } = useLabsPreferences();
+  return (
+    <>
+      <button disabled={!ready} onClick={() => setMenuVisible("agent", !preferences.agent)}>
+        Toggle Agent menu
+      </button>
+      <button disabled={!ready} onClick={() => setMenuVisible("chats", !preferences.chats)}>
+        Toggle Chats menu
+      </button>
+    </>
   );
 }
 

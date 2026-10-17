@@ -1274,8 +1274,10 @@ describe("AskScreen", () => {
     expect(screen.getByLabelText("Ask history")).toHaveTextContent(
       "No sessions yet",
     );
-    expect(screen.getByLabelText("Workspace setup sequence"))
-      .toHaveTextContent("Ask a question");
+    const setup = screen.getByLabelText("Workspace setup sequence");
+    expect(setup).toHaveTextContent("Write Context page");
+    expect(setup).toHaveTextContent("Save or review");
+    expect(setup).not.toHaveTextContent("Ask a question");
     expect(screen.getByRole("button", { name: "New Ask" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Start first Ask session" }),

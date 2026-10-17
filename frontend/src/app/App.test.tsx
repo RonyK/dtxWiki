@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { isValidElement, Suspense, type ReactNode } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { matchRoutes, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -441,6 +441,14 @@ describe("appRoutes role gating", () => {
   it("does not register the /context-map alias (no map feature exists)", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();
   });
+
+  it.each(["/ask", "/ask?new=1", "/ask/"])(
+    "resolves the unfinished Ask URL %s to the not-found route",
+    (path) => {
+      const matches = matchRoutes(appRoutes, path);
+      expect(matches?.at(-1)?.route.path).toBe("*");
+    },
+  );
 
   it("keeps the one-time password reset route public", () => {
     const route = findRoute(appRoutes, "/reset-password");

@@ -13,7 +13,6 @@ import {
   SpellCheck,
   Menu,
   MessagesSquare,
-  MessageSquare,
   Plus,
   Search,
   Settings,
@@ -38,6 +37,7 @@ import {
 } from "../api/workspaceDirectory";
 import { useAuth } from "../auth/AuthContext";
 import { normalizeLocale, setLocale, syncLocaleFromWorkspace } from "../i18n";
+import { useLabsPreferences } from "../hooks/useLabsPreferences";
 import { domainLabel } from "../lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../lib/searchLimits";
 import { searchResultHref } from "../lib/searchResultHref";
@@ -79,7 +79,6 @@ type NavItemKey =
   | "context"
   | "agent"
   | "chats"
-  | "ask"
   | "review"
   | "lint"
   | "activity"
@@ -105,7 +104,6 @@ type ShellLabels = {
   createTitle: string;
   newContextPage: string;
   newFolder: string;
-  newAsk: string;
   addLibraryItem: string;
   sidebarAria: string;
   sidebarCollapse: string;
@@ -131,7 +129,6 @@ const SIDEBAR_NAV_GROUPS: Array<{ key: NavGroupKey; items: SidebarNavItem[] }> =
     {
       key: "workflow",
       items: [
-        { icon: MessageSquare, key: "ask", preview: true, to: "/ask" },
         { icon: ListChecks, key: "review", preview: true, to: "/review" },
         // The lint queue is the other half of the review workflow, and used to be
         // reachable only from three levels inside Settings.
@@ -273,7 +270,6 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
       context: t("nav.context", { defaultValue: "Context" }),
       agent: t("nav.agent", { defaultValue: "Agent" }),
       chats: t("nav.chats", { defaultValue: "Chats" }),
-      ask: t("nav.ask", { defaultValue: "Ask" }),
       review: t("nav.review", { defaultValue: "Review queue" }),
       lint: t("nav.lint", { defaultValue: "Lint queue" }),
       activity: t("nav.activity", { defaultValue: "Activity" }),
@@ -310,7 +306,6 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
       defaultValue: "New Context page",
     }),
     newFolder: t("create.newFolder", { defaultValue: "New folder" }),
-    newAsk: t("create.newAsk", { defaultValue: "New Ask session" }),
     addLibraryItem: t("create.addLibraryItem", {
       defaultValue: "Add first Library item",
     }),
@@ -416,12 +411,13 @@ export function Shell({ children }: ShellProps) {
     : "app-shell app-shell-public";
   const shellLabels = useMemo(() => shellLabelsFromT(t), [t]);
   const workspaceContext = useOptionalWorkspaceContext();
+  const { preferences: labsPreferences } = useLabsPreferences();
   const selectedRole = workspaceContext?.selectedWorkspace?.role;
   const canWriteSelectedWorkspace = isEditorRole(selectedRole);
   // /chats is editor-gated end to end (backend + RequireEditor). Keep this
   // fail-closed until the selected role resolves so a Viewer never sees a
   // transient write-only destination during workspace hydration.
-  const hideChatsNav = !canWriteSelectedWorkspace;
+  const hideChatsNav = !labsPreferences.chats || !canWriteSelectedWorkspace;
   const activeLocale = normalizeLocale(i18n.language);
   const nextLocale = activeLocale === "ko" ? "en" : "ko";
   const nextLocaleLabel = t(`topbar.language.${nextLocale}`);
@@ -430,14 +426,14 @@ export function Shell({ children }: ShellProps) {
   });
   const navGroups = useMemo(() => {
     const groups = navGroupsForLabels(shellLabels);
-    if (!hideChatsNav) {
-      return groups;
-    }
     return groups.map((group) => ({
       ...group,
-      items: group.items.filter((item) => item.key !== "chats"),
+      items: group.items.filter((item) =>
+        (item.key !== "chats" || !hideChatsNav) &&
+        (item.key !== "agent" || labsPreferences.agent),
+      ),
     }));
-  }, [hideChatsNav, shellLabels]);
+  }, [hideChatsNav, labsPreferences.agent, shellLabels]);
 
   function closeMobileNav() {
     restoreMobileNavFocusRef.current = true;
@@ -1255,7 +1251,6 @@ const CREATE_MENU_TRIGGER_ID = "shell-create-menu-trigger";
 const CREATE_MENU_ID = "shell-create-menu";
 
 function CreateMenu({ labels }: { labels: ShellLabels }) {
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -1320,11 +1315,6 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
-
-  function createAskSessionRoute() {
-    closeMenu();
-    navigate(`/ask?new=${Date.now()}`);
-  }
 
   function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "Tab" && open) {
@@ -1426,16 +1416,6 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             <FolderPlus size={15} aria-hidden="true" />
             <span>{labels.newFolder}</span>
           </Link>
-          <button
-            className="create-menu-item"
-            onClick={createAskSessionRoute}
-            role="menuitem"
-            tabIndex={-1}
-            type="button"
-          >
-            <MessageSquare size={15} aria-hidden="true" />
-            <span>{labels.newAsk}</span>
-          </button>
           <Link
             className="create-menu-item"
             onClick={() => closeMenu()}

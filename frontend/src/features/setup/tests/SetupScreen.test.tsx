@@ -8,15 +8,23 @@ import { SetupScreen } from "../SetupScreen";
 
 const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "workspace-1";
+const labs = vi.hoisted(() => ({ chats: false, agent: false }));
+
+vi.mock("../../../shared/hooks/useLabsPreferences", () => ({
+  useLabsPreferences: () => ({ preferences: labs }),
+}));
 
 describe("SetupScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+    labs.chats = false;
+    labs.agent = false;
     setLocale("en", { persist: false });
   });
 
   it("renders readiness cards from live APIs", async () => {
+    labs.agent = true;
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -54,15 +62,17 @@ describe("SetupScreen", () => {
     expect(
       screen.getByRole("link", { name: /Connect external AI tools \(MCP\)/i }),
     ).toHaveAttribute("href", "/settings?section=mcp");
-    expect(screen.getByText("All set. Try asking a question.")).toBeInTheDocument();
+    expect(screen.getByText("Your workspace is ready.")).toBeInTheDocument();
     expect(screen.getByText("3 of 3 · Ready")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Ask" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open Context" })).toHaveAttribute(
       "href",
-      "/ask",
+      "/context",
     );
+    expect(screen.queryByRole("link", { name: "Open Ask" })).not.toBeInTheDocument();
   });
 
   it("uses server totals and labels a compatibility page as a lower bound", async () => {
+    labs.agent = true;
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -152,7 +162,7 @@ describe("SetupScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Setup" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("0 of 3 · Pending")).toBeInTheDocument();
+    expect(screen.getByText("0 of 2 · Pending")).toBeInTheDocument();
     expect(
       screen.getByText("Library is empty. Start by adding a source."),
     ).toBeInTheDocument();
@@ -181,7 +191,7 @@ describe("SetupScreen", () => {
     );
 
     expect(
-      await screen.findByText("1 of 3 · Partial"),
+      await screen.findByText("1 of 2 · Partial"),
     ).toBeInTheDocument();
     const requestedUrls = fetchMock.mock.calls.map((call) => call[0].toString());
     expect(requestedUrls).not.toContain(
@@ -190,7 +200,7 @@ describe("SetupScreen", () => {
   });
 
   it("does not repeat the ready-count in the callout body (M-13, 260908 UI audit)", async () => {
-    // The header status pill above ("1 of 3 · Partial") already states the
+    // The header status pill above ("1 of 2 · Partial") already states the
     // count; the callout used to restate it verbatim right underneath.
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
@@ -216,9 +226,64 @@ describe("SetupScreen", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText("1 of 3 · Partial");
+    await screen.findByText("1 of 2 · Partial");
     expect(screen.getByText("Keep going.")).toBeInTheDocument();
     expect(screen.queryByText(/of 3 ready/)).not.toBeInTheDocument();
+  });
+
+  it("finishes setup with sources and knowledge pages while Agent is hidden", async () => {
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+        data: [{ id: "source-1" }],
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages`]: {
+        data: [{ id: "context-1" }],
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SetupScreen />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("2 of 2 · Ready")).toBeInTheDocument();
+    expect(screen.getByText("Your workspace has sources and knowledge pages.")).toBeInTheDocument();
+    expect(screen.queryByText("AI rules")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open Agent|Add rule/ })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/agent"]')).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/agent/pages"))).toBe(false);
+  });
+
+  it("offers the Agent setup step after the Agent menu is enabled", async () => {
+    labs.agent = true;
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+        data: [{ id: "source-1" }],
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages`]: {
+        data: [{ id: "context-1" }],
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: {
+        data: [],
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SetupScreen />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("2 of 3 · Partial")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add rule" })).toHaveAttribute("href", "/agent");
+    expect(screen.getByText("Add an AI rule to control how answers are written.")).toBeInTheDocument();
   });
 });
 

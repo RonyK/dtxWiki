@@ -4,6 +4,7 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  FlaskConical,
   KeyRound,
   ListChecks,
   LockKeyhole,
@@ -114,6 +115,7 @@ import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { LintRulesSection } from "./LintRulesSection";
+import { LabsSection } from "./LabsSection";
 import { AdminJobsSection } from "./AdminJobsSection";
 import { AdminUserRecoverySection } from "./AdminUserRecoverySection";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
@@ -202,6 +204,7 @@ export type SettingsSection =
   | "members"
   | "policies"
   | "mcp"
+  | "labs"
   | "users"
   | "jobs"
   | "attachments"
@@ -3552,6 +3555,9 @@ function SettingsScreenBody() {
           <div
             className="settings-content"
           >
+            {activeSection === "labs" ? (
+              <LabsSection labelledBy={SETTINGS_DESTINATION_HEADING_ID} />
+            ) : null}
             {activeSection === "deployment" ? (
               isServerAdmin ? (
                 <DeploymentSection />
@@ -6802,6 +6808,13 @@ export function settingsDestinations(
         defaultValue: "{{count}} personal connections (access keys + OAuth apps)",
       }),
     },
+    {
+      id: "labs",
+      group: "account",
+      icon: FlaskConical,
+      label: t("sections.labs.label"),
+      description: t("sections.labs.description"),
+    },
   ];
 
   if (showUsers) {
@@ -6938,7 +6951,7 @@ function SettingsSectionNav({
       className="settings-subnav"
       aria-label={t("navigationLabel", { defaultValue: "Settings sections" })}
     >
-      {/* Eight destinations and five tabs behind one of them, with no way to
+      {/* Several destinations and five tabs behind one of them, with no way to
           ask where something is. The narrow-screen picker got this first
           because a modal list is where it pays most; the rail shares the
           filter rather than growing a second one. */}
@@ -10272,6 +10285,7 @@ function settingsSectionFromParam(section: string): SettingsRoute | null {
   }
   if (
     section === "mcp" ||
+    section === "labs" ||
     section === "users" ||
     section === "deployment" ||
     section === "jobs" ||
