@@ -3,6 +3,7 @@
   "activity.json:subtype.options.oauth",
   "auth.json:account.workspaceMeta",
   "chats.json:detail.flow.sessionInfoSubtitle",
+  "chats.json:detail.inputFields.id",
   "context.json:folder.pageFolderCount",
   "library.json:labels.format.csv",
   "library.json:labels.format.json",

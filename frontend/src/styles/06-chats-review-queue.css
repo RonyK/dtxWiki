@@ -1991,3 +1991,8 @@
 .mcp-tool-technical-inputs .mcp-tool-result-meta > div {
   align-content: start;
 }
+
+.mcp-chat-identifier-actions button[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.55;
+}

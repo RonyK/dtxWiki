@@ -490,16 +490,15 @@
     },
     "inputFields": {
       "workspace_id": "워크스페이스",
-      "unknownWorkspace": "이름을 확인할 수 없는 워크스페이스",
       "type": "유형",
       "target_type": "대상 유형",
       "page_type": "페이지 분류",
-      "id": "식별자",
+      "id": "ID",
       "target_id": "대상 ID",
       "page_id": "페이지 ID",
       "version_id": "버전 ID",
       "resource_id": "리소스 ID",
-      "target_kind": "대상 유형",
+      "target_kind": "대상 종류",
       "resource_kind": "리소스 종류",
       "resource_type": "리소스 유형"
     },
@@ -511,7 +510,8 @@
       "synthesis": "종합",
       "comparison": "비교",
       "decision": "결정"
-    }
+    },
+    "unknownWorkspace": "이름을 확인할 수 없는 워크스페이스"
   },
   "intentSource": {
     "write_reason": "에이전트가 밝힌 사유",

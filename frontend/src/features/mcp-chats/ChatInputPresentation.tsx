@@ -110,9 +110,10 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
           type="button"
           className="mcp-strip-toggle"
           aria-expanded={open}
-          disabled={copying}
+          aria-disabled={copying}
           aria-label={label ? t(open ? "detail.identifier.hideFor" : "detail.identifier.showFor", { field: label }) : undefined}
           onClick={() => {
+            if (copying) return;
             setOpen(!open);
             setResult(null);
           }}
@@ -123,7 +124,7 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
           type="button"
           className="mcp-strip-toggle"
           aria-label={label ? t("detail.identifier.copyFor", { field: label }) : undefined}
-          disabled={copying}
+          aria-disabled={copying}
           onClick={copy}
         >
           {t("detail.identifier.copy")}
@@ -142,7 +143,7 @@ export function WorkspaceInput({ value }: { value: string }) {
     .find((part) => part?.trim());
   return (
     <div>
-      {name || t("detail.inputFields.unknownWorkspace")}
+      {name || t("detail.unknownWorkspace")}
       <ChatIdentifier value={value} label={t("detail.inputFields.workspace_id")} />
     </div>
   );

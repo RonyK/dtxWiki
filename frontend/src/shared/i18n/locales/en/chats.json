@@ -490,7 +490,6 @@
     },
     "inputFields": {
       "workspace_id": "Workspace",
-      "unknownWorkspace": "Workspace name unavailable",
       "type": "Type",
       "target_type": "Target type",
       "page_type": "Page type",
@@ -511,7 +510,8 @@
       "synthesis": "Synthesis",
       "comparison": "Comparison",
       "decision": "Decision"
-    }
+    },
+    "unknownWorkspace": "Workspace name unavailable"
   },
   "intentSource": {
     "write_reason": "Agent's stated reason",

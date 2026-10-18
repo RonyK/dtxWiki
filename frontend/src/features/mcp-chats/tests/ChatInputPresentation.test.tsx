@@ -86,8 +86,9 @@ describe("Chat input presentation", () => {
       const copy = screen.getByRole("button", { name: "Copy full ID: Call ID" });
       await user.click(copy);
       const hide = screen.getByRole("button", { name: "Hide full ID: Call ID" });
-      expect(hide).toBeDisabled();
-      expect(copy).toBeDisabled();
+      expect(hide).toHaveAttribute("aria-disabled", "true");
+      expect(copy).toHaveAttribute("aria-disabled", "true");
+      expect(copy).toHaveFocus();
       await user.click(hide);
       await user.click(copy);
       expect(screen.getByText(full)).toBeVisible();
@@ -99,8 +100,8 @@ describe("Chat input presentation", () => {
         else resolveCopy();
         await pendingCopy.catch(() => undefined);
       });
-      expect(copy).toBeEnabled();
-      expect(hide).toBeEnabled();
+      expect(copy).toHaveAttribute("aria-disabled", "false");
+      expect(hide).toHaveAttribute("aria-disabled", "false");
       if (outcome === "denied") {
         expect(window.getSelection()?.toString()).toBe(full);
         expect(screen.getByRole("status")).toHaveTextContent("identifier is selected");
@@ -167,6 +168,10 @@ describe("Chat input presentation", () => {
     expect(screen.getByText("Context Page")).toBeVisible();
     expect(screen.getByText("Library Item Version")).toBeVisible();
     expect(screen.getByText(language === "ko" ? "종합" : "Synthesis")).toBeVisible();
+    const t = i18n.getFixedT(language, "chats");
+    expect(chatInputLabel("id", t)).toBe("ID");
+    expect(chatInputLabel("target_type", t)).toBe(language === "ko" ? "대상 유형" : "Target type");
+    expect(chatInputLabel("target_kind", t)).toBe(language === "ko" ? "대상 종류" : "Target kind");
   });
 
   it.each([
@@ -186,8 +191,8 @@ describe("Chat input presentation", () => {
     await i18n.changeLanguage(language);
     const error = vi.spyOn(console, "error");
     const warn = vi.spyOn(console, "warn");
-    const values = ["constructor", "toString", "hasOwnProperty", "__proto__", "new_kind", "", "overview.constructor"];
-    const labels = ["Constructor", "ToString", "HasOwnProperty", "Proto", "New kind", "—", "Overview constructor"];
+    const values = ["constructor", "toString", "hasOwnProperty", "__proto__", "new_kind", "", "overview.constructor", "unknownWorkspace"];
+    const labels = ["Constructor", "ToString", "HasOwnProperty", "Proto", "New kind", "—", "Overview constructor", "UnknownWorkspace"];
     for (const [index, value] of values.entries()) {
       const { unmount } = render(<>
         <TypeChip value={value} />
