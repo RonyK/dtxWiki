@@ -119,6 +119,7 @@ for (const language of ["en", "ko"] as const) {
       await checkBoxes(page, testInfo, "workspace-dialog");
       const namesFit = await modal.locator(".workspace-scope-copy strong").evaluateAll(nodes => nodes.every(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight));
       expect(namesFit, "the full picker must reveal long names instead of ellipsizing them").toBeTruthy();
+      await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-all`);
       const selectAll = modal.getByRole("checkbox");
       await expect(selectAll).toHaveJSProperty("indeterminate", true);
       await modal
@@ -135,6 +136,7 @@ for (const language of ["en", "ko"] as const) {
       await secondPage.focus();
       await page.keyboard.press("Space");
       await expect(secondPage).toHaveAttribute("aria-selected", "true");
+      await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-page-two`);
       const search = modal.getByRole("searchbox");
       await search.fill(`scope-${language}-${width}-41`);
       await expect(modal.getByRole("option")).toHaveCount(1);
@@ -144,6 +146,7 @@ for (const language of ["en", "ko"] as const) {
         ).id,
       );
       await modal.getByRole("option").click();
+      await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-search`);
       await search.fill("");
       await expect(modal.getByRole("option")).toHaveCount(8);
       await modal
@@ -158,6 +161,13 @@ for (const language of ["en", "ko"] as const) {
       const apply = modal.getByRole("button", {
         name: en ? "Apply 3 selected" : "3개 선택 적용",
       });
+      const cancelBounds = (await modal
+        .getByRole("button", { name: en ? "Cancel" : "취소", exact: true })
+        .boundingBox())!;
+      const applyBounds = (await apply.boundingBox())!;
+      expect(
+        applyBounds.x - (cancelBounds.x + cancelBounds.width),
+      ).toBeGreaterThanOrEqual(8);
       await apply.focus();
       await page.keyboard.press("Tab");
       expect(
@@ -222,6 +232,7 @@ for (const language of ["en", "ko"] as const) {
       await expect(modal).toBeVisible();
       expect(await modal.getByRole("checkbox").count()).toBe(0);
       await expect(modal.locator(".workspace-grant-details li")).toHaveCount(3);
+      await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-readonly`);
       await page.keyboard.press("Escape");
       await expect(row.locator(".workspace-chip-more")).toBeFocused();
       await row.locator(".row-actions-buttons")
@@ -231,6 +242,7 @@ for (const language of ["en", "ko"] as const) {
         .click();
       await expect(modal.getByRole("option")).toHaveCount(8);
       await checkBoxes(page, testInfo, "key-workspace-edit-dialog");
+      await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-edit`);
       await page.keyboard.press("Escape");
       expect(
         await page.evaluate(
@@ -290,12 +302,14 @@ for (const language of ["en", "ko"] as const) {
       previewCount = 2;
       await cleanupTrigger.click();
       await expect(cleanupDialog).toContainText("2");
+      await evidenceScreenshot(page, testInfo, `cleanup-${language}-${width}-confirm`);
       await cleanupDialog.locator(".modal-actions button").first().click();
       expect(cleanupPosts).toBe(0);
       await cleanupTrigger.click();
       await cleanupDialog.locator(".modal-actions .primary").click();
       await expect(cleanupDialog.getByRole("alert")).toBeVisible();
       expect(cleanupPosts).toBe(1);
+      await evidenceScreenshot(page, testInfo, `cleanup-${language}-${width}-error`);
       await cleanupDialog.locator(".modal-actions .primary").click();
       await expect(cleanupDialog).toBeHidden();
       await expect(cleanupTrigger).toBeFocused();

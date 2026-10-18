@@ -555,7 +555,7 @@ export function WorkspaceScopeSelector(props: WorkspaceScopePickerProps) {
           labelledBy={titleId}
           onClose={() => setOpen(false)}
           footer={
-            <>
+            <div className="modal-actions">
               <button
                 type="button"
                 className="icon-button"
@@ -574,7 +574,7 @@ export function WorkspaceScopeSelector(props: WorkspaceScopePickerProps) {
               >
                 {t("workspacePicker.apply", { count: draft.length })}
               </button>
-            </>
+            </div>
           }
         >
           <WorkspaceScopePicker
