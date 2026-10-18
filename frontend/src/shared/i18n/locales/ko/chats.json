@@ -483,7 +483,10 @@
     "identifier": {
       "show": "전체 ID 보기",
       "hide": "전체 ID 숨기기",
-      "copy": "전체 ID 복사"
+      "copy": "전체 ID 복사",
+      "showFor": "전체 ID 보기: {{field}}",
+      "hideFor": "전체 ID 숨기기: {{field}}",
+      "copyFor": "전체 ID 복사: {{field}}"
     },
     "inputFields": {
       "workspace_id": "워크스페이스",

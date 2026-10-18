@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { createContext, useContext, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -7,6 +8,7 @@ import {
   copyTextWithReason,
   type CopyTextDetailedResult,
 } from "../../shared/lib/copyText";
+import enChats from "../../shared/i18n/locales/en/chats.json";
 import { humanizeIdentifier } from "./chatPresentation";
 
 export const ChatWorkspaces = createContext<WorkspaceSummary[]>([]);
@@ -35,10 +37,19 @@ const RESOURCE_LABELS: Record<string, string> = {
   context_page: "Context Page",
   context_page_version: "Context Page Version",
   library_item: "Library Item",
+  library_item_version: "Library Item Version",
   library_artifact: "Library Artifact",
   agent_page: "Agent Page",
   context_claim: "Context Claim",
 };
+
+// Agent-supplied keys must not reach i18next's inherited-property lookup.
+// The canonical dictionary also rejects dotted paths and object-valued keys.
+export function chatInputLabel(key: string, t: TFunction<"chats">): string {
+  return Object.hasOwn(enChats.detail.inputFields, key)
+    ? t(`detail.inputFields.${key}`)
+    : humanizeIdentifier(key) || "—";
+}
 
 export function TypeChip({
   value,
@@ -50,12 +61,14 @@ export function TypeChip({
   const { t } = useTranslation("chats");
   const fallback = humanizeIdentifier(value) || "—";
   const label = pageType
-    ? t(`detail.pageTypes.${value}`, { defaultValue: fallback })
+    ? Object.hasOwn(enChats.detail.pageTypes, value)
+      ? t(`detail.pageTypes.${value}`)
+      : fallback
     : Object.hasOwn(RESOURCE_LABELS, value) ? RESOURCE_LABELS[value] : fallback;
   return <span className="mcp-chat-type-chip" title={value}>{label}</span>;
 }
 
-export function ChatIdentifier({ value }: { value: string }) {
+export function ChatIdentifier({ value, label }: { value: string; label?: string }) {
   const { t } = useTranslation("chats");
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<CopyTextDetailedResult | null>(null);
@@ -86,11 +99,20 @@ export function ChatIdentifier({ value }: { value: string }) {
           type="button"
           className="mcp-strip-toggle"
           aria-expanded={open}
-          onClick={() => setOpen(!open)}
+          aria-label={label ? t(open ? "detail.identifier.hideFor" : "detail.identifier.showFor", { field: label }) : undefined}
+          onClick={() => {
+            setOpen(!open);
+            setResult(null);
+          }}
         >
           {t(open ? "detail.identifier.hide" : "detail.identifier.show")}
         </button>
-        <button type="button" className="mcp-strip-toggle" onClick={copy}>
+        <button
+          type="button"
+          className="mcp-strip-toggle"
+          aria-label={label ? t("detail.identifier.copyFor", { field: label }) : undefined}
+          onClick={copy}
+        >
           {t("detail.identifier.copy")}
         </button>
       </div>
@@ -108,7 +130,7 @@ export function WorkspaceInput({ value }: { value: string }) {
   return (
     <div>
       {name || t("detail.inputFields.unknownWorkspace")}
-      <ChatIdentifier value={value} />
+      <ChatIdentifier value={value} label={t("detail.inputFields.workspace_id")} />
     </div>
   );
 }

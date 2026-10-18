@@ -483,7 +483,10 @@
     "identifier": {
       "show": "Show full ID",
       "hide": "Hide full ID",
-      "copy": "Copy full ID"
+      "copy": "Copy full ID",
+      "showFor": "Show full ID: {{field}}",
+      "hideFor": "Hide full ID: {{field}}",
+      "copyFor": "Copy full ID: {{field}}"
     },
     "inputFields": {
       "workspace_id": "Workspace",

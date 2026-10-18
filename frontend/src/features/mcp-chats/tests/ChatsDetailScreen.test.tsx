@@ -78,6 +78,29 @@ describe("ChatsDetailScreen", () => {
     expect(within(card).getByText("v2")).toBeVisible();
   });
 
+  it("renders agent-controlled field names and page types as safe text", async () => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    detail.timeline[0].input_summary = Object.fromEntries([
+      ["constructor", "first value"],
+      ["toString", "second value"],
+      ["hasOwnProperty", "third value"],
+      ["__proto__", "fourth value"],
+      ["page_type", "__proto__"],
+    ]);
+    renderWithDetail({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
+    });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: "Inputs" }));
+    const technical = card.querySelector(".mcp-tool-technical-inputs")!;
+    expect([...technical.querySelectorAll("dt")].map(node => node.textContent))
+      .toEqual(["Constructor", "ToString", "HasOwnProperty", "Proto", "Page type"]);
+    expect(technical.querySelector(".mcp-chat-type-chip")).toHaveTextContent("Proto");
+    expect(technical.textContent).not.toContain("returned an object");
+  });
+
   it("renders one title surface, session info, artifacts, and flow metadata", async () => {
     const user = userEvent.setup();
     renderWithDetail({

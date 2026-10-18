@@ -1959,7 +1959,8 @@
   .mcp-chat-meta-strip {
     grid-template-columns: minmax(0, 1fr);
   }
-  .mcp-chat-metadata-grid {
+  .mcp-chat-metadata-grid,
+  .mcp-chat-input-identifiers {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .mcp-chat-call-headline {

@@ -69,26 +69,26 @@ import {
   type ChatFlowStep,
 } from "./chatFlow";
 import { artifactVerbLabel, chatSummaryLine } from "./chatLabels";
+import { safeChatErrorMessage } from "./chatErrors";
+import { ChatEditCard, chatHasEditPreviews } from "./ChatEditCard";
+import {
+  ChatIdentifier,
+  chatInputLabel,
+  ChatWorkspaces,
+  isIdentifierField,
+  isResourceTypeField,
+  schemaVersion,
+  TypeChip,
+  WorkspaceInput,
+} from "./ChatInputPresentation";
 import {
   chatPresentationLine,
   humanizeIdentifier,
   similarityPercent,
   toolTitleLabel,
 } from "./chatPresentation";
-import { safeChatErrorMessage } from "./chatErrors";
-import { ChatEditCard, chatHasEditPreviews } from "./ChatEditCard";
 import { ClientChip, ClientIdentity } from "./ClientChip";
 import { ToolInputValue, isLongToolValue } from "./ToolInputValue";
-
-import {
-  ChatWorkspaces,
-  ChatIdentifier,
-  WorkspaceInput,
-  TypeChip,
-  isIdentifierField,
-  isResourceTypeField,
-  schemaVersion,
-} from "./ChatInputPresentation";
 
 const NARROW_FLOW_QUERY = "(max-width: 1024px)";
 
@@ -686,14 +686,38 @@ function SessionInfoSection({ chat }: { chat: McpChatDetail }) {
     >
       <div className="mcp-chat-meta-strip">
         <div className="mcp-chat-session-facts">
-          <MetaItem className="mcp-chat-meta-item--time" label={t("detail.meta.started")} value={formatVersionTimestamp(chat.started_at)} />
-          <MetaItem className="mcp-chat-meta-item--time" label={t("detail.meta.lastActivity")} value={formatVersionTimestamp(chat.last_activity_at)} />
-          <MetaItem label={t("units.duration")} value={formatDurationMs(durationMs, t)} />
-          <MetaItem label={t("detail.meta.calls")} value={String(chat.tool_call_count)} />
-          <MetaItem label={t("detail.meta.writes")} value={String(chat.write_count)} />
-          <MetaItem label={t("detail.meta.errors")} value={String(chat.error_count)} />
+          <MetaItem
+            className="mcp-chat-meta-item--time"
+            label={t("detail.meta.started")}
+            value={formatVersionTimestamp(chat.started_at)}
+          />
+          <MetaItem
+            className="mcp-chat-meta-item--time"
+            label={t("detail.meta.lastActivity")}
+            value={formatVersionTimestamp(chat.last_activity_at)}
+          />
+          <MetaItem
+            label={t("units.duration")}
+            value={formatDurationMs(durationMs, t)}
+          />
+          <MetaItem
+            label={t("detail.meta.calls")}
+            value={String(chat.tool_call_count)}
+          />
+          <MetaItem
+            label={t("detail.meta.writes")}
+            value={String(chat.write_count)}
+          />
+          <MetaItem
+            label={t("detail.meta.errors")}
+            value={String(chat.error_count)}
+          />
         </div>
-        <MetaItem className="mcp-chat-meta-item--client" label={t("detail.meta.client")} value={<ClientIdentity client={chat.client} />} />
+        <MetaItem
+          className="mcp-chat-meta-item--client"
+          label={t("detail.meta.client")}
+          value={<ClientIdentity client={chat.client} />}
+        />
       </div>
       {bootstrap.length > 0 ? <BootstrapNote items={bootstrap} /> : null}
     </AdvancedSection>
@@ -1479,7 +1503,7 @@ function TimelineTabPanel({
     const shortEntries = ordinary.filter(([, value]) => !isLongToolValue(value));
     shortEntries.sort(([a], [b]) => Number(b === "workspace_id") - Number(a === "workspace_id"));
     const longEntries = ordinary.filter(([, value]) => isLongToolValue(value));
-    const inputLabel = (key: string) => t(`detail.inputFields.${key}`, { defaultValue: labelFor(key) });
+    const inputLabel = (key: string) => chatInputLabel(key, t);
     return (
       <div className="mcp-tool-panel-card">
         {shapeOnlyNote}
@@ -1513,7 +1537,7 @@ function TimelineTabPanel({
                 {ids.map(([key, value]) => (
                   <div key={key}>
                     <dt>{inputLabel(key)}</dt>
-                    <dd><ChatIdentifier value={String(value)} /></dd>
+                    <dd><ChatIdentifier value={String(value)} label={inputLabel(key)} /></dd>
                   </div>
                 ))}
               </dl>
@@ -1640,7 +1664,7 @@ function TimelineTabPanel({
         </div>
         <div>
           <dt>{t("detail.fields.id")}</dt>
-          <dd><ChatIdentifier value={item.id} /></dd>
+          <dd><ChatIdentifier value={item.id} label={t("detail.fields.id")} /></dd>
         </div>
       </dl>
     </div>
@@ -1671,11 +1695,6 @@ function formatSummaryValue(value: unknown): string {
     }
   }
   return String(value);
-}
-
-function labelFor(value: string) {
-  const label = value.replace(/_/g, " ");
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
 }
 
 const KNOWN_CHAT_STATUSES = new Set([
