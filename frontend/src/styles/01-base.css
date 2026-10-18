@@ -476,3 +476,25 @@ h3 {
 .app-shell[data-sidebar-collapsed="true"] .brand-name {
   display: none;
 }
+
+/* Visible boxes share one geometry; labels and rows own the hit target. */
+:root { --checkbox-size: 16px; }
+input[type="checkbox"],
+.workspace-scope-check,
+.markdown-task-state {
+  box-sizing: border-box;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  min-width: var(--checkbox-size);
+  min-height: var(--checkbox-size);
+  max-width: var(--checkbox-size);
+  max-height: var(--checkbox-size);
+  padding: 0;
+  margin: 0;
+  flex: 0 0 var(--checkbox-size);
+}
+
+/* The visible square stays 16px; the associated label owns the hit area. */
+label:has(> input[type="checkbox"]) {
+  min-block-size: 24px;
+}

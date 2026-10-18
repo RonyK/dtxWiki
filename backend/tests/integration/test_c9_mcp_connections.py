@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.container import DatabaseProvider
 from backend.app.main import create_app
 from backend.app.settings import Settings
+from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.audit import AuditEvent
 from backend.models.base import Base, utc_now
 from backend.models.bundle import AgentInputBundle
@@ -48,6 +49,7 @@ def _client(page_service) -> TestClient:
 
 def _seed_expired_connection(page_service):
     now = utc_now()
+    grant_id = uuid4()
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User))
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
@@ -75,6 +77,7 @@ def _seed_expired_connection(page_service):
         )
         session.add(
             OAuthRefreshToken(
+                grant_id=grant_id,
                 token_lookup_hash="c9-expired-token",
                 user_id=user.id,
                 client_id=oauth_client.id,
@@ -89,6 +92,7 @@ def _seed_expired_connection(page_service):
             scopes=["mcp:read"],
             status="active",
             issued_to_user_id=user.id,
+            runtime_binding_key=f"oauth_grant:{grant_id}",
             token_metadata={"oauth_client_id": oauth_client.id},
             last_used_at=now - timedelta(hours=1),
         )
@@ -409,9 +413,7 @@ def test_legacy_oauth_consent_cursor_is_rejected_and_restarts_from_page_one(
         params={"limit": 1, "cursor": response.json()["next_cursor"]},
     )
     assert continuation.status_code == 200, continuation.text
-    assert [item["client_id"] for item in continuation.json()["data"]] == [
-        rows[1][0]
-    ]
+    assert [item["client_id"] for item in continuation.json()["data"]] == [rows[1][0]]
 
 
 def test_connection_listing_query_count_is_constant_per_page(page_service):
@@ -499,6 +501,25 @@ def test_mcp_last_used_touch_coalesces_within_five_minutes(page_service):
         assert client.last_used_at == first_used_at
 
 
+def _pat_binding(session, workspace_id):
+    user = session.scalar(select(User))
+    token = ApiToken(
+        user_id=user.id,
+        name="Listing credential",
+        token_lookup_hash=str(uuid4()),
+        hashed_token="unused",
+        scopes=["mcp:read"],
+    )
+    session.add(token)
+    session.flush()
+    session.add(
+        ApiTokenWorkspace(
+            token_id=token.id, workspace_id=workspace_id, desired_scopes=["mcp:read"]
+        )
+    )
+    return user.id, f"api_token:{token.id}"
+
+
 def _seed_manageable_client_facets(page_service):
     now = utc_now()
     with page_service.session_factory.begin() as session:
@@ -511,6 +532,7 @@ def _seed_manageable_client_facets(page_service):
             ("Disabled needle two", "disabled"),
         )
         for index, (name, status) in enumerate(definitions):
+            user_id, binding = _pat_binding(session, workspace.id)
             row = MCPClient(
                 workspace_id=workspace.id,
                 name=name,
@@ -518,7 +540,8 @@ def _seed_manageable_client_facets(page_service):
                 scopes=["mcp:read"],
                 status=status,
                 created_at=now - timedelta(minutes=index),
-                runtime_binding_key=f"test-facet:{index}",
+                runtime_binding_key=binding,
+                issued_to_user_id=user_id,
             )
             session.add(row)
             rows.append(row)
@@ -600,19 +623,19 @@ def test_mcp_client_cursor_traverses_more_than_one_default_page_exactly_once(
     client = _client(page_service)
     now = utc_now()
     with page_service.session_factory.begin() as session:
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         assert workspace is not None
         rows = []
         for index in range(23):
+            user_id, binding = _pat_binding(session, workspace.id)
             row = MCPClient(
                 workspace_id=workspace.id,
                 name=f"Cursor traversal client {index:02d}",
                 client_type="generic",
                 scopes=["mcp:read"],
                 status="active",
-                runtime_binding_key=f"cursor-traversal:{index}",
+                runtime_binding_key=binding,
+                issued_to_user_id=user_id,
                 created_at=now - timedelta(seconds=index),
             )
             session.add(row)
@@ -877,9 +900,7 @@ def test_mcp_client_delete_rejects_bearer_pat_even_for_owner(page_service):
     owner = _client(page_service)
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         assert user is not None and workspace is not None
         target = MCPClient(
             workspace_id=workspace.id,
@@ -956,6 +977,7 @@ def _seed_connection_state_axis_fixture(
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         for state in ("active", "expired", "revoked", "disabled"):
             for index in range(group_size):
+                grant_id = uuid4()
                 oauth_client_id = f"dyn_axis_{state}_{index}"
                 session.add(
                     OAuthClient(
@@ -985,6 +1007,7 @@ def _seed_connection_state_axis_fixture(
                 )
                 session.add(
                     OAuthRefreshToken(
+                        grant_id=grant_id,
                         token_lookup_hash=f"axis-{state}-{index}-token",
                         user_id=user.id,
                         client_id=oauth_client_id,
@@ -1005,6 +1028,7 @@ def _seed_connection_state_axis_fixture(
                     scopes=["mcp:read"],
                     status="disabled" if state == "disabled" else "active",
                     issued_to_user_id=user.id,
+                    runtime_binding_key=f"oauth_grant:{grant_id}",
                     token_metadata={"oauth_client_id": oauth_client_id},
                     last_used_at=now - timedelta(hours=1),
                 )
@@ -1329,9 +1353,7 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
         assert everything.status_counts.active == 1
         assert everything.status_counts.disabled == 1
         assert {row.name for row in listing("active").data} == {"PG live holder"}
-        assert {row.name for row in listing("disabled").data} == {
-            "PG tokenless holder"
-        }
+        assert {row.name for row in listing("disabled").data} == {"PG tokenless holder"}
         # The client_name search arm, which is the other pushed-down key set.
         assert {row.name for row in listing("all", "postgres shared").data} == {
             "PG live holder",
@@ -1340,3 +1362,26 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
     finally:
         drop_reflected_postgres_metadata(engine)
         engine.dispose()
+
+
+def test_credential_workspace_candidates_require_a_browser_session(page_service):
+    client = _client(page_service)
+    response = client.get("/api/v1/auth/credential-workspaces", params={"limit": 8})
+    assert response.status_code == 200
+    assert response.json()["total_count"] >= 1
+    assert all(
+        row["role"] in {"owner", "editor", "viewer"} for row in response.json()["data"]
+    )
+    invalid = client.get(
+        "/api/v1/auth/credential-workspaces", params={"cursor": "invalid"}
+    )
+    assert invalid.status_code == 422
+    client.cookies.clear()
+    assert client.get("/api/v1/auth/credential-workspaces").status_code == 401
+    assert (
+        client.get(
+            "/api/v1/auth/credential-workspaces",
+            headers={"Authorization": "Bearer invalid"},
+        ).status_code
+        == 401
+    )

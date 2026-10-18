@@ -3542,10 +3542,14 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 }
 
 .markdown-task-state {
+  font-size: var(--checkbox-size);
+  line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.1em;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
+  flex-shrink: 0;
   margin-right: 6px;
   color: var(--ink-muted);
   font-family: system-ui, sans-serif;

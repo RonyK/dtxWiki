@@ -22,6 +22,7 @@ from backend.schemas.auth import (
     AuthLogoutResponse,
     AuthMeResponse,
     AuthSessionResponse,
+    CredentialWorkspacePage,
     EmailVerificationConfirmRequest,
     EmailVerificationResponse,
     LoginRequest,
@@ -146,9 +147,7 @@ def get_password_recovery_service(
             if request.app.state.settings.canonical_https_ready
             else None
         ),
-        mail_delivery_service=EmailDeliveryService(
-            settings=request.app.state.settings
-        ),
+        mail_delivery_service=EmailDeliveryService(settings=request.app.state.settings),
     )
     request.app.state.password_recovery_service = service
     return service
@@ -198,8 +197,7 @@ def reject_token_in_query_string(request: Request) -> None:
             detail={
                 "error_code": "invalid_password_reset_request",
                 "message": (
-                    "send the one-time token in the JSON request body, "
-                    "not in the URL"
+                    "send the one-time token in the JSON request body, not in the URL"
                 ),
             },
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
@@ -509,8 +507,7 @@ def request_password_reset(
         "data": {
             "requested": True,
             "message": (
-                "If the email is registered, password reset instructions "
-                "were sent."
+                "If the email is registered, password reset instructions were sent."
             ),
         }
     }
@@ -565,9 +562,7 @@ def request_email_verification(
     except SessionServiceError as exc:
         return no_store_response(auth_error_response(exc))
     except PasswordRecoveryError as exc:
-        return no_store_response(
-            password_recovery_error_response(exc)
-        )
+        return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
     return {
         "data": {
@@ -591,9 +586,7 @@ def confirm_email_verification(
     try:
         recovery_service.consume_email_verification(token=request_body.token)
     except PasswordRecoveryError as exc:
-        return no_store_response(
-            password_recovery_error_response(exc)
-        )
+        return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
     return {"data": {"requested": False, "verified": True}}
 
@@ -619,9 +612,7 @@ def confirm_password_reset(
     except PasswordPolicyError as exc:
         return no_store_response(auth_error_response(exc))
     except PasswordRecoveryError as exc:
-        return no_store_response(
-            password_recovery_error_response(exc)
-        )
+        return no_store_response(password_recovery_error_response(exc))
     clear_session_cookie(response, request.app.state.settings, request)
     clear_recent_reauthentication_cookie(
         response,
@@ -655,6 +646,42 @@ def password_reset_status(
         return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
     return {"data": {"valid": True}}
+
+
+@router.get(
+    "/credential-workspaces",
+    response_model=CredentialWorkspacePage,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_credential_workspace_candidates(
+    request: Request,
+    session_service: SessionServiceDep,
+    session_factory: SessionFactoryDep,
+    q: Annotated[str, Query(max_length=128)] = "",
+    limit: Annotated[int, Query(ge=1, le=50)] = 8,
+    cursor: Annotated[str | None, Query(max_length=4096)] = None,
+):
+    from backend.services.credential_workspace_service import list_credential_workspaces
+
+    try:
+        user = current_session_user(request, session_service)
+        with session_factory() as session:
+            return list_credential_workspaces(
+                session,
+                user_id=user.user_id,
+                secret=request.app.state.settings.effective_session_secret,
+                query=q,
+                limit=limit,
+                cursor=cursor,
+            )
+    except SessionServiceError as exc:
+        return auth_error_response(exc)
+    except ValueError:
+        return build_rest_error_response(
+            status_code=422,
+            error_code="validation_failed",
+            message="Invalid workspace cursor",
+        )
 
 
 @router.get(

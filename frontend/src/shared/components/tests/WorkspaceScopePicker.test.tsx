@@ -1,0 +1,191 @@
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, expect, it, vi } from "vitest";
+import { useState } from "react";
+import {
+  WorkspaceScopePicker,
+  WorkspaceScopeSelector,
+  type WorkspaceScopeOption,
+} from "../WorkspaceScopePicker";
+import {
+  listCredentialWorkspaces,
+  type CredentialWorkspacePage,
+} from "../../api/credentialWorkspaces";
+import { setLocale } from "../../i18n";
+
+vi.mock("../../api/credentialWorkspaces", () => ({
+  listCredentialWorkspaces: vi.fn(),
+}));
+const labels = {
+  clearAll: "Clear all",
+  defaultBadge: "Default",
+  emptySelection: "Select at least one",
+  listLabel: "Workspaces",
+  membershipMissing: "Remove only",
+  noMatches: "No matches",
+  searchAria: "Search",
+  searchClear: "Clear",
+  searchPlaceholder: "Search",
+  selectAllShown: "Select page",
+  selectedCount: "selected",
+  toggleAllAria: "Toggle page",
+};
+const options: WorkspaceScopeOption[] = Array.from(
+  { length: 17 },
+  (_, index) => ({
+    id: `${index}`,
+    title: `Workspace ${String(index).padStart(2, "0")}`,
+    slug: `workspace-${index}`,
+    isDefault: index === 0,
+  }),
+);
+const response = (indices: number[]): CredentialWorkspacePage => ({
+  data: indices.map((i) => ({
+    ...options[i],
+    role: "owner",
+    is_default: i === 0,
+  })),
+  total_count: indices.length,
+  next_cursor: null,
+});
+beforeEach(() => {
+  setLocale("en", { persist: false });
+  vi.resetAllMocks();
+});
+
+it("keeps stable rows and full selections through pages, search, selected view, and clear", async () => {
+  const user = userEvent.setup();
+  function Harness() {
+    const [selected, setSelected] = useState(["0"]);
+    return (
+      <>
+        <output data-testid="selected">{selected.join(",")}</output>
+        <WorkspaceScopePicker
+          selectedIds={selected}
+          onChange={setSelected}
+          labels={labels}
+          workspaces={options}
+        />
+      </>
+    );
+  }
+  render(<Harness />);
+  expect(screen.getAllByRole("option")).toHaveLength(8);
+  const firstOrder = screen.getAllByRole("option").map((n) => n.textContent);
+  await user.click(screen.getByRole("option", { name: /Workspace 03/ }));
+  expect(screen.getAllByRole("option").map((n) => n.textContent)).toEqual(
+    firstOrder,
+  );
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("option", { name: /Workspace 08/ }));
+  await user.type(screen.getByRole("searchbox"), "workspace-16");
+  await user.click(screen.getByRole("option", { name: /Workspace 16/ }));
+  await user.clear(screen.getByRole("searchbox"));
+  expect(screen.getByTestId("selected")).toHaveTextContent("0,3,8,16");
+  await user.click(screen.getByRole("button", { name: /Selected items/ }));
+  expect(screen.getAllByRole("option")).toHaveLength(4);
+  expect(screen.getAllByRole("option", { selected: true })).toHaveLength(4);
+  await user.click(screen.getByRole("button", { name: "Clear all" }));
+  expect(screen.getByTestId("selected").textContent).toBe("");
+});
+
+it("discards a modal draft on Escape and commits only on Apply", async () => {
+  const user = userEvent.setup();
+  const changed = vi.fn();
+  render(
+    <WorkspaceScopeSelector
+      selectedIds={["0"]}
+      onChange={changed}
+      labels={labels}
+      workspaces={options}
+    />,
+  );
+  const open = screen.getByRole("button", {
+    name: "View and select workspaces",
+  });
+  await user.click(open);
+  await user.click(screen.getByRole("option", { name: /Workspace 01/ }));
+  await user.keyboard("{Escape}");
+  expect(changed).not.toHaveBeenCalled();
+  expect(open).toHaveFocus();
+  await user.click(open);
+  expect(screen.getByRole("option", { name: /Workspace 01/ })).toHaveAttribute(
+    "aria-selected",
+    "false",
+  );
+  await user.click(screen.getByRole("option", { name: /Workspace 01/ }));
+  await user.click(screen.getByRole("button", { name: "Apply 2 selected" }));
+  expect(changed).toHaveBeenCalledExactlyOnceWith(["0", "1"]);
+  expect(open).toHaveFocus();
+});
+
+it("ignores a late previous-query response and offers retry on a current failure", async () => {
+  const user = userEvent.setup();
+  let resolveOld!: (page: CredentialWorkspacePage) => void;
+  vi.mocked(listCredentialWorkspaces).mockImplementation((query) =>
+    query === ""
+      ? new Promise((resolve) => {
+          resolveOld = resolve;
+        })
+      : Promise.resolve(response([16])),
+  );
+  render(
+    <WorkspaceScopePicker
+      serverPaging
+      selectedIds={["0"]}
+      onChange={vi.fn()}
+      labels={labels}
+      workspaces={options.slice(0, 1)}
+    />,
+  );
+  await user.type(screen.getByRole("searchbox"), "new");
+  await screen.findByRole("option", { name: /Workspace 16/ });
+  await act(async () => resolveOld(response([1])));
+  expect(
+    screen.queryByRole("option", { name: /Workspace 01/ }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("option", { name: /Workspace 16/ }),
+  ).toBeInTheDocument();
+  vi.mocked(listCredentialWorkspaces).mockRejectedValueOnce(
+    new Error("offline"),
+  );
+  await user.type(screen.getByRole("searchbox"), "x");
+  const error = await screen.findByRole("alert");
+  expect(
+    within(error).getByRole("button", { name: "Retry" }),
+  ).toBeInTheDocument();
+  await user.click(within(error).getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+  );
+  await screen.findByRole("option", { name: /Workspace 16/ });
+});
+
+it("keeps the selected-items pager usable when an all-items request is still pending", async () => {
+  const user = userEvent.setup();
+  let resolvePage!: (page: CredentialWorkspacePage) => void;
+  vi.mocked(listCredentialWorkspaces).mockReturnValue(
+    new Promise((resolve) => {
+      resolvePage = resolve;
+    }),
+  );
+  render(
+    <WorkspaceScopePicker
+      serverPaging
+      selectedIds={options.map((option) => option.id)}
+      onChange={vi.fn()}
+      labels={labels}
+      workspaces={options}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /Selected items/ }));
+  expect(screen.queryByText("Loading workspaces…")).not.toBeInTheDocument();
+  const next = screen.getByRole("button", { name: "Next" });
+  expect(next).toBeEnabled();
+  await user.click(next);
+  expect(screen.getAllByRole("option")).toHaveLength(8);
+  expect(screen.getAllByRole("option")[0]).toHaveTextContent("Workspace 08");
+  await act(async () => resolvePage(response([0])));
+  expect(screen.getAllByRole("option")[0]).toHaveTextContent("Workspace 08");
+});

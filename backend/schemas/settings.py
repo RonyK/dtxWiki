@@ -23,7 +23,8 @@ class SettingsMcpClientData(BaseModel):
     client_type: str
     scopes: list[str]
     status: Literal["active", "disabled"]
-    connection_state: Literal["active", "expired", "revoked", "disabled"]
+    connection_state: Literal["active", "expired", "revoked", "disabled", "unknown"]
+    credential_kind: Literal["pat", "oauth", "unknown"] = "unknown"
     oauth_client_id: str | None = None
     last_used_at: datetime | None = None
     next_expiry: datetime | None = None

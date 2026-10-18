@@ -249,6 +249,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/credential-workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Credential Workspace Candidates */
+        get: operations["list_credential_workspace_candidates_api_v1_auth_credential_workspaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/email-verification/confirm": {
         parameters: {
             query?: never;
@@ -4805,6 +4822,32 @@ export interface components {
              */
             workspace_id: string;
         };
+        /** CredentialWorkspaceOption */
+        CredentialWorkspaceOption: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Role */
+            role: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+        };
+        /** CredentialWorkspacePage */
+        CredentialWorkspacePage: {
+            /** Data */
+            data: components["schemas"]["CredentialWorkspaceOption"][];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Total Count */
+            total_count: number;
+        };
         /** DeepLinkArtifact */
         DeepLinkArtifact: {
             /**
@@ -8511,7 +8554,13 @@ export interface components {
              * Connection State
              * @enum {string}
              */
-            connection_state: "active" | "expired" | "revoked" | "disabled";
+            connection_state: "active" | "expired" | "revoked" | "disabled" | "unknown";
+            /**
+             * Credential Kind
+             * @default unknown
+             * @enum {string}
+             */
+            credential_kind: "pat" | "oauth" | "unknown";
             /**
              * Id
              * Format: uuid
@@ -10105,6 +10154,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthCapabilitiesResponse"];
+                };
+            };
+        };
+    };
+    list_credential_workspace_candidates_api_v1_auth_credential_workspaces_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialWorkspacePage"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
         };

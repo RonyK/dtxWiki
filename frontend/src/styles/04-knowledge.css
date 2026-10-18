@@ -3172,8 +3172,8 @@
   border-radius: 5px;
   background: var(--paper);
   color: var(--ink);
-  width: 16px;
-  height: 16px;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
 }
 
 .workspace-scope-option.is-selected .workspace-scope-check {
@@ -3977,6 +3977,13 @@ details.advanced-section summary {
    on the rows below. It was bare bold text whose "available" green pointed at
    an undefined token, so both states rendered identically. */
 .mcp-app-availability {
+  box-sizing: border-box;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  line-height: 1;
   grid-column: 1 / -1;
   width: fit-content;
   border: 1px solid var(--border);
@@ -4552,3 +4559,122 @@ details.advanced-section summary {
     border-radius: 0;
   }
 }
+
+.workspace-scope-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  text-transform: none;
+}
+.workspace-scope-summary > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-scope-summary > button { justify-self: start; }
+.dialog-panel.workspace-picker-dialog {
+  width: min(720px, 100%);
+  max-height: 90dvh;
+}
+.workspace-picker-heading,
+.workspace-scope-pagination,
+.workspace-scope-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.workspace-picker-heading { justify-content: space-between; }
+.workspace-picker-heading h2 { min-width: 0; overflow-wrap: anywhere; }
+.workspace-scope-pagination { padding-block: 12px; }
+.workspace-scope-pagination > span { margin-inline-end: auto; }
+.workspace-grant-details { list-style: none; margin: 0; padding: 0; }
+.workspace-grant-details li { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.workspace-scope-select-all { min-height: 24px; }
+@media (max-width: 640px) {
+  .dialog-panel.workspace-picker-dialog {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+.mcp-key-row,
+.oauth-consent-row,
+.mcp-client-row { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
+.mcp-key-row > .row-actions,
+.oauth-consent-row > .row-actions,
+.mcp-client-row > .row-actions {
+  grid-column: 2 / -1;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  width: 100%;
+}
+.mcp-key-row .row-actions-buttons,
+.oauth-consent-row .row-actions-buttons,
+.mcp-client-row .row-actions-buttons { justify-content: flex-end; flex-wrap: wrap; }
+.mcp-credential-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.mcp-credential-heading > strong { min-width: 0; overflow-wrap: anywhere; }
+.mcp-credential-heading > .status-pill { flex-shrink: 0; }
+.mcp-key-title { display: block; }
+.mcp-key-identity { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 6px 12px; color: var(--ink-soft); }
+.mcp-field-label { display: block; margin-block: 10px 4px; font-size: 12px; font-weight: 700; color: var(--ink-muted); }
+.mcp-card-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-block: 12px; padding-block: 12px; border-block: 1px solid var(--border); }
+.mcp-card-times dt { font-size: 12px; color: var(--ink-muted); }
+.mcp-card-times dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.mcp-key-details { margin-block: 10px; }
+.mcp-key-details code { overflow-wrap: anywhere; }
+.mcp-connection-controls { margin-block: 16px 0; padding-top: 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .mcp-card-times { grid-template-columns: minmax(0, 1fr); }
+  .mcp-card-times > div { display: flex; justify-content: space-between; gap: 12px; }
+  .mcp-card-times dd { margin: 0; text-align: end; }
+  .mcp-credential-heading { flex-wrap: wrap; }
+}
+.workspace-picker-dialog > .dialog-scroll-region {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.workspace-picker-dialog .workspace-scope-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+}
+.workspace-picker-dialog .workspace-scope-list,
+.workspace-picker-dialog .workspace-grant-details {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.workspace-picker-dialog .workspace-scope-toolbar,
+.workspace-picker-dialog .workspace-scope-search,
+.workspace-picker-dialog .workspace-scope-pagination,
+.workspace-picker-dialog .workspace-scope-view-actions { flex-shrink: 0; }
+.workspace-picker-dialog .dialog-header { flex-shrink: 0; padding-bottom: 12px; }
+.dialog-panel.workspace-picker-dialog {
+  display: flex;
+  flex-direction: column;
+  height: min(760px, 90dvh);
+  overflow: hidden;
+}
+.workspace-picker-dialog > .dialog-scroll-region { flex: 1 1 auto; }
+.workspace-picker-dialog .workspace-scope-picker { flex: 1 1 auto; }
+@media (max-width: 640px) {
+  .dialog-backdrop:has(.workspace-picker-dialog) { padding: 0; }
+  .dialog-panel.workspace-picker-dialog { height: 100dvh; }
+}
+
+/* The compact summary truncates names; the full picker must reveal them. */
+.workspace-picker-dialog .workspace-picker-heading { width: 100%; }
+.workspace-picker-dialog .workspace-scope-copy strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.workspace-picker-dialog .workspace-scope-option { align-items: start; }
+.workspace-picker-dialog .workspace-scope-check { margin-block-start: 2px; }

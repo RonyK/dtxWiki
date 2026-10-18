@@ -145,7 +145,7 @@ CITATION_TYPES = {"raw_source", "derived_artifact", "context_page"}
 LIBRARY_RULE_TYPES = {"web", "manual_upload"}
 MCP_CLIENT_STATUSES = {"active", "disabled"}
 MCP_CLIENT_LIST_STATUSES = MCP_CLIENT_STATUSES | {"all"}
-MCP_CLIENT_CURSOR_VERSION = 1
+MCP_CLIENT_CURSOR_VERSION = 2
 MCP_CLIENT_CURSOR_SORT_VERSION = "created_at_desc_id_desc_v1"
 SYSTEM_MCP_CLIENT_TYPES = {
     "internal",
@@ -192,9 +192,7 @@ class LibraryPolicyBatchUpdateRequired(SettingsPolicyUpdateRejected):
     error_code = "library_policy_batch_update_required"
 
 
-class LibraryFormatExtensionTransferRequiresRelease(
-    SettingsPolicyUpdateRejected
-):
+class LibraryFormatExtensionTransferRequiresRelease(SettingsPolicyUpdateRejected):
     error_code = "library_format_extension_transfer_requires_release"
 
 
@@ -274,49 +272,12 @@ class SettingsService:
         cursor: str | None = None,
         cursor_secret: str,
     ) -> SettingsMcpClientListData:
-        """Return one exact, server-filtered management page.
+        """Filter and count against one control-plane credential snapshot.
 
-        The Active/Deactivated facet keys off *connection health*, not the
-        physical ``MCPClient.status`` column: a client whose consent expired or
-        whose OAuth grant was revoked leaves the Active facet even though it was
-        never administratively disabled. Deactivated therefore covers
-        disabled + expired + revoked, matching the Access Key "Inactive" rule.
-        See ``_mcp_client_active_connection_predicate``. Tombstones and
-        server-managed identities are absent from every list/count projection.
-
-        TWO PLANES, never joined. ``Workspace`` and the three OAuth tables are
-        control-plane; ``MCPClient`` is workspace-plane. Health is read off
-        CONTROL first and reduced to literal key sets, which are then pushed
-        down into workspace-plane SQL, so ``total_count``, both facet counts
-        and the page stay whole-table aggregates -- classifying a materialized
-        page in Python would break the exact server-filtered cursor contract
-        documented above.
-
-        The planes alternate rather than running strictly once each. A search
-        request goes control (health) -> workspace (the distinct OAuth client
-        ids this workspace's rows name) -> control (resolve the client_name
-        LIKE against exactly those ids) -> workspace (facets and page) ->
-        control (name the OAuth clients on the page that the workspace-wide
-        consent scan never saw). Every control step after the first reads
-        nothing but primary keys the workspace plane just handed it, and each
-        is bounded by ``limit`` or by this workspace's own connection count --
-        which is the whole point of the middle pair: it is what keeps a
-        user-supplied search term from turning the installation's entire
-        ``oauth_client`` table into bind parameters. See
-        ``oauth_service.attach_name_matched_oauth_client_ids``.
-
-        What this costs, exactly: cross-plane atomicity, and nothing else.
-        Within one response ``total_count``, both facets, the page and every
-        row's ``connection_state`` remain mutually consistent -- more so than
-        before, where the SQL facet and the Python per-row state were two
-        independent reads that agreed only by sharing one transaction.
-        ``filtered_count``, ``status_counts``, ordering, cursor shape and the
-        exact-filtering contract are unchanged, so no frontend or schema change
-        follows. A token expiring mid-walk still moves facets, exactly as the
-        paragraph above already declares.
-
-        This route reads two planes and writes neither, so there is no
-        distributed transaction here.
+        Only exact credential identities with current workspace permission are
+        active. Inactive is the exhaustive complement, including unknown legacy
+        identities. Control-plane facts cross into the workspace query as
+        literal key sets; no cross-database join or page-local filter is used.
         """
 
         acquire_consistent_read_snapshot(control_session)
@@ -324,12 +285,8 @@ class SettingsService:
             raise ReadNotFoundError("workspace not found")
         if status not in MCP_CLIENT_LIST_STATUSES:
             raise SettingsMcpClientCursorInvalid("invalid MCP client status filter")
-        # Bound once and reused by the facet counts, the data filter, and the
-        # per-row connection_state below, so one response cannot disagree with
-        # itself about what "now" is. This does not freeze across cursor pages
-        # (unlike Access Keys' threaded `evaluated_at`): a token expiring
-        # mid-walk moves facets, the same way the per-row state already shifted
-        # between two separate requests before this change.
+        # Cursor pages retain the first page's evaluation time. Explicit
+        # revocations and membership changes are still re-read on each request.
         now = utc_now()
         normalized_query = " ".join((query or "").split()).casefold()
         actor_binding = _mcp_client_cursor_actor_binding(actor)
@@ -345,6 +302,8 @@ class SettingsService:
             if cursor
             else None
         )
+        if typed_cursor is not None:
+            now = typed_cursor[2]
         health = load_workspace_oauth_health(
             control_session,
             workspace_id=workspace_id,
@@ -389,18 +348,50 @@ class SettingsService:
             # by the installation's whole oauth_client table. See
             # attach_name_matched_oauth_client_ids for what the unbounded shape
             # cost.
+            bound_keys = workspace_session.execute(
+                select(MCPClient.issued_to_user_id, _mcp_client_binding_expression())
+                .where(*manageable_filters)
+                .distinct()
+            ).all()
+            bound_app_ids = {
+                credential.oauth_client_id
+                for key in bound_keys
+                if (credential := health.credential_health.get(tuple(key))) is not None
+                and credential.oauth_client_id is not None
+            }
             health = attach_name_matched_oauth_client_ids(
                 control_session,
                 health,
                 name_search=normalized_query,
-                oauth_client_ids=workspace_session.scalars(
-                    select(oauth_client_id)
-                    .where(*manageable_filters, oauth_client_id.isnot(None))
-                    .distinct()
-                ).all(),
+                oauth_client_ids=set(
+                    workspace_session.scalars(
+                        select(oauth_client_id)
+                        .where(*manageable_filters, oauth_client_id.isnot(None))
+                        .distinct()
+                    ).all()
+                )
+                | bound_app_ids,
             )
+            matched_bindings = [
+                key
+                for key, credential in health.credential_health.items()
+                if credential.oauth_client_id
+                in (health.name_matched_oauth_client_ids or ())
+            ]
             search_filters = (
                 or_(
+                    or_(
+                        tuple_(
+                            MCPClient.issued_to_user_id,
+                            _mcp_client_binding_expression(),
+                        ).in_(matched_bindings),
+                        and_(
+                            MCPClient.issued_to_user_id.is_(None),
+                            MCPClient.runtime_binding_key.in_(
+                                [key[1] for key in matched_bindings]
+                            ),
+                        ),
+                    ),
                     func.lower(MCPClient.name).contains(
                         normalized_query, autoescape=True
                     ),
@@ -442,9 +433,7 @@ class SettingsService:
                     func.sum(
                         case(
                             (
-                                not_(
-                                    _mcp_client_active_connection_predicate(health)
-                                ),
+                                not_(_mcp_client_active_connection_predicate(health)),
                                 1,
                             ),
                             else_=0,
@@ -468,11 +457,9 @@ class SettingsService:
         if status == "active":
             data_filters.append(_mcp_client_active_connection_predicate(health))
         elif status == "disabled":
-            data_filters.append(
-                not_(_mcp_client_active_connection_predicate(health))
-            )
+            data_filters.append(not_(_mcp_client_active_connection_predicate(health)))
         if typed_cursor is not None:
-            cursor_created_at, cursor_id = typed_cursor
+            cursor_created_at, cursor_id, _evaluated_at = typed_cursor
             data_filters.append(
                 or_(
                     MCPClient.created_at < cursor_created_at,
@@ -500,6 +487,7 @@ class SettingsService:
                 query=normalized_query,
                 created_at=last.created_at,
                 client_id=last.id,
+                evaluated_at=now,
             )
         # A page row may name an OAuth client the workspace-wide scan above
         # never saw (no consent here). Its facet answer is already settled;
@@ -782,9 +770,7 @@ class SettingsService:
                     "format_families": 3,
                     "format_overrides": 3,
                 }
-                ordered_changes.sort(
-                    key=lambda item: library_order.get(item[0], 3)
-                )
+                ordered_changes.sort(key=lambda item: library_order.get(item[0], 3))
             for key, value in ordered_changes:
                 if group == "library" and key in RETIRED_LIBRARY_SOURCE_RULE_KEYS:
                     raise LibrarySourceRulesRetired(
@@ -1147,9 +1133,7 @@ class SettingsService:
         elif key == "builtin_format_overrides":
             try:
                 policy_value = (
-                    self.library_family_policy.coerce_builtin_format_overrides(
-                        value
-                    )
+                    self.library_family_policy.coerce_builtin_format_overrides(value)
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1159,9 +1143,7 @@ class SettingsService:
                     value,
                     existing_families=policy.get("format_families", []),
                     custom_formats=policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get(
-                        "builtin_format_overrides", {}
-                    ),
+                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1186,9 +1168,7 @@ class SettingsService:
                 str(item["format_id"])
                 for item in self.library_family_policy.coerce_custom_formats(
                     policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get(
-                        "builtin_format_overrides", {}
-                    ),
+                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
                 )
             }
             raw_format_id = key.removeprefix("format_overrides.")
@@ -1233,14 +1213,11 @@ def _validate_policy_cross_fields(
         return
     if group == "library":
         family_policy = (
-            library_family_policy
-            or get_default_library_family_policy_service()
+            library_family_policy or get_default_library_family_policy_service()
         )
         try:
-            builtin_format_overrides = (
-                family_policy.coerce_builtin_format_overrides(
-                    policy.get("builtin_format_overrides", {})
-                )
+            builtin_format_overrides = family_policy.coerce_builtin_format_overrides(
+                policy.get("builtin_format_overrides", {})
             )
             custom_formats = family_policy.coerce_custom_formats(
                 policy.get("custom_formats", []),
@@ -1250,8 +1227,7 @@ def _validate_policy_cross_fields(
             orphaned_custom_overrides = sorted(
                 format_id
                 for format_id in policy.get("format_overrides", {})
-                if str(format_id).startswith("custom-")
-                and format_id not in custom_ids
+                if str(format_id).startswith("custom-") and format_id not in custom_ids
             )
             if orphaned_custom_overrides:
                 raise LibraryFamilyPolicyError(
@@ -1497,9 +1473,7 @@ def normalized_library_policy(
         max_bytes=MAX_LIBRARY_WORKSPACE_UPLOAD_BYTES,
     )
     try:
-        policy_service = (
-            family_policy or get_default_library_family_policy_service()
-        )
+        policy_service = family_policy or get_default_library_family_policy_service()
         normalized["builtin_format_overrides"] = (
             policy_service.coerce_builtin_format_overrides(
                 source.get("builtin_format_overrides", {})
@@ -1516,9 +1490,7 @@ def normalized_library_policy(
         )
     except LibraryFamilyPolicyError as exc:
         raise LibraryPolicyValidationRejected(exc) from exc
-    custom_ids = {
-        str(item["format_id"]) for item in normalized["custom_formats"]
-    }
+    custom_ids = {str(item["format_id"]) for item in normalized["custom_formats"]}
     allowed_override_ids = LIBRARY_FORMATS | custom_ids
     normalized["format_overrides"] = {
         format_id: limit
@@ -1573,9 +1545,7 @@ def library_upload_limit_bytes(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized[
-                    "builtin_format_overrides"
-                ],
+                builtin_format_overrides=normalized["builtin_format_overrides"],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference = family.max_upload_bytes
@@ -1620,9 +1590,7 @@ def library_upload_limit_sources(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized[
-                    "builtin_format_overrides"
-                ],
+                builtin_format_overrides=normalized["builtin_format_overrides"],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference_source = "family"
@@ -1679,9 +1647,7 @@ def _coerce_library_upload_limit(
             f"{field_name} must be at least {MIN_LIBRARY_UPLOAD_BYTES}"
         )
     if value > max_bytes:
-        raise SettingsPolicyUpdateRejected(
-            f"{field_name} must be at most {max_bytes}"
-        )
+        raise SettingsPolicyUpdateRejected(f"{field_name} must be at most {max_bytes}")
     return value
 
 
@@ -1922,62 +1888,53 @@ def _page_oauth_client_ids(clients: list[MCPClient]) -> list[str]:
     ]
 
 
+def _mcp_client_binding_expression():
+    metadata = MCPClient.token_metadata
+    fallback = case(
+        (
+            metadata["token_kind"].as_string() == "oauth_jwt",
+            "oauth_grant:" + metadata["token_id"].as_string(),
+        ),
+        (
+            metadata["token_kind"].as_string().in_(["api_token", "pat"]),
+            "api_token:" + metadata["token_id"].as_string(),
+        ),
+        else_=None,
+    )
+    return func.coalesce(MCPClient.runtime_binding_key, fallback)
+
+
 def _mcp_client_active_connection_predicate(health: WorkspaceOAuthHealth):
-    """SQL twin of ``oauth_service.classify_oauth_connection_state`` == "active",
-    over ``MCPClient`` columns ONLY.
+    """Use the same exact control-plane credential snapshot as row rendering.
 
-    The Active/Deactivated facet keys off connection health, not the physical
-    ``MCPClient.status`` column, so the split has to be expressible in SQL --
-    loading the page into Python to classify it would break the exact
-    server-filtered cursor contract this endpoint documents.
-
-    This used to be three correlated ``EXISTS`` subqueries against
-    ``OAuthClient``/``OAuthConsent``/``OAuthRefreshToken``, two of them
-    correlating a CONTROL table's ``workspace_id`` against a WORKSPACE table's
-    inside one statement -- not expressible once the planes are separate
-    databases. Both of those tables are workspace-scoped, so for ONE workspace
-    the healthy answer set is finite: ``health`` is that set, computed on the
-    control plane, and pushed back down here as literal keys.
-
-    The two arms below are the same disjunction the old EXISTS pairs spelled
-    out. A client with no issuing user matched ANY row for its client/workspace
-    pair (the aggregate key); one with an issuing user matched only its own.
-    They cannot be merged into a single row-value ``IN`` because SQL compares
-    NULL to nothing: ``(NULL, 'c') IN ((NULL, 'c'))`` is UNKNOWN, not TRUE.
-
-    The Deactivated facet is ``not_()`` of this, so it matters that the whole
-    expression is never UNKNOWN -- a row that is neither TRUE nor FALSE would
-    be counted in neither facet. The only UNKNOWN source is an ``IN`` over a
-    NULL ``oauth_client_id``, and every arm that contains one is reached only
-    when the first arm has already made the ``OR`` true (client id NULL) or
-    when ``status`` has already made that arm FALSE.
+    Literal key sets cross the database boundary; token tables never join the
+    workspace-plane query. Unknown identities belong to the inactive complement.
     """
 
-    oauth_client_id = MCPClient.token_metadata["oauth_client_id"].as_string()
-    aggregate_ids, exact_keys = health.active_connection_keys()
-    arms = [
-        # No OAuth identity: connection state mirrors the physical status.
-        and_(oauth_client_id.is_(None), MCPClient.status == "active"),
-    ]
-    if aggregate_ids:
+    metadata = MCPClient.token_metadata
+    binding = _mcp_client_binding_expression()
+    app_id = func.nullif(metadata["oauth_client_id"].as_string(), "")
+    groups: dict[str | None, list[tuple[UUID, str]]] = {}
+    for (user_id, key), credential in health.credential_health.items():
+        if credential.state == "active":
+            groups.setdefault(credential.oauth_client_id, []).append((user_id, key))
+    arms = []
+    for oauth_id, keys in groups.items():
         arms.append(
             and_(
-                MCPClient.status == "active",
-                MCPClient.issued_to_user_id.is_(None),
-                oauth_client_id.in_(sorted(aggregate_ids)),
-            )
-        )
-    if exact_keys:
-        arms.append(
-            and_(
-                MCPClient.status == "active",
-                MCPClient.issued_to_user_id.isnot(None),
-                tuple_(MCPClient.issued_to_user_id, oauth_client_id).in_(
-                    sorted(exact_keys)
+                or_(
+                    tuple_(MCPClient.issued_to_user_id, binding).in_(sorted(keys)),
+                    and_(
+                        MCPClient.issued_to_user_id.is_(None),
+                        MCPClient.runtime_binding_key.in_([key[1] for key in keys]),
+                    ),
                 ),
+                or_(app_id.is_(None), app_id == oauth_id)
+                if oauth_id is not None
+                else app_id.is_(None),
             )
         )
-    return or_(*arms)
+    return and_(MCPClient.status == "active", func.coalesce(or_(*arms, False), False))
 
 
 def _warn_if_pushdown_key_set_is_large(health: WorkspaceOAuthHealth) -> None:
@@ -1991,11 +1948,8 @@ def _warn_if_pushdown_key_set_is_large(health: WorkspaceOAuthHealth) -> None:
     bind count up was precisely the one that logged nothing.
     """
 
-    aggregate_ids, exact_keys = health.active_connection_keys()
-    key_count = (
-        len(aggregate_ids)
-        + len(exact_keys)
-        + len(health.name_matched_oauth_client_ids or ())
+    key_count = len(health.credential_health) + len(
+        health.name_matched_oauth_client_ids or ()
     )
     if key_count <= MCP_CLIENT_PUSHDOWN_KEY_WARNING_THRESHOLD:
         return
@@ -2032,8 +1986,14 @@ def _settings_mcp_client_payload(
         connection_state, next_expiry, oauth_client_id, oauth_client_name = (
             health.connection_state_for(client)
         )
+        credential = health.credential_for(client)
         payload.append(
             {
+                "credential_kind": "unknown"
+                if credential is None
+                else "oauth"
+                if credential.oauth_client_id
+                else "pat",
                 "id": client.id,
                 "name": client.name,
                 "client_name": oauth_client_name or client.name,
@@ -2082,6 +2042,7 @@ def _encode_mcp_client_cursor(
     query: str,
     created_at: datetime,
     client_id: UUID,
+    evaluated_at: datetime,
 ) -> str:
     if not secret:
         raise ValueError("MCP client cursor secret must not be empty")
@@ -2094,6 +2055,7 @@ def _encode_mcp_client_cursor(
             query=query,
         ),
         "created": created_at.isoformat(),
+        "evaluated": evaluated_at.isoformat(),
         "id": client_id.hex,
     }
     encoded = (
@@ -2120,7 +2082,7 @@ def _decode_mcp_client_cursor(
     actor_binding: str,
     status: str,
     query: str,
-) -> tuple[datetime, UUID]:
+) -> tuple[datetime, UUID, datetime]:
     try:
         if not secret:
             raise ValueError("missing cursor secret")
@@ -2142,7 +2104,7 @@ def _decode_mcp_client_cursor(
         payload = json.loads(
             base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
         )
-        if set(payload) != {"v", "f", "created", "id"}:
+        if set(payload) != {"v", "f", "created", "id", "evaluated"}:
             raise ValueError("invalid cursor payload")
         if payload["v"] != MCP_CLIENT_CURSOR_VERSION:
             raise ValueError("unsupported cursor version")
@@ -2158,7 +2120,10 @@ def _decode_mcp_client_cursor(
         client_id = UUID(hex=payload["id"])
         if client_id.hex != payload["id"]:
             raise ValueError("invalid cursor client")
-        return created_at, client_id
+        evaluated_at = datetime.fromisoformat(payload["evaluated"])
+        if evaluated_at.tzinfo is None:
+            raise ValueError("missing evaluation timezone")
+        return created_at, client_id, evaluated_at
     except (
         ValueError,
         TypeError,
