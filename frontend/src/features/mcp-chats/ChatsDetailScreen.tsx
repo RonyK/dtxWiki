@@ -41,6 +41,7 @@ import {
 import {
   currentWorkspaceSelection,
   getCurrentWorkspaceId,
+  type WorkspaceSummary,
 } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
@@ -79,6 +80,16 @@ import { ChatEditCard, chatHasEditPreviews } from "./ChatEditCard";
 import { ClientChip, ClientIdentity } from "./ClientChip";
 import { ToolInputValue, isLongToolValue } from "./ToolInputValue";
 
+import {
+  ChatWorkspaces,
+  ChatIdentifier,
+  WorkspaceInput,
+  TypeChip,
+  isIdentifierField,
+  isResourceTypeField,
+  schemaVersion,
+} from "./ChatInputPresentation";
+
 const NARROW_FLOW_QUERY = "(max-width: 1024px)";
 
 export function ChatsDetailScreen() {
@@ -100,7 +111,12 @@ export function ChatsDetailScreen() {
     error,
     reload,
     setData,
-  } = useAsyncLoad<{ workspaceId: string; chat: McpChatDetail; isOwner: boolean }>(
+  } = useAsyncLoad<{
+    workspaceId: string;
+    chat: McpChatDetail;
+    isOwner: boolean;
+    workspaces: WorkspaceSummary[];
+  }>(
     async () => {
       const workspaceId = await getCurrentWorkspaceId();
       if (!workspaceId || !chatId) {
@@ -110,7 +126,10 @@ export function ChatsDetailScreen() {
       // Only gates whether the owner-only action is offered; the server
       // refuses anyone else regardless.
       const isOwner = currentWorkspaceSelection().workspace?.role === "owner";
-      return { workspaceId, chat, isOwner };
+      return {
+        workspaceId, chat, isOwner,
+        workspaces: currentWorkspaceSelection().data.workspaces,
+      };
     },
     [chatId],
     {
@@ -380,7 +399,9 @@ export function ChatsDetailScreen() {
         </section>
         <SessionInfoSection chat={chat} />
         {chat.linked_artifacts.length > 0 ? <ArtifactsSection chat={chat} /> : null}
-        <ChatFlowSection timeline={chat.timeline} workspaceId={state.workspaceId} />
+        <ChatWorkspaces.Provider value={state.workspaces}>
+          <ChatFlowSection timeline={chat.timeline} workspaceId={state.workspaceId} />
+        </ChatWorkspaces.Provider>
       </section>
       {archiveOpen ? (
         <ArchiveChatDialog
@@ -664,23 +685,15 @@ function SessionInfoSection({ chat }: { chat: McpChatDetail }) {
       onOpenChange={setOpen}
     >
       <div className="mcp-chat-meta-strip">
-        <MetaItem label={t("detail.meta.started")} value={formatVersionTimestamp(chat.started_at)} />
-        <MetaItem
-          label={t("detail.meta.lastActivity")}
-          value={formatVersionTimestamp(chat.last_activity_at)}
-        />
-        <MetaItem
-          label={t("units.duration")}
-          value={formatDurationMs(durationMs, t)}
-        />
-        <MetaItem
-          className="mcp-chat-meta-item--client"
-          label={t("detail.meta.client")}
-          value={<ClientIdentity client={chat.client} />}
-        />
-        <MetaItem label={t("detail.meta.calls")} value={String(chat.tool_call_count)} />
-        <MetaItem label={t("detail.meta.writes")} value={String(chat.write_count)} />
-        <MetaItem label={t("detail.meta.errors")} value={String(chat.error_count)} />
+        <div className="mcp-chat-session-facts">
+          <MetaItem className="mcp-chat-meta-item--time" label={t("detail.meta.started")} value={formatVersionTimestamp(chat.started_at)} />
+          <MetaItem className="mcp-chat-meta-item--time" label={t("detail.meta.lastActivity")} value={formatVersionTimestamp(chat.last_activity_at)} />
+          <MetaItem label={t("units.duration")} value={formatDurationMs(durationMs, t)} />
+          <MetaItem label={t("detail.meta.calls")} value={String(chat.tool_call_count)} />
+          <MetaItem label={t("detail.meta.writes")} value={String(chat.write_count)} />
+          <MetaItem label={t("detail.meta.errors")} value={String(chat.error_count)} />
+        </div>
+        <MetaItem className="mcp-chat-meta-item--client" label={t("detail.meta.client")} value={<ClientIdentity client={chat.client} />} />
       </div>
       {bootstrap.length > 0 ? <BootstrapNote items={bootstrap} /> : null}
     </AdvancedSection>
@@ -1355,6 +1368,8 @@ function ChatDisplayItems({ items }: { items: ChatDisplayItem[] }) {
                   <ExternalLink size={13} aria-hidden="true" />
                   <span>{displayItem.text}</span>
                 </Link>
+              ) : isResourceTypeField(displayItem.key) || displayItem.key === "page_type" ? (
+                <TypeChip value={displayItem.text} pageType={displayItem.key === "page_type"} />
               ) : displayItem.kind === "status" ? (
                 // A status item's text is a machine word ("discarded"), not
                 // prose, so it is localized like every other status.
@@ -1457,8 +1472,14 @@ function TimelineTabPanel({
     // Long arguments get their own full-width block. In the shared grid a
     // megabyte of markdown was laid out in a ~120px column and ran on for
     // thousands of lines, burying every other argument.
-    const shortEntries = entries.filter(([, value]) => !isLongToolValue(value));
-    const longEntries = entries.filter(([, value]) => isLongToolValue(value));
+    const ids = entries.filter(([key, value]) =>
+      key !== "workspace_id" && isIdentifierField(key) && typeof value === "string",
+    );
+    const ordinary = entries.filter((entry) => !ids.includes(entry));
+    const shortEntries = ordinary.filter(([, value]) => !isLongToolValue(value));
+    shortEntries.sort(([a], [b]) => Number(b === "workspace_id") - Number(a === "workspace_id"));
+    const longEntries = ordinary.filter(([, value]) => isLongToolValue(value));
+    const inputLabel = (key: string) => t(`detail.inputFields.${key}`, { defaultValue: labelFor(key) });
     return (
       <div className="mcp-tool-panel-card">
         {shapeOnlyNote}
@@ -1472,15 +1493,31 @@ function TimelineTabPanel({
               <dl className="mcp-tool-result-meta">
                 {shortEntries.map(([key, value]) => (
                   <div key={key}>
-                    <dt>{labelFor(key)}</dt>
-                    <dd>{formatSummaryValue(value)}</dd>
+                    <dt>{inputLabel(key)}</dt>
+                    <dd>
+                      {key === "workspace_id" && typeof value === "string" ? (
+                        <WorkspaceInput value={value} />
+                      ) : (isResourceTypeField(key) || key === "page_type") && typeof value === "string" ? (
+                        <TypeChip value={value} pageType={key === "page_type"} />
+                      ) : formatSummaryValue(value)}
+                    </dd>
                   </div>
                 ))}
               </dl>
             ) : null}
             {longEntries.map(([key, value]) => (
-              <ToolInputValue key={key} label={labelFor(key)} value={value} />
+              <ToolInputValue key={key} label={inputLabel(key)} value={value} />
             ))}
+            {ids.length > 0 ? (
+              <dl className="mcp-tool-result-meta mcp-chat-input-identifiers">
+                {ids.map(([key, value]) => (
+                  <div key={key}>
+                    <dt>{inputLabel(key)}</dt>
+                    <dd><ChatIdentifier value={String(value)} /></dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
           </section>
         ) : null}
       </div>
@@ -1570,13 +1607,7 @@ function TimelineTabPanel({
   }
   return (
     <div className="mcp-tool-panel-card">
-      <dl className="mcp-tool-result-meta">
-        <div>
-          <dt>{t("detail.fields.id")}</dt>
-          <dd>
-            <code className="uuid">{item.id}</code>
-          </dd>
-        </div>
+      <dl className="mcp-tool-result-meta mcp-chat-metadata-grid">
         <div>
           <dt>{t("detail.fields.status")}</dt>
           <dd>{statusLabel(item.result_status, t)}</dd>
@@ -1601,11 +1632,15 @@ function TimelineTabPanel({
         </div>
         <div>
           <dt>{t("detail.fields.schema")}</dt>
-          <dd>{item.schema_version}</dd>
+          <dd>{schemaVersion(item.schema_version)}</dd>
         </div>
-        <div>
+        <div className="mcp-chat-call-headline">
           <dt>{t("detail.fields.headline")}</dt>
           <dd>{item.headline}</dd>
+        </div>
+        <div>
+          <dt>{t("detail.fields.id")}</dt>
+          <dd><ChatIdentifier value={item.id} /></dd>
         </div>
       </dl>
     </div>

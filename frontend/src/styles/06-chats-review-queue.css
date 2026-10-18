@@ -234,7 +234,8 @@
 
 .mcp-chat-meta-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: minmax(0, 4fr) minmax(0, 3fr);
+  align-items: start;
   gap: 8px;
   min-width: 0;
   max-width: 100%;
@@ -252,8 +253,7 @@
 }
 
 .mcp-chat-meta-item--client {
-  grid-column: span 2;
-  min-width: 280px;
+  min-width: 0;
 }
 
 .mcp-chat-meta-item > span {
@@ -1896,4 +1896,97 @@
    stretching to a sibling's height and leaving a blank lower half. */
 .review-queue-grid > .review-queue-card {
   align-self: start;
+}
+
+/* Session facts remain independent of the expanded client card. */
+.mcp-chat-session-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.mcp-chat-meta-item--time {
+  grid-column: span 2;
+}
+.mcp-chat-type-chip {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 7px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  background: var(--surface-subtle);
+}
+.mcp-chat-identifier {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-chat-identifier-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.mcp-chat-full-id {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mcp-chat-identifier > [role="status"] {
+  display: block;
+  font-size: 12px;
+}
+.mcp-chat-metadata-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mcp-chat-call-headline {
+  grid-column: span 2;
+}
+.mcp-chat-metadata-grid dd,
+.mcp-tool-technical-inputs .mcp-tool-result-meta dd {
+  max-height: none;
+  overflow: visible;
+}
+.mcp-chat-call-headline dd {
+  white-space: pre-wrap;
+}
+.mcp-chat-input-identifiers {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mcp-chat-input-identifiers > div {
+  grid-column: -2 / -1;
+}
+@media (max-width: 1024px) {
+  .mcp-chat-meta-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcp-chat-metadata-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mcp-chat-call-headline {
+    grid-column: 1 / -1;
+  }
+  .mcp-chat-identifier-actions button {
+    min-height: 44px;
+  }
+}
+@media (max-width: 640px) {
+  .mcp-chat-session-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mcp-chat-meta-item--time {
+    grid-column: auto;
+  }
+  .mcp-chat-metadata-grid,
+  .mcp-chat-input-identifiers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcp-chat-call-headline,
+  .mcp-chat-input-identifiers > div {
+    grid-column: auto;
+  }
+}
+
+.mcp-chat-metadata-grid > div,
+.mcp-tool-technical-inputs .mcp-tool-result-meta > div {
+  align-content: start;
 }

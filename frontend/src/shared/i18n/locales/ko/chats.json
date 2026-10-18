@@ -479,7 +479,36 @@
       "selected": "선택됨 — Ctrl+C 를 누르세요"
     },
     "recordNoticeTitle": "채팅 전문이 아닌 도구 활동 기록입니다.",
-    "recordNoticeBody": "dtxWiki는 MCP 도구 호출과 추적 정책에 따라 보존되는 입력값·결과 및 연결된 아티팩트를 기록합니다. 외부 클라이언트에 입력한 메시지의 별도 사본을 전송받지는 않습니다."
+    "recordNoticeBody": "dtxWiki는 MCP 도구 호출과 추적 정책에 따라 보존되는 입력값·결과 및 연결된 아티팩트를 기록합니다. 외부 클라이언트에 입력한 메시지의 별도 사본을 전송받지는 않습니다.",
+    "identifier": {
+      "show": "전체 ID 보기",
+      "hide": "전체 ID 숨기기",
+      "copy": "전체 ID 복사"
+    },
+    "inputFields": {
+      "workspace_id": "워크스페이스",
+      "unknownWorkspace": "이름을 확인할 수 없는 워크스페이스",
+      "type": "유형",
+      "target_type": "대상 유형",
+      "page_type": "페이지 분류",
+      "id": "식별자",
+      "target_id": "대상 ID",
+      "page_id": "페이지 ID",
+      "version_id": "버전 ID",
+      "resource_id": "리소스 ID",
+      "target_kind": "대상 유형",
+      "resource_kind": "리소스 종류",
+      "resource_type": "리소스 유형"
+    },
+    "pageTypes": {
+      "overview": "개요",
+      "source": "출처",
+      "entity": "개체",
+      "concept": "개념",
+      "synthesis": "종합",
+      "comparison": "비교",
+      "decision": "결정"
+    }
   },
   "intentSource": {
     "write_reason": "에이전트가 밝힌 사유",

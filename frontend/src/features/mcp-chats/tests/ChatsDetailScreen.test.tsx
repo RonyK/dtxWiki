@@ -49,6 +49,35 @@ describe("ChatsDetailScreen", () => {
     return within(call).getByRole("tabpanel");
   }
 
+  it.each([false, true])("orders semantic inputs, long content, then identifiers and preserves raw metadata (reverse: %s)", async (reverse) => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    const fullId = "12345678-1234-5678-9012-12345678abcd";
+    detail.timeline[0] = { ...detail.timeline[0], id: fullId,
+      input_summary: { id: fullId, body_markdown: "Raw CASE body ".repeat(30), type: "context_page", workspace_id: WORKSPACE_ID, target_id: "second-id" },
+      input_display_items: [{ key: "target_kind", kind: "text", text: "context_page" }],
+      headline: "Original RAW headline ".repeat(100), schema_version: "2" };
+    if (reverse) {
+      detail.timeline[0].input_summary = Object.fromEntries(Object.entries(detail.timeline[0].input_summary).reverse());
+    }
+    renderWithDetail({ [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail) });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: "Inputs" }));
+    expect(within(card).getAllByText("Context Page")).toHaveLength(2);
+    expect(within(card).getByText("Default")).toBeVisible();
+    const technical = card.querySelector(".mcp-tool-technical-inputs")!;
+    expect([...technical.querySelectorAll(".mcp-tool-result-meta dt")].map(node => node.textContent))
+      .toEqual(reverse ? ["Workspace", "Type", "Target ID", "ID"] : ["Workspace", "Type", "ID", "Target ID"]);
+    expect(technical.lastElementChild).toHaveClass("mcp-chat-input-identifiers");
+    expect(technical.querySelector(".mcp-tool-longvalue-body")).toHaveTextContent("Raw CASE body");
+    await user.click(within(card).getByRole("tab", { name: "Metadata" }));
+    const metadata = card.querySelector(".mcp-chat-metadata-grid")!;
+    expect(metadata.lastElementChild).toHaveTextContent("12345678…abcd");
+    expect(metadata.querySelector(".mcp-chat-call-headline dd")?.textContent).toBe(detail.timeline[0].headline);
+    expect(within(card).getByText("v2")).toBeVisible();
+  });
+
   it("renders one title surface, session info, artifacts, and flow metadata", async () => {
     const user = userEvent.setup();
     renderWithDetail({
@@ -843,6 +872,7 @@ describe("ChatsDetailScreen", () => {
             {
               ...chatDetail().timeline[0],
               input_availability: "redacted",
+              input_summary: { workspace_id: WORKSPACE_ID, type: "context_page", id: "private-identifier-1234567890" },
               result_availability: "redacted",
               // A redacted call must not leak what little was captured.
               result_summary: "Found 3 private documents.",
@@ -869,6 +899,10 @@ describe("ChatsDetailScreen", () => {
       within(callPanel(call)).getByText("The inputs of this call are hidden from you."),
     ).toBeInTheDocument();
     expect(within(callPanel(call)).queryByText("Technical inputs")).toBeNull();
+    expect(within(callPanel(call)).queryByText("Default")).toBeNull();
+    expect(within(callPanel(call)).queryByText("Context Page")).toBeNull();
+    expect(callPanel(call).textContent).not.toContain("private-identifier");
+    expect(callPanel(call).querySelector("button")).toBeNull();
   });
 
   it("applies the returned title and focuses its heading after save", async () => {
