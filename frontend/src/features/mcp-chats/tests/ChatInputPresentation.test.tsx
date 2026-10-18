@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -66,6 +66,64 @@ describe("Chat input presentation", () => {
       expect(screen.getByRole("status")).toBeEmptyDOMElement();
     },
   );
+
+  it.each(["copied", "denied"])(
+    "keeps the full fallback mounted until a delayed copy settles: %s",
+    async (outcome) => {
+      const user = userEvent.setup();
+      let resolveCopy!: () => void;
+      let rejectCopy!: (error: Error) => void;
+      const pendingCopy = new Promise<void>((resolve, reject) => {
+        resolveCopy = resolve;
+        rejectCopy = reject;
+      });
+      const writeText = vi.fn().mockReturnValue(pendingCopy);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      render(<ChatIdentifier value={full} label="Call ID" />);
+      const copy = screen.getByRole("button", { name: "Copy full ID: Call ID" });
+      await user.click(copy);
+      const hide = screen.getByRole("button", { name: "Hide full ID: Call ID" });
+      expect(hide).toBeDisabled();
+      expect(copy).toBeDisabled();
+      await user.click(hide);
+      await user.click(copy);
+      expect(screen.getByText(full)).toBeVisible();
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(full);
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
+
+      await act(async () => {
+        if (outcome === "denied") rejectCopy(new Error("denied"));
+        else resolveCopy();
+        await pendingCopy.catch(() => undefined);
+      });
+      expect(copy).toBeEnabled();
+      expect(hide).toBeEnabled();
+      if (outcome === "denied") {
+        expect(window.getSelection()?.toString()).toBe(full);
+        expect(screen.getByRole("status")).toHaveTextContent("identifier is selected");
+      } else {
+        expect(screen.getByRole("status")).toHaveTextContent("Client identifier copied");
+      }
+      await user.click(hide);
+      expect(screen.queryByText(full)).toBeNull();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    },
+  );
+
+  it.each(["en", "ko"])("shows a placeholder for whitespace types in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    for (const value of ["", "   ", "\t\n", "\u00a0"]) {
+      const { unmount } = render(<>
+        <TypeChip value={value} />
+        <TypeChip value={value} pageType />
+      </>);
+      expect(screen.getAllByText("—")).toHaveLength(2);
+      unmount();
+    }
+  });
 
   it("gives identifier buttons their field context", () => {
     render(<>

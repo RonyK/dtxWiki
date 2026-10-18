@@ -59,7 +59,7 @@ export function TypeChip({
   pageType?: boolean;
 }) {
   const { t } = useTranslation("chats");
-  const fallback = humanizeIdentifier(value) || "—";
+  const fallback = humanizeIdentifier(value).trim() || "—";
   const label = pageType
     ? Object.hasOwn(enChats.detail.pageTypes, value)
       ? t(`detail.pageTypes.${value}`)
@@ -71,13 +71,24 @@ export function TypeChip({
 export function ChatIdentifier({ value, label }: { value: string; label?: string }) {
   const { t } = useTranslation("chats");
   const [open, setOpen] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [result, setResult] = useState<CopyTextDetailedResult | null>(null);
   const fullRef = useRef<HTMLElement>(null);
 
   async function copy() {
-    // Commit the full fallback text before the helper tries to select it.
-    flushSync(() => setOpen(true));
-    setResult(await copyTextWithReason(value, fullRef.current));
+    if (copying) return;
+    // Keep the full fallback mounted while clipboard permission is pending.
+    // A hide or duplicate copy must not detach the helper's selection target.
+    flushSync(() => {
+      setOpen(true);
+      setCopying(true);
+      setResult(null);
+    });
+    try {
+      setResult(await copyTextWithReason(value, fullRef.current));
+    } finally {
+      setCopying(false);
+    }
   }
 
   const reason = result && t(
@@ -99,6 +110,7 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
           type="button"
           className="mcp-strip-toggle"
           aria-expanded={open}
+          disabled={copying}
           aria-label={label ? t(open ? "detail.identifier.hideFor" : "detail.identifier.showFor", { field: label }) : undefined}
           onClick={() => {
             setOpen(!open);
@@ -111,6 +123,7 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
           type="button"
           className="mcp-strip-toggle"
           aria-label={label ? t("detail.identifier.copyFor", { field: label }) : undefined}
+          disabled={copying}
           onClick={copy}
         >
           {t("detail.identifier.copy")}
