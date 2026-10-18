@@ -83,8 +83,15 @@ test("Settings integrations lists and revokes OAuth MCP consent", async ({
     .getByRole("radiogroup", { name: "OAuth app state" })
     .getByRole("radio", { name: "All" })
     .click();
-  await expect(consentSection.getByText(clientName)).toBeVisible();
-  await expect(consentSection.getByText("mcp:read", { exact: true })).toBeVisible();
+  const consentRow = consentSection
+    .locator(".oauth-consent-row")
+    .filter({ hasText: clientName });
+  await expect(consentRow.getByText(clientName, { exact: true })).toBeVisible();
+  // Known scopes use translated chips: mcp:read is displayed as "Read".
+  // Match the complete scope set on this app's card, not another app's label.
+  const scopeChips = consentRow.locator(".scope-chip");
+  await expect(scopeChips).toHaveText(["Read"]);
+  await expect(scopeChips).toBeVisible();
 
   const revokeAll = page.getByRole("button", {
     name: `Revoke all consents for ${clientName}`,
