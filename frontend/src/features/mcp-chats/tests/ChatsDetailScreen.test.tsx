@@ -72,7 +72,7 @@ describe("ChatsDetailScreen", () => {
     expect(within(card).getByText("v12")).toBeVisible();
     expect(within(card).getByText("98765432…abcd")).not.toBeVisible();
     expect(within(card).getByText("12345678…abcd")).not.toBeVisible();
-    await user.click(within(card).getByText("Original IDs", { exact: true }));
+    await user.click(within(card).getByText("Raw request details", { exact: true }));
     expect(within(card).getByText("98765432…abcd")).toBeVisible();
     expect(within(card).getByText("12345678…abcd")).toBeVisible();
   });
@@ -826,7 +826,8 @@ describe("ChatsDetailScreen", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the opening tab, its display items, and the raw inputs without expanding anything", async () => {
+  it("keeps meaningful inputs open and conflict tokens in raw request details", async () => {
+    const user = userEvent.setup();
     renderWithDetail({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]:
@@ -867,8 +868,11 @@ describe("ChatsDetailScreen", () => {
     expect(
       within(panel).getByRole("heading", { name: "Technical inputs" }),
     ).toBeInTheDocument();
-    expect(within(panel).getByText("Expected editing revision")).toBeInTheDocument();
-    expect(within(panel).getByText("4")).toBeInTheDocument();
+    expect(within(panel).getByText("expected_editing_revision")).not.toBeVisible();
+    expect(within(panel).getByText("4")).not.toBeVisible();
+    await user.click(within(panel).getByText("Raw request details", { exact: true }));
+    expect(within(panel).getByText("expected_editing_revision")).toBeVisible();
+    expect(within(panel).getByText("4")).toBeVisible();
     // The old per-call meta line is gone from the card; those facts live in
     // Metadata.
     expect(within(call).queryByText(/^Started /)).toBeNull();

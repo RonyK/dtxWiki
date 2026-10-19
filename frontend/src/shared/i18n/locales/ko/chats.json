@@ -485,7 +485,7 @@
     "recordNoticeTitle": "채팅 전문이 아닌 도구 활동 기록입니다.",
     "recordNoticeBody": "dtxWiki는 MCP 도구 호출과 추적 정책에 따라 보존되는 입력값·결과 및 연결된 아티팩트를 기록합니다. 외부 클라이언트에 입력한 메시지의 별도 사본을 전송받지는 않습니다.",
     "identifier": {
-      "rawReferences": "원본 ID",
+      "rawReferences": "원본 요청 정보",
       "copied": "ID를 복사했습니다",
       "show": "전체 ID 보기",
       "hide": "전체 ID 숨기기",
@@ -497,7 +497,6 @@
     "inputFields": {
       "title": "제목",
       "body_md": "본문",
-      "expected_editing_revision": "예상 편집 리비전",
       "workspace_id": "워크스페이스",
       "type": "유형",
       "target_type": "대상 유형",

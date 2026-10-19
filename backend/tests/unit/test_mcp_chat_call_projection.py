@@ -11,7 +11,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.models.audit import AuditEvent
 from backend.models.context import ContextPage, ContextPageVersion
@@ -22,6 +22,7 @@ from backend.models.workspace import MCPClient, Workspace
 from backend.policy.auth import ActorContext
 from backend.services.mcp_chat_service import (
     McpChatService,
+    _ReaderGate,
     purge_previews_for_page,
 )
 from backend.services.mcp_trace_redaction import (
@@ -259,6 +260,77 @@ def test_input_version_number_does_not_expose_another_authors_private_version(
             entry.key == "input_version" for entry in item.input_display_items
         )
         assert "v37" not in item.model_dump_json()
+
+
+def test_input_version_display_issues_no_queries_even_for_uncached_references(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace, client, owner = _setup(session)
+        page, known = _published_page(session, workspace.id, "cached-version", "Guide")
+        uncached = _version(session, page, status="draft", author=owner.id, number=2)
+        chat = _Chat(session, workspace, client, owner)
+        call = chat.call(
+            "update_context_edit",
+            {"version_id": str(known.id), "base_version_id": str(uncached.id)},
+        )
+        gate = _ReaderGate(
+            chat.service, session, workspace.id, _human(owner.id, workspace.id)
+        )
+        assert gate.visible_version(known.id) is known
+        statements = []
+        connection = session.connection()
+
+        def record(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(connection, "before_cursor_execute", record)
+        try:
+            items = gate.input_version_items(call)
+        finally:
+            event.remove(connection, "before_cursor_execute", record)
+        assert [(entry.key, entry.text) for entry in items] == [("input_version", "v1")]
+        assert statements == []
+        assert uncached.id not in gate._versions
+
+
+def test_missing_input_versions_use_one_metadata_query_for_repeated_calls(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace, client, owner = _setup(session)
+        page, _ = _published_page(session, workspace.id, "batch-version", "Guide")
+        versions = [
+            _version(session, page, status="draft", author=owner.id, number=number)
+            for number in range(2, 14)
+        ]
+        chat = _Chat(session, workspace, client, owner)
+        calls = [
+            chat.call("update_context_edit", {"version_id": str(version.id)})
+            for version in versions
+            for _ in range(2)
+        ]
+        gate = _ReaderGate(
+            chat.service, session, workspace.id, _human(owner.id, workspace.id)
+        )
+        gate.title_and_path("context_page", page.id)
+        statements = []
+        connection = session.connection()
+
+        def record(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(connection, "before_cursor_execute", record)
+        try:
+            gate.prime_input_versions(calls)
+            for index, call in enumerate(calls):
+                assert [entry.text for entry in gate.input_version_items(call)] == [
+                    f"v{2 + index // 2}"
+                ]
+        finally:
+            event.remove(connection, "before_cursor_execute", record)
+        assert len(statements) == 1
+        assert "body_md" not in statements[0]
 
 
 # --- Failed calls (C1) ------------------------------------------------------

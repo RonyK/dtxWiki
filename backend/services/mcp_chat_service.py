@@ -9,7 +9,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, load_only
 
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.base import utc_now
@@ -1602,9 +1602,18 @@ class McpChatService:
                     primary_artifact=headline_artifact.get(row.id),
                     content_visible=gate.call_content_visible(row, chat),
                     session_diff=session_diffs.get(row.id),
-                    input_versions=gate.input_version_items(row),
                 )
             )
+        # Enrich only after visibility/content projection has populated the
+        # request cache. Most edit versions need no additional read at all.
+        visible_pairs = [
+            (row, item)
+            for row, item in zip(rows, timeline, strict=True)
+            if item.input_availability != "redacted" and row.id not in discarded_edit
+        ]
+        gate.prime_input_versions([row for row, _ in visible_pairs])
+        for row, item in visible_pairs:
+            item.input_display_items.extend(gate.input_version_items(row))
         return timeline
 
     def _error_call_item(
@@ -1655,7 +1664,6 @@ class McpChatService:
             input_items = _input_display_items(
                 row, input_summary, [], edit_summary=edit_summary
             )
-            input_items.extend(gate.input_version_items(row))
             seen = {item.resource_id for item in input_items if item.resource_id}
             for target in targets[:5]:
                 if target.resource_id in seen:
@@ -2159,6 +2167,7 @@ class _ReaderGate:
         self.actor = actor
         self._titles: dict[tuple[str, UUID], tuple[str | None, str | None]] = {}
         self._versions: dict[UUID, ContextPageVersion | None] = {}
+        self._input_version_candidates: dict[UUID, ContextPageVersion] = {}
         self._targets: dict[tuple[str, UUID], _ResolvedTarget | None] = {}
         self._discarded: dict[UUID, bool] = {}
 
@@ -2208,12 +2217,47 @@ class _ReaderGate:
             self._versions[version_id] = version if visible else None
         return self._versions[version_id]
 
+    def prime_input_versions(self, rows: list[MCPToolCall]) -> None:
+        """Read missing version labels in bounded batches, without bodies."""
+        wanted: set[UUID] = set()
+        for row in rows:
+            for field in _CONTEXT_VERSION_ID_FIELDS:
+                if _target_kind_for_field(row.tool_name, field) != "context_version":
+                    continue
+                version_id = _parse_uuid_value(row.input_summary.get(field))
+                if version_id and version_id not in self._versions:
+                    wanted.add(version_id)
+        ids = list(wanted)
+        for start in range(0, len(ids), 500):
+            versions = self.session.scalars(
+                select(ContextPageVersion)
+                .where(
+                    ContextPageVersion.workspace_id == self.workspace_id,
+                    ContextPageVersion.id.in_(ids[start : start + 500]),
+                )
+                .options(
+                    load_only(
+                        ContextPageVersion.id,
+                        ContextPageVersion.page_id,
+                        ContextPageVersion.version_no,
+                        ContextPageVersion.version_status,
+                        ContextPageVersion.created_by_actor_kind,
+                        ContextPageVersion.created_by_actor_id,
+                    )
+                )
+            ).all()
+            self._input_version_candidates.update(
+                (version.id, version) for version in versions
+            )
+
     def input_version_items(self, row: MCPToolCall) -> list[McpChatDisplayItem]:
-        """Resolve input Context version numbers through the reader's gate.
+        """Reuse Context versions already loaded by the reader's gate.
 
         Only use actual input references, never a created/result version or
         the page's latest version. Editing revisions remain captured inputs;
         reading today's mutable revision would misdescribe a historical call.
+        This per-call step never queries. Batched candidates also require a
+        previously checked page title and the existing version visibility rule.
         """
         items: list[McpChatDisplayItem] = []
         for field, key in (
@@ -2225,7 +2269,19 @@ class _ReaderGate:
             if _target_kind_for_field(row.tool_name, field) != "context_version":
                 continue
             version_id = _parse_uuid_value(row.input_summary.get(field))
-            version = self.visible_version(version_id) if version_id else None
+            version = (
+                self._versions.get(version_id)
+                if version_id in self._versions
+                else self._input_version_candidates.get(version_id)
+            )
+            if version is not None and (
+                not self._titles.get(("context_page", version.page_id), (None, None))[0]
+                or (
+                    self.actor is not None
+                    and not context_version_is_visible(version, self.actor)
+                )
+            ):
+                version = None
             if version is not None:
                 items.append(
                     McpChatDisplayItem(
@@ -2650,7 +2706,6 @@ def _visible_call_item(
     primary_artifact: tuple[str, str | None, str] | None,
     content_visible: bool,
     session_diff: McpChatSessionDiff | None,
-    input_versions: list[McpChatDisplayItem],
 ) -> McpChatTimelineItem:
     """A call the reader may see. Without ``content_visible`` -- the version
     it wrote into is another author's private row -- every field below is
@@ -2681,7 +2736,6 @@ def _visible_call_item(
     input_items = _input_display_items(
         row, input_summary, linked_artifacts, edit_summary=edit_summary
     )
-    input_items.extend(input_versions)
     result_items = _result_display_items(row, linked_artifacts, result_summary)
     presentation = _call_presentation(row, primary_artifact, input_summary)
     return McpChatTimelineItem(

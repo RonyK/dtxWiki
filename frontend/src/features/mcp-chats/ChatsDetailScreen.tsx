@@ -1496,14 +1496,15 @@ function TimelineTabPanel({
     // Long arguments get their own full-width block. In the shared grid a
     // megabyte of markdown was laid out in a ~120px column and ran on for
     // thousands of lines, burying every other argument.
-    const ids = entries.filter(([key, value]) =>
-      key !== "workspace_id" && isIdentifierField(key) && typeof value === "string",
+    const references = entries.filter(([key, value]) =>
+      key === "expected_editing_revision"
+      || (key !== "workspace_id" && isIdentifierField(key) && typeof value === "string"),
     );
-    const ordinary = entries.filter((entry) => !ids.includes(entry));
+    const ordinary = entries.filter((entry) => !references.includes(entry));
     const shortEntries = ordinary.filter(([, value]) => !isLongToolValue(value));
     shortEntries.sort(([a], [b]) => Number(b === "workspace_id") - Number(a === "workspace_id"));
     const longEntries = ordinary.filter(([, value]) => isLongToolValue(value));
-    const inputLabel = (key: string) => chatInputLabel(key, t);
+    const inputLabel = (key: string) => key === "expected_editing_revision" ? key : chatInputLabel(key, t);
     return (
       <div className="mcp-tool-panel-card">
         {shapeOnlyNote}
@@ -1533,14 +1534,18 @@ function TimelineTabPanel({
               {longEntries.map(([key, value]) => (
                 <ToolInputValue key={key} label={inputLabel(key)} value={value} />
               ))}
-              {ids.length > 0 ? (
+              {references.length > 0 ? (
                 <details className="mcp-chat-input-reference-details">
                   <summary>{t("detail.identifier.rawReferences")}</summary>
                   <dl className="mcp-tool-result-meta mcp-chat-input-identifiers">
-                    {ids.map(([key, value]) => (
+                    {references.map(([key, value]) => (
                       <div key={key}>
                         <dt>{inputLabel(key)}</dt>
-                        <dd><ChatIdentifier value={String(value)} label={inputLabel(key)} /></dd>
+                        <dd>
+                          {isIdentifierField(key) && typeof value === "string" ? (
+                            <ChatIdentifier value={value} label={inputLabel(key)} />
+                          ) : formatSummaryValue(value)}
+                        </dd>
                       </div>
                     ))}
                   </dl>
