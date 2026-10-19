@@ -249,10 +249,8 @@ test("MCP credential cards and search chrome stay balanced across responsive wid
         ["access-keys", page.locator(".mcp-keys-section")],
         ["approved-app-card", consentRow],
         [
-          "oauth-search",
-          oauthSection.locator(
-            ".mcp-clients-section .credential-list-controls",
-          ),
+          "mcp-client-search",
+          page.locator("#mcp-connected-clients .credential-list-controls"),
         ],
         [
           "access-keys-search",
