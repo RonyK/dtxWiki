@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
-import { createContext, useContext, useRef, useState } from "react";
+import { Check, Copy, FileText } from "lucide-react";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 
@@ -65,7 +66,12 @@ export function TypeChip({
       ? t(`detail.pageTypes.${value}`)
       : fallback
     : Object.hasOwn(RESOURCE_LABELS, value) ? RESOURCE_LABELS[value] : fallback;
-  return <span className="mcp-chat-type-chip" title={value}>{label}</span>;
+  return (
+    <span className="mcp-chat-type-chip" title={value}>
+      <FileText size={12} aria-hidden="true" />
+      {label}
+    </span>
+  );
 }
 
 export function ChatIdentifier({ value, label }: { value: string; label?: string }) {
@@ -74,20 +80,28 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
   const [copying, setCopying] = useState(false);
   const [result, setResult] = useState<CopyTextDetailedResult | null>(null);
   const fullRef = useRef<HTMLElement>(null);
+  const mounted = useRef(true);
+  const fullId = useId();
+  const feedbackId = useId();
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   async function copy() {
     if (copying) return;
-    // Keep the full fallback mounted while clipboard permission is pending.
-    // A hide or duplicate copy must not detach the helper's selection target.
-    flushSync(() => {
-      setOpen(true);
-      setCopying(true);
-      setResult(null);
-    });
+    setCopying(true);
+    setResult(null);
     try {
-      setResult(await copyTextWithReason(value, fullRef.current));
+      const next = await copyTextWithReason(value, () => {
+        // Reveal only for manual selection, and never after a tab unmount.
+        if (!mounted.current) return null;
+        flushSync(() => setOpen(true));
+        return fullRef.current;
+      });
+      if (mounted.current) setResult(next);
     } finally {
-      setCopying(false);
+      if (mounted.current) setCopying(false);
     }
   }
 
@@ -96,42 +110,53 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
   );
   const feedback = result && (
     result.status === "copied"
-      ? t("clientIdentity.copied")
+      ? t("detail.identifier.copied")
       : result.status === "selected"
         ? t("clientIdentity.selected", { reason })
         : t("clientIdentity.copyUnavailable", { reason })
   );
+  const toggleLabel = label
+    ? t(open ? "detail.identifier.hideFor" : "detail.identifier.showFor", { field: label })
+    : t(open ? "detail.identifier.hide" : "detail.identifier.show");
+  const copyLabel = label
+    ? t("detail.identifier.copyFor", { field: label })
+    : t("detail.identifier.copy");
 
   return (
     <div className="mcp-chat-identifier">
-      <code>{abbreviatedId(value)}</code>
-      <div className="mcp-chat-identifier-actions">
+      <div className="mcp-chat-identifier-row">
         <button
           type="button"
-          className="mcp-strip-toggle"
+          className="mcp-chat-id-toggle"
           aria-expanded={open}
+          aria-controls={open ? fullId : undefined}
           aria-disabled={copying}
-          aria-label={label ? t(open ? "detail.identifier.hideFor" : "detail.identifier.showFor", { field: label }) : undefined}
+          aria-label={toggleLabel}
+          title={toggleLabel}
           onClick={() => {
             if (copying) return;
             setOpen(!open);
             setResult(null);
           }}
         >
-          {t(open ? "detail.identifier.hide" : "detail.identifier.show")}
+          <code dir="ltr">{abbreviatedId(value)}</code>
         </button>
         <button
           type="button"
-          className="mcp-strip-toggle"
-          aria-label={label ? t("detail.identifier.copyFor", { field: label }) : undefined}
+          className="icon-button compact-icon-button"
+          aria-label={copyLabel}
+          title={copyLabel}
+          aria-describedby={feedback ? feedbackId : undefined}
           aria-disabled={copying}
-          onClick={copy}
+          onClick={() => void copy()}
         >
-          {t("detail.identifier.copy")}
+          {result?.status === "copied"
+            ? <Check size={14} aria-hidden="true" />
+            : <Copy size={14} aria-hidden="true" />}
         </button>
       </div>
-      {open && <code ref={fullRef} className="mcp-chat-full-id">{value}</code>}
-      <span role="status">{feedback}</span>
+      {open && <code id={fullId} ref={fullRef} dir="ltr" className="mcp-chat-full-id">{value}</code>}
+      <span id={feedbackId} role="status" aria-atomic="true">{feedback}</span>
     </div>
   );
 }
@@ -142,8 +167,8 @@ export function WorkspaceInput({ value }: { value: string }) {
   const name = workspace && [workspace.title, workspace.name, workspace.slug]
     .find((part) => part?.trim());
   return (
-    <div>
-      {name || t("detail.unknownWorkspace")}
+    <div className="mcp-chat-workspace-input">
+      <span>{name || t("detail.unknownWorkspace")}</span>
       <ChatIdentifier value={value} label={t("detail.inputFields.workspace_id")} />
     </div>
   );

@@ -1513,35 +1513,37 @@ function TimelineTabPanel({
         {entries.length > 0 ? (
           <section className="mcp-tool-technical-inputs">
             <h4>{t("detail.technicalInputs")}</h4>
-            {shortEntries.length > 0 ? (
-              <dl className="mcp-tool-result-meta">
-                {shortEntries.map(([key, value]) => (
-                  <div key={key}>
-                    <dt>{inputLabel(key)}</dt>
-                    <dd>
-                      {key === "workspace_id" && typeof value === "string" ? (
-                        <WorkspaceInput value={value} />
-                      ) : (isResourceTypeField(key) || key === "page_type") && typeof value === "string" ? (
-                        <TypeChip value={value} pageType={key === "page_type"} />
-                      ) : formatSummaryValue(value)}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : null}
-            {longEntries.map(([key, value]) => (
-              <ToolInputValue key={key} label={inputLabel(key)} value={value} />
-            ))}
-            {ids.length > 0 ? (
-              <dl className="mcp-tool-result-meta mcp-chat-input-identifiers">
-                {ids.map(([key, value]) => (
-                  <div key={key}>
-                    <dt>{inputLabel(key)}</dt>
-                    <dd><ChatIdentifier value={String(value)} label={inputLabel(key)} /></dd>
-                  </div>
-                ))}
-              </dl>
-            ) : null}
+            <div className="mcp-chat-input-grid">
+              {shortEntries.length > 0 ? (
+                <dl className="mcp-tool-result-meta mcp-chat-input-fields">
+                  {shortEntries.map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{inputLabel(key)}</dt>
+                      <dd>
+                        {key === "workspace_id" && typeof value === "string" ? (
+                          <WorkspaceInput value={value} />
+                        ) : (isResourceTypeField(key) || key === "page_type") && typeof value === "string" ? (
+                          <TypeChip value={value} pageType={key === "page_type"} />
+                        ) : formatSummaryValue(value)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {longEntries.map(([key, value]) => (
+                <ToolInputValue key={key} label={inputLabel(key)} value={value} />
+              ))}
+              {ids.length > 0 ? (
+                <dl className="mcp-tool-result-meta mcp-chat-input-identifiers">
+                  {ids.map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{inputLabel(key)}</dt>
+                      <dd><ChatIdentifier value={String(value)} label={inputLabel(key)} /></dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </div>
           </section>
         ) : null}
       </div>

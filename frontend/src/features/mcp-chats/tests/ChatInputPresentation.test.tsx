@@ -31,6 +31,39 @@ describe("Chat input presentation", () => {
       .toEqual(["v1", "v2", "v1", "v2", "—", "—", "—", "release-3"]);
   });
 
+  it("uses the abbreviated ID as the keyboard disclosure and a single icon copy control", async () => {
+    const user = userEvent.setup();
+    render(<ChatIdentifier value={full} label="Page ID" />);
+    const show = screen.getByRole("button", { name: "Show full ID: Page ID" });
+    const copy = screen.getByRole("button", { name: "Copy full ID: Page ID" });
+    expect(show).toHaveTextContent("12345678…abcd");
+    expect(copy.textContent).toBe("");
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    show.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByText(full)).toBeVisible();
+    expect(show).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("does not clear a new selection when a pending copy rejects after unmount", async () => {
+    const user = userEvent.setup();
+    let rejectCopy!: (error: Error) => void;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => new Promise<void>((_, reject) => { rejectCopy = reject; }) },
+    });
+    const { unmount } = render(<ChatIdentifier value={full} />);
+    await user.click(screen.getByRole("button", { name: "Copy full ID" }));
+    unmount();
+    const { container } = render(<p>New result selection</p>);
+    const range = document.createRange();
+    range.selectNodeContents(container.firstChild!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    await act(async () => { rejectCopy(new Error("denied")); });
+    expect(window.getSelection()?.toString()).toBe("New result selection");
+  });
+
   it.each(["copied", "denied", "unsupported"])(
     "copies or selects the full ID: %s",
     async (mode) => {
@@ -56,8 +89,12 @@ describe("Chat input presentation", () => {
       if (mode !== "copied") {
         expect(window.getSelection()?.toString()).toBe(full);
       }
-      expect(screen.getByText(full)).toBeVisible();
-      expect(screen.getByRole("status")).not.toBeEmptyDOMElement();
+      if (mode === "copied") {
+        expect(screen.queryByText(full)).toBeNull();
+        await user.click(screen.getByRole("button", { name: "Show full ID" }));
+      } else {
+        expect(screen.getByText(full)).toBeVisible();
+      }
       await user.click(screen.getByRole("button", { name: "Hide full ID" }));
       expect(screen.queryByText(full)).toBeNull();
       expect(screen.getByRole("status")).toBeEmptyDOMElement();
@@ -84,6 +121,7 @@ describe("Chat input presentation", () => {
       });
       render(<ChatIdentifier value={full} label="Call ID" />);
       const copy = screen.getByRole("button", { name: "Copy full ID: Call ID" });
+      await user.click(screen.getByRole("button", { name: "Show full ID: Call ID" }));
       await user.click(copy);
       const hide = screen.getByRole("button", { name: "Hide full ID: Call ID" });
       expect(hide).toHaveAttribute("aria-disabled", "true");
@@ -106,7 +144,7 @@ describe("Chat input presentation", () => {
         expect(window.getSelection()?.toString()).toBe(full);
         expect(screen.getByRole("status")).toHaveTextContent("identifier is selected");
       } else {
-        expect(screen.getByRole("status")).toHaveTextContent("Client identifier copied");
+        expect(screen.getByRole("status")).toHaveTextContent("ID copied");
       }
       await user.click(hide);
       expect(screen.queryByText(full)).toBeNull();

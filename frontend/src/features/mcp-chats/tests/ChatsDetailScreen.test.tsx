@@ -69,7 +69,7 @@ describe("ChatsDetailScreen", () => {
     const technical = card.querySelector(".mcp-tool-technical-inputs")!;
     expect([...technical.querySelectorAll(".mcp-tool-result-meta dt")].map(node => node.textContent))
       .toEqual(reverse ? ["Workspace", "Type", "Target ID", "ID"] : ["Workspace", "Type", "ID", "Target ID"]);
-    expect(technical.lastElementChild).toHaveClass("mcp-chat-input-identifiers");
+    expect(technical.querySelector(".mcp-chat-input-grid")!.lastElementChild).toHaveClass("mcp-chat-input-identifiers");
     expect(technical.querySelector(".mcp-tool-longvalue-body")).toHaveTextContent("Raw CASE body");
     await user.click(within(card).getByRole("tab", { name: "Metadata" }));
     const metadata = card.querySelector(".mcp-chat-metadata-grid")!;

@@ -481,6 +481,7 @@
     "recordNoticeTitle": "Tool activity, not a chat transcript.",
     "recordNoticeBody": "dtxWiki records MCP tool calls and the inputs/results retained by its trace policy, plus linked artifacts. It does not receive a separate copy of the message typed in the external client.",
     "identifier": {
+      "copied": "ID copied",
       "show": "Show full ID",
       "hide": "Hide full ID",
       "copy": "Copy full ID",
