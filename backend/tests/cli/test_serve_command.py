@@ -21,20 +21,22 @@ from backend.tests.utils.environment import clear_ambient_dtxwiki_env
 
 @pytest.fixture
 def serve(monkeypatch, tmp_path):
-    """Invoke `dtxwiki serve` with the server, bootstrap and browser stubbed."""
+    """Invoke `dtxwiki serve` with the runtime and browser stubbed."""
 
     clear_ambient_dtxwiki_env(monkeypatch)
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "data"))
     calls: dict = {}
     monkeypatch.setattr(cli_main, "create_app", lambda **_kwargs: object())
-    monkeypatch.setattr(cli_main, "bootstrap_app", lambda *_args, **_kwargs: None)
 
-    async def fake_runtime(_app, _settings, **kwargs):
+    async def fake_runtime(
+        _app, _settings, *, application_factory, on_started, **kwargs
+    ):
         calls.update(uvicorn=kwargs)
         calls["loop"] = asyncio.get_running_loop()
-        kwargs["bootstrap"]()
-        if kwargs["on_started"] is not None:
-            kwargs["on_started"]()
+        assert _app is None
+        calls["application"] = application_factory(_settings)
+        if on_started is not None:
+            on_started()
 
     monkeypatch.setattr(cli_main, "serve_runtime", fake_runtime)
     monkeypatch.setattr(
