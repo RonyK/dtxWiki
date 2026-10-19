@@ -3399,6 +3399,16 @@
             "description": "Keyset cursor for the next page, or null when this is the last page. Non-null does not imply `items` is non-empty: with a `usage` filter applied, a page can legitimately contain zero matching items while more unfiltered rows -- and possibly more matches -- remain beyond it. Always follow a non-null cursor rather than stopping on an empty `items` list.",
             "title": "Next Cursor"
           },
+          "retention_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextMediaRetentionPolicyPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scope": {
             "enum": [
               "mine",
@@ -3460,8 +3470,15 @@
             "type": "boolean"
           },
           "content_url": {
-            "title": "Content Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Url"
           },
           "created_at": {
             "format": "date-time",
@@ -3839,6 +3856,61 @@
           "orphaned_since"
         ],
         "title": "ContextMediaOrphanPayload",
+        "type": "object"
+      },
+      "ContextMediaRetentionPolicyPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "default_orphan_retention_hours": {
+            "minimum": 0.0,
+            "title": "Default Orphan Retention Hours",
+            "type": "integer"
+          },
+          "effective_orphan_retention_hours": {
+            "minimum": 0.0,
+            "title": "Effective Orphan Retention Hours",
+            "type": "integer"
+          },
+          "max_orphan_retention_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Max Orphan Retention Hours",
+            "type": "integer"
+          },
+          "orphan_retention_hours": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Retention Hours"
+          },
+          "revision": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Revision",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "server",
+              "workspace"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orphan_retention_hours",
+          "effective_orphan_retention_hours",
+          "default_orphan_retention_hours",
+          "max_orphan_retention_hours",
+          "source",
+          "revision"
+        ],
+        "title": "ContextMediaRetentionPolicyPayload",
         "type": "object"
       },
       "ContextMediaUploadPayload": {
@@ -16343,6 +16415,16 @@
           "agent_injection": {
             "$ref": "#/components/schemas/PolicyCard"
           },
+          "attachments": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "citation": {
             "$ref": "#/components/schemas/PolicyCard"
           },
@@ -16428,6 +16510,7 @@
           "group": {
             "enum": [
               "workspace",
+              "attachments",
               "library",
               "citation",
               "context_write",
@@ -19079,7 +19162,6 @@
     },
     "/api/v1/admin/context-media/orphans": {
       "get": {
-        "description": "Every current Context-media orphan in one workspace: an asset whose\nupload session expired before anything claimed it, or one claimed onto a\npage but written into no version's Markdown -- either never (an upload\nabandoned mid-edit, the usual case) or no longer. An unclaimed upload\nsession that has not expired yet is an upload in progress and is not\nlisted.\n\nServer-admin surface -- unlike the workspace-scoped listing it reads any\nworkspace, not only ones the caller is a member of. ``workspace_id`` is\nrequired: this endpoint reports one workspace per call and never\naggregates across the instance.",
         "operationId": "admin_list_context_media_orphans_api_v1_admin_context_media_orphans_get",
         "parameters": [
           {

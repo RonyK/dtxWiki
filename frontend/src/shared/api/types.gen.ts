@@ -62,20 +62,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Admin List Context Media Orphans
-         * @description Every current Context-media orphan in one workspace: an asset whose
-         *     upload session expired before anything claimed it, or one claimed onto a
-         *     page but written into no version's Markdown -- either never (an upload
-         *     abandoned mid-edit, the usual case) or no longer. An unclaimed upload
-         *     session that has not expired yet is an upload in progress and is not
-         *     listed.
-         *
-         *     Server-admin surface -- unlike the workspace-scoped listing it reads any
-         *     workspace, not only ones the caller is a member of. ``workspace_id`` is
-         *     required: this endpoint reports one workspace per call and never
-         *     aggregates across the instance.
-         */
+        /** Admin List Context Media Orphans */
         get: operations["admin_list_context_media_orphans_api_v1_admin_context_media_orphans_get"];
         put?: never;
         post?: never;
@@ -3923,6 +3910,7 @@ export interface components {
              * @description Keyset cursor for the next page, or null when this is the last page. Non-null does not imply `items` is non-empty: with a `usage` filter applied, a page can legitimately contain zero matching items while more unfiltered rows -- and possibly more matches -- remain beyond it. Always follow a non-null cursor rather than stopping on an empty `items` list.
              */
             next_cursor: string | null;
+            retention_policy?: components["schemas"]["ContextMediaRetentionPolicyPayload"] | null;
             /**
              * Scope
              * @enum {string}
@@ -3968,7 +3956,7 @@ export interface components {
             /** Can Delete */
             can_delete: boolean;
             /** Content Url */
-            content_url: string;
+            content_url: string | null;
             /**
              * Created At
              * Format: date-time
@@ -4139,6 +4127,24 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /** ContextMediaRetentionPolicyPayload */
+        ContextMediaRetentionPolicyPayload: {
+            /** Default Orphan Retention Hours */
+            default_orphan_retention_hours: number;
+            /** Effective Orphan Retention Hours */
+            effective_orphan_retention_hours: number;
+            /** Max Orphan Retention Hours */
+            max_orphan_retention_hours: number;
+            /** Orphan Retention Hours */
+            orphan_retention_hours: number | null;
+            /** Revision */
+            revision: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "server" | "workspace";
         };
         /** ContextMediaUploadPayload */
         ContextMediaUploadPayload: {
@@ -8582,6 +8588,7 @@ export interface components {
         /** SettingsPolicies */
         SettingsPolicies: {
             agent_injection: components["schemas"]["PolicyCard"];
+            attachments?: components["schemas"]["PolicyCard"] | null;
             citation: components["schemas"]["PolicyCard"];
             context_write: components["schemas"]["PolicyCard"];
             library: components["schemas"]["PolicyCard"];
@@ -8610,7 +8617,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint";
+            group: "workspace" | "attachments" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint";
         };
         /** SettingsPolicyUpdateRequest */
         SettingsPolicyUpdateRequest: {

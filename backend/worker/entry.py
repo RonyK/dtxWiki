@@ -17,6 +17,7 @@ from backend.app.container import BlobStoreProvider, DatabaseProvider
 from backend.app.settings import Settings
 from backend.models.workspace import Workspace
 from backend.services.bundle_expiration import BundleExpirationService
+from backend.services.context_media_policy import resolve_context_media_policy
 from backend.services.job_queue import JobQueueService
 from backend.services.mail_delivery import EmailDeliveryService
 from backend.services.ops import runtime_lock
@@ -82,9 +83,7 @@ class _ShutdownSignals:
         previous = {}
         try:
             for shutdown_signal in _SHUTDOWN_SIGNALS:
-                previous[shutdown_signal] = signal.signal(
-                    shutdown_signal, self.handle
-                )
+                previous[shutdown_signal] = signal.signal(shutdown_signal, self.handle)
         except ValueError:
             # Not the main thread (an embedding host): the host owns signals.
             pass
@@ -441,9 +440,19 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
     """
     try:
         with database_provider.control_session_factory().begin() as control_session:
-            workspace_ids = list(
-                control_session.scalars(select(Workspace.id).order_by(Workspace.id))
-            )
+            workspace_policies = []
+            for workspace in control_session.scalars(
+                select(Workspace).order_by(Workspace.id)
+            ):
+                try:
+                    policy = resolve_context_media_policy(
+                        workspace, settings.context_media_orphan_retention_hours
+                    )
+                    workspace_policies.append((workspace.id, policy))
+                except Exception:
+                    logger.exception(
+                        "invalid retention policy for workspace %s", workspace.id
+                    )
     except Exception:
         logger.exception("periodic job seeding failed reading workspace roster")
         return
@@ -451,8 +460,7 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
     queue = JobQueueService()
     bundle_expiration = BundleExpirationService(job_queue=queue)
     now = datetime.now(UTC)
-    schedules = tick_schedules(settings)
-    for workspace_id in workspace_ids:
+    for workspace_id, policy in workspace_policies:
         try:
             with database_provider.session_for(workspace_id).begin() as ws_session:
                 seed_jobs_for_workspace(
@@ -461,7 +469,8 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
                     now=now,
                     job_queue=queue,
                     bundle_expiration=bundle_expiration,
-                    schedules=schedules,
+                    schedules=tick_schedules(settings, policy),
+                    context_media_policy_revision=policy.revision,
                 )
         except Exception:
             logger.exception(

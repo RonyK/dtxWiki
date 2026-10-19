@@ -66,10 +66,12 @@ PER_WORKSPACE_DATABASE_TOPOLOGY = "per_workspace_database"
 # unsupported; see README.md ("현재 제한 사항") and DEPLOYMENT.md
 # ("데이터베이스").
 SHIPPED_STORAGE_TOPOLOGY = SINGLE_DATABASE_TOPOLOGY
-KNOWN_STORAGE_TOPOLOGIES = frozenset({
-    SINGLE_DATABASE_TOPOLOGY,
-    PER_WORKSPACE_DATABASE_TOPOLOGY,
-})
+KNOWN_STORAGE_TOPOLOGIES = frozenset(
+    {
+        SINGLE_DATABASE_TOPOLOGY,
+        PER_WORKSPACE_DATABASE_TOPOLOGY,
+    }
+)
 UNDECLARED_STORAGE_TOPOLOGY = "undeclared"
 
 
@@ -872,7 +874,14 @@ class ServiceRegistry:
     def settings_svc(self):
         from backend.services.settings_service import SettingsService
 
-        return SettingsService(library_family_policy=self.library_family_policy)
+        return SettingsService(
+            library_family_policy=self.library_family_policy,
+            orphan_retention_hours=(
+                self.settings.context_media_orphan_retention_hours
+                if self.settings is not None
+                else 168
+            ),
+        )
 
     @cached_property
     def context_ingress(self):

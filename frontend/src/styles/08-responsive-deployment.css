@@ -1263,3 +1263,124 @@
     padding-inline-start: 26px;
   }
 }
+
+.attachments-controls {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.attachments-card-main {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.attachments-card-main > .attachments-identity,
+.attachments-card-main > .attachments-facts {
+  grid-column: 1;
+}
+
+.attachments-actions {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: start;
+  justify-content: flex-end;
+}
+
+.attachments-confirm-actions {
+  justify-content: flex-end;
+}
+
+.attachments-card-main > .attachments-confirm,
+.attachments-bulk > .attachments-confirm {
+  grid-column: 1 / -1;
+}
+
+.attachments-bulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.attachments-bulk > .attachments-confirm {
+  flex-basis: 100%;
+}
+
+.attachments-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  cursor: pointer;
+}
+
+.attachments-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.attachments-card:has(.attachments-row-checkbox) {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.attachments-card.is-selected {
+  border-color: var(--context);
+  background: var(--surface-subtle);
+}
+
+@media (max-width: 480px) {
+  .attachments-card:has(.attachments-row-checkbox) {
+    gap: 6px;
+    padding: 10px;
+  }
+  .attachments-row-checkbox {
+    min-width: 28px;
+  }
+  .attachments-card-main > .attachments-facts {
+    grid-column: 1 / -1;
+  }
+}
+
+.attachments-policy {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.attachments-policy h3,
+.attachments-policy p {
+  margin: 0;
+}
+
+.attachments-policy fieldset {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  margin: 0;
+}
+
+.attachments-policy fieldset > label:not(.attachments-checkbox) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.attachments-policy input[type="number"] {
+  width: 120px;
+  max-width: 100%;
+}

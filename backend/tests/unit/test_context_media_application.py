@@ -51,6 +51,7 @@ class FakeRepository:
         workspace_id: UUID,
         *,
         viewer=None,
+        viewer_role=None,
         created_by=None,
         page_id=None,
         orphan_only: bool = False,

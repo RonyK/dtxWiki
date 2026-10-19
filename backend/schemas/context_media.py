@@ -161,7 +161,7 @@ class ContextMediaAttachmentPayload(BaseModel):
     is_mine: bool
     can_delete: bool
     usage_token: str
-    content_url: str
+    content_url: str | None
     uploaded_by_display_name: str
     """Never null: ``resolve_actor_display_names`` falls back to a role label
     ("MCP client", "Agent worker") for non-human actors, so the UI needs no
@@ -169,6 +169,17 @@ class ContextMediaAttachmentPayload(BaseModel):
     created_by_actor_kind: str
     created_by_actor_id: str
     created_at: datetime
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMediaRetentionPolicyPayload(BaseModel):
+    orphan_retention_hours: int | None = Field(ge=0)
+    effective_orphan_retention_hours: int = Field(ge=0)
+    default_orphan_retention_hours: int = Field(ge=0)
+    max_orphan_retention_hours: int = Field(gt=0)
+    source: Literal["server", "workspace"]
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -185,6 +196,7 @@ class ContextMediaAttachmentListData(BaseModel):
             "rather than stopping on an empty `items` list."
         )
     )
+    retention_policy: ContextMediaRetentionPolicyPayload | None = None
     scope: Literal["mine", "workspace"]
     """Echoed back so the client can tell a "no attachments" answer for the
     whole workspace apart from one for just this uploader."""

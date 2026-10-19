@@ -9,6 +9,7 @@ app process cannot mutate ``/etc`` under the systemd sandbox, so it returns the
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Annotated
 from uuid import UUID
 
@@ -21,7 +22,9 @@ from backend.api.auth import (
 )
 from backend.api.deps import (
     DatabaseProviderDep,
+    RestActorDep,
     SessionFactoryDep,
+    WorkspaceAdminAccessDep,
     WorkspaceSessionFactoryDep,
 )
 from backend.api.health import _ready_payload as health_ready_payload
@@ -131,9 +134,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
             "mail_connection_status": recovery.mail_connection_status,
             "mail_last_attempt_at": recovery.mail_last_attempt_at,
             "mail_from_address": recovery.mail_from_address,
-            "smtp_credentials_configured": (
-                recovery.smtp_credentials_configured
-            ),
+            "smtp_credentials_configured": (recovery.smtp_credentials_configured),
             "canonical_public_url": recovery.canonical_public_url,
             "https_ready": recovery.https_ready,
             "outbox_queued": recovery.outbox_queued,
@@ -389,28 +390,22 @@ def admin_list_jobs(
 def admin_list_context_media_orphans(
     workspace_id: UUID,
     session_factory: WorkspaceSessionFactoryDep,
+    actor: RestActorDep,
+    access: WorkspaceAdminAccessDep,
     control_session_factory: SessionFactoryDep,
     _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
 ):
-    """Every current Context-media orphan in one workspace: an asset whose
-    upload session expired before anything claimed it, or one claimed onto a
-    page but written into no version's Markdown -- either never (an upload
-    abandoned mid-edit, the usual case) or no longer. An unclaimed upload
-    session that has not expired yet is an upload in progress and is not
-    listed.
-
-    Server-admin surface -- unlike the workspace-scoped listing it reads any
-    workspace, not only ones the caller is a member of. ``workspace_id`` is
-    required: this endpoint reports one workspace per call and never
-    aggregates across the instance.
-    """
-    # Required workspace_id instead of an instance-wide aggregation: every read
-    # here has to run on session_for(workspace_id), never the control plane. A
-    # media-orphan fan-out would be another copy of list_all_jobs' roster +
-    # per-workspace session + skip-and-flag shape -- one more call site to keep
-    # in sync with that pattern rather than reusing it.
     with session_factory() as session:
-        items = list_context_media_orphans(session, workspace_id=workspace_id)
+        items = list_context_media_orphans(
+            session,
+            workspace_id=workspace_id,
+            actor=replace(
+                actor,
+                workspace_id=workspace_id,
+                role=access.role,
+                workspace_role=access.role,
+            ),
+        )
     # Uploader labels come off the CONTROL session -- `users` is identity
     # plane, the listing above is workspace plane. Same split as the
     # workspace-scoped endpoint in backend/api/read.py.

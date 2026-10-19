@@ -29,5 +29,6 @@
   "shell.json:topbar.language.en",
   "shell.json:topbar.language.ko",
   "tree.json:counts",
-  "tree.json:folder.pageFolderCount"
+  "tree.json:folder.pageFolderCount",
+  "settings.json:attachments.policy.daysHours"
 ]

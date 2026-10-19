@@ -110,9 +110,7 @@ def attachment_read_projection(
         "association_state": record.association_state.value,
         "usage_state": asset.usage_state.value,
         "latest_draft_reference_count": asset.latest_draft_reference_count,
-        "current_published_reference_count": (
-            asset.current_published_reference_count
-        ),
+        "current_published_reference_count": (asset.current_published_reference_count),
         "historical_reference_count": asset.historical_reference_count,
         "is_orphan": projection.is_orphan,
         "is_mine": (
@@ -124,9 +122,11 @@ def attachment_read_projection(
         "content_url": attachment_content_url(
             workspace_id=workspace_id,
             page_id=record.page_id,
-            version_id=record.created_for_version_id,
+            version_id=projection.preview_version_id,
             asset_id=record.asset_id,
-        ),
+        )
+        if projection.preview_version_id is not None
+        else None,
         "uploaded_by_display_name": uploaded_by_display_name,
         "created_by_actor_kind": record.created_by.kind,
         "created_by_actor_id": str(record.created_by.id),

@@ -175,6 +175,7 @@ from backend.services.context_media_orphan_sweep import (
     list_orphans as list_context_media_orphans,
 )
 from backend.services.context_media_orphan_sweep import orphan_read_projection
+from backend.services.context_media_policy import read_context_media_policy
 from backend.services.conversion_orchestrator import (
     LibraryConversionRetryNotAvailableError,
     LibraryConversionRetryNotFoundError,
@@ -3600,7 +3601,8 @@ def list_workspace_jobs(
 )
 def list_workspace_context_media_orphans(
     workspace_id: UUID,
-    _access: WorkspaceAdminAccessDep,
+    access: WorkspaceAdminAccessDep,
+    actor: RestActorDep,
     session_factory: WorkspaceSessionFactoryDep,
     control_session_factory: SessionFactoryDep,
 ):
@@ -3620,7 +3622,16 @@ def list_workspace_context_media_orphans(
     # carry asset filenames and uploader identities, so this is storage
     # housekeeping rather than general status visibility.
     with session_factory() as session:
-        items = list_context_media_orphans(session, workspace_id=workspace_id)
+        items = list_context_media_orphans(
+            session,
+            workspace_id=workspace_id,
+            actor=replace(
+                actor,
+                workspace_id=workspace_id,
+                role=access.role,
+                workspace_role=access.role,
+            ),
+        )
     # The uploader label is resolved on the CONTROL session: `users` is an
     # identity-plane table (plan §2), so the workspace-plane listing above
     # deliberately does not touch it. Same directory-then-route split the
@@ -3722,6 +3733,7 @@ def list_workspace_context_media_attachments(
     page, has_more, next_after = svc.context_media.list_workspace_assets(
         workspace_id=workspace_id,
         viewer=viewer,
+        viewer_role=access.role,
         created_by=viewer if scope == "mine" else None,
         page_id=page_id,
         orphan_only=orphan_only,
@@ -3745,6 +3757,11 @@ def list_workspace_context_media_attachments(
     # IMMEDIATE transactions on one SQLite file. Same split as the orphan
     # listing directly above.
     with control_session_factory() as control_session:
+        retention_policy = read_context_media_policy(
+            control_session,
+            workspace_id,
+            svc.settings_svc.orphan_retention_hours,
+        )
         names = resolve_actor_display_names(
             control_session,
             (
@@ -3773,6 +3790,7 @@ def list_workspace_context_media_attachments(
             ],
             "next_cursor": next_cursor,
             "scope": scope,
+            "retention_policy": retention_policy.metadata(),
         }
     }
 
