@@ -6350,6 +6350,22 @@
             ],
             "title": "Oauth Jwk",
             "type": "string"
+          },
+          "worker": {
+            "default": "n/a",
+            "enum": [
+              "ok",
+              "n/a",
+              "error",
+              "not_configured",
+              "unsynced",
+              "drift",
+              "manager_missing",
+              "ephemeral_unsafe",
+              "invalid"
+            ],
+            "title": "Worker",
+            "type": "string"
           }
         },
         "required": [

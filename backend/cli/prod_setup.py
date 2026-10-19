@@ -595,6 +595,7 @@ def render_production_env(
     mcp_http_mode: str = "streamable",
     tls_mode: str = "acme",
     forwarded_allow_ips: str = "127.0.0.1",
+    worker_mode: Literal["managed", "external"] = "managed",
 ) -> str:
     """Render a complete production env file that passes the startup guards.
 
@@ -613,6 +614,7 @@ def render_production_env(
         f"DTXWIKI_APP_NAME={app_name}",
         "DTXWIKI_APP_ENV=production",
         "DTXWIKI_APP_MODE=team",
+        f"DTXWIKI_WORKER_MODE={worker_mode}",
         f"DTXWIKI_PUBLIC_BASE_URL={origin}",
         f"DTXWIKI_TLS_MODE={tls_mode}",
         "DTXWIKI_BEHIND_PROXY=true",

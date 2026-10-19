@@ -22,6 +22,70 @@ Desktop 설치 파일은 0.1.1에 포함되지 않습니다.
 - production은 SQLite 단일 노드입니다. app 1개 + worker 1개만 실행하고 DB를 NFS에 두거나
   app/worker를 수평 확장하지 않습니다.
 
+개인용 `dtxwiki`/`dtxwiki serve`와 Desktop 로컬 엔진은 서버와 worker를 함께
+시작하고 종료합니다. systemd 설치는 worker를 별도 서비스로 구성하고 env 파일에
+`DTXWIKI_WORKER_MODE=external`을 기록합니다. Docker 이미지는 기존 Compose의 별도
+worker 서비스와 호환되도록 image 자체에서 `external`을 기본값으로 사용합니다.
+일반 설치에서는 이 설정이나 별도 worker 명령이 필요하지 않습니다.
+
+개인용 실행은 API 부모 프로세스가 SPA를 제공하고 worker를 관리합니다. 시작 시에만
+별도 init 프로세스가 DB 준비를 수행하므로 DB 호출이 막혀도 부모는 중지와 시작 제한
+시간을 처리할 수 있습니다. init 성공과 실제 종료를 확인한 뒤 worker와 HTTP를 시작합니다.
+worker 준비는 최초 stale-job 복구 순회 완료를 뜻합니다. control DB의 workspace 목록을
+읽지 못하면 시작을 거절하며, 개별 workspace의 장애는 경고 후 다음 순회로 미룹니다.
+메일 전송 성공은 시작 조건이 아닙니다. external 모드의 `/health/ready`는 기존처럼
+worker를 별도로 감시하지 않고 `worker=n/a`로 표시합니다.
+
+managed 모드는 로컬의 일반 SQLite 파일만 지원합니다. `sqlite:///...`와
+`sqlite+pysqlite:///...`, `timeout` 등 연결 query는 같은 DB 소유권으로 취급합니다.
+동일 data directory를 사용하는 다른 DB 실행도 거절합니다. memory DB·SQLite URI·기타
+driver는 external 모드를 사용해야 하며, SQLite hard link는 경로 기반 소유권을 보장할 수
+없어 거절합니다. symlink는 실제 경로로 해석합니다. NFS/SMB 파일의 잠금 안전성을
+보장하지 않습니다. 직접 ASGI 실행이나 구 버전 프로세스와의 임의 혼용은 이 새 잠금 계약의
+대상이 아니므로 업그레이드·유지보수 전에 기존 writer를 모두 중지해야 합니다.
+DB 파일 기준의 소유권·consumer 단일성 보장은 일반 SQLite 파일에 적용됩니다.
+고급 external 경로의 URI/memory DB나 다른 DB backend는 data directory의 잠금만
+공유하므로, 운영자가 다른 경로·data directory를 통한 동시 소비와 유지보수를 조정해야 합니다.
+
+잠금은 data directory와 DB 옆의 별도 lock 파일에 유지됩니다. external API는 소유권과
+shared activity 잠금, external worker는 shared activity와 DB consumer 잠금을 보유합니다.
+따라서 준비된 DB의 `DTXWIKI_AUTO_BOOTSTRAP=false` API와 별도 worker는 어느 순서로도
+시작할 수 있지만 worker 소비자는 하나만 허용합니다. migration이 가능한 startup과 명시적
+`dtxwiki bootstrap`, `update`, `rollback`, `migrate-data`는 충돌하는 writer가 있으면
+거절합니다. writer를 중지한 후 maintenance bootstrap을 실행하세요. `migrate-data`는
+source와 target DB 모두를 보호합니다. 잠금 파일은 종료 뒤에도 남으며 삭제하지 마세요.
+준비된 production DB의 `DTXWIKI_AUTO_BOOTSTRAP=false` admin 명령은 shared 검증으로
+서비스와 공존합니다. 자동 migration을 허용한 사용자 설정에서는 admin 명령의 DB 준비도
+writer 중지를 요구하므로, 실행 중인 DB에 명령을 적용할 때는 먼저 maintenance bootstrap으로
+DB를 준비하고 `DTXWIKI_AUTO_BOOTSTRAP=false`로 실행하세요.
+부모가 강제 종료된 뒤 helper가 아직 살아 있으면 해당 작업이 끝나거나 정리될 때까지
+새 managed 시작과 maintenance가 거절됩니다.
+
+기본 `solo_local` 실행은 data directory의 `oauth-jwt.pem`과 기존 `session_secret`을
+재사용합니다. 기존 Desktop의 `desktop-oauth-jwt.pem`이 있으면 그 키를 먼저 재사용하며,
+명시한 key path·PEM·session secret이 우선합니다. 기존 키를 자동 회전하지 않습니다.
+
+이 관리 범위는 init·worker의 시작과 종료입니다. API 부모 자체가 native 호출에 완전히
+막힌 경우 standalone CLI의 coroutine이 이를 강제로 해제하지는 못합니다. Linux에서
+Ctrl+C/정상 종료가 처리되지 않으면 `ps -o pid,ppid,args -p <PID>`로 해당 실행인지
+확인하고 `kill -TERM <PID>`, 필요하면 `kill -KILL <PID>`로 종료할 수 있습니다.
+systemd와 container는 기존 관리자의 강제 종료 경로를 사용합니다. 지원하는 bundled
+helper는 parent-loss 감시와 activity 잠금을 가지며, 임의 third-party detached 변환기에는
+동일한 자동 정리를 보장하지 않습니다.
+기존 systemd 설치도 `dtxwiki update`의 마이그레이션 단계에서 env 파일에 이 설정을
+자동 반영합니다. 이전 updater가 custom env 경로를 전달하지 않으면 설치된 systemd unit의
+env 경로를 조회합니다. 경로를 하나로 확정할 수 없으면 서비스를 중지한 채 실패하므로
+출력된 `--env-file` 복구 명령으로 마이그레이션을 마친 뒤 서비스를 시작하세요.
+로컬 wheel을 수동 교체한다면 최신 `setup production --reconfigure`를
+실행해 서비스 설정을 갱신하거나, 기존 env 파일에 `DTXWIKI_WORKER_MODE=external`을
+추가한 뒤 서비스를 다시 시작하세요.
+다른 process manager에서 이미 `dtxwiki-worker run`을 실행 중이라면 새 버전의 웹 서버를
+처음 시작하기 전에 `DTXWIKI_WORKER_MODE=external` 또는 `--worker-mode external`을
+설정하세요. 이전 버전의 env 백업에는 이 설정을 추가하지 마세요.
+별도 worker 서비스가 없는 `--no-systemd` 설치와 Windows에서는 기본 `managed`를
+사용하며, `dtxwiki serve`가 worker도 실행합니다. 재구성 시에는 기존 worker-mode
+설정을 유지합니다.
+
 | 환경 | 권장 경로 | 비고 |
 | --- | --- | --- |
 | 일반 Ubuntu VM/VPS | wheel + `install.sh` + systemd | 권장, Caddy/서비스/초기 admin 자동 구성 |
@@ -517,6 +581,12 @@ JWT 키·session secret(`DTXWIKI_SESSION_SECRET_FILE=/var/lib/dtxwiki/session_se
 전제는 self-host 와 동일: 도메인 DNS A 레코드 → 호스트, 80/443 개방.
 production 스택은 dtxWiki 이미지 + `caddy:2` 만 사용하며 개발 전용 사이드카는 포함하지
 않는다.
+
+기존 Compose 파일을 유지하고 이미지만 교체해도 새 이미지의 `external` 기본값으로
+app 내부 worker와 별도 worker가 중복 실행되지 않습니다. Compose의 app `environment`에
+`DTXWIKI_WORKER_MODE`를 추가하지 마세요. 이 설정을 모르는 0.1.2 이미지로 rollback할 때
+production 설정 검증이 실패할 수 있습니다. 별도 worker 서비스 없이 컨테이너 하나로
+실행하려면 `DTXWIKI_WORKER_MODE=managed`를 명시하고 worker 서비스를 실행하지 마세요.
 
 ---
 

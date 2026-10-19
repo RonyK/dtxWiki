@@ -390,7 +390,8 @@
       "db": "Database",
       "app_version": "App version",
       "mcp": "MCP service",
-      "oauth_jwk": "OAuth signing key"
+      "oauth_jwk": "OAuth signing key",
+      "worker": "Background processing"
     },
     "healthStatus": {
       "ok": "OK",

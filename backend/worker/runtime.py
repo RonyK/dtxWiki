@@ -87,6 +87,25 @@ class WorkerShutdownRequested(BaseException):
 
 
 @dataclass(frozen=True)
+class InitialRecoveryResult:
+    """Outcome of the first stale-lease pass, before worker readiness.
+
+    A control-plane failure means the pass could not run. Individual workspace
+    failures remain isolated, as they are during periodic recovery.
+    """
+
+    roster_available: bool
+    reclaimed_count: int = 0
+    failed_workspace_ids: tuple[UUID, ...] = ()
+
+    @property
+    def status(self) -> str:
+        if not self.roster_available:
+            return "roster_failed"
+        return "partial" if self.failed_workspace_ids else "complete"
+
+
+@dataclass(frozen=True)
 class WorkerDispatchResult:
     job_id: UUID
     job_type: str
@@ -406,6 +425,17 @@ class OneShotWorker:
         session_factory: sessionmaker,
         lease_timeout_seconds: int,
     ) -> int:
+        """Best-effort periodic recovery; preserve the reclaimed-count API."""
+        return self.recover_initial_stale_jobs_with_session_factory(
+            session_factory=session_factory,
+            lease_timeout_seconds=lease_timeout_seconds,
+        ).reclaimed_count
+
+    def recover_initial_stale_jobs_with_session_factory(
+        self,
+        session_factory: sessionmaker,
+        lease_timeout_seconds: int,
+    ) -> InitialRecoveryResult:
         """Requeue (or terminally fail) every workspace's jobs stuck in
         'running' past their lease.
 
@@ -435,28 +465,30 @@ class OneShotWorker:
         ``self._database_provider`` is injected (unit tests exercising a
         single un-sharded DB) -- unchanged from before Phase 6a in that case.
 
-        Returns the total number of jobs reclaimed across every workspace.
+        Report whether the required roster pass ran, and which workspaces
+        were deferred. The periodic wrapper keeps its existing integer API.
         """
-        control_session_factory = (
-            self._database_provider.control_session_factory()
-            if self._database_provider is not None
-            else session_factory
-        )
         try:
+            control_session_factory = (
+                self._database_provider.control_session_factory()
+                if self._database_provider is not None
+                else session_factory
+            )
             with control_session_factory.begin() as control_session:
                 workspace_ids = self._workspace_roster(control_session)
         except Exception:
             logger.exception("stale-job reclaim failed reading workspace roster")
-            return 0
+            return InitialRecoveryResult(roster_available=False)
 
         total_reclaimed = 0
+        failed_workspace_ids = []
         for workspace_id in workspace_ids:
-            workspace_session_factory = (
-                self._database_provider.session_for(workspace_id)
-                if self._database_provider is not None
-                else session_factory
-            )
             try:
+                workspace_session_factory = (
+                    self._database_provider.session_for(workspace_id)
+                    if self._database_provider is not None
+                    else session_factory
+                )
                 with workspace_session_factory.begin() as session:
                     reclaimed = self.job_queue.reclaim_stale_jobs(
                         session=session,
@@ -487,6 +519,7 @@ class OneShotWorker:
                         )
                     total_reclaimed += len(reclaimed)
             except Exception:
+                failed_workspace_ids.append(workspace_id)
                 logger.exception(
                     "stale-job reclaim failed for workspace %s; continuing "
                     "the sweep for the remaining workspaces",
@@ -509,7 +542,11 @@ class OneShotWorker:
                     job_type=job.job_type,
                     error=job.last_error or "worker lease expired",
                 )
-        return total_reclaimed
+        return InitialRecoveryResult(
+            roster_available=True,
+            reclaimed_count=total_reclaimed,
+            failed_workspace_ids=tuple(failed_workspace_ids),
+        )
 
     def _release_interrupted_claim(
         self,

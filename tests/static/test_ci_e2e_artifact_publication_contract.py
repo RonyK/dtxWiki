@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -165,6 +166,57 @@ HAS_BASH = shutil.which("bash") is not None
 requires_bash = pytest.mark.skipif(
     not HAS_BASH, reason="bash is not on PATH; scripts/redact_evidence.sh needs it"
 )
+
+
+@pytest.fixture
+def playwright_config(tmp_path):
+    node = shutil.which("node")
+    if node is None or not (ROOT / "node_modules/@playwright/test").is_dir():
+        pytest.skip("node and installed Playwright dependencies are required")
+    result = subprocess.run(
+        [
+            node,
+            "--input-type=module",
+            "-e",
+            'import config from "./playwright.config.ts"; '
+            "console.log(JSON.stringify(config));",
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "CI": "true",
+            "DTXWIKI_E2E_DATABASE_URL": f"sqlite:///{tmp_path / 'test.db'}",
+            "DTXWIKI_E2E_LIBRARY_BLOB_ROOT": str(tmp_path / "blobs"),
+            "DTXWIKI_E2E_STATIC_ROOT": str(tmp_path / "static"),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
+def test_ci_report_does_not_embed_source_diff(playwright_config):
+    assert playwright_config["captureGitInfo"]["diff"] is False
+
+
+def test_e2e_uses_one_consumer_for_mail_and_library_jobs(playwright_config):
+    workers = [
+        server
+        for server in playwright_config["webServer"]
+        if "backend.worker.entry run" in server["command"]
+    ]
+    assert len(workers) == 1
+    worker = workers[0]
+    assert "--skip-bootstrap" in worker["command"]
+    assert "--job-type library_conversion" in worker["command"]
+    assert "--job-type library_preview" in worker["command"]
+    assert worker["env"]["DTXWIKI_MAIL_PROVIDER"] == "smtp"
+    backend = playwright_config["webServer"][0]
+    assert (
+        worker["env"]["DTXWIKI_DATABASE_URL"] == backend["env"]["DTXWIKI_DATABASE_URL"]
+    )
+    assert "wait" in worker
 
 
 def _run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:

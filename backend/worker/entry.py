@@ -1,9 +1,10 @@
 import json
 import logging
+import os
 import signal
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -12,8 +13,9 @@ import typer
 from sqlalchemy import select
 
 from backend.app.bootstrap import DatabaseNotCurrentError, verify_database_current
-from backend.app.bootstrap import bootstrap as bootstrap_app
+from backend.app.bootstrap import bootstrap_core as bootstrap_app
 from backend.app.container import BlobStoreProvider, DatabaseProvider
+from backend.app.runtime_resources import RuntimeResources
 from backend.app.settings import Settings
 from backend.models.workspace import Workspace
 from backend.services.bundle_expiration import BundleExpirationService
@@ -82,9 +84,7 @@ class _ShutdownSignals:
         previous = {}
         try:
             for shutdown_signal in _SHUTDOWN_SIGNALS:
-                previous[shutdown_signal] = signal.signal(
-                    shutdown_signal, self.handle
-                )
+                previous[shutdown_signal] = signal.signal(shutdown_signal, self.handle)
         except ValueError:
             # Not the main thread (an embedding host): the host owns signals.
             pass
@@ -111,22 +111,48 @@ def _worker_runtime(settings: Settings, *, skip_bootstrap: bool) -> Iterator[Non
     writing to a schema it was not built for.
     """
 
-    try:
-        lock = runtime_lock.acquire_shared()
-    except runtime_lock.RuntimeLockHeldError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=RUNTIME_LOCKED_EXIT_CODE) from exc
-    try:
-        if not skip_bootstrap and settings.auto_bootstrap:
-            try:
-                bootstrap_app(settings)
-            except DatabaseNotCurrentError as exc:
-                _refuse_database(exc)
-        _verify_database(settings)
-        yield
-    finally:
-        if lock is not None:
-            lock.release()
+    bootstrap_requested = not skip_bootstrap and settings.auto_bootstrap
+    with ExitStack() as guards:
+        try:
+            resources = RuntimeResources.for_settings(settings)
+            activity = resources.acquire_activity(
+                "exclusive" if bootstrap_requested else "shared"
+            )
+            guards.enter_context(activity)
+            # All consuming workers, including a standalone external worker,
+            # obey the same DB-side consumer lock. Managed registration owns
+            # another SH lease, but never a second consumer lock.
+            guards.enter_context(resources.acquire_consumer())
+        except (runtime_lock.RuntimeLockHeldError, OSError, ValueError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=RUNTIME_LOCKED_EXIT_CODE) from exc
+        environment = resources.export_environment()
+        previous_environment = {key: os.environ.get(key) for key in environment}
+        os.environ.update(environment)
+        try:
+            if bootstrap_requested:
+                try:
+                    bootstrap_app(settings)
+                except DatabaseNotCurrentError as exc:
+                    _refuse_database(exc)
+                # A migration requires quiescent storage. Keep the consumer
+                # lock continuously while changing to the lifetime SH lease;
+                # a maintenance operation winning this gap makes us refuse
+                # before any job can be consumed.
+                activity.release()
+                try:
+                    guards.enter_context(resources.acquire_activity("shared"))
+                except (runtime_lock.RuntimeLockHeldError, OSError, ValueError) as exc:
+                    typer.echo(str(exc), err=True)
+                    raise typer.Exit(code=RUNTIME_LOCKED_EXIT_CODE) from exc
+            _verify_database(settings)
+            yield
+        finally:
+            for key, previous in previous_environment.items():
+                if previous is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = previous
 
 
 def _verify_database(settings: Settings) -> None:
@@ -303,6 +329,8 @@ def _run_loop(
     poll_interval_seconds: float,
     max_jobs: int | None,
     idle_exit_after: int | None,
+    on_ready: Callable[[], None] | None = None,
+    report_idle: bool = True,
 ) -> None:
     database_provider = DatabaseProvider(settings)
     blob_store_provider = BlobStoreProvider(settings)
@@ -330,10 +358,26 @@ def _run_loop(
     # backstops the dispatch loop must run regardless of anything else that
     # happened this iteration.
     full_sweep_interval_seconds = reclaim_interval_seconds
-    worker.reclaim_stale_jobs_with_session_factory(
+    recovery = worker.recover_initial_stale_jobs_with_session_factory(
         session_factory=factory,
         lease_timeout_seconds=lease_timeout_seconds,
     )
+    if not recovery.roster_available:
+        raise RuntimeError(
+            "worker initial recovery failed: control database workspace roster "
+            "is unavailable"
+        )
+    if recovery.failed_workspace_ids:
+        logger.warning(
+            "worker initial recovery partial; deferred workspaces: %s",
+            ", ".join(map(str, recovery.failed_workspace_ids)),
+        )
+    if shutdown.requested:
+        return
+    if on_ready is not None:
+        on_ready()
+    # Periodic registration and external mail delivery are not prerequisites
+    # for accepting jobs. In particular, SMTP must not delay the ready packet.
     _seed_due_jobs(database_provider, settings)
     _sweep_email_outbox(database_provider, settings)
     last_reclaim_monotonic = time.monotonic()
@@ -408,7 +452,8 @@ def _run_loop(
         consecutive_dispatch_errors = 0
         if result is None:
             idle_count += 1
-            typer.echo(json.dumps({"status": "idle"}, sort_keys=True))
+            if report_idle:
+                typer.echo(json.dumps({"status": "idle"}, sort_keys=True))
             if idle_exit_after is not None and idle_count >= idle_exit_after:
                 return
             shutdown.sleep(poll_interval_seconds)

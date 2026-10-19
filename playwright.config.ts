@@ -117,6 +117,7 @@ export default defineConfig({
   testIgnore: "**/_*.spec.ts",
   timeout: 30_000,
   retries: 0,
+  captureGitInfo: { diff: false },
   reporter: process.env.CI
     ? [["dot"], ["html", { open: "never", outputFolder: "playwright-report" }]]
     : [["list"]],
@@ -233,57 +234,18 @@ export default defineConfig({
       timeout: 20_000,
     },
     {
-      name: "mail worker",
-      command: [
-        quoted(pythonExecutable),
-        "-m backend.worker.entry run",
-        "--skip-bootstrap",
-        "--job-type email_delivery",
-        "--poll-interval-seconds 0.5",
-      ].join(" "),
-      env: {
-        ...inheritedEnv,
-        ...identityRecoveryEnv,
-        DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
-        DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
-        DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",
-      },
-      reuseExistingServer: false,
-      stdout: "pipe",
-      wait: { stdout: /"status":\s*"idle"/ },
-      timeout: 20_000,
-    },
-    {
-      name: "library conversion worker",
+      name: "background worker",
       command: [
         quoted(pythonExecutable),
         "-m backend.worker.entry run",
         "--skip-bootstrap",
         "--job-type library_conversion",
-        "--poll-interval-seconds 0.5",
-      ].join(" "),
-      env: {
-        ...inheritedEnv,
-        DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
-        DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
-        DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",
-      },
-      reuseExistingServer: false,
-      stdout: "pipe",
-      wait: { stdout: /"status":\s*"idle"/ },
-      timeout: 20_000,
-    },
-    {
-      name: "library preview worker",
-      command: [
-        quoted(pythonExecutable),
-        "-m backend.worker.entry run",
-        "--skip-bootstrap",
         "--job-type library_preview",
         "--poll-interval-seconds 0.5",
       ].join(" "),
       env: {
         ...inheritedEnv,
+        ...identityRecoveryEnv,
         DTXWIKI_DATABASE_URL: e2eDatabaseUrl,
         DTXWIKI_LIBRARY_BLOB_ROOT: e2eLibraryBlobRoot,
         DTXWIKI_SESSION_SECRET: "dtxwiki-e2e-session-secret",

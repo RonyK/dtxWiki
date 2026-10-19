@@ -67,8 +67,10 @@ def main() -> None:
         f"--workpath={PYINSTALLER_WORK / 'work'}",
         f"--specpath={PYINSTALLER_WORK}",
         "--collect-submodules=backend",
+        f"--additional-hooks-dir={DESKTOP / 'pyinstaller-hooks'}",
         "--exclude-module=backend.tests",
         "--copy-metadata=dtxwiki",
+        "--copy-metadata=Pillow",
         f"--add-data={_add_data(ROOT / 'backend' / 'alembic.ini', 'backend')}",
         "--add-data="
         + _add_data(ROOT / "backend" / "migrations", "backend/migrations"),
