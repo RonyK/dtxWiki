@@ -13,6 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
+CURRENT_HEAD = "d148b9746ff5"
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"
@@ -163,7 +164,7 @@ def _write_revision(stage, revision, down_revision):
 
 
 def _write_stray_revision(stage):
-    _write_revision(stage, "0003_stray", "efcbcf724889")
+    _write_revision(stage, "0003_stray", CURRENT_HEAD)
 
 
 def _write_branch_revision(stage):
@@ -173,8 +174,8 @@ def _write_branch_revision(stage):
 
 
 def _write_merge_revision(stage):
-    _write_revision(stage, "0003_one", "efcbcf724889")
-    _write_revision(stage, "0003_two", "efcbcf724889")
+    _write_revision(stage, "0003_one", CURRENT_HEAD)
+    _write_revision(stage, "0003_two", CURRENT_HEAD)
     _write_revision(stage, "0004_merge", ("0003_one", "0003_two"))
 
 
@@ -269,7 +270,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
     assert REVISION_MODULES == 10
     for name in (WHEEL_NAME, SDIST_NAME):
         assert (
-            f"{name}: alembic head efcbcf724889, "
+            f"{name}: alembic head {CURRENT_HEAD}, "
             f"{REVISION_MODULES} packaged core revision modules, "
             "15 frozen migration files intact, "
             "frontend bundle intact"
@@ -339,7 +340,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     assert probe.returncode == 0, probe.stdout + probe.stderr
     resolved = json.loads(probe.stdout)
-    assert resolved["heads"] == ["efcbcf724889"], "cwd bought no isolation at all"
+    assert resolved["heads"] == [CURRENT_HEAD], "cwd bought no isolation at all"
     leaked = {
         name: origin
         for name, origin in resolved["foreign"].items()
@@ -356,7 +357,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
     [
         (
             _write_branch_revision,
-            "packaged Alembic heads are ['0003_branch', 'efcbcf724889'], expected "
+            f"packaged Alembic heads are ['0003_branch', '{CURRENT_HEAD}'], expected "
             "exactly one",
         ),
         (
