@@ -49,6 +49,30 @@ describe("ChatsDetailScreen", () => {
     return within(call).getByRole("tabpanel");
   }
 
+  it.each(["en", "ko"])("explains the conflict token by purpose in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    detail.timeline[0].input_summary = { expected_editing_revision: 3 };
+    renderWithDetail({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
+    });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: language === "ko" ? "입력" : "Inputs" }));
+    const label = language === "ko" ? "덮어쓰기 방지 번호" : "Overwrite protection number";
+    const help = language === "ko"
+      ? "이 요청이 기준으로 삼은 초안 상태를 확인하는 내부 번호입니다. 초안 상태가 달라졌으면 변경을 적용하지 않습니다."
+      : "An internal number identifying the draft state this request was based on. If that state has changed, the change is rejected.";
+    expect(within(card).getByText(label)).not.toBeVisible();
+    expect(within(card).getByText(help)).not.toBeVisible();
+    await user.click(within(card).getByText(language === "ko" ? "원본 요청 정보" : "Raw request details", { exact: true }));
+    expect(within(card).getByText(label)).toBeVisible();
+    expect(within(card).getByText(help)).toBeVisible();
+    expect(card.textContent).not.toContain("expected_editing_revision");
+    expect(card.textContent).not.toContain("Expected editing revision");
+  });
+
   it("shows the requested document and version while keeping raw IDs in a disclosure", async () => {
     const user = userEvent.setup();
     const detail = chatDetail();
@@ -868,10 +892,10 @@ describe("ChatsDetailScreen", () => {
     expect(
       within(panel).getByRole("heading", { name: "Technical inputs" }),
     ).toBeInTheDocument();
-    expect(within(panel).getByText("expected_editing_revision")).not.toBeVisible();
+    expect(within(panel).getByText("Overwrite protection number")).not.toBeVisible();
     expect(within(panel).getByText("4")).not.toBeVisible();
     await user.click(within(panel).getByText("Raw request details", { exact: true }));
-    expect(within(panel).getByText("expected_editing_revision")).toBeVisible();
+    expect(within(panel).getByText("Overwrite protection number")).toBeVisible();
     expect(within(panel).getByText("4")).toBeVisible();
     // The old per-call meta line is gone from the card; those facts live in
     // Metadata.

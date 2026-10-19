@@ -485,6 +485,7 @@
     "recordNoticeTitle": "Tool activity, not a chat transcript.",
     "recordNoticeBody": "dtxWiki records MCP tool calls and the inputs/results retained by its trace policy, plus linked artifacts. It does not receive a separate copy of the message typed in the external client.",
     "identifier": {
+      "conflictCheckHelp": "An internal number identifying the draft state this request was based on. If that state has changed, the change is rejected.",
       "rawReferences": "Raw request details",
       "copied": "ID copied",
       "show": "Show full ID",
@@ -495,6 +496,7 @@
       "copyFor": "Copy full ID: {{field}}"
     },
     "inputFields": {
+      "expected_editing_revision": "Overwrite protection number",
       "title": "Title",
       "body_md": "Body",
       "workspace_id": "Workspace",

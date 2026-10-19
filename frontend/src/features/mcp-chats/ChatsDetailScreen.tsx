@@ -1504,7 +1504,7 @@ function TimelineTabPanel({
     const shortEntries = ordinary.filter(([, value]) => !isLongToolValue(value));
     shortEntries.sort(([a], [b]) => Number(b === "workspace_id") - Number(a === "workspace_id"));
     const longEntries = ordinary.filter(([, value]) => isLongToolValue(value));
-    const inputLabel = (key: string) => key === "expected_editing_revision" ? key : chatInputLabel(key, t);
+    const inputLabel = (key: string) => chatInputLabel(key, t);
     return (
       <div className="mcp-tool-panel-card">
         {shapeOnlyNote}
@@ -1545,6 +1545,11 @@ function TimelineTabPanel({
                           {isIdentifierField(key) && typeof value === "string" ? (
                             <ChatIdentifier value={value} label={inputLabel(key)} />
                           ) : formatSummaryValue(value)}
+                          {key === "expected_editing_revision" ? (
+                            <p className="mcp-chat-conflict-check-help">
+                              {t("detail.identifier.conflictCheckHelp")}
+                            </p>
+                          ) : null}
                         </dd>
                       </div>
                     ))}

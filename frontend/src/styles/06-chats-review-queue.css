@@ -2020,6 +2020,15 @@
   width: fit-content;
   padding: 4px 0;
 }
+.mcp-chat-input-reference-details dt {
+  text-transform: none;
+}
+.mcp-chat-conflict-check-help {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .mcp-chat-input-reference-details > .mcp-chat-input-identifiers {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 0;
