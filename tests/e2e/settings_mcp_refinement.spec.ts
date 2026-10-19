@@ -82,7 +82,7 @@ for (const language of ["en", "ko"] as const) {
         const response = await page.request.post("/api/v1/workspaces", {
           data: {
             title: `Workspace ${String(index).padStart(2, "0")} 긴 이름으로 줄바꿈과 선택 요약을 확인하는 워크스페이스`,
-            slug: `scope-${language}-${width}-${index}`,
+            slug: `scope-${testInfo.project.name}-${language}-${width}-${index}`,
           },
         });
         expect(response.status()).toBe(201);
@@ -144,11 +144,14 @@ for (const language of ["en", "ko"] as const) {
       await expect(secondPage).toHaveAttribute("aria-selected", "true");
       await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-page-two`);
       const search = modal.getByRole("searchbox");
-      await search.fill(`scope-${language}-${width}-41`);
+      await search.fill(
+        `scope-${testInfo.project.name}-${language}-${width}-41`,
+      );
       await expect(modal.getByRole("option")).toHaveCount(1);
       expectedIds.add(
         roster.workspaces.find(
-          (w: { slug: string }) => w.slug === `scope-${language}-${width}-41`,
+          (w: { slug: string }) =>
+            w.slug === `scope-${testInfo.project.name}-${language}-${width}-41`,
         ).id,
       );
       await modal.getByRole("option").click();
@@ -171,9 +174,10 @@ for (const language of ["en", "ko"] as const) {
         .getByRole("button", { name: en ? "Cancel" : "취소", exact: true })
         .boundingBox())!;
       const applyBounds = (await apply.boundingBox())!;
+      // An 8px gap measures 7.99993896... in Firefox's sub-pixel layout.
       expect(
         applyBounds.x - (cancelBounds.x + cancelBounds.width),
-      ).toBeGreaterThanOrEqual(8);
+      ).toBeGreaterThanOrEqual(8 - 0.01);
       await apply.focus();
       await page.keyboard.press("Tab");
       expect(
@@ -193,7 +197,8 @@ for (const language of ["en", "ko"] as const) {
       await expect(modal).toBeHidden();
       await expect(opener).toBeFocused();
       await expect(summary).toContainText(en ? "3 selected" : "3개 선택");
-      expect((await summary.boundingBox())!.height).toBe(beforeHeight);
+      // Sub-pixel layout makes the same box measure 68 and 68.00003 in Firefox.
+      expect((await summary.boundingBox())!.height).toBeCloseTo(beforeHeight, 1);
       expect(issued).toBe(0);
       // A cancelled second draft leaves all three committed selections intact.
       await opener.click();
@@ -432,7 +437,7 @@ for (const language of ["en", "ko"] as const) {
       const current = (
         await (await page.request.get("/api/v1/workspaces")).json()
       ).data;
-      const slug = `purge-geometry-${language}-${width}`;
+      const slug = `purge-geometry-${testInfo.project.name}-${language}-${width}`;
       const workspaceResponse = await page.request.post("/api/v1/workspaces", {
         data: { title: "Purge checkbox geometry", slug },
       });
