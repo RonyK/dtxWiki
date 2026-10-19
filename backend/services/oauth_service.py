@@ -58,6 +58,7 @@ from backend.services.credential_replica_service import (
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.mcp_credential_health import (
     CredentialHealth,
+    binding_key_for_client,
     load_credential_health,
 )
 from backend.services.oauth_cimd import (
@@ -164,8 +165,7 @@ def _csrf_state_bucket_prune_locked(now: float) -> None:
 
     for bucket in (_OAUTH_CSRF_ISSUED_STATES, _OAUTH_CSRF_CONSUMED_STATES):
         stale = [
-            key
-            for key, stamp in bucket.items()
+            key for key, stamp in bucket.items()
             if now - stamp > _OAUTH_CSRF_STATE_BUCKET_TTL
         ]
         for key in stale:
@@ -505,7 +505,9 @@ def _apply_verified_oauth_association(
     client.catalog_app_id = values["catalog_app_id"]
     client.catalog_app_label_snapshot = values["catalog_app_label_snapshot"]
     client.catalog_revision = values["catalog_revision"]
-    client.catalog_association_provenance = values["catalog_association_provenance"]
+    client.catalog_association_provenance = values[
+        "catalog_association_provenance"
+    ]
 
 
 def oauth_client_id_for_mcp_client(client: MCPClient) -> str | None:
@@ -739,12 +741,7 @@ class WorkspaceOAuthHealth:
         metadata = (
             client.token_metadata if isinstance(client.token_metadata, dict) else {}
         )
-        binding = client.runtime_binding_key
-        if binding is None and metadata.get("token_id"):
-            kind = metadata.get("token_kind")
-            if kind in {"api_token", "pat", "oauth_jwt"}:
-                prefix = "oauth_grant" if kind == "oauth_jwt" else "api_token"
-                binding = f"{prefix}:{metadata['token_id']}"
+        binding = binding_key_for_client(client)
         credential = self.credential_health.get((client.issued_to_user_id, binding))
         # A server-owned binding already identifies a globally unique credential.
         # Legacy rows may lack the issuer projection; metadata-only fallbacks
@@ -798,10 +795,18 @@ def load_workspace_oauth_health(
     *,
     workspace_id: UUID,
     now: datetime,
+    bindings: Collection[str],
     oauth_client_ids: Collection[str] | None = None,
 ) -> WorkspaceOAuthHealth:
-    """Capture exact credentials once; resolve app names on the same plane."""
-    credentials = load_credential_health(session, workspace_id=workspace_id, now=now)
+    """Capture the named credentials once; resolve app names on the same plane.
+
+    ``bindings`` are the ``runtime_binding_key`` values the caller's workspace
+    rows name. Required on purpose: omitting it must not fall back to scanning
+    every member's credentials.
+    """
+    credentials = load_credential_health(
+        session, workspace_id=workspace_id, now=now, bindings=bindings
+    )
     candidate_ids = {
         c.oauth_client_id for c in credentials.values() if c.oauth_client_id is not None
     }
@@ -1192,7 +1197,9 @@ class OAuthService:
                 default_scope if raw_scope in (None, "") else str(raw_scope)
             )
         except InvalidOAuthRequestError as exc:
-            raise InvalidClientRegistrationError(f"scope is invalid: {exc}") from exc
+            raise InvalidClientRegistrationError(
+                f"scope is invalid: {exc}"
+            ) from exc
         # Sprint_5 Phase_3 Task 3.2: client_name length ∈ [1, 200]. Previously
         # silently truncated to 128 chars, which masked over-long submissions.
         raw_client_name = payload.get("client_name")
@@ -1214,7 +1221,9 @@ class OAuthService:
             application_type=application_type,
             scope=scope,
         )
-        catalog_repository = self.catalog_repository or get_mcp_app_catalog_repository()
+        catalog_repository = (
+            self.catalog_repository or get_mcp_app_catalog_repository()
+        )
         catalog_association = catalog_repository.find_verified_oauth_association(
             registration_identity
         )
@@ -1251,7 +1260,8 @@ class OAuthService:
                 )
             ).all()
             normalized_redirect_set = {
-                _registration_identity_redirect_uri(uri) for uri in normalized_redirects
+                _registration_identity_redirect_uri(uri)
+                for uri in normalized_redirects
             }
             for existing in candidates:
                 if (
@@ -1380,13 +1390,17 @@ class OAuthService:
         try:
             metadata = fetch_client_metadata_document(client_id)
             if metadata.client_id != client_id:
-                raise InvalidOAuthRequestError("client metadata is unavailable")
+                raise InvalidOAuthRequestError(
+                    "client metadata is unavailable"
+                )
             registration = _validated_cimd_registration(metadata)
         except Exception:
             # This is an unauthenticated network probe. No DNS result,
             # response body, transport exception, or validation detail may
             # cross the OAuth boundary or reach normal request logs.
-            raise InvalidOAuthRequestError("client metadata is unavailable") from None
+            raise InvalidOAuthRequestError(
+                "client metadata is unavailable"
+            ) from None
 
         metadata_fingerprint = _dcr_registration_identity(
             client_name=registration.client_name,
@@ -1397,7 +1411,9 @@ class OAuthService:
             application_type=registration.application_type,
             scope=registration.scope,
         )
-        catalog_repository = self.catalog_repository or get_mcp_app_catalog_repository()
+        catalog_repository = (
+            self.catalog_repository or get_mcp_app_catalog_repository()
+        )
         catalog_association = catalog_repository.find_verified_oauth_association(
             metadata_fingerprint
         )
@@ -1932,7 +1948,9 @@ class OAuthService:
                 ),
                 "scope": representative["scope"] if representative else "",
                 "workspaces": workspaces_payload,
-                "granted_at": (representative["granted_at"] if representative else now),
+                "granted_at": (
+                    representative["granted_at"] if representative else now
+                ),
                 "connection_state": connection_state,
                 "last_used_at": client_last_used_at,
                 "next_expiry": next_expiry,
@@ -1940,7 +1958,9 @@ class OAuthService:
                 "refresh_ttl_seconds": (
                     representative["refresh_ttl_seconds"] if representative else None
                 ),
-                "effective_refresh_ttl_seconds": _effective_refresh_ttl(representative),
+                "effective_refresh_ttl_seconds": _effective_refresh_ttl(
+                    representative
+                ),
                 "sliding_enabled": (
                     representative["sliding_enabled"] if representative else False
                 ),
@@ -1971,7 +1991,9 @@ class OAuthService:
         """
 
         if len(set(workspace_ids)) != len(workspace_ids):
-            raise InvalidOAuthRequestError("duplicate workspace_id in workspace_ids")
+            raise InvalidOAuthRequestError(
+                "duplicate workspace_id in workspace_ids"
+            )
         common_scope = live_group[0].scope
         common_refresh_ttl = live_group[0].refresh_ttl_seconds
         common_sliding = live_group[0].sliding_enabled
@@ -2540,12 +2562,16 @@ class OAuthService:
                 member_ids = {workspace.id for workspace, _role in memberships}
                 for requested_id in workspace_ids:
                     if requested_id not in member_ids:
-                        raise InvalidOAuthRequestError("workspace access is required")
+                        raise InvalidOAuthRequestError(
+                            "workspace access is required"
+                        )
                 selected_ids = set(workspace_ids)
                 live_by_workspace = {row.workspace_id: row for row in live_group}
                 merged_scope = normalized_scope
                 if live_group:
-                    merged_scope = merge_scopes(live_group[0].scope, normalized_scope)
+                    merged_scope = merge_scopes(
+                        live_group[0].scope, normalized_scope
+                    )
                 added_ids: list[UUID] = []
                 removed_ids: list[UUID] = []
                 now = utc_now()
@@ -2572,7 +2598,9 @@ class OAuthService:
                             ),
                             catalog_revision=client.catalog_revision,
                             granted_at=now,
-                            desired_scopes=normalize_scope(merged_scope).split(),
+                            desired_scopes=normalize_scope(
+                                merged_scope
+                            ).split(),
                             revision=1,
                             sync_state="pending",
                         )
@@ -2806,7 +2834,8 @@ class OAuthService:
                 current = session.scalar(
                     select(OAuthRefreshToken)
                     .where(
-                        OAuthRefreshToken.token_lookup_hash == token_hash(refresh_token)
+                        OAuthRefreshToken.token_lookup_hash
+                        == token_hash(refresh_token)
                     )
                     .with_for_update()
                 )
@@ -2824,7 +2853,11 @@ class OAuthService:
                 family_key = current.grant_id or current.id
                 token_age_seconds = max(
                     0,
-                    int((now - to_aware_utc(current.created_at)).total_seconds()),
+                    int(
+                        (
+                            now - to_aware_utc(current.created_at)
+                        ).total_seconds()
+                    ),
                 )
 
                 def refuse(
@@ -3138,7 +3171,10 @@ class OAuthService:
         # client-id auth is enforced at the endpoint layer (the endpoint
         # validates client_id form == token.client_id before calling
         # this method); we treat None as "endpoint already authorised".
-        if revoker_user_id is not None and row.user_id != revoker_user_id:
+        if (
+            revoker_user_id is not None
+            and row.user_id != revoker_user_id
+        ):
             # Wrong-user oracle: behave as if the token were unknown so
             # the endpoint returns 200 and does NOT disclose existence.
             return False
@@ -3208,7 +3244,10 @@ class OAuthService:
         jti_row = session.get(OAuthAccessTokenJti, jti)
         if jti_row is None:
             return False
-        if revoker_user_id is not None and jti_row.user_id != revoker_user_id:
+        if (
+            revoker_user_id is not None
+            and jti_row.user_id != revoker_user_id
+        ):
             return False
         if revoker_client_id is not None and jti_row.client_id != revoker_client_id:
             return False
@@ -3566,7 +3605,9 @@ def _validated_cimd_registration(
 def _cimd_has_established_grant(session: Session, client_id: str) -> bool:
     now = utc_now()
     consent = session.scalar(
-        select(OAuthConsent.user_id).where(OAuthConsent.client_id == client_id).limit(1)
+        select(OAuthConsent.user_id)
+        .where(OAuthConsent.client_id == client_id)
+        .limit(1)
     )
     if consent is not None:
         return True
@@ -3878,15 +3919,17 @@ def record_refresh_token_refusal(
     family_refresh_count = 0
     family_access_count = 0
     if reason == "rotated_reuse":
-        family_refresh_count, family_access_count = revoke_refresh_token_grant_family(
-            session,
-            user_id=user_id,
-            client_id=client_id,
-            detected_via=detected_via or "rotated_to_id",
-            reused_refresh_id=refresh_token_id,
-            family_key=family_key,
-            reason=reason,
-            token_age_seconds=token_age_seconds,
+        family_refresh_count, family_access_count = (
+            revoke_refresh_token_grant_family(
+                session,
+                user_id=user_id,
+                client_id=client_id,
+                detected_via=detected_via or "rotated_to_id",
+                reused_refresh_id=refresh_token_id,
+                family_key=family_key,
+                reason=reason,
+                token_age_seconds=token_age_seconds,
+            )
         )
     elif reason in _REFRESH_REFUSALS_REVOKING_FAMILY:
         family_refresh_count, family_access_count = (
@@ -4011,20 +4054,25 @@ def revoke_live_token_grant_families(
     the refresh-token family.
     """
 
-    statement = select(OAuthRefreshToken).where(OAuthRefreshToken.user_id == user_id)
+    statement = select(OAuthRefreshToken).where(
+        OAuthRefreshToken.user_id == user_id
+    )
     if client_id is not None:
         statement = statement.where(OAuthRefreshToken.client_id == client_id)
     family_keys = {
-        token.grant_id or token.id for token in session.scalars(statement).all()
+        token.grant_id or token.id
+        for token in session.scalars(statement).all()
     }
     now = revoked_at or utc_now()
     refresh_count = 0
     access_count = 0
     for family_key in family_keys:
-        revoked_refresh, revoked_access = _revoke_refresh_token_grant_family_rows(
-            session,
-            family_key=family_key,
-            revoked_at=now,
+        revoked_refresh, revoked_access = (
+            _revoke_refresh_token_grant_family_rows(
+                session,
+                family_key=family_key,
+                revoked_at=now,
+            )
         )
         refresh_count += revoked_refresh
         access_count += revoked_access
@@ -4170,7 +4218,9 @@ def validate_redirect_uri(uri: str) -> str:
             "redirect_uri host trailing dot not allowed"
         )
     if port == 0:
-        raise InvalidClientRegistrationError("redirect_uri loopback port 0 not allowed")
+        raise InvalidClientRegistrationError(
+            "redirect_uri loopback port 0 not allowed"
+        )
     if parsed.scheme == "http" and port is None:
         raise InvalidClientRegistrationError(
             "redirect_uri loopback port is required (RFC 8252 §7.3)"

@@ -1,14 +1,19 @@
 """Exact credential health must agree with SQL facets and cursor pages."""
 
 from datetime import timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
+from backend.models.api_token import ApiTokenWorkspace
 from backend.models.base import utc_now
 from backend.models.oauth import OAuthConsent, OAuthRefreshToken
-from backend.models.workspace import MCPClient
+from backend.models.user import User
+from backend.models.workspace import MCPClient, WorkspaceMembership
+from backend.services import settings_service
+from backend.services.mcp_credential_health import load_credential_health
 from backend.services.settings_service import SettingsService
 from backend.tests.unit import test_mcp_access_db_consistency as fixtures
 from backend.tests.unit.test_mcp_access_db_consistency import (
@@ -212,8 +217,6 @@ def test_individual_credentials_and_filters_share_one_verdict(db, kind):
 
 
 def test_cursor_retains_evaluation_time_but_a_new_listing_sees_expiry(db, monkeypatch):
-    from backend.services import settings_service
-
     now = utc_now()
     with db.factory.begin() as session:
         for index in range(3):
@@ -238,6 +241,14 @@ def test_cursor_retains_evaluation_time_but_a_new_listing_sees_expiry(db, monkey
     assert len(second.data) == 1
     assert all(row.connection_state == "active" for row in second.data)
     assert listing(db, "active").filtered_count == 0
+    # A cursor older than the freeze window re-evaluates at the current time.
+    stale_at = now + settings_service.MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE
+    monkeypatch.setattr(
+        settings_service, "utc_now", lambda: stale_at + timedelta(seconds=1)
+    )
+    stale = listing(db, "active", limit=2, cursor=first.next_cursor)
+    assert stale.filtered_count == 0
+    assert stale.data == []
 
 
 def test_exact_binding_without_metadata_remains_searchable_by_app_name(db):
@@ -275,3 +286,152 @@ def test_exact_binding_without_metadata_remains_searchable_by_app_name(db):
     page = listing(db, "active", query="discoverable")
     assert page.filtered_count == 1
     assert page.data[0].client_name == "Discoverable Application"
+
+
+def test_lost_workspace_access_is_revoked_for_each_independent_cause(db):
+    """Each credential has exactly one defect; the two controls stay active."""
+
+    now = utc_now()
+    with db.factory.begin() as session:
+        outsider = User(email="out@example.com", password_hash="x", display_name="o")
+        suspended = User(email="sus@example.com", password_hash="x", display_name="s")
+        suspended.status = "disabled"
+        session.add_all([outsider, suspended])
+        session.flush()
+        session.add(
+            WorkspaceMembership(
+                user_id=suspended.id, workspace_id=db.workspace_id, role="editor"
+            )
+        )
+        for client_id in ("app-ok", "app-consent-removed"):
+            session.add(_oauth_client(client_id, client_name=client_id))
+        session.flush()
+
+        def as_user(user_id):
+            return SimpleNamespace(user_id=user_id, workspace_id=db.workspace_id)
+
+        def pat(name, user_id=None, *, grant=True, grant_removed=False):
+            owner = as_user(user_id or db.user_id)
+            token = _add_api_token(session, owner, name=name, lookup_hash=name)
+            link = session.scalar(
+                select(ApiTokenWorkspace).where(ApiTokenWorkspace.token_id == token.id)
+            )
+            if not grant:
+                session.delete(link)
+            elif grant_removed:
+                link.removed_at = now
+            return owner.user_id, f"api_token:{token.id}"
+
+        def oauth(name, user_id=None, client_id="app-ok", consent_removed=False):
+            owner = user_id or db.user_id
+            grant_id = uuid4()
+            session.add(
+                OAuthRefreshToken(
+                    user_id=owner,
+                    client_id=client_id,
+                    grant_id=grant_id,
+                    token_lookup_hash=name,
+                    scope="mcp:read",
+                    expires_at=now + timedelta(days=5),
+                )
+            )
+            consent = session.get(
+                OAuthConsent, (owner, client_id, db.workspace_id)
+            ) or OAuthConsent(
+                user_id=owner,
+                client_id=client_id,
+                workspace_id=db.workspace_id,
+                scope="mcp:read",
+            )
+            consent.removed_at = now if consent_removed else None
+            session.add(consent)
+            return owner, f"oauth_grant:{grant_id}"
+
+        expected = {
+            "pat-ok": ("active", pat("pat-ok")),
+            "pat-no-grant": ("revoked", pat("pat-no-grant", grant=False)),
+            "pat-grant-removed": (
+                "revoked",
+                pat("pat-grant-removed", grant_removed=True),
+            ),
+            "pat-lost-membership": ("revoked", pat("pat-out", outsider.id)),
+            "pat-inactive-user": ("revoked", pat("pat-sus", suspended.id)),
+            "oauth-ok": ("active", oauth("oauth-ok")),
+            "oauth-consent-removed": (
+                "revoked",
+                oauth("oc", client_id="app-consent-removed", consent_removed=True),
+            ),
+            "oauth-lost-membership": ("revoked", oauth("oauth-out", outsider.id)),
+            "oauth-inactive-user": ("revoked", oauth("oauth-sus", suspended.id)),
+        }
+        for name, (_state, (user_id, binding)) in expected.items():
+            session.add(
+                MCPClient(
+                    workspace_id=db.workspace_id,
+                    name=name,
+                    issued_to_user_id=user_id,
+                    runtime_binding_key=binding,
+                )
+            )
+    states = {name: state for name, (state, _key) in expected.items()}
+    assert {r.name: r.connection_state for r in listing(db).data} == {
+        **states,
+        "Seed client": "unknown",
+    }
+    assert {r.name for r in listing(db, "active").data} == {"pat-ok", "oauth-ok"}
+
+
+def test_loader_reads_only_the_named_credentials(db):
+    with db.factory.begin() as session:
+        tokens = [
+            _add_api_token(session, db, name=f"t{i}", lookup_hash=f"t{i}")
+            for i in range(3)
+        ]
+    named = f"api_token:{tokens[0].id}"
+    with db.factory() as session:
+
+        def load(*bindings):
+            return load_credential_health(
+                session, workspace_id=db.workspace_id, now=utc_now(), bindings=bindings
+            )
+
+        assert set(load(named, "api_token:not-a-uuid", "other:x", "oauth_grant:")) == {
+            (db.user_id, named)
+        }
+        assert load() == {}
+
+
+def test_policies_judge_only_the_page_bindings(db, monkeypatch):
+    now = utc_now()
+    with db.factory.begin() as session:
+        for index in range(3):
+            name = f"p{index}"
+            token = _add_api_token(session, db, name=name, lookup_hash=name)
+            session.add(
+                MCPClient(
+                    workspace_id=db.workspace_id,
+                    name=f"p{index}",
+                    issued_to_user_id=db.user_id,
+                    runtime_binding_key=f"api_token:{token.id}",
+                    last_used_at=now - timedelta(minutes=index),
+                )
+            )
+    seen = {}
+    real = settings_service.load_workspace_oauth_health
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(settings_service, "load_workspace_oauth_health", spy)
+    with db.factory() as control, db.factory() as workspace:
+        policies = SettingsService().get_policies(
+            control_session=control,
+            workspace_session=workspace,
+            workspace_id=db.workspace_id,
+            mcp_client_limit=2,
+        )
+    page = {row.name: row for row in policies.mcp_clients}
+    assert set(page) == {"p0", "p1"}
+    assert len(seen["bindings"]) == 2
+    assert all(row.connection_state == "active" for row in page.values())

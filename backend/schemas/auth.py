@@ -171,7 +171,9 @@ class ApiTokenCreateRequest(BaseModel):
         ceiling = set(self.scopes)
         for grant in self.workspace_grants:
             if grant.scopes is not None and not set(grant.scopes) <= ceiling:
-                raise ValueError("workspace grant scopes must be a subset of scopes")
+                raise ValueError(
+                    "workspace grant scopes must be a subset of scopes"
+                )
         return self
 
     def resolved_expires_at(self, *, now: datetime) -> datetime | None:
@@ -204,7 +206,9 @@ class ApiTokenUpdateRequest(BaseModel):
     @model_validator(mode="after")
     def _require_a_change(self):
         if not self.model_fields_set:
-            raise ValueError("at least one of name or workspace_grants is required")
+            raise ValueError(
+                "at least one of name or workspace_grants is required"
+            )
         if self.workspace_grants is not None:
             _require_unique_workspace_ids(self.workspace_grants)
         return self
@@ -277,7 +281,9 @@ class PasswordResetStatusData(BaseModel):
 
 class PasswordResetRequestData(BaseModel):
     requested: bool = True
-    message: str = "If the email is registered, password reset instructions were sent."
+    message: str = (
+        "If the email is registered, password reset instructions were sent."
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -421,7 +427,10 @@ class OAuthConsentSettingsUpdateRequest(BaseModel):
     def _require_a_setting(self):
         if not self.model_fields_set:
             raise ValueError("at least one consent setting is required")
-        if "sliding_enabled" in self.model_fields_set and self.sliding_enabled is None:
+        if (
+            "sliding_enabled" in self.model_fields_set
+            and self.sliding_enabled is None
+        ):
             raise ValueError("sliding_enabled must be true or false")
         if self.workspace_ids is not None and len(set(self.workspace_ids)) != len(
             self.workspace_ids

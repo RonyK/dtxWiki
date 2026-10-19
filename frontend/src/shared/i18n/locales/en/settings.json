@@ -1804,7 +1804,9 @@
     "next": "Next",
     "search": "Workspace name or slug",
     "clearSearch": "Clear workspace search",
-    "noMatches": "No matching workspace",
+    "noMatches": "No matching workspace"
+  },
+  "mcpCard": {
     "permissions": "Permissions",
     "workspaces": "Allowed workspaces",
     "details": "Key details",

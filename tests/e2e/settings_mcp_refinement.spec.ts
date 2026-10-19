@@ -33,7 +33,11 @@ async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
             height: box.height,
             computedWidth: style.width,
             computedHeight: style.height,
-            targetHeight: target?.height,
+            // An input with no label or option row is its own target, so it
+            // fails the 24px check below. Only non-input state widgets (the
+            // read-only Markdown task marks) have no target to measure.
+            targetWidth: target?.width ?? (input ? box.width : undefined),
+            targetHeight: target?.height ?? (input ? box.height : undefined),
           };
         }),
     );
@@ -42,8 +46,10 @@ async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
     expect(item.height, `${surface}: ${item.label}`).toBe(16);
     expect(item.computedWidth).toBe("16px");
     expect(item.computedHeight).toBe("16px");
-    if (item.targetHeight !== undefined)
-      expect(item.targetHeight).toBeGreaterThanOrEqual(24);
+    if (item.targetHeight !== undefined) {
+      expect(item.targetHeight, `${surface}: ${item.label}`).toBeGreaterThanOrEqual(24);
+      expect(item.targetWidth, `${surface}: ${item.label}`).toBeGreaterThanOrEqual(24);
+    }
   }
   const inventoryPath = testInfo.outputPath(
     `${surface}-checkbox-inventory.json`,

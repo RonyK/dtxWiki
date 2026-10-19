@@ -1804,7 +1804,9 @@
     "next": "다음",
     "search": "Workspace 이름 또는 slug",
     "clearSearch": "Workspace 검색 지우기",
-    "noMatches": "검색 결과가 없습니다",
+    "noMatches": "검색 결과가 없습니다"
+  },
+  "mcpCard": {
     "permissions": "권한",
     "workspaces": "허용 Workspace",
     "details": "키 세부 정보",

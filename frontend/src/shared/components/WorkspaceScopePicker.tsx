@@ -71,6 +71,9 @@ type WorkspaceScopePickerProps = {
   workspaces: WorkspaceScopeOption[];
 };
 
+/** Server search waits for typing to pause; each request costs a count + page. */
+const SERVER_SEARCH_DEBOUNCE_MS = 250;
+
 function normalize(value: string) {
   return value.trim().toLowerCase();
 }
@@ -100,6 +103,8 @@ export function WorkspaceScopePicker({
 }: WorkspaceScopePickerProps) {
   const { t } = useTranslation("settings");
   const [query, setQuery] = useState("");
+  // What the server was last asked for; trails `query` while typing.
+  const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(0);
   const [availableCount, setAvailableCount] = useState(
     () => workspaces.filter((w) => !w.membershipMissing).length,
@@ -123,16 +128,25 @@ export function WorkspaceScopePicker({
     loadedCallback.current = onOptionsLoaded;
   }, [onOptionsLoaded]);
   const cursor = cursors[page] ?? null;
-  const requestKey = JSON.stringify([query, cursor]);
+  const requestKey = JSON.stringify([searchTerm, cursor]);
+  useEffect(() => {
+    if (!serverPaging || selectedOnly || query === searchTerm) return;
+    const timer = window.setTimeout(() => {
+      setSearchTerm(query);
+      setPage(0);
+      setCursors([null]);
+    }, SERVER_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [serverPaging, selectedOnly, query, searchTerm]);
   useEffect(() => {
     if (!serverPaging || selectedOnly) return;
     let cancelled = false;
     setLoading(true);
     setLoadError(false);
-    listCredentialWorkspaces(query, cursor)
+    listCredentialWorkspaces(searchTerm, cursor)
       .then((result) => {
         if (cancelled) return;
-        if (!query) setAvailableCount(result.total_count);
+        if (!searchTerm) setAvailableCount(result.total_count);
         const rows = result.data.map((w) => ({
           ...w,
           isDefault: w.is_default,
@@ -142,7 +156,7 @@ export function WorkspaceScopePicker({
           rows,
           total: result.total_count,
           next: result.next_cursor,
-          key: JSON.stringify([query, cursor]),
+          key: JSON.stringify([searchTerm, cursor]),
         });
         setKnown(
           (current) =>
@@ -158,18 +172,22 @@ export function WorkspaceScopePicker({
     return () => {
       cancelled = true;
     };
-  }, [serverPaging, selectedOnly, query, cursor, retry]);
+  }, [serverPaging, selectedOnly, searchTerm, cursor, retry]);
   function changeQuery(value: string) {
     setQuery(value);
-    setPage(0);
-    setCursors([null]);
     setActiveIndex(0);
+    // Server paging resets when the debounced term lands; local lists now.
+    if (!serverPaging || selectedOnly) {
+      setPage(0);
+      setCursors([null]);
+    }
   }
 
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const allCount = serverPaging ? availableCount : workspaces.length;
   const generatedId = useId();
   const normalizedQuery = normalize(query);
 
@@ -338,7 +356,7 @@ export function WorkspaceScopePicker({
         <CountChip
           compact
           label={labels.selectedCount}
-          outOf={Math.max(total, selectedIds.length)}
+          outOf={Math.max(allCount, selectedIds.length)}
           value={selectedIds.length}
         />
       </div>
@@ -374,8 +392,7 @@ export function WorkspaceScopePicker({
             setActiveIndex(0);
           }}
         >
-          {t("workspacePicker.showAll")} (
-          {serverPaging ? availableCount : workspaces.length})
+          {t("workspacePicker.showAll")} ({allCount})
         </button>
         <button
           type="button"
@@ -396,7 +413,11 @@ export function WorkspaceScopePicker({
         {useRemote && loadError ? (
           <div role="alert">
             {t("workspacePicker.loadError")}{" "}
-            <button type="button" onClick={() => setRetry((n) => n + 1)}>
+            <button
+              type="button"
+              className="icon-button text-button"
+              onClick={() => setRetry((n) => n + 1)}
+            >
               {t("workspacePicker.retry")}
             </button>
           </div>

@@ -2748,6 +2748,13 @@ button.history-card {
   gap: 8px;
 }
 
+.lint-rules-card .lint-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 24px;
+}
+
 .lint-rules-card .lint-rule-group-count {
   font-size: 12px;
   font-weight: 500;

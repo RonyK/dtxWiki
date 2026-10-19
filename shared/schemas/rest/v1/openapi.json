@@ -19965,6 +19965,11 @@
             "description": "Too Many Requests"
           }
         },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
         "summary": "List Credential Workspace Candidates",
         "tags": [
           "auth"

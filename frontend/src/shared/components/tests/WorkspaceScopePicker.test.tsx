@@ -189,3 +189,30 @@ it("keeps the selected-items pager usable when an all-items request is still pen
   await act(async () => resolvePage(response([0])));
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("Workspace 08");
 });
+
+it("debounces server search and keeps the selection count against all workspaces", async () => {
+  const user = userEvent.setup();
+  vi.mocked(listCredentialWorkspaces).mockImplementation(async (query) => ({
+    ...response(query ? [16] : [0, 1, 2]),
+    total_count: query ? 1 : 17,
+  }));
+  render(
+    <WorkspaceScopePicker
+      serverPaging
+      selectedIds={["0", "1", "2"]}
+      onChange={vi.fn()}
+      labels={labels}
+      workspaces={options.slice(0, 3)}
+    />,
+  );
+  await screen.findByRole("option", { name: /Workspace 02/ });
+  expect(screen.getByText("3/17 selected")).toBeInTheDocument();
+  await user.type(screen.getByRole("searchbox"), "workspace-16");
+  await screen.findByRole("option", { name: /Workspace 16/ });
+  expect(
+    vi.mocked(listCredentialWorkspaces).mock.calls.map(([query]) => query),
+  ).toEqual(["", "workspace-16"]);
+  expect(screen.getByText("3/17 selected")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Selected items/ }));
+  expect(screen.getByText("3/17 selected")).toBeInTheDocument();
+});

@@ -18,7 +18,7 @@ from backend.models.mcp_chat import McpChatSession
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.oauth import OAuthClient, OAuthConsent, OAuthRefreshToken
 from backend.models.user import User
-from backend.models.workspace import MCPClient, Workspace
+from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.policy.auth import ActorContext
 from backend.services.mcp_trace_capture import touch_mcp_client_last_used
 from backend.services.oauth_service import (
@@ -413,7 +413,9 @@ def test_legacy_oauth_consent_cursor_is_rejected_and_restarts_from_page_one(
         params={"limit": 1, "cursor": response.json()["next_cursor"]},
     )
     assert continuation.status_code == 200, continuation.text
-    assert [item["client_id"] for item in continuation.json()["data"]] == [rows[1][0]]
+    assert [item["client_id"] for item in continuation.json()["data"]] == [
+        rows[1][0]
+    ]
 
 
 def test_connection_listing_query_count_is_constant_per_page(page_service):
@@ -623,7 +625,9 @@ def test_mcp_client_cursor_traverses_more_than_one_default_page_exactly_once(
     client = _client(page_service)
     now = utc_now()
     with page_service.session_factory.begin() as session:
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         assert workspace is not None
         rows = []
         for index in range(23):
@@ -900,7 +904,9 @@ def test_mcp_client_delete_rejects_bearer_pat_even_for_owner(page_service):
     owner = _client(page_service)
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         assert user is not None and workspace is not None
         target = MCPClient(
             workspace_id=workspace.id,
@@ -1243,13 +1249,14 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
 
     NOTE for anyone reading a green run: this test is SKIPPED unless
     ``DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL`` points at a live
-    database, and it was NOT executed on the machine that wrote it -- no
-    PostgreSQL server and no psycopg driver were installed there. The
+    database, which is how it stayed skipped locally while the exact-identity
+    health rewrite made its old fixtures read "unknown" (rows with no
+    ``runtime_binding_key``/``grant_id``). CI provisions that database, and the
+    fixtures now name their credentials exactly. It also executes the PAT and
+    OAuth credential reads (``load_credential_health``) on PostgreSQL. The
     always-on companion is
     ``test_mcp_access_db_consistency.test_active_connection_predicate_compiles
-    _on_postgresql``, which compiles the same expression against the
-    PostgreSQL dialect without a server; that catches an unrenderable shape
-    but proves nothing about execution.
+    _on_postgresql``, which only compiles the expression.
     """
 
     database_url = _postgres_url()
@@ -1261,6 +1268,7 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
     live_user_id = uuid4()
     dry_user_id = uuid4()
     oauth_client_id = "pg-shared-app"
+    live_grant_id, dry_grant_id = uuid4(), uuid4()
     try:
         with session_factory.begin() as session:
             session.add(
@@ -1294,9 +1302,9 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
                 )
             )
             session.flush()
-            for user_id, name in (
-                (live_user_id, "PG live holder"),
-                (dry_user_id, "PG tokenless holder"),
+            for user_id, name, grant_id in (
+                (live_user_id, "PG live holder", live_grant_id),
+                (dry_user_id, "PG tokenless holder", dry_grant_id),
             ):
                 session.add(
                     OAuthConsent(
@@ -1314,6 +1322,7 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
                         scopes=["mcp:read"],
                         status="active",
                         issued_to_user_id=user_id,
+                        runtime_binding_key=f"oauth_grant:{grant_id}",
                         token_metadata={"oauth_client_id": oauth_client_id},
                     )
                 )
@@ -1322,8 +1331,49 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
                     token_lookup_hash="sha256:pg-live-holder",
                     user_id=live_user_id,
                     client_id=oauth_client_id,
+                    grant_id=live_grant_id,
                     scope="mcp:read",
                     expires_at=utc_now() + timedelta(days=7),
+                )
+            )
+
+            session.add(
+                WorkspaceMembership(
+                    user_id=live_user_id, workspace_id=workspace_id, role="owner"
+                )
+            )
+            session.add(
+                WorkspaceMembership(
+                    user_id=dry_user_id, workspace_id=workspace_id, role="owner"
+                )
+            )
+            pat = ApiToken(
+                user_id=live_user_id,
+                name="PG key",
+                token_lookup_hash="sha256:pg-pat",
+                hashed_token="unused",
+                scopes=["mcp:read"],
+            )
+            session.add(pat)
+            session.flush()
+            session.add(
+                ApiTokenWorkspace(
+                    token_id=pat.id,
+                    workspace_id=workspace_id,
+                    desired_scopes=["mcp:read"],
+                    revision=1,
+                    sync_state="synced",
+                )
+            )
+            session.add(
+                MCPClient(
+                    workspace_id=workspace_id,
+                    name="PG PAT holder",
+                    client_type="generic",
+                    scopes=["mcp:read"],
+                    status="active",
+                    issued_to_user_id=live_user_id,
+                    runtime_binding_key=f"api_token:{pat.id}",
                 )
             )
 
@@ -1350,10 +1400,15 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
                 )
 
         everything = listing("all")
-        assert everything.status_counts.active == 1
+        assert everything.status_counts.active == 2
         assert everything.status_counts.disabled == 1
-        assert {row.name for row in listing("active").data} == {"PG live holder"}
-        assert {row.name for row in listing("disabled").data} == {"PG tokenless holder"}
+        assert {row.name for row in listing("active").data} == {
+            "PG live holder",
+            "PG PAT holder",
+        }
+        assert {row.name for row in listing("disabled").data} == {
+            "PG tokenless holder"
+        }
         # The client_name search arm, which is the other pushed-down key set.
         assert {row.name for row in listing("all", "postgres shared").data} == {
             "PG live holder",

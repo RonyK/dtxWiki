@@ -147,7 +147,9 @@ def get_password_recovery_service(
             if request.app.state.settings.canonical_https_ready
             else None
         ),
-        mail_delivery_service=EmailDeliveryService(settings=request.app.state.settings),
+        mail_delivery_service=EmailDeliveryService(
+            settings=request.app.state.settings
+        ),
     )
     request.app.state.password_recovery_service = service
     return service
@@ -197,7 +199,8 @@ def reject_token_in_query_string(request: Request) -> None:
             detail={
                 "error_code": "invalid_password_reset_request",
                 "message": (
-                    "send the one-time token in the JSON request body, not in the URL"
+                    "send the one-time token in the JSON request body, "
+                    "not in the URL"
                 ),
             },
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
@@ -507,7 +510,8 @@ def request_password_reset(
         "data": {
             "requested": True,
             "message": (
-                "If the email is registered, password reset instructions were sent."
+                "If the email is registered, password reset instructions "
+                "were sent."
             ),
         }
     }
@@ -562,7 +566,9 @@ def request_email_verification(
     except SessionServiceError as exc:
         return no_store_response(auth_error_response(exc))
     except PasswordRecoveryError as exc:
-        return no_store_response(password_recovery_error_response(exc))
+        return no_store_response(
+            password_recovery_error_response(exc)
+        )
     set_no_store_headers(response)
     return {
         "data": {
@@ -586,7 +592,9 @@ def confirm_email_verification(
     try:
         recovery_service.consume_email_verification(token=request_body.token)
     except PasswordRecoveryError as exc:
-        return no_store_response(password_recovery_error_response(exc))
+        return no_store_response(
+            password_recovery_error_response(exc)
+        )
     set_no_store_headers(response)
     return {"data": {"requested": False, "verified": True}}
 
@@ -612,7 +620,9 @@ def confirm_password_reset(
     except PasswordPolicyError as exc:
         return no_store_response(auth_error_response(exc))
     except PasswordRecoveryError as exc:
-        return no_store_response(password_recovery_error_response(exc))
+        return no_store_response(
+            password_recovery_error_response(exc)
+        )
     clear_session_cookie(response, request.app.state.settings, request)
     clear_recent_reauthentication_cookie(
         response,

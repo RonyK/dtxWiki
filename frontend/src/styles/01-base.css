@@ -494,7 +494,11 @@ input[type="checkbox"],
   flex: 0 0 var(--checkbox-size);
 }
 
-/* The visible square stays 16px; the associated label owns the hit area. */
+/* The visible square stays 16px; the associated label owns the hit area.
+   WCAG 2.2 SC 2.5.8 (Target Size Minimum, 24x24) is met by that label or
+   option row, so an interactive checkbox must never stand alone. The e2e
+   inventory (settings_mcp_refinement.spec.ts) fails any enabled input whose
+   target is smaller than 24px, with or without a label. */
 label:has(> input[type="checkbox"]) {
   min-block-size: 24px;
 }

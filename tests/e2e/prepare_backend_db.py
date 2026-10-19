@@ -43,7 +43,9 @@ E2E_VIEWPORT_KEYS = ("1280x720", "1440x900", "1920x1080", "390x844")
 # authenticating as the wrong fixture.
 _E2E_PROFILE = os.environ.get("DTXWIKI_E2E_PROFILE", "standard")
 E2E_PROJECT_KEYS = (
-    ("chromium", "firefox", "webkit") if _E2E_PROFILE == "exhaustive" else ("chromium",)
+    ("chromium", "firefox", "webkit")
+    if _E2E_PROFILE == "exhaustive"
+    else ("chromium",)
 )
 
 

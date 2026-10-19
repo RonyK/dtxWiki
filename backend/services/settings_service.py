@@ -6,7 +6,7 @@ import hmac
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import ceil
 from uuid import UUID
 
@@ -45,6 +45,7 @@ from backend.services.library_policy import (
     LibraryFamilyPolicyService,
     get_default_library_family_policy_service,
 )
+from backend.services.mcp_credential_health import binding_key_for_client
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
     attach_name_matched_oauth_client_ids,
@@ -82,6 +83,10 @@ logger = logging.getLogger(__name__)
 # here) so an oddly-shaped workspace shows up in logs before it shows up as a
 # failure.
 MCP_CLIENT_PUSHDOWN_KEY_WARNING_THRESHOLD = 2000
+# A cursor freezes its first page's evaluation time so a walk stays coherent,
+# but only briefly: an older cursor re-evaluates credential expiry at the
+# current time instead of showing long-expired credentials as usable.
+MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE = timedelta(minutes=10)
 LANGUAGE_CODES = {"en", "ko"}
 LITERAL_OPTIONS = {
     "visibility": {"private", "team", "public"},
@@ -192,7 +197,9 @@ class LibraryPolicyBatchUpdateRequired(SettingsPolicyUpdateRejected):
     error_code = "library_policy_batch_update_required"
 
 
-class LibraryFormatExtensionTransferRequiresRelease(SettingsPolicyUpdateRejected):
+class LibraryFormatExtensionTransferRequiresRelease(
+    SettingsPolicyUpdateRejected
+):
     error_code = "library_format_extension_transfer_requires_release"
 
 
@@ -285,8 +292,9 @@ class SettingsService:
             raise ReadNotFoundError("workspace not found")
         if status not in MCP_CLIENT_LIST_STATUSES:
             raise SettingsMcpClientCursorInvalid("invalid MCP client status filter")
-        # Cursor pages retain the first page's evaluation time. Explicit
-        # revocations and membership changes are still re-read on each request.
+        # Cursor pages retain the first page's evaluation time for a short
+        # window (MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE). Explicit revocations
+        # and membership changes are still re-read on each request.
         now = utc_now()
         normalized_query = " ".join((query or "").split()).casefold()
         actor_binding = _mcp_client_cursor_actor_binding(actor)
@@ -302,22 +310,51 @@ class SettingsService:
             if cursor
             else None
         )
-        if typed_cursor is not None:
+        if (
+            typed_cursor is not None
+            and now - typed_cursor[2] <= MCP_CLIENT_CURSOR_EVALUATION_MAX_AGE
+        ):
             now = typed_cursor[2]
+        control_session.rollback()
+
+        # Credentials are judged by the exact bindings this workspace's own rows
+        # name, so the control-plane read follows the connection count instead of
+        # the members x tokens x rotations population. That costs one workspace
+        # read before the control snapshot and a fresh workspace snapshot after
+        # it. Every transaction is released first: the planes can share a single
+        # connection (the single-database profile and every :memory: test pool),
+        # where a second BEGIN is a hard error, and holding both at once is the
+        # nesting backend/api/deps.py warns about.
+        acquire_consistent_read_snapshot(workspace_session)
+        oauth_client_id = MCPClient.token_metadata["oauth_client_id"].as_string()
+        manageable_filters = (
+            MCPClient.workspace_id == workspace_id,
+            MCPClient.deleted_at.is_(None),
+            MCPClient.status.in_(MCP_CLIENT_STATUSES),
+            func.lower(MCPClient.client_type).notin_(SYSTEM_MCP_CLIENT_TYPES),
+            func.lower(MCPClient.name) != "internal-agent",
+        )
+        # One read names every credential and OAuth app the rows point at; the
+        # client_name search below reuses it instead of asking again.
+        bound_rows = workspace_session.execute(
+            select(
+                MCPClient.issued_to_user_id,
+                _mcp_client_binding_expression(),
+                oauth_client_id,
+            )
+            .where(*manageable_filters)
+            .distinct()
+        ).all()
+        workspace_session.rollback()
+        bound_keys = {(row[0], row[1]) for row in bound_rows}
+
+        acquire_consistent_read_snapshot(control_session)
         health = load_workspace_oauth_health(
             control_session,
             workspace_id=workspace_id,
             now=now,
+            bindings={binding for _user, binding in bound_keys if binding is not None},
         )
-
-        # Release the control-plane read transaction before the workspace one
-        # opens. The two sessions can share a single connection -- the
-        # single-database profile, and every :memory: test pool -- where a
-        # second BEGIN is a hard error, and holding both at once is the nesting
-        # backend/api/deps.py warns about. The snapshot has already done its
-        # job: every whole-workspace control value the rest of this method
-        # needs is now plain data inside `health`.
-        #
         # Two later steps still read CONTROL -- the client_name search and the
         # page refinement below -- and both deliberately run OUTSIDE this
         # released snapshot, as plain key lookups rather than a re-entered
@@ -330,14 +367,6 @@ class SettingsService:
         control_session.rollback()
 
         acquire_consistent_read_snapshot(workspace_session)
-        oauth_client_id = MCPClient.token_metadata["oauth_client_id"].as_string()
-        manageable_filters = (
-            MCPClient.workspace_id == workspace_id,
-            MCPClient.deleted_at.is_(None),
-            MCPClient.status.in_(MCP_CLIENT_STATUSES),
-            func.lower(MCPClient.client_type).notin_(SYSTEM_MCP_CLIENT_TYPES),
-            func.lower(MCPClient.name) != "internal-agent",
-        )
         search_filters = ()
         if normalized_query:
             # Resolve the client_name arm against the ids THIS workspace's own
@@ -348,28 +377,19 @@ class SettingsService:
             # by the installation's whole oauth_client table. See
             # attach_name_matched_oauth_client_ids for what the unbounded shape
             # cost.
-            bound_keys = workspace_session.execute(
-                select(MCPClient.issued_to_user_id, _mcp_client_binding_expression())
-                .where(*manageable_filters)
-                .distinct()
-            ).all()
             bound_app_ids = {
                 credential.oauth_client_id
                 for key in bound_keys
-                if (credential := health.credential_health.get(tuple(key))) is not None
+                if (credential := health.credential_health.get(key)) is not None
                 and credential.oauth_client_id is not None
             }
             health = attach_name_matched_oauth_client_ids(
                 control_session,
                 health,
                 name_search=normalized_query,
-                oauth_client_ids=set(
-                    workspace_session.scalars(
-                        select(oauth_client_id)
-                        .where(*manageable_filters, oauth_client_id.isnot(None))
-                        .distinct()
-                    ).all()
-                )
+                oauth_client_ids={
+                    row[2] for row in bound_rows if row[2] is not None
+                }
                 | bound_app_ids,
             )
             matched_bindings = [
@@ -433,7 +453,9 @@ class SettingsService:
                     func.sum(
                         case(
                             (
-                                not_(_mcp_client_active_connection_predicate(health)),
+                                not_(
+                                    _mcp_client_active_connection_predicate(health)
+                                ),
                                 1,
                             ),
                             else_=0,
@@ -457,7 +479,9 @@ class SettingsService:
         if status == "active":
             data_filters.append(_mcp_client_active_connection_predicate(health))
         elif status == "disabled":
-            data_filters.append(not_(_mcp_client_active_connection_predicate(health)))
+            data_filters.append(
+                not_(_mcp_client_active_connection_predicate(health))
+            )
         if typed_cursor is not None:
             cursor_created_at, cursor_id, _evaluated_at = typed_cursor
             data_filters.append(
@@ -568,8 +592,8 @@ class SettingsService:
                 last_client.last_used_at,
                 last_client.id,
             )
-        # Narrowed to this page's clients, so the control-plane scan stays
-        # O(page) rather than O(workspace consents): there is no facet here to
+        # Narrowed to this page's own credentials, so the control-plane read stays
+        # O(page) rather than O(workspace members): there is no facet here to
         # need the whole answer set.
         mcp_payload = _settings_mcp_client_payload(
             mcp_clients,
@@ -578,6 +602,7 @@ class SettingsService:
                 workspace_id=workspace_id,
                 now=utc_now(),
                 oauth_client_ids=_page_oauth_client_ids(mcp_clients),
+                bindings=_page_bindings(mcp_clients),
             ),
         )
         return SettingsPolicies(
@@ -770,7 +795,9 @@ class SettingsService:
                     "format_families": 3,
                     "format_overrides": 3,
                 }
-                ordered_changes.sort(key=lambda item: library_order.get(item[0], 3))
+                ordered_changes.sort(
+                    key=lambda item: library_order.get(item[0], 3)
+                )
             for key, value in ordered_changes:
                 if group == "library" and key in RETIRED_LIBRARY_SOURCE_RULE_KEYS:
                     raise LibrarySourceRulesRetired(
@@ -1133,7 +1160,9 @@ class SettingsService:
         elif key == "builtin_format_overrides":
             try:
                 policy_value = (
-                    self.library_family_policy.coerce_builtin_format_overrides(value)
+                    self.library_family_policy.coerce_builtin_format_overrides(
+                        value
+                    )
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1143,7 +1172,9 @@ class SettingsService:
                     value,
                     existing_families=policy.get("format_families", []),
                     custom_formats=policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
+                    builtin_format_overrides=policy.get(
+                        "builtin_format_overrides", {}
+                    ),
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1168,7 +1199,9 @@ class SettingsService:
                 str(item["format_id"])
                 for item in self.library_family_policy.coerce_custom_formats(
                     policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
+                    builtin_format_overrides=policy.get(
+                        "builtin_format_overrides", {}
+                    ),
                 )
             }
             raw_format_id = key.removeprefix("format_overrides.")
@@ -1213,11 +1246,14 @@ def _validate_policy_cross_fields(
         return
     if group == "library":
         family_policy = (
-            library_family_policy or get_default_library_family_policy_service()
+            library_family_policy
+            or get_default_library_family_policy_service()
         )
         try:
-            builtin_format_overrides = family_policy.coerce_builtin_format_overrides(
-                policy.get("builtin_format_overrides", {})
+            builtin_format_overrides = (
+                family_policy.coerce_builtin_format_overrides(
+                    policy.get("builtin_format_overrides", {})
+                )
             )
             custom_formats = family_policy.coerce_custom_formats(
                 policy.get("custom_formats", []),
@@ -1227,7 +1263,8 @@ def _validate_policy_cross_fields(
             orphaned_custom_overrides = sorted(
                 format_id
                 for format_id in policy.get("format_overrides", {})
-                if str(format_id).startswith("custom-") and format_id not in custom_ids
+                if str(format_id).startswith("custom-")
+                and format_id not in custom_ids
             )
             if orphaned_custom_overrides:
                 raise LibraryFamilyPolicyError(
@@ -1473,7 +1510,9 @@ def normalized_library_policy(
         max_bytes=MAX_LIBRARY_WORKSPACE_UPLOAD_BYTES,
     )
     try:
-        policy_service = family_policy or get_default_library_family_policy_service()
+        policy_service = (
+            family_policy or get_default_library_family_policy_service()
+        )
         normalized["builtin_format_overrides"] = (
             policy_service.coerce_builtin_format_overrides(
                 source.get("builtin_format_overrides", {})
@@ -1490,7 +1529,9 @@ def normalized_library_policy(
         )
     except LibraryFamilyPolicyError as exc:
         raise LibraryPolicyValidationRejected(exc) from exc
-    custom_ids = {str(item["format_id"]) for item in normalized["custom_formats"]}
+    custom_ids = {
+        str(item["format_id"]) for item in normalized["custom_formats"]
+    }
     allowed_override_ids = LIBRARY_FORMATS | custom_ids
     normalized["format_overrides"] = {
         format_id: limit
@@ -1545,7 +1586,9 @@ def library_upload_limit_bytes(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized["builtin_format_overrides"],
+                builtin_format_overrides=normalized[
+                    "builtin_format_overrides"
+                ],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference = family.max_upload_bytes
@@ -1590,7 +1633,9 @@ def library_upload_limit_sources(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized["builtin_format_overrides"],
+                builtin_format_overrides=normalized[
+                    "builtin_format_overrides"
+                ],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference_source = "family"
@@ -1647,7 +1692,9 @@ def _coerce_library_upload_limit(
             f"{field_name} must be at least {MIN_LIBRARY_UPLOAD_BYTES}"
         )
     if value > max_bytes:
-        raise SettingsPolicyUpdateRejected(f"{field_name} must be at most {max_bytes}")
+        raise SettingsPolicyUpdateRejected(
+            f"{field_name} must be at most {max_bytes}"
+        )
     return value
 
 
@@ -1876,6 +1923,10 @@ def _is_system_mcp_client(client: MCPClient) -> bool:
     client_type = client.client_type.casefold()
     name = client.name.casefold()
     return client_type in SYSTEM_MCP_CLIENT_TYPES or name == "internal-agent"
+
+
+def _page_bindings(clients: list[MCPClient]) -> set[str]:
+    return {key for client in clients if (key := binding_key_for_client(client))}
 
 
 def _page_oauth_client_ids(clients: list[MCPClient]) -> list[str]:

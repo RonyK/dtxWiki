@@ -2449,9 +2449,9 @@ function SettingsScreenBody() {
                       <div className="oauth-consent-details">
                         <div className="mcp-credential-heading"><strong>{presentation.label}</strong><StatusPill compact status={oauthConsentConnectionState(consent)} /></div>
                   <p className="meta-line">OAuth</p>
-                  <span className="mcp-field-label">{t("workspacePicker.permissions")}</span>
+                  <span className="mcp-field-label">{t("mcpCard.permissions")}</span>
                   <div className="scope-chip-row">{consent.scope.split(/\s+/).filter(Boolean).map(scope => <span className="scope-chip" key={scope}>{scopeLabel(scope, t)}</span>)}</div>
-                  <span className="mcp-field-label">{t("workspacePicker.workspaces")}</span>
+                  <span className="mcp-field-label">{t("mcpCard.workspaces")}</span>
                   <WorkspaceScopeChips
                     labels={workspaceChipLabels}
                     roleLabel={workspaceRoleLabel}
@@ -2627,7 +2627,7 @@ function SettingsScreenBody() {
           </PaginatedCredentialList>
         )}
       <div className="mcp-connection-controls">
-        <div><strong>{t("workspacePicker.cleanupTitle")}</strong><p>{t("workspacePicker.cleanupBody")}</p></div>
+        <div><strong>{t("mcpCard.cleanupTitle")}</strong><p>{t("mcpCard.cleanupBody")}</p></div>
         {oauthConsentFilter === "active" && hiddenConnectionCount > 0 ? (
           <CountChip
             compact
@@ -2648,7 +2648,7 @@ function SettingsScreenBody() {
         >
           <Trash2 size={15} aria-hidden="true" />
           <span>
-            {t("workspacePicker.cleanupPreview")}
+            {t("mcpCard.cleanupPreview")}
           </span>
         </button>
       </div>
@@ -5079,7 +5079,7 @@ function McpKeyRow({
           </div>
         )}
         <span className="mcp-field-label">
-          {t("workspacePicker.permissions")}
+          {t("mcpCard.permissions")}
         </span>
         <div className="scope-chip-row">
           {token.scopes.map((scope) => (
@@ -5089,7 +5089,7 @@ function McpKeyRow({
           ))}
         </div>
         <span className="mcp-field-label">
-          {t("workspacePicker.workspaces")}
+          {t("mcpCard.workspaces")}
         </span>
         <WorkspaceScopeChips
           labels={chipLabels}
@@ -5105,26 +5105,26 @@ function McpKeyRow({
         />
         <dl className="mcp-card-times">
           <div>
-            <dt>{t("workspacePicker.created")}</dt>
+            <dt>{t("mcpCard.created")}</dt>
             <dd>{formatDateTime(token.created_at)}</dd>
           </div>
           <div>
-            <dt>{t("workspacePicker.lastUsed")}</dt>
+            <dt>{t("mcpCard.lastUsed")}</dt>
             <dd>
               {token.last_used_at ? formatDateTime(token.last_used_at) : never}
             </dd>
           </div>
           <div>
-            <dt>{t("workspacePicker.expires")}</dt>
+            <dt>{t("mcpCard.expires")}</dt>
             <dd>
               {token.expires_at
                 ? formatDateTime(token.expires_at)
-                : t("workspacePicker.noExpiry")}
+                : t("mcpCard.noExpiry")}
             </dd>
           </div>
         </dl>
         <details className="mcp-key-details">
-          <summary>{t("workspacePicker.details")}</summary>
+          <summary>{t("mcpCard.details")}</summary>
           <p>
             UUID <code>{token.id}</code>
           </p>
@@ -5351,7 +5351,7 @@ function McpClientList({
                 <KeyRound size={16} aria-hidden="true" />
                 <div>
                   <div className="mcp-credential-heading"><strong>{clientName(client, index)}</strong><StatusPill status={connectionState} compact label={clientConnectionStateLabel(connectionState, t)} /></div>
-                  <p className="meta-line">{t(status === "active" ? "workspacePicker.allowed" : "workspacePicker.blocked")}</p>
+                  <p className="meta-line">{t(status === "active" ? "mcpCard.allowed" : "mcpCard.blocked")}</p>
                   <p>
                     {t("clientRow.scopes", {
                       defaultValue: "{{type}} · Scopes {{scopes}}",
@@ -5379,7 +5379,7 @@ function McpClientList({
                         </dt>
                         <dd>
                           {status === "active"
-                            ? t("workspacePicker.allowed") : t("workspacePicker.blocked")}
+                            ? t("mcpCard.allowed") : t("mcpCard.blocked")}
                         </dd>
                       </div>
                       <div>
@@ -10496,26 +10496,26 @@ function McpCredentialTimes({
   const { t } = useTranslation("settings");
   const expiryLabel =
     kind === "pat"
-      ? "workspacePicker.expires"
+      ? "mcpCard.expires"
       : kind === "oauth"
-        ? "workspacePicker.sessionExpiry"
-        : "workspacePicker.expiry";
+        ? "mcpCard.sessionExpiry"
+        : "mcpCard.expiry";
   const noExpiry =
     kind === "pat"
-      ? t("workspacePicker.noExpiry")
+      ? t("mcpCard.noExpiry")
       : kind === "unknown" || state === "unknown"
-        ? t("workspacePicker.expiryUnknown")
-        : t("workspacePicker.reapprove");
+        ? t("mcpCard.expiryUnknown")
+        : t("mcpCard.reapprove");
   return (
     <dl className="mcp-card-times">
       {grantedAt ? (
         <div>
-          <dt>{t("workspacePicker.granted")}</dt>
+          <dt>{t("mcpCard.granted")}</dt>
           <dd>{formatDateTime(grantedAt)}</dd>
         </div>
       ) : null}
       <div>
-        <dt>{t("workspacePicker.lastUsed")}</dt>
+        <dt>{t("mcpCard.lastUsed")}</dt>
         <dd>
           {lastUsed ? formatDateTime(String(lastUsed)) : t("clientRow.never")}
         </dd>
