@@ -283,6 +283,10 @@
       }
     },
     "displayFields": {
+      "input_version": "입력 버전",
+      "base_version": "기준 버전",
+      "editing_version": "편집 버전",
+      "cited_version": "인용 버전",
       "search_query": "검색어",
       "query": "검색어",
       "context_page": "문서",
@@ -481,6 +485,7 @@
     "recordNoticeTitle": "채팅 전문이 아닌 도구 활동 기록입니다.",
     "recordNoticeBody": "dtxWiki는 MCP 도구 호출과 추적 정책에 따라 보존되는 입력값·결과 및 연결된 아티팩트를 기록합니다. 외부 클라이언트에 입력한 메시지의 별도 사본을 전송받지는 않습니다.",
     "identifier": {
+      "rawReferences": "원본 ID",
       "copied": "ID를 복사했습니다",
       "show": "전체 ID 보기",
       "hide": "전체 ID 숨기기",
@@ -490,6 +495,9 @@
       "copyFor": "전체 ID 복사: {{field}}"
     },
     "inputFields": {
+      "title": "제목",
+      "body_md": "본문",
+      "expected_editing_revision": "예상 편집 리비전",
       "workspace_id": "워크스페이스",
       "type": "유형",
       "target_type": "대상 유형",

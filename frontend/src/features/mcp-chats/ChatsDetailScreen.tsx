@@ -1534,14 +1534,17 @@ function TimelineTabPanel({
                 <ToolInputValue key={key} label={inputLabel(key)} value={value} />
               ))}
               {ids.length > 0 ? (
-                <dl className="mcp-tool-result-meta mcp-chat-input-identifiers">
-                  {ids.map(([key, value]) => (
-                    <div key={key}>
-                      <dt>{inputLabel(key)}</dt>
-                      <dd><ChatIdentifier value={String(value)} label={inputLabel(key)} /></dd>
-                    </div>
-                  ))}
-                </dl>
+                <details className="mcp-chat-input-reference-details">
+                  <summary>{t("detail.identifier.rawReferences")}</summary>
+                  <dl className="mcp-tool-result-meta mcp-chat-input-identifiers">
+                    {ids.map(([key, value]) => (
+                      <div key={key}>
+                        <dt>{inputLabel(key)}</dt>
+                        <dd><ChatIdentifier value={String(value)} label={inputLabel(key)} /></dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
               ) : null}
             </div>
           </section>

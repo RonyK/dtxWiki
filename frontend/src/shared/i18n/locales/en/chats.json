@@ -283,6 +283,10 @@
       }
     },
     "displayFields": {
+      "input_version": "Input version",
+      "base_version": "Base version",
+      "editing_version": "Editing version",
+      "cited_version": "Cited version",
       "search_query": "Search query",
       "query": "Search query",
       "context_page": "Document",
@@ -481,6 +485,7 @@
     "recordNoticeTitle": "Tool activity, not a chat transcript.",
     "recordNoticeBody": "dtxWiki records MCP tool calls and the inputs/results retained by its trace policy, plus linked artifacts. It does not receive a separate copy of the message typed in the external client.",
     "identifier": {
+      "rawReferences": "Original IDs",
       "copied": "ID copied",
       "show": "Show full ID",
       "hide": "Hide full ID",
@@ -490,6 +495,9 @@
       "copyFor": "Copy full ID: {{field}}"
     },
     "inputFields": {
+      "title": "Title",
+      "body_md": "Body",
+      "expected_editing_revision": "Expected editing revision",
       "workspace_id": "Workspace",
       "type": "Type",
       "target_type": "Target type",

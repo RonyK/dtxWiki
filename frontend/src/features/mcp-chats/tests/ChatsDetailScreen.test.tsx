@@ -49,6 +49,34 @@ describe("ChatsDetailScreen", () => {
     return within(call).getByRole("tabpanel");
   }
 
+  it("shows the requested document and version while keeping raw IDs in a disclosure", async () => {
+    const user = userEvent.setup();
+    const detail = chatDetail();
+    const pageId = "12345678-1234-5678-9012-12345678abcd";
+    const versionId = "98765432-1234-5678-9012-12345678abcd";
+    detail.timeline[0] = {
+      ...detail.timeline[0], action: "edit", tool_name: "update_context_edit",
+      input_summary: { page_id: pageId, version_id: versionId, body_md: "Raw content ".repeat(30) },
+      input_display_items: [
+        { key: "requested_artifact", kind: "artifact", text: "Requested guide", resource_kind: "context_page", resource_id: pageId, navigation_path: `/context?target=${pageId}` },
+        { key: "input_version", kind: "text", text: "v12", resource_id: versionId },
+      ],
+    };
+    renderWithDetail({
+      [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
+    });
+    const card = await findCallCard();
+    await user.click(within(card).getByRole("tab", { name: "Inputs" }));
+    expect(within(card).getByRole("link", { name: "Requested guide" })).toBeVisible();
+    expect(within(card).getByText("v12")).toBeVisible();
+    expect(within(card).getByText("98765432…abcd")).not.toBeVisible();
+    expect(within(card).getByText("12345678…abcd")).not.toBeVisible();
+    await user.click(within(card).getByText("Original IDs", { exact: true }));
+    expect(within(card).getByText("98765432…abcd")).toBeVisible();
+    expect(within(card).getByText("12345678…abcd")).toBeVisible();
+  });
+
   it.each([false, true])("orders semantic inputs, long content, then identifiers and preserves raw metadata (reverse: %s)", async (reverse) => {
     const user = userEvent.setup();
     const detail = chatDetail();
@@ -69,7 +97,7 @@ describe("ChatsDetailScreen", () => {
     const technical = card.querySelector(".mcp-tool-technical-inputs")!;
     expect([...technical.querySelectorAll(".mcp-tool-result-meta dt")].map(node => node.textContent))
       .toEqual(reverse ? ["Workspace", "Type", "Target ID", "ID"] : ["Workspace", "Type", "ID", "Target ID"]);
-    expect(technical.querySelector(".mcp-chat-input-grid")!.lastElementChild).toHaveClass("mcp-chat-input-identifiers");
+    expect(technical.querySelector(".mcp-chat-input-grid")!.lastElementChild).toHaveClass("mcp-chat-input-reference-details");
     expect(technical.querySelector(".mcp-tool-longvalue-body")).toHaveTextContent("Raw CASE body");
     await user.click(within(card).getByRole("tab", { name: "Metadata" }));
     const metadata = card.querySelector(".mcp-chat-metadata-grid")!;
@@ -824,9 +852,10 @@ describe("ChatsDetailScreen", () => {
     });
 
     const call = await findCallCard();
-    // No disclosure left anywhere on the card: neither the old outer
-    // "Technical call details" nor the nested one inside Inputs.
-    expect(call.querySelector("details")).toBeNull();
+    // The content stays open; only redundant raw identifiers are disclosed.
+    const rawIds = call.querySelector(".mcp-chat-input-reference-details");
+    expect(rawIds).not.toHaveAttribute("open");
+    expect(call.querySelector(".mcp-tool-technical-details")).toBeNull();
     // A write opens on what it sent.
     expect(within(call).getByRole("tab", { name: "Inputs" })).toHaveAttribute(
       "aria-selected",

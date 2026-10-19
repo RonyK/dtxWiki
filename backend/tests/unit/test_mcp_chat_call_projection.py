@@ -208,6 +208,59 @@ def _page_link(page, verb):
     return (McpChatArtifactKind.CONTEXT_PAGE, page.id, verb)
 
 
+def test_input_version_number_resolves_exact_input_not_latest_or_result(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace, client, owner = _setup(session)
+        page, original = _published_page(
+            session, workspace.id, "version-input", "Guide"
+        )
+        original.version_status = "superseded_snapshot"
+        session.flush()
+        latest = _version(
+            session, page, status="published_snapshot", author="seed", number=9
+        )
+        chat = _Chat(session, workspace, client, owner)
+        call = chat.call(
+            "update_context_edit",
+            {"page_id": str(page.id), "version_id": str(original.id)},
+            result_detail={"version_id": str(latest.id)},
+            links=[_page_link(page, McpChatArtifactVerb.EDITED)],
+        )
+        item = _item(chat.read(_human(owner.id, workspace.id)), call)
+        versions = [
+            entry for entry in item.input_display_items if entry.key == "input_version"
+        ]
+        assert [(entry.text, entry.resource_id) for entry in versions] == [
+            ("v1", original.id)
+        ]
+
+
+def test_input_version_number_does_not_expose_another_authors_private_version(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace, client, owner = _setup(session)
+        page, _ = _published_page(
+            session, workspace.id, "private-version-input", "Guide"
+        )
+        private = _version(
+            session, page, status="editing", author=str(uuid4()), number=37
+        )
+        chat = _Chat(session, workspace, client, owner)
+        call = chat.call(
+            "update_context_edit",
+            {"page_id": str(page.id), "version_id": str(private.id)},
+            links=[_page_link(page, McpChatArtifactVerb.EDITED)],
+        )
+        item = _item(chat.read(_human(owner.id, workspace.id)), call)
+        assert not any(
+            entry.key == "input_version" for entry in item.input_display_items
+        )
+        assert "v37" not in item.model_dump_json()
+
+
 # --- Failed calls (C1) ------------------------------------------------------
 
 

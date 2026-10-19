@@ -1973,14 +1973,14 @@
 .mcp-chat-call-headline dd {
   white-space: pre-wrap;
 }
-/* One shared row: meaning in the first two columns, identifiers last.
-   Full-width bodies remain between the meaning fields and identifier group. */
+/* Input facts use the available width; raw references are a disclosure,
+   rather than occupying a reserved column beside or below the content. */
 .mcp-tool-technical-inputs {
   container-type: inline-size;
 }
 .mcp-chat-input-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px 18px;
   align-items: start;
   min-width: 0;
@@ -1993,8 +1993,7 @@
   align-content: start;
 }
 .mcp-chat-input-fields {
-  grid-column: 1 / 3;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px 18px;
 }
 .mcp-chat-input-grid > .mcp-tool-longvalue {
@@ -2002,12 +2001,30 @@
   margin: 0;
 }
 .mcp-chat-input-identifiers {
-  grid-column: 3;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .mcp-chat-workspace-input > span {
   display: block;
+}
+.mcp-chat-input-reference-details {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.mcp-chat-input-reference-details > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 4px 0;
+}
+.mcp-chat-input-reference-details > .mcp-chat-input-identifiers {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 0;
+  padding: 8px 0 0;
+  background: transparent;
 }
 .mcp-chat-workspace-input > .mcp-chat-identifier {
   margin-top: 4px;
@@ -2015,12 +2032,9 @@
 }
 @container (max-width: 540px) {
   .mcp-chat-input-grid,
-  .mcp-chat-input-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .mcp-chat-input-fields,
-  .mcp-chat-input-identifiers {
-    grid-column: 1 / -1;
+  .mcp-chat-input-reference-details > .mcp-chat-input-identifiers {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 1024px) {

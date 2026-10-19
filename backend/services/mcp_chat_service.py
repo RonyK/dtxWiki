@@ -1602,6 +1602,7 @@ class McpChatService:
                     primary_artifact=headline_artifact.get(row.id),
                     content_visible=gate.call_content_visible(row, chat),
                     session_diff=session_diffs.get(row.id),
+                    input_versions=gate.input_version_items(row),
                 )
             )
         return timeline
@@ -1654,6 +1655,7 @@ class McpChatService:
             input_items = _input_display_items(
                 row, input_summary, [], edit_summary=edit_summary
             )
+            input_items.extend(gate.input_version_items(row))
             seen = {item.resource_id for item in input_items if item.resource_id}
             for target in targets[:5]:
                 if target.resource_id in seen:
@@ -2206,6 +2208,35 @@ class _ReaderGate:
             self._versions[version_id] = version if visible else None
         return self._versions[version_id]
 
+    def input_version_items(self, row: MCPToolCall) -> list[McpChatDisplayItem]:
+        """Resolve input Context version numbers through the reader's gate.
+
+        Only use actual input references, never a created/result version or
+        the page's latest version. Editing revisions remain captured inputs;
+        reading today's mutable revision would misdescribe a historical call.
+        """
+        items: list[McpChatDisplayItem] = []
+        for field, key in (
+            ("version_id", "input_version"),
+            ("base_version_id", "base_version"),
+            ("editing_version_id", "editing_version"),
+            ("cited_context_page_version_id", "cited_version"),
+        ):
+            if _target_kind_for_field(row.tool_name, field) != "context_version":
+                continue
+            version_id = _parse_uuid_value(row.input_summary.get(field))
+            version = self.visible_version(version_id) if version_id else None
+            if version is not None:
+                items.append(
+                    McpChatDisplayItem(
+                        key=key,
+                        kind="text",
+                        text=f"v{version.version_no}",
+                        resource_id=version.id,
+                    )
+                )
+        return items
+
     def call_content_visible(self, row: MCPToolCall, chat: McpChatSession) -> bool:
         """Whether the reader may see what a context-edit call wrote.
 
@@ -2619,6 +2650,7 @@ def _visible_call_item(
     primary_artifact: tuple[str, str | None, str] | None,
     content_visible: bool,
     session_diff: McpChatSessionDiff | None,
+    input_versions: list[McpChatDisplayItem],
 ) -> McpChatTimelineItem:
     """A call the reader may see. Without ``content_visible`` -- the version
     it wrote into is another author's private row -- every field below is
@@ -2649,6 +2681,7 @@ def _visible_call_item(
     input_items = _input_display_items(
         row, input_summary, linked_artifacts, edit_summary=edit_summary
     )
+    input_items.extend(input_versions)
     result_items = _result_display_items(row, linked_artifacts, result_summary)
     presentation = _call_presentation(row, primary_artifact, input_summary)
     return McpChatTimelineItem(
