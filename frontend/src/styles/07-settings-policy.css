@@ -1245,9 +1245,8 @@ button.history-card {
    into a ~504px list that pushed all content past the fold. The trigger costs
    one row and always names where you are. */
 .settings-section-picker {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  /* Keep navigation above the content in normal flow. A sticky trigger
+     otherwise covers attachment controls as the settings pane scrolls. */
   background: var(--surface-page, var(--surface));
   padding-block: 4px;
 }
