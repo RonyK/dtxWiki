@@ -484,12 +484,6 @@
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
-  .mcp-client-identifier > .compact-icon-button {
-    width: 44px;
-    min-width: 44px;
-    min-height: 44px;
-  }
-
   .mcp-chat-dl-link {
     min-height: 44px;
   }
@@ -1953,7 +1947,7 @@
   outline-offset: 2px;
   border-radius: 3px;
 }
-.mcp-chat-identifier-row > .compact-icon-button {
+.mcp-chat-identifier-row > .icon-button {
   flex: 0 0 auto;
 }
 .mcp-chat-full-id {
@@ -2039,11 +2033,8 @@
   .mcp-chat-call-headline {
     grid-column: 1 / -1;
   }
-  .mcp-chat-identifier-row > button {
+  .mcp-chat-id-toggle {
     min-height: 44px;
-  }
-  .mcp-chat-identifier-row > .compact-icon-button {
-    min-width: 44px;
   }
 }
 @media (max-width: 640px) {

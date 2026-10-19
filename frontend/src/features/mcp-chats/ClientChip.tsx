@@ -123,7 +123,7 @@ export function ClientIdentity({ client }: ClientIdentityProps) {
             <button
               aria-describedby={copyFeedback ? copyFeedbackId : undefined}
               aria-label={copyLabel}
-              className="icon-button compact-icon-button"
+              className="icon-button icon-button--small"
               onClick={() => void copyIdentifier()}
               title={copyLabel}
               type="button"

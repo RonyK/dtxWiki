@@ -143,7 +143,7 @@ export function ChatIdentifier({ value, label }: { value: string; label?: string
         </button>
         <button
           type="button"
-          className="icon-button compact-icon-button"
+          className="icon-button icon-button--small"
           aria-label={copyLabel}
           title={copyLabel}
           aria-describedby={feedback ? feedbackId : undefined}
