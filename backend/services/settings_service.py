@@ -28,6 +28,10 @@ from backend.schemas.settings import (
     SettingsPolicies,
 )
 from backend.services.audit_service import AuditService
+from backend.services.context_media_policy import (
+    resolve_context_media_policy,
+    validate_retention_hours,
+)
 from backend.services.db_read_snapshot import acquire_consistent_read_snapshot
 from backend.services.db_write_intent import (
     acquire_workspace_write_intent,
@@ -255,7 +259,9 @@ class SettingsService:
         self,
         *,
         library_family_policy: LibraryFamilyPolicyService | None = None,
+        orphan_retention_hours: int = 168,
     ) -> None:
+        self.orphan_retention_hours = orphan_retention_hours
         self.library_family_policy = (
             library_family_policy or get_default_library_family_policy_service()
         )
@@ -588,6 +594,11 @@ class SettingsService:
             ),
         )
         return SettingsPolicies(
+            attachments=_policy_card(
+                name="attachments",
+                title="Unused file retention",
+                policy=self._policy_group_projection(workspace, "attachments"),
+            ),
             workspace=_policy_card(
                 name="workspace",
                 title="Workspace basics",
@@ -724,6 +735,10 @@ class SettingsService:
         is no distributed transaction to reason about.
         """
 
+        if group == "attachments" and expected_revision is None:
+            raise SettingsPolicyUpdateRejected(
+                "attachments requires a batch save with expected_revision"
+            )
         acquire_write_intent(control_session)
         workspace = control_session.scalar(
             select(Workspace).where(Workspace.id == workspace_id).with_for_update()
@@ -742,7 +757,22 @@ class SettingsService:
                 current_policy=current_policy,
             )
 
-        if group == "workspace":
+        if group == "attachments":
+            if set(changes) != {"orphan_retention_hours"}:
+                raise SettingsPolicyUpdateRejected("Unknown attachment policy field")
+            value = changes["orphan_retention_hours"]
+            try:
+                if value is not None:
+                    value = validate_retention_hours(value)
+            except ValueError as exc:
+                raise SettingsPolicyUpdateRejected(str(exc)) from exc
+            policy = dict(workspace.context_media_policy or {})
+            if value is None:
+                policy.pop("orphan_retention_hours", None)
+            else:
+                policy["orphan_retention_hours"] = value
+            workspace.context_media_policy = policy
+        elif group == "workspace":
             for key, value in changes.items():
                 self._update_workspace_field(control_session, workspace, key, value)
         elif group == "lint":
@@ -832,7 +862,19 @@ class SettingsService:
             action=action,
             target_kind="workspace",
             target_id=workspace_id,
-            payload={"group": group, "key": keys[0], "keys": keys},
+            payload={
+                "group": group,
+                "key": keys[0],
+                "keys": keys,
+                **(
+                    {
+                        "before": current_policy,
+                        "after": self._policy_group_projection(workspace, group),
+                    }
+                    if group == "attachments"
+                    else {}
+                ),
+            },
         )
         control_session.flush()
         return self.get_policies(
@@ -846,6 +888,10 @@ class SettingsService:
         workspace: Workspace,
         group: str,
     ) -> dict[str, object]:
+        if group == "attachments":
+            return resolve_context_media_policy(
+                workspace, self.orphan_retention_hours
+            ).policy
         if group == "workspace":
             return {
                 "slug": workspace.slug,

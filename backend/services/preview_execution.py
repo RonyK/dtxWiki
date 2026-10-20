@@ -232,6 +232,15 @@ def _bundled_provider_commands() -> dict[str, tuple[str, ...]]:
     executable = Path(sys.executable)
     if not executable.is_absolute():
         executable = executable.absolute()
+    if getattr(sys, "frozen", False):
+        return {
+            "dtxwiki.pillow-image-preview": (
+                str(executable),
+                "preview-host",
+                "--provider",
+                "dtxwiki.pillow-image-preview",
+            )
+        }
     return {
         "dtxwiki.pillow-image-preview": (
             str(executable),

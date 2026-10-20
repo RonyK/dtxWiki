@@ -9,19 +9,24 @@ app process cannot mutate ``/etc`` under the systemd sandbox, so it returns the
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
 
 from backend.api.auth import (
     PasswordRecoveryServiceDep,
     require_recent_server_admin_reauthentication,
     require_server_admin,
 )
+from backend.api.context_media import _error_response as context_media_error_response
 from backend.api.deps import (
     DatabaseProviderDep,
+    RestActorDep,
+    ServicesDep,
     SessionFactoryDep,
+    WorkspaceAdminAccessDep,
     WorkspaceSessionFactoryDep,
 )
 from backend.api.health import _ready_payload as health_ready_payload
@@ -34,7 +39,11 @@ from backend.schemas.admin_users import (
     AdminUserListResponse,
 )
 from backend.schemas.common import RESTErrorBody
-from backend.schemas.context_media import ContextMediaOrphanListResponse
+from backend.schemas.context_media import (
+    AdminContextMediaAttachmentListResponse,
+    ContextMediaDeleteResponse,
+    ContextMediaOrphanListResponse,
+)
 from backend.schemas.deployment import DeploymentStatusResponse
 from backend.schemas.jobs import (
     AdminJobListResponse,
@@ -44,6 +53,12 @@ from backend.schemas.jobs import (
 )
 from backend.services import deployment as deployment_service
 from backend.services import update_check_service
+from backend.services.admin_context_media import (
+    AdminAttachmentError,
+    AdminAttachmentUnavailable,
+    delete_admin_attachment,
+    list_admin_attachments,
+)
 from backend.services.admin_user_recovery import AdminUserRecoveryService
 from backend.services.audit_service import AuditService
 from backend.services.context_media_orphan_sweep import (
@@ -131,9 +146,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
             "mail_connection_status": recovery.mail_connection_status,
             "mail_last_attempt_at": recovery.mail_last_attempt_at,
             "mail_from_address": recovery.mail_from_address,
-            "smtp_credentials_configured": (
-                recovery.smtp_credentials_configured
-            ),
+            "smtp_credentials_configured": (recovery.smtp_credentials_configured),
             "canonical_public_url": recovery.canonical_public_url,
             "https_ready": recovery.https_ready,
             "outbox_queued": recovery.outbox_queued,
@@ -389,28 +402,22 @@ def admin_list_jobs(
 def admin_list_context_media_orphans(
     workspace_id: UUID,
     session_factory: WorkspaceSessionFactoryDep,
+    actor: RestActorDep,
+    access: WorkspaceAdminAccessDep,
     control_session_factory: SessionFactoryDep,
     _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
 ):
-    """Every current Context-media orphan in one workspace: an asset whose
-    upload session expired before anything claimed it, or one claimed onto a
-    page but written into no version's Markdown -- either never (an upload
-    abandoned mid-edit, the usual case) or no longer. An unclaimed upload
-    session that has not expired yet is an upload in progress and is not
-    listed.
-
-    Server-admin surface -- unlike the workspace-scoped listing it reads any
-    workspace, not only ones the caller is a member of. ``workspace_id`` is
-    required: this endpoint reports one workspace per call and never
-    aggregates across the instance.
-    """
-    # Required workspace_id instead of an instance-wide aggregation: every read
-    # here has to run on session_for(workspace_id), never the control plane. A
-    # media-orphan fan-out would be another copy of list_all_jobs' roster +
-    # per-workspace session + skip-and-flag shape -- one more call site to keep
-    # in sync with that pattern rather than reusing it.
     with session_factory() as session:
-        items = list_context_media_orphans(session, workspace_id=workspace_id)
+        items = list_context_media_orphans(
+            session,
+            workspace_id=workspace_id,
+            actor=replace(
+                actor,
+                workspace_id=workspace_id,
+                role=access.role,
+                workspace_role=access.role,
+            ),
+        )
     # Uploader labels come off the CONTROL session -- `users` is identity
     # plane, the listing above is workspace plane. Same split as the
     # workspace-scoped endpoint in backend/api/read.py.
@@ -513,3 +520,91 @@ def admin_retry_job(
                 lease_timeout_seconds=lease_timeout_seconds,
             )
         }
+
+
+@router.get(
+    "/context-media/attachments",
+    response_model=AdminContextMediaAttachmentListResponse,
+    responses={**REST_ERROR_RESPONSES, 503: {"model": RESTErrorBody}},
+)
+def admin_list_context_media_attachments(
+    db: DatabaseProviderDep,
+    svc: ServicesDep,
+    response: Response,
+    admin: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+    q: Annotated[str, Query(max_length=200)] = "",
+    mine: bool = False,
+    orphan_only: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 24,
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return {
+            "data": list_admin_attachments(
+                db=db,
+                repository_factory=svc.context_media_repository_factory,
+                actor_id=admin.user_id,
+                q=q,
+                mine=mine,
+                orphan_only=orphan_only,
+                limit=limit,
+                cursor=cursor,
+            )
+        }
+    except ValueError:
+        return build_rest_error_response(
+            error_code="validation_failed",
+            message="Invalid attachment cursor",
+            status_code=422,
+        )
+    except AdminAttachmentUnavailable:
+        return build_rest_error_response(
+            error_code="media_unavailable",
+            message="A workspace could not be read. Refresh to try again.",
+            status_code=503,
+        )
+
+
+@router.delete(
+    "/context-media/attachments/{asset_id}",
+    response_model=ContextMediaDeleteResponse,
+    responses={
+        **REST_ERROR_RESPONSES,
+        **{code: {"model": RESTErrorBody} for code in (409, 412, 503)},
+    },
+)
+def admin_delete_context_media_attachment(
+    asset_id: UUID,
+    workspace_id: UUID,
+    db: DatabaseProviderDep,
+    svc: ServicesDep,
+    response: Response,
+    admin: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+    usage_token: Annotated[str, Header(alias="If-Match", min_length=1)],
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        delete_admin_attachment(
+            db=db,
+            repository_factory=svc.context_media_repository_factory,
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=admin.user_id,
+            usage_token=usage_token.strip('"'),
+        )
+    except AdminAttachmentError as exc:
+        return context_media_error_response(exc)
+    except AdminAttachmentUnavailable:
+        return build_rest_error_response(
+            error_code="media_unavailable",
+            message="Workspace is unavailable",
+            status_code=503,
+        )
+    return {
+        "data": {
+            "id": asset_id,
+            "association_state": "tombstoned",
+            "gc_state": "queued",
+        }
+    }

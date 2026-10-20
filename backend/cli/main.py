@@ -1,5 +1,6 @@
 """dtxwiki CLI entry point."""
 
+import asyncio
 import ipaddress
 import json
 import logging
@@ -18,6 +19,7 @@ from backend.app.bootstrap import (
     migration_status,
 )
 from backend.app.data_dir import data_dir, default_sqlite_url
+from backend.app.runtime import RuntimeStartupError, serve_runtime
 from backend.app.settings import Settings
 from backend.app.version import package_version
 from backend.cli.commands import admin as admin_commands
@@ -72,6 +74,9 @@ def root(
     db: str | None = typer.Option(None, help="Override database URL."),
     open_browser: bool = typer.Option(True, "--open/--no-open"),
     log_level: str = typer.Option("info", help="uvicorn log level."),
+    worker_mode: str | None = typer.Option(
+        None, help="Background worker mode: managed (default) or external."
+    ),
 ) -> None:
     if ctx.invoked_subcommand is None:
         serve(
@@ -80,6 +85,7 @@ def root(
             db=db,
             open_browser=open_browser,
             log_level=log_level,
+            worker_mode=worker_mode,
         )
 
 
@@ -93,6 +99,9 @@ def serve(
     db: str | None = typer.Option(None, help="Override database URL."),
     open_browser: bool = typer.Option(True, "--open/--no-open"),
     log_level: str = typer.Option("info", help="uvicorn log level."),
+    worker_mode: str | None = typer.Option(
+        None, help="Background worker mode: managed (default) or external."
+    ),
 ) -> None:
     run_server(
         host=host,
@@ -100,6 +109,7 @@ def serve(
         db=db,
         open_browser=open_browser,
         log_level=log_level,
+        worker_mode=worker_mode,
     )
 
 
@@ -110,28 +120,50 @@ def run_server(
     db: str | None,
     open_browser: bool,
     log_level: str,
+    worker_mode: str | None = None,
 ) -> None:
-    settings = Settings(database_url=db) if db else Settings()
+    overrides = {}
+    if db:
+        overrides["database_url"] = db
+    if worker_mode is not None:
+        if worker_mode not in {"managed", "external"}:
+            raise typer.BadParameter(
+                "must be managed or external", param_hint="--worker-mode"
+            )
+        overrides["worker_mode"] = worker_mode
+    settings = Settings(**overrides)
     resolved_port = port if port is not None else settings.backend_port
     if settings.app_mode == "solo_local" and not is_loopback_bind_host(host):
         _warn_solo_local_network_bind(host, settings)
-    app_instance = create_app(settings=settings)
-    bootstrap_app(settings, app_instance)
-    if open_browser:
-        webbrowser.open(_browser_url(host, resolved_port))
-    uvicorn.run(
-        app_instance,
-        host=host,
-        port=resolved_port,
-        log_level=log_level,
-        proxy_headers=settings.behind_proxy,
-        forwarded_allow_ips=settings.forwarded_allow_ips,
-        # uvicorn's access log writes the full request target, query string
-        # included -- one-time password-reset and email-verification tokens
-        # among them. The app's own JSON request log (RequestLogMiddleware)
-        # records the route template instead.
-        access_log=False,
-    )
+    try:
+        # Preserve uvicorn.run's automatic uvloop/platform selection. Older
+        # supported Uvicorn versions configure the event-loop policy instead.
+        loop_config = uvicorn.Config(None, log_level=log_level)
+        get_loop_factory = getattr(loop_config, "get_loop_factory", None)
+        if get_loop_factory is not None:
+            loop_factory = get_loop_factory()
+        else:
+            loop_config.setup_event_loop()
+            loop_factory = None
+        asyncio.run(
+            serve_runtime(
+                None,
+                settings,
+                host=host,
+                port=resolved_port,
+                log_level=log_level,
+                proxy_headers=settings.behind_proxy,
+                forwarded_allow_ips=settings.forwarded_allow_ips,
+                on_started=(lambda: webbrowser.open(_browser_url(host, resolved_port)))
+                if open_browser
+                else None,
+                application_factory=lambda effective: create_app(settings=effective),
+            ),
+            loop_factory=loop_factory,
+        )
+    except RuntimeStartupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def is_loopback_bind_host(host: str) -> bool:
@@ -213,9 +245,7 @@ def reindex(
     settings = Settings(database_url=db) if db else Settings()
     embedder = build_embedding_provider(settings)
     session_factory = make_session_factory_from_settings(settings)
-    database_provider = DatabaseProvider(
-        settings, session_factory=session_factory
-    )
+    database_provider = DatabaseProvider(settings, session_factory=session_factory)
     indexers = [Fts5Indexer(database_provider)]
     if embedder is None:
         typer.echo(
@@ -246,9 +276,7 @@ def reindex(
         # workspace's failure (e.g. a transient embedding error) does not roll
         # back every other workspace's reindex.
         try:
-            counts = reindex_workspace(
-                database_provider, indexer, workspace_id
-            )
+            counts = reindex_workspace(database_provider, indexer, workspace_id)
             for key in totals:
                 totals[key] += counts.get(key, 0)
         except Exception as exc:  # report and continue
@@ -315,7 +343,8 @@ def keygen(
     output: Annotated[
         Path,
         typer.Option(
-            "--output", "-o",
+            "--output",
+            "-o",
             help="PEM file path. Recommended: /etc/dtxwiki/jwt.pem",
         ),
     ],

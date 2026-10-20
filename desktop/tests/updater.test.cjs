@@ -6,7 +6,7 @@ const test = require("node:test");
 
 const { createUpdateManager } = require("../src/updater.cjs");
 
-function fixture({ packaged = true, response = 1 } = {}) {
+function fixture({ packaged = true, response = 1, beforeInstall = async () => {} } = {}) {
   const updater = new EventEmitter();
   updater.checkForUpdates = async () => {};
   updater.downloadUpdate = async () => {
@@ -26,7 +26,7 @@ function fixture({ packaged = true, response = 1 } = {}) {
       },
     },
     getWindow: () => null,
-    beforeInstall: async () => {},
+    beforeInstall,
   });
   return { manager, messages, updater };
 }
@@ -47,4 +47,28 @@ test("an accepted update is downloaded", async () => {
   updater.emit("update-available", { version: "1.2.3" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(updater.downloaded, true);
+});
+
+test("installation is held until engine exit and is cancelled when stop fails", async () => {
+  const { updater, messages } = fixture({
+    response: 0,
+    beforeInstall: async () => { throw new Error("unconfirmed PID 1234"); },
+  });
+  updater.emit("update-downloaded", { version: "1.2.3" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(updater.installed, undefined);
+  assert.equal(messages.at(-1).type, "error");
+  assert.match(messages.at(-1).detail, /unconfirmed PID 1234/);
+});
+
+test("installation awaits the shared engine stop before quitting", async () => {
+  let confirmExit;
+  const exited = new Promise((resolve) => { confirmExit = resolve; });
+  const { updater } = fixture({ response: 0, beforeInstall: () => exited });
+  updater.emit("update-downloaded", { version: "1.2.3" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(updater.installed, undefined);
+  confirmExit();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(updater.installed, true);
 });

@@ -399,6 +399,7 @@ def test_setup_fresh_writes_env_key_and_admin(tmp_path: Path):
     parsed = prod_setup.read_env_file(env)
     assert parsed["DTXWIKI_PUBLIC_BASE_URL"] == "https://wiki.example.com"
     assert parsed["DTXWIKI_AUTO_BOOTSTRAP"] == "false"
+    assert parsed["DTXWIKI_WORKER_MODE"] == "managed"
     assert parsed["DTXWIKI_SIGNUP_ENABLED"] == "false"
     assert parsed["DTXWIKI_DATABASE_URL"] == db_url
     assert len(parsed["DTXWIKI_SESSION_SECRET"]) > 40
@@ -424,6 +425,9 @@ def test_setup_reconfigure_preserves_secret_and_key(tmp_path: Path):
     env = Path(paths["env"])
     secret_before = prod_setup.get_env_value(env, "DTXWIKI_SESSION_SECRET")
     key_bytes_before = Path(paths["jwt"]).read_bytes()
+    # --no-systemd changes configuration without replacing an operator's
+    # existing external process manager.
+    prod_setup.set_env_values(env, {"DTXWIKI_WORKER_MODE": "external"})
 
     second = runner.invoke(
         cli_main.app,
@@ -435,6 +439,7 @@ def test_setup_reconfigure_preserves_secret_and_key(tmp_path: Path):
     assert parsed["DTXWIKI_PUBLIC_BASE_URL"] == "https://wiki2.example.com"
     assert parsed["DTXWIKI_CORS_ORIGINS"] == "https://wiki2.example.com"
     assert parsed["DTXWIKI_SESSION_SECRET"] == secret_before
+    assert parsed["DTXWIKI_WORKER_MODE"] == "external"
     assert Path(paths["jwt"]).read_bytes() == key_bytes_before
 
 

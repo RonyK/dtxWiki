@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import select as select_module
 import signal
 import subprocess
 import sys
@@ -31,6 +32,7 @@ from backend.app.bootstrap import (
     resolve_migrations_dir,
 )
 from backend.app.db import make_session_factory_from_settings
+from backend.app.runtime_resources import ACTIVITY_ENV, RuntimeResources
 from backend.app.settings import Settings
 from backend.models.job import Job
 from backend.scripts.seed_dev import seed_default_workspace
@@ -39,7 +41,7 @@ from backend.services.ops import runtime_lock
 from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 from backend.worker import entry as worker_entry
 from backend.worker.entry import app as worker_cli
-from backend.worker.runtime import OneShotWorker
+from backend.worker.runtime import InitialRecoveryResult, OneShotWorker
 
 pytestmark = [
     pytest.mark.integration,
@@ -441,3 +443,272 @@ def test_worker_process_exits_cleanly_on_sigterm(tmp_path, data_dir):
     assert process.returncode == 0, stderr
     assert '"status": "stopped"' in stdout
     runtime_lock.acquire_exclusive(data_dir).release()
+
+
+def test_initial_roster_failure_never_reports_ready(tmp_path, data_dir, monkeypatch):
+    settings = Settings(database_url=_migrated_database_url(tmp_path))
+    events = []
+
+    def failed_roster(_self, _session):
+        raise RuntimeError("control database unavailable")
+
+    monkeypatch.setattr(OneShotWorker, "_workspace_roster", failed_roster)
+    monkeypatch.setattr(
+        worker_entry, "_seed_due_jobs", lambda *a: events.append("seed")
+    )
+    monkeypatch.setattr(
+        worker_entry, "_sweep_email_outbox", lambda *a: events.append("mail")
+    )
+    with pytest.raises(RuntimeError, match="initial recovery failed"):
+        worker_entry._run_loop(
+            settings,
+            worker_entry._ShutdownSignals(),
+            workspace_id=None,
+            job_type=None,
+            poll_interval_seconds=0,
+            max_jobs=None,
+            idle_exit_after=1,
+            on_ready=lambda: events.append("ready"),
+        )
+    assert events == []
+
+
+def test_ready_follows_recovery_and_precedes_seed_and_mail(
+    tmp_path, data_dir, monkeypatch
+):
+    settings = Settings(database_url=_migrated_database_url(tmp_path))
+    events = []
+    warnings = []
+    broken_workspace = UUID("d5b10adf-edac-4dd6-a698-4b14fe7c04c1")
+
+    def recovery(_self, **kwargs):
+        events.append("recovery")
+        return InitialRecoveryResult(True, failed_workspace_ids=(broken_workspace,))
+
+    monkeypatch.setattr(
+        OneShotWorker, "recover_initial_stale_jobs_with_session_factory", recovery
+    )
+    monkeypatch.setattr(
+        worker_entry.logger,
+        "warning",
+        lambda message, *args: warnings.append(message % args),
+    )
+    monkeypatch.setattr(
+        worker_entry, "_seed_due_jobs", lambda *a: events.append("seed")
+    )
+    monkeypatch.setattr(
+        worker_entry, "_sweep_email_outbox", lambda *a: events.append("mail")
+    )
+    monkeypatch.setattr(
+        OneShotWorker, "dispatch_once_with_session_factory", lambda *a, **k: None
+    )
+    worker_entry._run_loop(
+        settings,
+        worker_entry._ShutdownSignals(),
+        workspace_id=None,
+        job_type=None,
+        poll_interval_seconds=0,
+        max_jobs=None,
+        idle_exit_after=1,
+        on_ready=lambda: events.append("ready"),
+    )
+    assert events == ["recovery", "ready", "seed", "mail"]
+    assert len(warnings) == 1
+    assert "initial recovery partial" in warnings[0]
+    assert str(broken_workspace) in warnings[0]
+
+
+def test_stop_during_recovery_does_not_report_ready(tmp_path, data_dir, monkeypatch):
+    settings = Settings(database_url=_migrated_database_url(tmp_path))
+    shutdown = worker_entry._ShutdownSignals()
+    ready = []
+
+    def recovery(_self, **kwargs):
+        shutdown.signal_name = "SIGTERM"
+        return InitialRecoveryResult(True)
+
+    monkeypatch.setattr(
+        OneShotWorker, "recover_initial_stale_jobs_with_session_factory", recovery
+    )
+    worker_entry._run_loop(
+        settings,
+        shutdown,
+        workspace_id=None,
+        job_type=None,
+        poll_interval_seconds=0,
+        max_jobs=None,
+        idle_exit_after=1,
+        on_ready=lambda: ready.append(True),
+    )
+    assert ready == []
+
+
+@pytest.mark.parametrize("fail_verify", [False, True])
+def test_external_worker_exports_host_activity_and_restores_environment(
+    tmp_path, data_dir, monkeypatch, fail_verify
+):
+    settings = Settings(database_url=_migrated_database_url(tmp_path))
+    monkeypatch.setenv(ACTIVITY_ENV, "preexisting-embedding-environment")
+    expected = RuntimeResources.for_settings(settings).export_environment()[
+        ACTIVITY_ENV
+    ]
+    seen = []
+
+    def verify(_settings):
+        seen.append(os.environ[ACTIVITY_ENV])
+        if fail_verify:
+            raise RuntimeError("fixture verification failure")
+
+    monkeypatch.setattr(worker_entry, "_verify_database", verify)
+    if fail_verify:
+        with pytest.raises(RuntimeError, match="fixture verification failure"):
+            with worker_entry._worker_runtime(settings, skip_bootstrap=True):
+                pytest.fail("verification must precede jobs")
+    else:
+        with worker_entry._worker_runtime(settings, skip_bootstrap=True):
+            assert os.environ[ACTIVITY_ENV] == expected
+    assert seen == [expected]
+    assert os.environ[ACTIVITY_ENV] == "preexisting-embedding-environment"
+
+
+def test_external_workers_share_one_consumer_across_url_alias_and_data_roots(
+    tmp_path, data_dir
+):
+    database_url = _migrated_database_url(tmp_path)
+    environment = {
+        **os.environ,
+        "DTXWIKI_DATA_DIR": str(data_dir),
+        "PYTHONPATH": str(REPO_ROOT),
+    }
+    command = [sys.executable, "-m", "backend.worker.entry"]
+    first = subprocess.Popen(
+        [*command, "run", "--db", database_url, "--skip-bootstrap"],
+        cwd=REPO_ROOT,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert first.stdout is not None
+        deadline = time.monotonic() + 30
+        while True:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, "first worker did not enter its dispatch loop"
+            readable, _, _ = select_module.select([first.stdout], [], [], remaining)
+            assert readable, "first worker did not report idle"
+            line = first.stdout.readline()
+            assert line, "first worker exited before acquiring its consumer lease"
+            if json.loads(line).get("status") == "idle":
+                break
+        second = subprocess.run(
+            [
+                *command,
+                "run-once",
+                "--skip-bootstrap",
+                "--db",
+                database_url.replace("sqlite+pysqlite:", "sqlite:") + "?timeout=7",
+            ],
+            cwd=REPO_ROOT,
+            env={**environment, "DTXWIKI_DATA_DIR": str(tmp_path / "other-root")},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert first.poll() is None
+        assert second.returncode == worker_entry.RUNTIME_LOCKED_EXIT_CODE
+        assert "dtxwiki-consumer.lock" in second.stderr
+    finally:
+        if first.poll() is None:
+            first.send_signal(signal.SIGTERM)
+        try:
+            _, stderr = first.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            first.kill()
+            first.communicate()
+            raise
+    assert first.returncode == 0, stderr
+
+
+def test_worker_migration_refuses_live_api_before_bootstrap(
+    tmp_path, data_dir, monkeypatch
+):
+    settings = Settings(
+        database_url=_migrated_database_url(tmp_path), auto_bootstrap=True
+    )
+    resources = RuntimeResources.for_settings(settings)
+    monkeypatch.setattr(
+        worker_entry, "bootstrap_app", lambda settings: pytest.fail("must not migrate")
+    )
+    with resources.acquire_parent(managed=False):
+        with pytest.raises(worker_entry.typer.Exit) as refused:
+            with worker_entry._worker_runtime(settings, skip_bootstrap=False):
+                pytest.fail("must not consume while migration admission fails")
+    assert refused.value.exit_code == worker_entry.RUNTIME_LOCKED_EXIT_CODE
+
+
+def test_worker_bootstraps_empty_database_and_keeps_consumer_across_downgrade(
+    tmp_path, data_dir, monkeypatch
+):
+    database = tmp_path / "empty.sqlite"
+    settings = Settings(database_url=f"sqlite:///{database}", auto_bootstrap=True)
+    resources = RuntimeResources.for_settings(settings)
+    acquire_activity = RuntimeResources.acquire_activity
+    transitions = []
+
+    def checked_acquire(self, mode="shared"):
+        if mode == "shared" and not transitions:
+            with pytest.raises(runtime_lock.RuntimeLockHeldError):
+                self.acquire_consumer()
+            transitions.append("consumer retained before SH")
+        return acquire_activity(self, mode)
+
+    monkeypatch.setattr(RuntimeResources, "acquire_activity", checked_acquire)
+    assert not database.exists()
+    with worker_entry._worker_runtime(settings, skip_bootstrap=False):
+        assert database.exists()
+        worker_entry._verify_database(settings)
+        with pytest.raises(runtime_lock.RuntimeLockHeldError):
+            resources.acquire_consumer()
+        with pytest.raises(runtime_lock.RuntimeLockHeldError):
+            acquire_activity(resources, "exclusive")
+        # The downgrade completed: a verify-only external API can coexist.
+        with resources.acquire_parent(managed=False):
+            pass
+    assert transitions == ["consumer retained before SH"]
+    with acquire_activity(resources, "exclusive"), resources.acquire_consumer():
+        pass
+
+
+def test_worker_refuses_if_maintenance_wins_activity_downgrade(
+    tmp_path, data_dir, monkeypatch
+):
+    settings = Settings(
+        database_url=_migrated_database_url(tmp_path), auto_bootstrap=True
+    )
+    resources = RuntimeResources.for_settings(settings)
+    acquire_activity = RuntimeResources.acquire_activity
+    maintenance = []
+
+    def preempted_acquire(self, mode="shared"):
+        if mode == "shared":
+            maintenance.append(acquire_activity(self, "exclusive"))
+        return acquire_activity(self, mode)
+
+    monkeypatch.setattr(RuntimeResources, "acquire_activity", preempted_acquire)
+    monkeypatch.setattr(
+        worker_entry,
+        "_verify_database",
+        lambda settings: pytest.fail("must not consume"),
+    )
+    try:
+        with pytest.raises(worker_entry.typer.Exit) as refused:
+            with worker_entry._worker_runtime(settings, skip_bootstrap=False):
+                pytest.fail("must not consume after losing the activity lease")
+        assert refused.value.exit_code == worker_entry.RUNTIME_LOCKED_EXIT_CODE
+        # The failed startup released the consumer; no worker can use storage.
+        with resources.acquire_consumer():
+            pass
+    finally:
+        for guard in maintenance:
+            guard.release()

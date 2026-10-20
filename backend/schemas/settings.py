@@ -73,6 +73,7 @@ class SettingsMcpClientDeleteResponse(RESTResponseBase):
 
 class SettingsPolicies(BaseModel):
     workspace: PolicyCard
+    attachments: PolicyCard | None = None
     library: PolicyCard
     citation: PolicyCard
     context_write: PolicyCard
@@ -110,6 +111,7 @@ class SettingsPolicyUpdateRequest(BaseModel):
 class SettingsPolicyBatchUpdateRequest(BaseModel):
     group: Literal[
         "workspace",
+        "attachments",
         "library",
         "citation",
         "context_write",

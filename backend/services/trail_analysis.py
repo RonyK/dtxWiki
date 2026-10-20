@@ -7,7 +7,7 @@ from itertools import combinations
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from backend.models.agent import AgentPage
 from backend.models.context import ContextPage, EdgeProjection
@@ -119,7 +119,17 @@ def recompute_authority(
     now: datetime | None = None,
 ) -> int:
     now = now or datetime.now(UTC)
-    workspace = session.get(Workspace, workspace_id)
+    # Released migrations call this before later Workspace columns exist.
+    workspace = session.get(
+        Workspace,
+        workspace_id,
+        options=[
+            load_only(
+                Workspace.edge_projection_version,
+                Workspace.authority_projection_version,
+            )
+        ],
+    )
     if workspace is None:
         raise ValueError("workspace not found while computing authority")
     projection_version = workspace.edge_projection_version

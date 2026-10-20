@@ -3,7 +3,7 @@ handler, and reports its retention setting correctly.
 """
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -28,6 +28,7 @@ from backend.services.context_media_orphan_sweep import (
     ContextMediaOrphanSweepService,
     OrphanSweepResult,
 )
+from backend.services.context_media_policy import ContextMediaPolicy
 from backend.services.job_queue import JobQueueService
 from backend.worker.registry import registered_handlers
 from backend.worker.runtime import OneShotWorker
@@ -44,7 +45,7 @@ def test_context_media_orphan_sweep_is_registered():
     assert "context_media_orphan_sweep" in registered_handlers()
 
 
-def test_tick_seeds_orphan_sweep_only_when_retention_is_enabled():
+def test_tick_seeds_orphan_sweep_in_drain_mode_when_disabled():
     session_factory = make_session_factory()
     now = datetime(2026, 8, 29, 3, 0, tzinfo=UTC)
     disabled_settings = Settings(
@@ -62,9 +63,7 @@ def test_tick_seeds_orphan_sweep_only_when_retention_is_enabled():
     with session_factory.begin() as session:
         seed_default_workspace(session)
         disabled = seed_due_jobs(session, disabled_settings, now=now)
-        assert "context_media_orphan_sweep" not in {
-            job.job_type for job in disabled
-        }
+        assert "context_media_orphan_sweep" in {job.job_type for job in disabled}
 
     with session_factory.begin() as session:
         enabled = seed_due_jobs(session, enabled_settings, now=now)
@@ -101,7 +100,10 @@ def test_orphan_sweep_is_seeded_on_the_interval_schedule_not_per_minute():
     # coarser than daily); the bucket count is baked into the idempotency
     # key the same way lint_tick's interval-bucketed key is.
     bucket = int(now.timestamp()) // (24 * 3600)
-    assert orphan_jobs[0].idempotency_key == f"context_media_orphan_sweep:24h:{bucket}"
+    assert (
+        orphan_jobs[0].idempotency_key == f"context_media_orphan_sweep:24h:{bucket}:"
+        f"{ContextMediaPolicy(None, 168).revision}"
+    )
 
 
 def test_orphan_sweep_interval_never_exceeds_a_short_retention_window():
@@ -124,10 +126,13 @@ def test_orphan_sweep_interval_never_exceeds_a_short_retention_window():
     ]
     assert len(orphan_jobs) == 1
     bucket = int(now.timestamp()) // (2 * 3600)
-    assert orphan_jobs[0].idempotency_key == f"context_media_orphan_sweep:2h:{bucket}"
+    assert (
+        orphan_jobs[0].idempotency_key == f"context_media_orphan_sweep:2h:{bucket}:"
+        f"{ContextMediaPolicy(None, 2).revision}"
+    )
 
 
-def test_worker_dispatches_registered_orphan_sweep_service():
+def test_worker_dispatches_registered_orphan_sweep_service(monkeypatch):
     """Wiring test with a fake service (mirrors
     test_worker_dispatches_registered_media_install_reconciler): the
     handler must pass job.workspace_id, settings.retention_hours, and the
@@ -150,6 +155,14 @@ def test_worker_dispatches_registered_orphan_sweep_service():
                 run_at=now,
             )
 
+    run_at = datetime(2026, 10, 19, 0, 0, tzinfo=UTC)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return run_at
+
+    monkeypatch.setattr("backend.worker.runtime.datetime", FrozenDatetime)
     fake_service = _FakeSweepService()
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
@@ -182,7 +195,7 @@ def test_worker_dispatches_registered_orphan_sweep_service():
         "reclaimed_count": 2,
         "drained_count": 1,
     }
-    assert fake_service.called == (workspace_id, 72, scheduled_for)
+    assert fake_service.called == (workspace_id, 72, run_at)
 
 
 def test_worker_end_to_end_reclaims_a_real_orphan():
@@ -253,14 +266,25 @@ def test_worker_end_to_end_reclaims_a_real_orphan():
 
         repository = SqlAlchemyContextMediaRepository(session)
         actor = ActorIdentity("human", str(uuid4()))
-        page = ContextPage(workspace_id=workspace_id, slug="worker-orphan",
-            title="Worker orphan", page_type="overview")
+        page = ContextPage(
+            workspace_id=workspace_id,
+            slug="worker-orphan",
+            title="Worker orphan",
+            page_type="overview",
+        )
         session.add(page)
         session.flush()
-        version = ContextPageVersion(workspace_id=workspace_id, page_id=page.id,
-            version_no=1, body_md="", content_hash="0" * 64, actor_type="human",
-            created_by_actor_kind=actor.kind, created_by_actor_id=actor.id,
-            version_status="editing")
+        version = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=1,
+            body_md="",
+            content_hash="0" * 64,
+            actor_type="human",
+            created_by_actor_kind=actor.kind,
+            created_by_actor_id=actor.id,
+            version_status="editing",
+        )
         session.add(version)
         session.flush()
         asset = _RegisterMediaAsset().execute(
@@ -327,3 +351,233 @@ def test_worker_end_to_end_reclaims_a_real_orphan():
             )
         )
         assert job is not None and job.status == "completed"
+
+
+def test_same_bucket_policy_revision_and_disabled_server_override():
+    from backend.models.workspace import Workspace
+
+    factory = make_session_factory()
+    settings = Settings(context_media_orphan_retention_hours=0)
+    now = datetime(2026, 10, 19, 0, 0, tzinfo=UTC)
+    with factory.begin() as session:
+        workspace = seed_default_workspace(session)
+        workspace.context_media_policy = {"orphan_retention_hours": 168}
+        workspace_id = workspace.id
+    with factory.begin() as session:
+        first = seed_due_jobs(session, settings, now=now)
+        assert (
+            len([j for j in first if j.job_type == "context_media_orphan_sweep"]) == 1
+        )
+        session.get(Workspace, workspace_id).context_media_policy = {
+            "orphan_retention_hours": 72
+        }
+    with factory.begin() as session:
+        second = seed_due_jobs(session, settings, now=now)
+        orphan = [j for j in second if j.job_type == "context_media_orphan_sweep"]
+        assert len(orphan) == 1
+        assert orphan[0].idempotency_key.endswith(ContextMediaPolicy(72, 0).revision)
+    with factory.begin() as session:
+        assert not seed_due_jobs(session, settings, now=now)
+
+
+def test_split_worker_resolves_latest_control_policy_before_workspace_transaction(
+    tmp_path, monkeypatch
+):
+    from sqlalchemy import event
+
+    from backend.app.container import DatabaseProvider
+    from backend.models.workspace import Workspace
+
+    control_engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'control.db'}")
+    workspace_engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'workspace.db'}")
+    Base.metadata.create_all(control_engine)
+    Base.metadata.create_all(workspace_engine)
+    control = sessionmaker(control_engine, expire_on_commit=False)
+    workspace = sessionmaker(workspace_engine, expire_on_commit=False)
+    with control.begin() as session:
+        ws = seed_default_workspace(session)
+        workspace_id = ws.id
+        ws.context_media_policy = {"orphan_retention_hours": 168}
+    with workspace.begin() as session:
+        session.add(
+            Workspace(
+                id=workspace_id,
+                slug="shard",
+                title="Shard",
+                name="Shard",
+                context_media_policy={"orphan_retention_hours": 1},
+            )
+        )
+
+    class SplitProvider(DatabaseProvider):
+        def session_for(self, workspace_id):
+            return workspace
+
+    provider = SplitProvider(None, session_factory=control)
+    calls = []
+
+    class Sweep:
+        def sweep(self, session, *, workspace_id, retention_hours, now):
+            assert session.get_bind() is workspace_engine
+            calls.append((retention_hours, now))
+            return OrphanSweepResult(0, 0, 0, now)
+
+    worker = OneShotWorker(
+        database_provider=provider,
+        settings=Settings(context_media_orphan_retention_hours=0),
+        context_media_orphan_sweep_service=Sweep(),
+    )
+    run_at = datetime(2026, 10, 19, tzinfo=UTC)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return run_at
+
+    monkeypatch.setattr("backend.worker.runtime.datetime", FrozenDatetime)
+
+    def forbid_workspace_policy_reads(
+        conn, cursor, statement, parameters, context, executemany
+    ):
+        if (
+            statement.lstrip().upper().startswith("SELECT")
+            and "workspace." in statement.lower()
+        ):
+            raise AssertionError("Policy read on workspace plane")
+
+    event.listen(
+        workspace_engine, "before_cursor_execute", forbid_workspace_policy_reads
+    )
+    from sqlalchemy import delete
+
+    from backend.worker.entry import _seed_due_jobs
+
+    _seed_due_jobs(provider, Settings(context_media_orphan_retention_hours=0))
+    with workspace.begin() as session:
+        scheduled = session.scalars(
+            select(Job).where(Job.job_type == "context_media_orphan_sweep")
+        ).all()
+        assert len(scheduled) == 1
+        assert scheduled[0].idempotency_key.endswith(
+            ContextMediaPolicy(168, 0).revision
+        )
+        # Clear only this test's queue to inspect each stale execution below.
+        session.execute(delete(Job))
+    for hours in (336, 0, 72):
+        with workspace.begin() as session:
+            JobQueueService().enqueue(
+                session=session,
+                workspace_id=workspace_id,
+                job_type="context_media_orphan_sweep",
+                trigger_type="scheduled",
+                idempotency_key=f"stale-{hours}",
+                target_ref={
+                    "scheduled_for": "2000-01-01T00:00:00+00:00",
+                    "retention_hours": 1,
+                },
+            )
+        with control.begin() as session:
+            session.get(Workspace, workspace_id).context_media_policy = {
+                "orphan_retention_hours": hours
+            }
+        result = worker.dispatch_once_with_session_factory(
+            workspace,
+            workspace_id=workspace_id,
+            job_types={"context_media_orphan_sweep"},
+        )
+        assert result.status == "completed", result
+        assert calls[-1] == (hours, run_at)
+    with control.begin() as session:
+        session.get(Workspace, workspace_id).context_media_policy = {
+            "orphan_retention_hours": -1
+        }
+    with workspace.begin() as session:
+        JobQueueService().enqueue(
+            session=session,
+            workspace_id=workspace_id,
+            job_type="context_media_orphan_sweep",
+            trigger_type="scheduled",
+            idempotency_key="invalid-policy",
+            target_ref={},
+        )
+    before = len(calls)
+    result = worker.dispatch_once_with_session_factory(
+        workspace, workspace_id=workspace_id, job_types={"context_media_orphan_sweep"}
+    )
+    assert result.status in {"queued", "failed"}
+    assert len(calls) == before
+
+
+def test_real_sweeps_keep_three_workspace_policies_separate(monkeypatch):
+    from types import SimpleNamespace
+
+    from sqlalchemy import update
+
+    from backend.models.workspace import Workspace
+    from backend.tests.integration.test_context_media_attachments_api import _seed_asset
+
+    factory = make_session_factory()
+    run_at = datetime(2026, 10, 19, tzinfo=UTC)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return run_at
+
+    monkeypatch.setattr("backend.worker.runtime.datetime", FrozenDatetime)
+    ids = []
+    with factory.begin() as session:
+        first = seed_default_workspace(session)
+        first.context_media_policy = {"orphan_retention_hours": 168}
+        ids.append(first.id)
+        for hours in (0, 72):
+            workspace = Workspace(
+                id=uuid4(),
+                slug=f"retention-{hours}",
+                title=f"Retention {hours}",
+                name=f"Retention {hours}",
+                context_media_policy={"orphan_retention_hours": hours},
+            )
+            session.add(workspace)
+            ids.append(workspace.id)
+    seeded = [
+        _seed_asset(
+            SimpleNamespace(session_factory=factory),
+            workspace_id,
+            created_by_actor_id=str(uuid4()),
+        )
+        for workspace_id in ids
+    ]
+    with factory.begin() as session:
+        session.execute(
+            update(ContextMediaAsset).values(created_at=run_at - timedelta(days=4))
+        )
+        for workspace_id in ids:
+            JobQueueService().enqueue(
+                session=session,
+                workspace_id=workspace_id,
+                job_type="context_media_orphan_sweep",
+                trigger_type="scheduled",
+                idempotency_key="same-key-different-workspace",
+                target_ref={"scheduled_for": "2000-01-01T00:00:00+00:00"},
+            )
+    worker = OneShotWorker(
+        settings=Settings(context_media_orphan_retention_hours=0),
+        context_media_orphan_sweep_service=ContextMediaOrphanSweepService(
+            SqlAlchemyContextMediaRepository
+        ),
+    )
+    for workspace_id, reclaimed in zip(ids, (0, 0, 1), strict=True):
+        result = worker.dispatch_once_with_session_factory(
+            factory, workspace_id=workspace_id, job_types={"context_media_orphan_sweep"}
+        )
+        assert result.status == "completed"
+        assert result.detail["reclaimed_count"] == reclaimed
+    with factory() as session:
+        for workspace_id, asset, exists in zip(
+            ids, seeded, (True, True, False), strict=True
+        ):
+            assert (
+                session.get(ContextMediaAsset, (workspace_id, UUID(asset["asset_id"])))
+                is not None
+            ) is exists

@@ -1,4 +1,5 @@
 """Tests for proxy_headers dual entry path (Task 4.2)."""
+
 import unittest.mock as mock
 
 from backend.app.settings import Settings
@@ -12,14 +13,17 @@ def test_uvicorn_proxy_headers_passed_cli(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_uvicorn_run(app, **kwargs):
+    async def fake_runtime(app, settings, **kwargs):
         captured.update(kwargs)
 
-    with mock.patch("backend.cli.main.uvicorn.run", side_effect=fake_uvicorn_run), \
-         mock.patch("backend.cli.main.bootstrap_app"), \
-         mock.patch("backend.cli.main.create_app", return_value=mock.MagicMock()), \
-         mock.patch("backend.cli.main.webbrowser.open"):
+    with (
+        mock.patch("backend.cli.main.serve_runtime", side_effect=fake_runtime),
+        mock.patch("backend.cli.main.bootstrap_app"),
+        mock.patch("backend.cli.main.create_app", return_value=mock.MagicMock()),
+        mock.patch("backend.cli.main.webbrowser.open"),
+    ):
         from backend.cli.main import run_server
+
         run_server(
             host="127.0.0.1",
             port=21080,
@@ -38,14 +42,17 @@ def test_default_proxy_headers_false_no_op(monkeypatch):
 
     captured = {}
 
-    def fake_uvicorn_run(app, **kwargs):
+    async def fake_runtime(app, settings, **kwargs):
         captured.update(kwargs)
 
-    with mock.patch("backend.cli.main.uvicorn.run", side_effect=fake_uvicorn_run), \
-         mock.patch("backend.cli.main.bootstrap_app"), \
-         mock.patch("backend.cli.main.create_app", return_value=mock.MagicMock()), \
-         mock.patch("backend.cli.main.webbrowser.open"):
+    with (
+        mock.patch("backend.cli.main.serve_runtime", side_effect=fake_runtime),
+        mock.patch("backend.cli.main.bootstrap_app"),
+        mock.patch("backend.cli.main.create_app", return_value=mock.MagicMock()),
+        mock.patch("backend.cli.main.webbrowser.open"),
+    ):
         from backend.cli.main import run_server
+
         run_server(
             host="127.0.0.1",
             port=21080,
@@ -62,6 +69,7 @@ def test_module_main_marked_deprecated():
     import inspect
 
     from backend.app import main as main_module
+
     doc = inspect.getdoc(main_module.main)
     assert doc is not None
     assert "DEPRECATED" in doc or "deprecated" in doc.lower()
@@ -82,9 +90,11 @@ def test_uvicorn_proxy_headers_passed_module_main():
     def fake_uvicorn_run(app, **kwargs):
         captured.update(kwargs)
 
-    with mock.patch.object(main_module, "get_settings", return_value=settings), \
-         mock.patch.object(main_module, "create_app", return_value=mock.MagicMock()), \
-         mock.patch.object(main_module.uvicorn, "run", side_effect=fake_uvicorn_run):
+    with (
+        mock.patch.object(main_module, "get_settings", return_value=settings),
+        mock.patch.object(main_module, "create_app", return_value=mock.MagicMock()),
+        mock.patch.object(main_module.uvicorn, "run", side_effect=fake_uvicorn_run),
+    ):
         main_module.main()
 
     assert captured.get("proxy_headers") is True

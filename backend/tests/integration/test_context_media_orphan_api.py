@@ -74,8 +74,12 @@ def _workspace_id(client: TestClient) -> str:
 
 
 def _seed_page_bound_orphan(
-    page_service, workspace_id, *, created_by_actor_id: str | None = None,
-    title: str = "Orphan page", editing: bool = False
+    page_service,
+    workspace_id,
+    *,
+    created_by_actor_id: str | None = None,
+    title: str = "Orphan page",
+    editing: bool = False,
 ) -> None:
     """Register against a real editing row, then optionally submit it."""
     from datetime import datetime
@@ -304,9 +308,7 @@ def test_workspace_orphan_listing_excludes_a_live_in_flight_upload(page_service)
 
     owner = make_client(page_service, "orphans-live@example.com")
     workspace_id = _workspace_id(owner)
-    _seed_page_bound_orphan(
-        page_service, UUID(workspace_id), editing=True
-    )
+    _seed_page_bound_orphan(page_service, UUID(workspace_id), editing=True)
 
     response = owner.get(f"/api/v1/workspaces/{workspace_id}/context/media/orphans")
     assert response.status_code == 200, response.text
@@ -346,3 +348,29 @@ def test_admin_orphan_listing_returns_orphans_for_the_given_workspace(page_servi
     assert len(items) == 1
     assert "owner_kind" not in items[0]
     assert "session_id" not in items[0]
+
+
+def test_nonmember_server_admin_cannot_read_orphan_metadata(page_service):
+    from uuid import UUID
+    owner = make_client(page_service, "orphan-owner-boundary@example.com")
+    workspace_id = _workspace_id(owner)
+    _seed_page_bound_orphan(page_service, UUID(workspace_id))
+    admin = make_server_admin_client(page_service, "orphan-admin-boundary@example.com")
+    from backend.models.workspace import WorkspaceMembership
+
+    with page_service.session_factory.begin() as session:
+        user = session.scalar(
+            select(User).where(User.email == "orphan-admin-boundary@example.com")
+        )
+        membership = session.scalar(
+            select(WorkspaceMembership).where(
+                WorkspaceMembership.workspace_id == UUID(workspace_id),
+                WorkspaceMembership.user_id == user.id,
+            )
+        )
+        session.delete(membership)
+    response = admin.get(
+        "/api/v1/admin/context-media/orphans", params={"workspace_id": workspace_id}
+    )
+    assert response.status_code in (403, 404)
+    assert "orphan.png" not in response.text

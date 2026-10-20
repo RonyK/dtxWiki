@@ -6,6 +6,8 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from backend.app.db import make_engine
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
+from backend.app.settings import Settings
 from backend.models import Base
 from backend.models.workspace import Workspace
 from backend.scripts.migrate_data import (
@@ -106,6 +108,23 @@ def test_rejects_same_source_and_target_url(tmp_path: Path) -> None:
 
     with pytest.raises(MigrationPrecheckError, match="must differ"):
         migrate_data(url, url)
+
+
+def test_rejects_same_sqlite_database_through_driver_and_query_alias(tmp_path):
+    database = tmp_path / "same.sqlite"
+    with pytest.raises(MigrationPrecheckError, match="same SQLite database"):
+        migrate_data(_url(database), f"sqlite+pysqlite:///{database}?timeout=8")
+
+
+@pytest.mark.parametrize("busy", ["source", "target"])
+def test_migrate_refuses_db_activity_outside_its_data_root(tmp_path, busy):
+    source = _url(tmp_path / "source.sqlite")
+    target = _url(tmp_path / "target.sqlite")
+    database_url = source if busy == "source" else target
+    resources = RuntimeResources.for_settings(Settings(database_url=database_url))
+    with acquire_paths([resources.activity_paths[1]], "shared"):
+        with pytest.raises(MigrationPrecheckError, match="dtxwiki-activity.lock"):
+            migrate_data(source, target, data_dir=tmp_path / "other-root")
 
 
 def test_rejects_missing_target_alembic_revision(tmp_path: Path) -> None:

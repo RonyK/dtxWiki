@@ -27,10 +27,10 @@ FRAGMENTS_DIR = MIGRATIONS_DIR.parent / "fragments"
 FREEZE_MANIFEST = MIGRATIONS_DIR.parent / "frozen_revisions.json"
 RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
-# Canonical head of the 0.1 schema release group.
+# Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
 RETENTION_REVISION = "d148b9746ff5"
-INPUT_REVISION = "19db79d3e622"
+CURRENT_HEAD = "19db79d3e622"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -79,7 +79,7 @@ def test_the_chain_is_linear_and_starts_with_the_released_revisions():
 
     script = _script_directory()
     chain = _base_first_chain(script)
-    assert script.get_heads() == [INPUT_REVISION]
+    assert script.get_heads() == [CURRENT_HEAD]
     assert code_revisions() == {revision for revision, _ in chain}
     assert code_revisions().isdisjoint(RETIRED_REVISION_IDS)
 
@@ -87,7 +87,7 @@ def test_the_chain_is_linear_and_starts_with_the_released_revisions():
         (INITIAL_REVISION, None),
         (CORE_REVISION, INITIAL_REVISION),
         (RETENTION_REVISION, CORE_REVISION),
-        (INPUT_REVISION, RETENTION_REVISION),
+        (CURRENT_HEAD, RETENTION_REVISION),
     ]
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
@@ -345,7 +345,7 @@ def test_generated_revisions_group_patch_versions_and_link_in_order(tmp_path):
     )
     first = create_revision("0.2.0", "add workspace settings", root=tmp_path)
     second = create_revision("0.2.1", "add search index", root=tmp_path)
-    assert first.down_revision == INPUT_REVISION
+    assert first.down_revision == CURRENT_HEAD
     assert second.down_revision == first.revision
     assert first.revision != second.revision
     assert (

@@ -8,6 +8,7 @@
   "main": "src/main.cjs",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
+    "test:engine-stop": "node --test tests/blocked-engine.integration.cjs",
     "pack": "electron-builder --config electron-builder.config.cjs --dir",
     "build:pack": "electron-builder --config electron-builder.config.cjs --dir",
     "build:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64",

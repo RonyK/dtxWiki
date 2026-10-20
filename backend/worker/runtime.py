@@ -26,6 +26,7 @@ from backend.repositories.workspace_scoped import get_in_workspace
 from backend.services.actor_identities import SYSTEM_FEEDBACK_RESOLVER_ACTOR_ID
 from backend.services.bundle_expiration import BundleExpirationService
 from backend.services.context_media_orphan_sweep import ContextMediaOrphanSweepService
+from backend.services.context_media_policy import read_context_media_policy
 from backend.services.context_reconciliation_reminder import (
     RECONCILIATION_REMINDER_JOB_TYPE,
     ContextReconciliationReminderService,
@@ -84,6 +85,25 @@ class WorkerShutdownRequested(BaseException):
     def __init__(self, signal_name: str) -> None:
         super().__init__(signal_name)
         self.signal_name = signal_name
+
+
+@dataclass(frozen=True)
+class InitialRecoveryResult:
+    """Outcome of the first stale-lease pass, before worker readiness.
+
+    A control-plane failure means the pass could not run. Individual workspace
+    failures remain isolated, as they are during periodic recovery.
+    """
+
+    roster_available: bool
+    reclaimed_count: int = 0
+    failed_workspace_ids: tuple[UUID, ...] = ()
+
+    @property
+    def status(self) -> str:
+        if not self.roster_available:
+            return "roster_failed"
+        return "partial" if self.failed_workspace_ids else "complete"
 
 
 @dataclass(frozen=True)
@@ -406,6 +426,17 @@ class OneShotWorker:
         session_factory: sessionmaker,
         lease_timeout_seconds: int,
     ) -> int:
+        """Best-effort periodic recovery; preserve the reclaimed-count API."""
+        return self.recover_initial_stale_jobs_with_session_factory(
+            session_factory=session_factory,
+            lease_timeout_seconds=lease_timeout_seconds,
+        ).reclaimed_count
+
+    def recover_initial_stale_jobs_with_session_factory(
+        self,
+        session_factory: sessionmaker,
+        lease_timeout_seconds: int,
+    ) -> InitialRecoveryResult:
         """Requeue (or terminally fail) every workspace's jobs stuck in
         'running' past their lease.
 
@@ -435,28 +466,30 @@ class OneShotWorker:
         ``self._database_provider`` is injected (unit tests exercising a
         single un-sharded DB) -- unchanged from before Phase 6a in that case.
 
-        Returns the total number of jobs reclaimed across every workspace.
+        Report whether the required roster pass ran, and which workspaces
+        were deferred. The periodic wrapper keeps its existing integer API.
         """
-        control_session_factory = (
-            self._database_provider.control_session_factory()
-            if self._database_provider is not None
-            else session_factory
-        )
         try:
+            control_session_factory = (
+                self._database_provider.control_session_factory()
+                if self._database_provider is not None
+                else session_factory
+            )
             with control_session_factory.begin() as control_session:
                 workspace_ids = self._workspace_roster(control_session)
         except Exception:
             logger.exception("stale-job reclaim failed reading workspace roster")
-            return 0
+            return InitialRecoveryResult(roster_available=False)
 
         total_reclaimed = 0
+        failed_workspace_ids = []
         for workspace_id in workspace_ids:
-            workspace_session_factory = (
-                self._database_provider.session_for(workspace_id)
-                if self._database_provider is not None
-                else session_factory
-            )
             try:
+                workspace_session_factory = (
+                    self._database_provider.session_for(workspace_id)
+                    if self._database_provider is not None
+                    else session_factory
+                )
                 with workspace_session_factory.begin() as session:
                     reclaimed = self.job_queue.reclaim_stale_jobs(
                         session=session,
@@ -487,6 +520,7 @@ class OneShotWorker:
                         )
                     total_reclaimed += len(reclaimed)
             except Exception:
+                failed_workspace_ids.append(workspace_id)
                 logger.exception(
                     "stale-job reclaim failed for workspace %s; continuing "
                     "the sweep for the remaining workspaces",
@@ -509,7 +543,11 @@ class OneShotWorker:
                     job_type=job.job_type,
                     error=job.last_error or "worker lease expired",
                 )
-        return total_reclaimed
+        return InitialRecoveryResult(
+            roster_available=True,
+            reclaimed_count=total_reclaimed,
+            failed_workspace_ids=tuple(failed_workspace_ids),
+        )
 
     def _release_interrupted_claim(
         self,
@@ -1213,6 +1251,25 @@ class OneShotWorker:
                         workspace_session_factory,
                         claimed_job,
                     )
+                elif claimed_job.job_type == "context_media_orphan_sweep":
+                    if self._settings is None:
+                        raise RuntimeError(
+                            "Attachment retention settings are unavailable"
+                        )
+                    with control_session_factory() as policy_session:
+                        policy = read_context_media_policy(
+                            policy_session,
+                            claimed_job.workspace_id,
+                            self._settings.context_media_orphan_retention_hours,
+                        )
+                    run_at = datetime.now(UTC)
+                    with workspace_session_factory.begin() as work_session:
+                        detail = self._sweep_context_media(
+                            work_session,
+                            claimed_job.workspace_id,
+                            policy.effective_hours,
+                            run_at,
+                        )
                 else:
                     with workspace_session_factory.begin() as work_session:
                         detail = self._run_business_logic(
@@ -1834,17 +1891,36 @@ class OneShotWorker:
     def _business_context_media_orphan_sweep(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
+        # Legacy single-DB dispatch only. Production resolves CONTROL before
+        # opening the workspace mutation transaction in the orchestrator.
         del queue_job
-        retention_hours = (
-            self._settings.context_media_orphan_retention_hours
-            if self._settings is not None
-            else 0
+        if self._settings is None:
+            raise RuntimeError("Attachment retention settings are unavailable")
+        if self._database_provider is not None:
+            with self._database_provider.control_session_factory()() as control_session:
+                policy = read_context_media_policy(
+                    control_session,
+                    job.workspace_id,
+                    self._settings.context_media_orphan_retention_hours,
+                )
+        else:
+            policy = read_context_media_policy(
+                session,
+                job.workspace_id,
+                self._settings.context_media_orphan_retention_hours,
+            )
+        return self._sweep_context_media(
+            session, job.workspace_id, policy.effective_hours, datetime.now(UTC)
         )
+
+    def _sweep_context_media(
+        self, session: Session, workspace_id: UUID, hours: int, now: datetime
+    ) -> dict[str, Any]:
         result = self._context_media_orphan_sweep_service().sweep(
             session,
-            workspace_id=job.workspace_id,
-            retention_hours=retention_hours,
-            now=self._datetime_target(job=job, key="scheduled_for"),
+            workspace_id=workspace_id,
+            retention_hours=hours,
+            now=now,
         )
         return {
             "inspected_count": result.inspected_count,

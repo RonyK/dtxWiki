@@ -105,6 +105,7 @@ def test_root_invocation_accepts_serve_options(monkeypatch):
             "db": None,
             "open_browser": False,
             "log_level": "warning",
+            "worker_mode": None,
         }
     ]
 
@@ -112,28 +113,26 @@ def test_root_invocation_accepts_serve_options(monkeypatch):
 def test_root_invocation_uses_env_backed_default_port(monkeypatch):
     calls = []
 
-    def fake_uvicorn_run(app_instance, **kwargs):
+    async def fake_runtime(app_instance, settings, **kwargs):
         calls.append({"app": app_instance, **kwargs})
 
     monkeypatch.setenv("DTXWIKI_BACKEND_PORT", "22080")
     monkeypatch.setattr(cli_main, "bootstrap_app", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli_main, "create_app", lambda settings: object())
-    monkeypatch.setattr(cli_main.uvicorn, "run", fake_uvicorn_run)
+    monkeypatch.setattr(cli_main, "serve_runtime", fake_runtime)
 
     result = CliRunner().invoke(cli_main.app, ["--no-open"])
 
     assert result.exit_code == 0
-    assert calls == [
-        {
-            "app": calls[0]["app"],
-            "host": "127.0.0.1",
-            "port": 22080,
-            "log_level": "info",
-            "access_log": False,
-            "proxy_headers": False,
-            "forwarded_allow_ips": "127.0.0.1",
-        }
-    ]
+    assert len(calls) == 1
+    assert calls[0]["host"] == "127.0.0.1"
+    assert calls[0]["port"] == 22080
+    assert calls[0]["log_level"] == "info"
+    assert calls[0]["proxy_headers"] is False
+    assert calls[0]["forwarded_allow_ips"] == "127.0.0.1"
+    assert calls[0]["on_started"] is None
+    assert calls[0]["app"] is None
+    assert callable(calls[0]["application_factory"])
 
 
 def test_cli_import_does_not_create_global_asgi_app_under_production_guard():
@@ -317,10 +316,13 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
     assert "role" not in payload
 
     session_service = make_session_service(database_url)
-    assert session_service.login(
-        email="user@example.com",
-        password="correct-password",
-    ).user.email == "user@example.com"
+    assert (
+        session_service.login(
+            email="user@example.com",
+            password="correct-password",
+        ).user.email
+        == "user@example.com"
+    )
     existing_session = session_service.login(
         email="user@example.com",
         password="correct-password",
@@ -346,18 +348,19 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
         session_service.authenticate_session(existing_session.session_token)
     with pytest.raises(InvalidCredentialsError, match="email or password is invalid"):
         session_service.login(email="user@example.com", password="correct-password")
-    assert session_service.login(
-        email="user@example.com",
-        password="changed-password",
-    ).user.email == "user@example.com"
+    assert (
+        session_service.login(
+            email="user@example.com",
+            password="changed-password",
+        ).user.email
+        == "user@example.com"
+    )
 
     session_factory = make_session_factory(make_engine(database_url))
     with session_factory() as session:
         user = session.scalar(select(User).where(User.email == "user@example.com"))
         audit = session.scalar(
-            select(AuditEvent).where(
-                AuditEvent.action == "auth.password.admin_reset"
-            )
+            select(AuditEvent).where(AuditEvent.action == "auth.password.admin_reset")
         )
         assert user is not None
         assert user.session_generation == 1

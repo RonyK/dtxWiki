@@ -9,7 +9,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, load_only
 
 from backend.domain.input_policy import (
     validate_title,
@@ -46,7 +46,10 @@ from backend.repositories.mcp_chat_repo import (
     list_call_artifact_edges,
     list_calls_naming_page,
 )
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 from backend.schemas.mcp_chat import (
     McpChatAction,
@@ -1605,6 +1608,16 @@ class McpChatService:
                     session_diff=session_diffs.get(row.id),
                 )
             )
+        # Enrich only after visibility/content projection has populated the
+        # request cache. Most edit versions need no additional read at all.
+        visible_pairs = [
+            (row, item)
+            for row, item in zip(rows, timeline, strict=True)
+            if item.input_availability != "redacted" and row.id not in discarded_edit
+        ]
+        gate.prime_input_versions([row for row, _ in visible_pairs])
+        for row, item in visible_pairs:
+            item.input_display_items.extend(gate.input_version_items(row))
         return timeline
 
     def _error_call_item(
@@ -2156,6 +2169,7 @@ class _ReaderGate:
         self.actor = actor
         self._titles: dict[tuple[str, UUID], tuple[str | None, str | None]] = {}
         self._versions: dict[UUID, ContextPageVersion | None] = {}
+        self._input_version_candidates: dict[UUID, ContextPageVersion] = {}
         self._targets: dict[tuple[str, UUID], _ResolvedTarget | None] = {}
         self._discarded: dict[UUID, bool] = {}
 
@@ -2204,6 +2218,82 @@ class _ReaderGate:
             )
             self._versions[version_id] = version if visible else None
         return self._versions[version_id]
+
+    def prime_input_versions(self, rows: list[MCPToolCall]) -> None:
+        """Read missing version labels in bounded batches, without bodies."""
+        wanted: set[UUID] = set()
+        for row in rows:
+            for field in _CONTEXT_VERSION_ID_FIELDS:
+                if _target_kind_for_field(row.tool_name, field) != "context_version":
+                    continue
+                version_id = _parse_uuid_value(row.input_summary.get(field))
+                if version_id and version_id not in self._versions:
+                    wanted.add(version_id)
+        ids = list(wanted)
+        for start in range(0, len(ids), 500):
+            versions = self.session.scalars(
+                select_in_workspace_by_ids(
+                    ContextPageVersion,
+                    workspace_id=self.workspace_id,
+                    resource_ids=ids[start : start + 500],
+                )
+                .options(
+                    load_only(
+                        ContextPageVersion.id,
+                        ContextPageVersion.page_id,
+                        ContextPageVersion.version_no,
+                        ContextPageVersion.version_status,
+                        ContextPageVersion.created_by_actor_kind,
+                        ContextPageVersion.created_by_actor_id,
+                    )
+                )
+            ).all()
+            self._input_version_candidates.update(
+                (version.id, version) for version in versions
+            )
+
+    def input_version_items(self, row: MCPToolCall) -> list[McpChatDisplayItem]:
+        """Reuse Context versions already loaded by the reader's gate.
+
+        Only use actual input references, never a created/result version or
+        the page's latest version. Editing revisions remain captured inputs;
+        reading today's mutable revision would misdescribe a historical call.
+        This per-call step never queries. Batched candidates also require a
+        previously checked page title and the existing version visibility rule.
+        """
+        items: list[McpChatDisplayItem] = []
+        for field, key in (
+            ("version_id", "input_version"),
+            ("base_version_id", "base_version"),
+            ("editing_version_id", "editing_version"),
+            ("cited_context_page_version_id", "cited_version"),
+        ):
+            if _target_kind_for_field(row.tool_name, field) != "context_version":
+                continue
+            version_id = _parse_uuid_value(row.input_summary.get(field))
+            version = (
+                self._versions.get(version_id)
+                if version_id in self._versions
+                else self._input_version_candidates.get(version_id)
+            )
+            if version is not None and (
+                not self._titles.get(("context_page", version.page_id), (None, None))[0]
+                or (
+                    self.actor is not None
+                    and not context_version_is_visible(version, self.actor)
+                )
+            ):
+                version = None
+            if version is not None:
+                items.append(
+                    McpChatDisplayItem(
+                        key=key,
+                        kind="text",
+                        text=f"v{version.version_no}",
+                        resource_id=version.id,
+                    )
+                )
+        return items
 
     def call_content_visible(self, row: MCPToolCall, chat: McpChatSession) -> bool:
         """Whether the reader may see what a context-edit call wrote.

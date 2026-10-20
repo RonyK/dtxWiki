@@ -27,6 +27,7 @@ from backend.schemas.lint import LintRunCreateRequest
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services import job_hints
 from backend.services.bundle_expiration import BundleExpirationService
+from backend.services.context_media_policy import ContextMediaPolicy
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.extraction_service import ExtractionService
 from backend.services.job_hints import record_workspace_job_hint
@@ -106,8 +107,7 @@ def test_due_tick_seeder_is_idempotent_and_honors_disabled_intervals():
         lint_tick_interval_hours=24,
         trail_tick_interval_hours=0,
         librarian_tick_interval_days=0,
-        # Out of scope for this test (interval-tick seeding); the sweep's
-        # own minute-job seeding is covered separately below.
+        # Automatic reclamation is off; hourly Context drain still runs.
         context_media_orphan_retention_hours=0,
     )
     with session_factory.begin() as session:
@@ -121,6 +121,7 @@ def test_due_tick_seeder_is_idempotent_and_honors_disabled_intervals():
         "media_install_reconcile",
         "credential_replica_reconcile",
         "lint_tick",
+        "context_media_orphan_sweep",
         "media_blob_gc",
     ]
     assert second == []
@@ -140,6 +141,11 @@ def test_due_tick_seeder_is_idempotent_and_honors_disabled_intervals():
             f"{workspace.id}:{bundle_bucket}",
         ),
         ("lint_tick", f"lint_tick:24h:{bucket}"),
+        (
+            "context_media_orphan_sweep",
+            f"context_media_orphan_sweep:1h:{int(now.timestamp()) // 3600}:"
+            + ContextMediaPolicy(None, 0).revision,
+        ),
         ("media_blob_gc", f"media_blob_gc:1h:{int(now.timestamp()) // 3600}"),
     ]
     assert jobs[0].workspace_id == workspace.id
@@ -180,6 +186,7 @@ def test_due_tick_uses_configured_interval_and_ignores_manual_job_history():
         "media_install_reconcile",
         "credential_replica_reconcile",
         "lint_tick",
+        "context_media_orphan_sweep",
         "media_blob_gc",
     }
     assert {job.job_type for job in second} == {
@@ -187,6 +194,7 @@ def test_due_tick_uses_configured_interval_and_ignores_manual_job_history():
         "media_install_reconcile",
         "credential_replica_reconcile",
         "lint_tick",
+        "context_media_orphan_sweep",
         "media_blob_gc",
     }
     assert first_lint.idempotency_key != second_lint.idempotency_key
@@ -220,6 +228,7 @@ def test_due_tick_seeds_minute_maintenance_jobs_once_per_minute():
         "bundle_expiration_sweep",
         "media_install_reconcile",
         "credential_replica_reconcile",
+        "context_media_orphan_sweep",
         "media_blob_gc",
     ]
     assert same_hour == []
@@ -227,6 +236,7 @@ def test_due_tick_seeds_minute_maintenance_jobs_once_per_minute():
         "bundle_expiration_sweep",
         "media_install_reconcile",
         "credential_replica_reconcile",
+        "context_media_orphan_sweep",
         "media_blob_gc",
     ]
 
@@ -1263,6 +1273,48 @@ def test_worker_reclaim_with_session_factory_swallows_reclaim_errors(monkeypatch
     )
 
     assert reclaimed_count == 0
+
+
+def test_initial_recovery_reports_control_roster_failure(monkeypatch):
+    factory = make_session_factory()
+    worker = OneShotWorker()
+
+    def unavailable(_session):
+        raise RuntimeError("roster unavailable")
+
+    monkeypatch.setattr(worker, "_workspace_roster", unavailable)
+    result = worker.recover_initial_stale_jobs_with_session_factory(factory, 600)
+    assert result.status == "roster_failed"
+    assert not result.roster_available
+    # Periodic recovery retains its existing best-effort count contract.
+    assert worker.reclaim_stale_jobs_with_session_factory(factory, 600) == 0
+
+
+def test_initial_recovery_reports_partial_without_skipping_healthy_workspace(
+    monkeypatch,
+):
+    factory = make_session_factory()
+    worker = OneShotWorker()
+    with factory.begin() as session:
+        broken = seed_default_workspace(session)
+        healthy = Workspace(slug="initial-healthy", title="Healthy", name="Healthy")
+        session.add(healthy)
+        session.flush()
+        broken_id, healthy_id = broken.id, healthy.id
+    visited = []
+
+    def reclaim(*, workspace_id, **kwargs):
+        visited.append(workspace_id)
+        if workspace_id == broken_id:
+            raise RuntimeError("workspace unavailable")
+        return []
+
+    monkeypatch.setattr(worker.job_queue, "reclaim_stale_jobs", reclaim)
+    result = worker.recover_initial_stale_jobs_with_session_factory(factory, 600)
+    assert result.status == "partial"
+    assert result.failed_workspace_ids == (broken_id,)
+    assert set(visited) == {broken_id, healthy_id}
+    assert result.reclaimed_count == 0
 
 
 def test_reclaim_stale_jobs_fans_out_and_reclaims_every_workspace():
