@@ -29,6 +29,10 @@ from backend.policy.rbac import (
     require_workspace_role,
 )
 from backend.policy.trust_boundaries import actor_with_target_workspace_scope
+from backend.services.mcp_read_projection import (
+    capture_served_reads,
+    finish_served_read,
+)
 from backend.services.page_service import PageService
 from backend.services.read_errors import ReadServiceError
 
@@ -137,13 +141,9 @@ def dispatch(
         directory=tool_context.services.workspace_directory,
     )
     if isinstance(scoped_actor, PolicyRejection):
-        return MCPErrorResponse(
-            envelope=error_envelope(actor, scoped_actor.error_code)
-        )
+        return MCPErrorResponse(envelope=error_envelope(actor, scoped_actor.error_code))
     if not has_required_scope(scoped_actor, TOOL_REQUIRED_SCOPES[tool_name]):
-        return MCPErrorResponse(
-            envelope=error_envelope(scoped_actor, "scope_denied")
-        )
+        return MCPErrorResponse(envelope=error_envelope(scoped_actor, "scope_denied"))
     # Rebind the context to the rescoped actor and the resolved target
     # workspace: ctx.session_factory now routes via db.session_for(...), so a
     # sharding-capable DatabaseProvider sees every workspace-scoped call.
@@ -156,7 +156,16 @@ def dispatch(
             else None
         ),
     )
-    return handler(payload, ctx)
+    with capture_served_reads() as snapshots:
+        response = handler(payload, ctx)
+    # An internal attribute deliberately bypasses the wire schema. The runner
+    # passes it separately to trace persistence; model_dump never includes it.
+    object.__setattr__(
+        response,
+        "_served_read_projection",
+        finish_served_read(tool_name, payload, snapshots),
+    )
+    return response
 
 
 def resolve_target_actor(
@@ -257,9 +266,11 @@ def resolve_workspace_id_for_tool(
             except ValueError:
                 return None
 
-    workspace_slug = payload.get("workspace_slug") if isinstance(
-        payload.get("workspace_slug"), str
-    ) else None
+    workspace_slug = (
+        payload.get("workspace_slug")
+        if isinstance(payload.get("workspace_slug"), str)
+        else None
+    )
 
     resolved_directory = directory or WorkspaceDirectory()
     with session_factory() as session:

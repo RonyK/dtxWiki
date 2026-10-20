@@ -79,6 +79,7 @@ from backend.services.coverage_service import (
 )
 from backend.services.grep_wiki import grep_wiki as grep_wiki_service
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
+from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
     build_workspace_index,
     parse_concept_path,
@@ -938,6 +939,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             if version is None:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         content = render_context_concept(page, version, workspace_slug=workspace_slug)
+        record_served_read("context_page", page.id, version)
         frontmatter = project_context_frontmatter(
             page, version, workspace_slug=workspace_slug
         )
@@ -1095,9 +1097,7 @@ def read_context_outline(
     with ctx.session_factory() as session:
         page, version = _resolve_outline_version(session, ctx, request, actor)
         if page is None or version is None:
-            return ReadContextOutlineOutput(
-                envelope=error_envelope(actor, "not_found")
-            )
+            return ReadContextOutlineOutput(envelope=error_envelope(actor, "not_found"))
         body_md = version.body_md
         outline = outline_for_body(body_md)
         headings = [
@@ -1148,9 +1148,7 @@ def read_context_outline(
                 heading_path=list(section.heading_path),
                 occurrence=section.occurrence,
                 line_start=section.line_start,
-                line_end=_outline_subtree_line_end(
-                    body_md, section.subtree_char_end
-                ),
+                line_end=_outline_subtree_line_end(body_md, section.subtree_char_end),
                 char_count=section.subtree_char_end - section.char_start,
                 section_hash=calculate_content_hash(
                     body_md[section.char_start : section.subtree_char_end]
@@ -1185,6 +1183,7 @@ def read_context_outline(
             char_count=len(body_md),
             section_count=len(headings),
         )
+        record_served_read("context_page", page.id, version)
         selected_output = None
         if request.select is not None:
             selected, anchor_status = _resolve_outline_selection(
@@ -1407,6 +1406,7 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
             ),
             map_repaired=map_repaired,
         )
+        record_served_read("context_page", page.id, version)
         blocks_omitted_count = max(0, block_total - (start_block + len(blocks)))
 
     return ReadStructureMapOutput(

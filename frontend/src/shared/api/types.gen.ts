@@ -665,6 +665,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/activity/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Activity Feed */
+        get: operations["list_activity_feed_api_v1_workspaces__workspace_id__activity_feed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/activity/read-group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Activity Read Group */
+        get: operations["get_activity_read_group_api_v1_workspaces__workspace_id__activity_read_group_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/agent/bundles/preview": {
         parameters: {
             query?: never;
@@ -2730,6 +2764,114 @@ export interface components {
              */
             is_current_user: boolean;
         };
+        /** ActivityFeedData */
+        ActivityFeedData: {
+            /** Entries */
+            entries: components["schemas"]["ActivityFeedEntry"][];
+            /** Has More */
+            has_more: boolean;
+            /** Lanes */
+            lanes: {
+                [key: string]: components["schemas"]["ActivityFeedLaneCount"];
+            };
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Represented Event Count */
+            represented_event_count: number;
+            /** Returned Entry Count */
+            returned_entry_count: number;
+            /** Unread Count */
+            unread_count: number;
+        };
+        /** ActivityFeedEntry */
+        ActivityFeedEntry: {
+            /**
+             * Entry Type
+             * @enum {string}
+             */
+            entry_type: "event" | "read_group";
+            event: components["schemas"]["ActivityFeedEvent"];
+            /** Event Count */
+            event_count: number;
+            /**
+             * First Occurred At
+             * Format: date-time
+             */
+            first_occurred_at: string;
+            /** Group Token */
+            group_token?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Last Occurred At
+             * Format: date-time
+             */
+            last_occurred_at: string;
+        };
+        /** ActivityFeedEvent */
+        ActivityFeedEvent: {
+            actor: components["schemas"]["ActivityActor"] | null;
+            /** Affordances */
+            affordances: ("restore_version" | "undo_change" | "mark_read" | "open")[];
+            /** Body */
+            body: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Event Args */
+            event_args: {
+                [key: string]: string;
+            };
+            /** Event Key */
+            event_key: ("context_page.draft.publish" | "tree.node.move" | "tree.node.rename" | "workspace.join_request.requested" | "workspace.join_request.approved" | "workspace.join_request.rejected") | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "pending" | "advisory" | "history";
+            navigation?: components["schemas"]["ActivityNavigation"] | null;
+            /**
+             * Operation
+             * @default log
+             */
+            operation: string;
+            /** Public Error Code */
+            public_error_code?: string | null;
+            /** Result Status */
+            result_status?: string | null;
+            /** Review Item Id */
+            review_item_id: string | null;
+            target: components["schemas"]["ActivityTarget"] | null;
+            /** Target Title */
+            target_title?: string | null;
+            /** Title */
+            title: string;
+            /** Tool Name */
+            tool_name?: string | null;
+        };
+        /** ActivityFeedLaneCount */
+        ActivityFeedLaneCount: {
+            /** Has More */
+            has_more: boolean | null;
+            /** Represented Event Count */
+            represented_event_count: number;
+            /** Returned Entry Count */
+            returned_entry_count: number;
+        };
+        /** ActivityFeedResponse */
+        ActivityFeedResponse: {
+            data: components["schemas"]["ActivityFeedData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** ActivityItemRead */
         ActivityItemRead: {
             actor: components["schemas"]["ActivityActor"] | null;
@@ -2778,6 +2920,34 @@ export interface components {
         /** ActivityListResponse */
         ActivityListResponse: {
             data: components["schemas"]["ActivityListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ActivityNavigation */
+        ActivityNavigation: {
+            /** Href */
+            href: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Kind */
+            target_kind: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** ActivityReadGroupData */
+        ActivityReadGroupData: {
+            /** Event Count */
+            event_count: number;
+            /** Events */
+            events: components["schemas"]["ActivityFeedEvent"][];
+            /** Group Id */
+            group_id: string;
+        };
+        /** ActivityReadGroupResponse */
+        ActivityReadGroupResponse: {
+            data: components["schemas"]["ActivityReadGroupData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ActivityTarget */
@@ -12258,6 +12428,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    list_activity_feed_api_v1_workspaces__workspace_id__activity_feed_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "yesterday" | "week" | "month" | "all";
+                kind?: "all" | "workspace" | "mcp" | "system" | "review_decision";
+                subtype?: string;
+                lane?: ("pending" | "advisory" | "history") | null;
+                group_reads?: boolean;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityFeedResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    get_activity_read_group_api_v1_workspaces__workspace_id__activity_read_group_get: {
+        parameters: {
+            query: {
+                token: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityReadGroupResponse"];
                 };
             };
             /** @description Unauthorized */

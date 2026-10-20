@@ -18,7 +18,7 @@
     "activeTitle": "필터 ({{count}})"
   },
   "overview": {
-    "windowNotice": "최신 활동 {{count}}건을 표시합니다. 이전 활동은 각 영역을 열어 불러오세요."
+    "windowNotice": "현재 조회 범위의 {{count}}개 표시 항목입니다. 이전 활동은 각 영역을 열어 불러오세요."
   },
   "filterSummary": {
     "label": "필터",
@@ -126,7 +126,13 @@
     "job": "백그라운드 작업"
   },
   "actors": {
-    "agentWorker": "내부 에이전트 워커"
+    "agentWorker": "내부 에이전트 워커",
+    "fullNames": "전체 이름 보기: {{names}}",
+    "details": "활동 작성 주체의 전체 이름",
+    "user": "사용자",
+    "mcp": "MCP 클라이언트",
+    "keyboardHelp": "아래 방향키로 이름 영역에 이동하고 Escape로 닫을 수 있습니다.",
+    "close": "이름 닫기"
   },
   "details": {
     "trigger": "시작 계기: {{value}}",
@@ -169,5 +175,90 @@
     "ask": "질의 활동",
     "review": "리뷰 결정",
     "chat": "챗 활동"
+  },
+  "feed": {
+    "count": "{{count}}개 항목 · 원본 {{events}}건",
+    "repeatCount": "{{count}}회",
+    "resource": "대상 자료",
+    "mcpFallback": "MCP 도구 실행 기록",
+    "types": {
+      "context": "Context",
+      "agent": "Agent",
+      "library": "Library",
+      "mcp": "MCP 호출",
+      "tree": "워크스페이스 트리",
+      "review": "검토 요청",
+      "job": "백그라운드 작업",
+      "activity": "활동"
+    },
+    "action": {
+      "edited": "편집됨",
+      "read": "읽음",
+      "search": "검색됨",
+      "logged": "기록됨",
+      "created": "생성됨",
+      "published": "게시됨",
+      "restored": "복원됨",
+      "failed": "실패",
+      "partial": "일부 처리",
+      "accepted": "접수됨"
+    },
+    "mcpOperations": {
+      "read_one": "{{target}}{{particle}} 읽었습니다",
+      "read_other": "{{target}}{{particle}} {{count}}회 읽었습니다",
+      "search": "워크스페이스 자료를 검색했습니다",
+      "edit": "초안을 수정했습니다",
+      "create": "새 항목을 만들었습니다",
+      "review": "검토를 요청했습니다",
+      "publish": "변경 내용을 게시했습니다",
+      "restore": "이전 내용을 복원했습니다",
+      "delete": "항목을 삭제했습니다",
+      "cite": "자료를 인용했습니다",
+      "guide": "사용 안내를 확인했습니다"
+    },
+    "mcpResults": {
+      "failed": "도구 실행을 완료하지 못했습니다",
+      "conflict": "버전 충돌로 요청을 완료하지 못했습니다",
+      "rejected_by_policy": "요청이 정책에 따라 거절되었습니다",
+      "partial": "요청이 일부만 처리되었습니다",
+      "accepted": "요청이 접수되었습니다"
+    },
+    "noTarget": "대상 링크 없음",
+    "openMcpActivity": "MCP 활동 보기",
+    "openActivity": "활동 목록 보기",
+    "openReview": "검토 열기: {{title}}",
+    "reviewRequiredFor": "검토필요: {{title}}",
+    "reviewRequired": "검토필요",
+    "technical": {
+      "title": "기술 정보",
+      "tool": "도구",
+      "result": "실행 결과",
+      "duration": "소요 시간",
+      "milliseconds": "{{count}}ms",
+      "error": "공개 오류 코드"
+    },
+    "group": {
+      "expand": "원본 {{count}}건 펼치기",
+      "collapse": "내역 접기",
+      "loading": "원본 내역을 불러오는 중",
+      "error": "원본 내역을 불러오지 못했습니다. 다시 시도해 주세요.",
+      "retry": "다시 시도",
+      "timeRange": "최초 활동부터 마지막 활동까지"
+    },
+    "groupReads": "반복 읽기 묶기",
+    "grouped": "반복 읽기 묶음",
+    "raw": "개별 활동",
+    "scope": "현재 조회 범위",
+    "loadedAll": "이 조회 시점의 일치하는 활동을 모두 표시했습니다",
+    "reload": "활동 새로고침",
+    "seeAllPending": "대기 중 활동 전체 보기",
+    "seeAllAdvisory": "주의 활동 전체 보기",
+    "seeAllHistory": "기록 활동 전체 보기",
+    "preview": "조회된 {{loaded}}개 항목 중 {{count}}개 표시",
+    "queryEvents": "현재 조회 범위의 원본 활동",
+    "entryUnit_one": "개 항목",
+    "entryUnit_other": "개 항목",
+    "originalEventUnit_one": "건",
+    "originalEventUnit_other": "건"
   }
 }

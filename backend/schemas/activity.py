@@ -70,3 +70,75 @@ class ActivityListResponse(RESTResponseBase):
     data: ActivityListData
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ActivityNavigation(BaseModel):
+    target_kind: str
+    target_id: UUID
+    title: str | None = None
+    href: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActivityFeedEvent(ActivityItemRead):
+    operation: str = "log"
+    result_status: str | None = None
+    tool_name: str | None = None
+    public_error_code: str | None = None
+    duration_ms: int | None = None
+    navigation: ActivityNavigation | None = None
+
+
+class ActivityFeedEntry(BaseModel):
+    entry_type: Literal["event", "read_group"]
+    id: str
+    event: ActivityFeedEvent
+    event_count: int
+    first_occurred_at: datetime
+    last_occurred_at: datetime
+    group_token: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActivityFeedLaneCount(BaseModel):
+    returned_entry_count: int
+    represented_event_count: int
+    # None means this capped overview has not established this lane's end.
+    has_more: bool | None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActivityFeedData(BaseModel):
+    entries: list[ActivityFeedEntry]
+    next_cursor: str | None
+    # Attention items in the current query, independent of grouping or preview.
+    unread_count: int
+    returned_entry_count: int
+    represented_event_count: int
+    has_more: bool
+    lanes: dict[ActivityLane, ActivityFeedLaneCount]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActivityFeedResponse(RESTResponseBase):
+    data: ActivityFeedData
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActivityReadGroupData(BaseModel):
+    group_id: str
+    events: list[ActivityFeedEvent]
+    event_count: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActivityReadGroupResponse(RESTResponseBase):
+    data: ActivityReadGroupData
+
+    model_config = ConfigDict(extra="forbid")

@@ -3,7 +3,11 @@
 // and so the `tests/static/test_frontend_quality_contract.py` barrel guard
 // passes. Keep entries alphabetised.
 export * from "./ActionMenu";
+export * from "./ActivityActionBadge";
 export * from "./ActivityActorBadge";
+export * from "./ActivityEntryRow";
+export * from "./ActivityGroupingControl";
+export * from "./ActivityReadGroup";
 export * from "./AdvancedSection";
 export * from "./Avatar";
 export * from "./BottomSheet";

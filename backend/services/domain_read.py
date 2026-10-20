@@ -99,6 +99,7 @@ from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
 )
+from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES,
     context_concept_path,
@@ -499,6 +500,7 @@ class DomainReadService:
         if source is None:
             raise ReadNotFoundError("source version not found")
         self._require_visible_library_source(source, actor)
+        record_served_read("library_item", source.id, version)
         return self._library_item_version_payload(
             version,
             workspace_id=workspace_id,
@@ -527,6 +529,7 @@ class DomainReadService:
             raise ReadNotFoundError("source artifact not found")
         source, _version, artifact = lookup
         self._require_visible_library_source(source, actor)
+        record_served_read("library_item", source.id, _version)
         return self._library_artifact_payload(
             artifact,
             workspace_id=workspace_id,
@@ -687,6 +690,7 @@ class DomainReadService:
         )
         if version is not None and not agent_version_is_visible(page, version, actor):
             raise ReadNotFoundError("agent page version not found")
+        record_served_read("agent_page", page.id, version)
         tree_path = self.tree_read_service.path_for_target(
             session=session,
             workspace_id=workspace_id,
@@ -852,6 +856,7 @@ class DomainReadService:
             raise ReadNotFoundError("context page version not found")
         if version is not None and not context_version_is_visible(version, actor):
             raise ReadNotFoundError("context page version not found")
+        record_served_read("context_page", page.id, version)
         enrichment = self.context_page_read_enrichment(
             session,
             workspace_id,
@@ -1275,6 +1280,7 @@ class DomainReadService:
             if version is None:
                 return None
             concept_path = context_concept_path(page.slug)
+            record_served_read("context_page", page.id, version)
             return {
                 "id": page.id,
                 "title": page.title,
@@ -1322,6 +1328,7 @@ class DomainReadService:
             ):
                 return None
             concept_path = context_concept_path(page.slug)
+            record_served_read("context_page", page.id, version)
             return {
                 "id": claim.id,
                 "title": f"Claim in {page.title}",
@@ -1353,14 +1360,16 @@ class DomainReadService:
                 if version is not None
                 else ()
             )
+            served_text = "\n\n".join(
+                artifact.conversion_detail.index_text
+                for artifact in artifacts
+                if artifact.conversion_detail.index_text
+            )
+            record_served_read("library_item", item.id, version, content=served_text)
             return {
                 "id": item.id,
                 "title": item.title or item.uri,
-                "text": "\n\n".join(
-                    artifact.conversion_detail.index_text
-                    for artifact in artifacts
-                    if artifact.conversion_detail.index_text
-                ),
+                "text": served_text,
                 "url": f"/library?target={item.id}",
                 "metadata": {
                     "type": entity_type,
@@ -1411,6 +1420,12 @@ class DomainReadService:
                 artifact_id=artifact.id,
             ):
                 return None
+            record_served_read(
+                "library_item",
+                item.id,
+                version,
+                content=artifact.conversion_detail.index_text or "",
+            )
             return {
                 "id": artifact.id,
                 "title": item.title or artifact.kind.replace("_", " ").title(),
@@ -1459,6 +1474,7 @@ class DomainReadService:
             )
             if version is None:
                 return None
+            record_served_read("agent_page", page.id, version)
             return {
                 "id": page.id,
                 "title": page.title,
@@ -1736,6 +1752,7 @@ class DomainReadService:
             raise ReadNotFoundError("context claim not found")
         if version is None or not context_version_is_visible(version, actor):
             raise ReadNotFoundError("context claim not found")
+        record_served_read("context_page", page.id, version)
         return {
             "id": str(claim.id),
             "page_version_id": str(claim.page_version_id),

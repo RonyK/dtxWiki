@@ -16,7 +16,7 @@ from backend.models.review import ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import get_in_workspace, where_in_workspace
 from backend.schemas.activity import (
     ActivityActor,
     ActivityEventKey,
@@ -270,6 +270,8 @@ class ActivityService:
         limit: int,
         audience_for: UUID | None,
         actor_role: str | None,
+        item_ids: list[UUID] | None = None,
+        snapshot: datetime | None = None,
     ) -> list[ActivityItemRead]:
         statement = select(ReviewItem).where(
             ReviewItem.workspace_id == workspace_id,
@@ -283,12 +285,23 @@ class ActivityService:
             scope="all",
             actor_role=actor_role,
         )
+        if item_ids is not None or snapshot is not None:
+            conditions = []
+            if item_ids is not None:
+                conditions.append(ReviewItem.id.in_(item_ids))
+            if snapshot is not None:
+                conditions.append(ReviewItem.created_at <= snapshot)
+            statement = where_in_workspace(
+                statement, ReviewItem, workspace_id=workspace_id, conditions=conditions
+            )
         if since is not None:
             statement = statement.where(ReviewItem.created_at >= since)
         if until is not None:
             statement = statement.where(ReviewItem.created_at < until)
         rows = session.scalars(
-            statement.order_by(ReviewItem.created_at.desc()).limit(limit)
+            statement.order_by(
+                ReviewItem.created_at.desc(), ReviewItem.id.desc()
+            ).limit(limit)
         ).all()
         return [
             ActivityItemRead(
@@ -322,11 +335,14 @@ class ActivityService:
         actor: ActorContext | None = None,
         page_scope: PageActivityScope | None = None,
         deferred_identity: DeferredIdentityLabels | None = None,
+        item_ids: list[UUID] | None = None,
     ) -> list[ActivityItemRead]:
         statement = select(AuditEvent).where(
             AuditEvent.workspace_id == workspace_id,
             not_(_audit_only_observation_event_clause()),
         )
+        if item_ids is not None:
+            statement = statement.where(AuditEvent.id.in_(item_ids))
         if since is not None:
             statement = statement.where(AuditEvent.created_at >= since)
         if until is not None:
@@ -365,11 +381,7 @@ class ActivityService:
         mcp_client_actors = resolve_mcp_client_actor_details(
             session,
             workspace_id,
-            (
-                event.actor_id
-                for event in rows
-                if event.actor_kind == "mcp_client"
-            ),
+            (event.actor_id for event in rows if event.actor_kind == "mcp_client"),
         )
         owner_names = (
             {}
@@ -470,6 +482,7 @@ class ActivityService:
         until: datetime | None,
         limit: int,
         deferred_identity: DeferredIdentityLabels | None = None,
+        item_ids: list[UUID] | None = None,
     ) -> list[ActivityItemRead]:
         occurred_at = func.coalesce(MCPToolCall.completed_at, MCPToolCall.started_at)
         statement = (
@@ -480,6 +493,13 @@ class ActivityService:
             )
             .where(MCPToolCall.workspace_id == workspace_id)
         )
+        if item_ids is not None:
+            statement = where_in_workspace(
+                statement,
+                MCPToolCall,
+                workspace_id=workspace_id,
+                conditions=(MCPToolCall.id.in_(item_ids),),
+            )
         if since is not None:
             statement = statement.where(occurred_at >= since)
         if until is not None:
@@ -549,6 +569,7 @@ class ActivityService:
         since: datetime | None,
         until: datetime | None,
         limit: int,
+        item_ids: list[UUID] | None = None,
     ) -> list[ActivityItemRead]:
         # Internal index-maintenance jobs are not user-facing operations: a
         # context edit/publish or a library extraction enqueues an `embed` job on
@@ -559,6 +580,13 @@ class ActivityService:
             Job.workspace_id == workspace_id,
             Job.job_type.not_in(HIDDEN_JOB_TYPES),
         )
+        if item_ids is not None:
+            statement = where_in_workspace(
+                statement,
+                Job,
+                workspace_id=workspace_id,
+                conditions=(Job.id.in_(item_ids),),
+            )
         if since is not None:
             statement = statement.where(Job.updated_at >= since)
         if until is not None:

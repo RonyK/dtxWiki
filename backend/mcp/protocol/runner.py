@@ -475,6 +475,7 @@ async def call_tool_async(
             name=name,
             arguments=trace_arguments,
             payload=trace_payload,
+            read_projection=getattr(response, "_served_read_projection", None),
             mcp_session_id=conversation.token
             or mcp_session_id
             or str(envelope.get("request_id") or ""),
@@ -867,6 +868,7 @@ def _persist_trace(
     trace_workspace_id: UUID | None = None,
     create_chat_session: bool = True,
     fail_closed: bool = False,
+    read_projection: dict[str, Any] | None = None,
 ) -> None:
     if not mcp_session_id or trace_workspace_id is None:
         return
@@ -897,6 +899,7 @@ def _persist_trace(
                 completed_at=_utc_now(),
                 latency_ms=latency_ms,
                 create_chat_session=create_chat_session,
+                read_projection=read_projection,
             )
     except Exception:
         # Counted BEFORE the fail_closed branch: a correctness-critical trace
