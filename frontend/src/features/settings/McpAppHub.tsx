@@ -38,6 +38,7 @@ import { Dialog } from "../../shared/components/Dialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { canCopyText, selectText, writeTextToClipboard } from "../../shared/lib/clipboard";
 import { renderMcpSetupPlan } from "./mcpSetupRenderer";
+import { SettingsLoadingRow } from "./SettingsPaneParts";
 import type {
   McpSetupStep,
   RenderedMcpSetupArtifact,
@@ -382,9 +383,9 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
             </div>
           </div>
           {loading ? (
-            <p className="meta-line" role="status">
+            <SettingsLoadingRow>
               {t("appHub.loading", { defaultValue: "Loading supported apps…" })}
-            </p>
+            </SettingsLoadingRow>
           ) : null}
           {error ? (
             <div className="mcp-app-hub-recovery">
@@ -541,7 +542,6 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
 
             {selectedOwner ? (
               <div
-                aria-busy={planBusy || undefined}
                 className="mcp-app-method-panel"
                 ref={methodPanelRef}
                 tabIndex={-1}
@@ -651,11 +651,11 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
                   />
                 )}
                 {planBusy ? (
-                  <p className="meta-line" role="status">
+                  <SettingsLoadingRow>
                     {t("appHub.preparing", {
                       defaultValue: "Preparing setup…",
                     })}
-                  </p>
+                  </SettingsLoadingRow>
                 ) : null}
                 {planError ? (
                   <StatusBanner tone="warning">{planError}</StatusBanner>

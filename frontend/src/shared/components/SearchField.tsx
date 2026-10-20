@@ -1,5 +1,7 @@
-import { LoaderCircle, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { type KeyboardEvent, useRef } from "react";
+
+import { Spinner } from "./Spinner";
 
 type SearchFieldProps = {
   ariaLabel: string;
@@ -87,11 +89,7 @@ export function SearchField({
           type="submit"
         >
           {loading ? (
-            <LoaderCircle
-              aria-hidden="true"
-              className="search-field-spinner"
-              size={14}
-            />
+            <Spinner decorative size={14} />
           ) : null}
           <span>{submitLabel}</span>
         </button>

@@ -225,7 +225,11 @@ it("shows no matches only after the current server request succeeds with an empt
   render(
     <WorkspaceScopePicker serverPaging selectedIds={[]} onChange={vi.fn()} labels={labels} workspaces={[]} />,
   );
-  expect(screen.getByText("Loading workspaces…")).toBeInTheDocument();
+  const loading = screen
+    .getByText("Loading workspaces…")
+    .closest('[role="status"]');
+  expect(loading).toBeInTheDocument();
+  expect(loading?.querySelector(".spinner-glyph")).toBeInTheDocument();
   expect(screen.queryByText("No matches")).not.toBeInTheDocument();
   await act(async () => resolvePage(response([])));
   expect(screen.queryByText("Loading workspaces…")).not.toBeInTheDocument();
@@ -244,7 +248,10 @@ it("keeps failure and retry states distinct from a successful empty result", asy
   const alert = await screen.findByRole("alert");
   expect(screen.queryByText("No matches")).not.toBeInTheDocument();
   await user.click(within(alert).getByRole("button", { name: "Retry" }));
-  expect(screen.getByText("Loading workspaces…")).toBeInTheDocument();
+  const loading = screen
+    .getByText("Loading workspaces…")
+    .closest('[role="status"]');
+  expect(loading?.querySelector(".spinner-glyph")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.queryByText("No matches")).not.toBeInTheDocument();
   await act(async () => resolveRetry(response([])));
@@ -267,9 +274,17 @@ it("hides a stale empty result while a new search is debouncing or loading", asy
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "new" } });
     expect(listCredentialWorkspaces).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+    const debouncingLoading = screen
+      .getByText("Loading workspaces…")
+      .closest('[role="status"]');
+    expect(debouncingLoading?.querySelector(".spinner-glyph")).toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(250); });
     expect(listCredentialWorkspaces).toHaveBeenLastCalledWith("new", null);
     expect(screen.getByText("Loading workspaces…")).toBeInTheDocument();
+    const requestLoading = screen
+      .getByText("Loading workspaces…")
+      .closest('[role="status"]');
+    expect(requestLoading?.querySelector(".spinner-glyph")).toBeInTheDocument();
     expect(screen.queryByText("No matches")).not.toBeInTheDocument();
     await act(async () => resolveSearch(response([16])));
     expect(screen.getByRole("option", { name: /Workspace 16/ })).toBeInTheDocument();

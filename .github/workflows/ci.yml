@@ -184,6 +184,7 @@ jobs:
         run: |
           node tests/e2e/network_retry.test.mjs
           node tests/e2e/redact-network.test.mjs
+          node tests/e2e/page-diagnostics.test.mjs
 
   e2e:
     runs-on: ubuntu-latest

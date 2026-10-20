@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { axe } from "jest-axe";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +27,31 @@ describe("AdminUserRecoverySection", () => {
       value: true,
     });
     setLocale("en", { persist: false });
+  });
+
+  it("shows shared progress only while checking server recovery availability", async () => {
+    let rejectCapabilities!: (reason: Error) => void;
+    const pendingCapabilities = new Promise<Response>((_resolve, reject) => {
+      rejectCapabilities = reject;
+    });
+    vi.spyOn(globalThis, "fetch").mockReturnValue(pendingCapabilities);
+    render(<AdminUserRecoverySection />);
+
+    const status = screen.getByText("Checking server recovery availability…")
+      .closest('[role="status"]');
+    expect(status).toHaveTextContent("Checking server recovery availability…");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status?.querySelector(".spinner")).toHaveAttribute("aria-hidden", "true");
+
+    await act(async () => {
+      rejectCapabilities(new Error("Unavailable"));
+      await pendingCapabilities.catch(() => undefined);
+    });
+    expect(await screen.findByText(
+      "Recovery availability could not be confirmed. Reload before issuing a reset.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("Checking server recovery availability…"))
+      .not.toBeInTheDocument();
   });
 
   it("keeps the directory private until reauthentication and relocks when proof expires", async () => {

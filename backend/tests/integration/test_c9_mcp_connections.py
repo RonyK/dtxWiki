@@ -1232,6 +1232,7 @@ def _postgres_url() -> str | None:
     return value if value and value.startswith("postgresql") else None
 
 
+@pytest.mark.xdist_group("postgres")
 @pytest.mark.skipif(
     _postgres_url() is None,
     reason="requires the dedicated PostgreSQL migration test database",
@@ -1251,8 +1252,10 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
     ``DTXWIKI_POSTGRES_MIGRATION_TEST_DATABASE_URL`` points at a live
     database, which is how it stayed skipped locally while the exact-identity
     health rewrite made its old fixtures read "unknown" (rows with no
-    ``runtime_binding_key``/``grant_id``). CI provisions that database, and the
-    fixtures now name their credentials exactly. It also executes the PAT and
+    ``runtime_binding_key``/``grant_id``). The ``postgres`` xdist group selects
+    this test for the PR PostgreSQL gate and serializes its schema teardown
+    with the other suites sharing that database. The fixtures name their
+    credentials exactly. It also executes the PAT and
     OAuth credential reads (``load_credential_health``) on PostgreSQL. The
     always-on companion is
     ``test_mcp_access_db_consistency.test_active_connection_predicate_compiles

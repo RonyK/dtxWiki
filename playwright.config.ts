@@ -125,6 +125,10 @@ export default defineConfig({
   // the host CPU count, which turns valid concurrent writes into lock cascades.
   workers: 1,
   use: {
+    // Fail at the operation that stalled, before a multi-step acceptance test
+    // exhausts its whole budget. Response-event waits inherit actionTimeout.
+    actionTimeout: 15_000,
+    navigationTimeout: 20_000,
     // One origin for the document, the bundle and the API — the shape the wheel
     // ships. A Vite dev server on a second port gave every page two Chromium
     // socket pools, so a host network-change notification flushed both and the

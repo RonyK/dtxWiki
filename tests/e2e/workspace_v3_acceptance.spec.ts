@@ -26,6 +26,10 @@ import {
   retryOnceAfterNetworkChange,
   type RequestIdentity,
 } from "./network_retry";
+import {
+  createPageLifecycleRecorder,
+  runWithCompletedResponse,
+} from "./page-diagnostics";
 
 type WorkspaceSummary = {
   id: string;
@@ -223,6 +227,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         const workspaceTitle = `E2E Role Refresh ${suffix}`;
         const ownerContext = await isolatedContext(browser, viewport);
         const memberContext = await isolatedContext(browser, viewport);
+        let lifecycle: ReturnType<typeof createPageLifecycleRecorder> | null = null;
 
         try {
           await signUp(ownerContext.request, ownerEmail);
@@ -293,6 +298,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           );
 
           const memberPage = await memberContext.newPage();
+          lifecycle = createPageLifecycleRecorder(memberPage);
           const pageErrors: string[] = [];
           memberPage.on("pageerror", (error) => pageErrors.push(error.message));
           await memberPage.addInitScript(
@@ -345,16 +351,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               .filter({ hasText: memberEmail });
             await expect(selfRow.getByText("You", { exact: true })).toBeVisible();
 
-            const roleChanged = memberPage.waitForResponse(
-              (response) =>
-                response.url().endsWith(`/members/${memberUserId}`) &&
-                response.request().method() === "PATCH",
-            );
-            const authoritativeRefresh = memberPage.waitForResponse(
-              (response) =>
-                response.url().endsWith("/api/v1/workspaces") &&
-                response.request().method() === "GET",
-            );
             await selfRow.locator("select").selectOption("editor");
             // WS-10: self-demote (including owner self-demotion) is gated
             // behind a confirmation dialog -- selecting the option alone must
@@ -365,11 +361,26 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               name: "Give up Owner access?",
             });
             await expect(selfDemoteDialog).toBeVisible();
-            await selfDemoteDialog
-              .getByRole("button", { name: "Give up Owner access" })
-              .click();
-            expect((await roleChanged).ok()).toBeTruthy();
-            const refreshResponse = await authoritativeRefresh;
+            const refreshResponse = await test.step("confirm self-demotion and finish the authoritative refresh body", async () => {
+              return runWithCompletedResponse(
+                memberPage,
+                (request) =>
+                  new URL(request.url()).pathname === "/api/v1/workspaces" &&
+                  request.method() === "GET",
+                async () => {
+                  const roleChanged = await runWithCompletedResponse(
+                    memberPage,
+                    (request) =>
+                      new URL(request.url()).pathname.endsWith(`/members/${memberUserId}`) &&
+                      request.method() === "PATCH",
+                    () => selfDemoteDialog
+                      .getByRole("button", { name: "Give up Owner access" })
+                      .click(),
+                  );
+                  expect(roleChanged.ok()).toBeTruthy();
+                },
+              );
+            });
             expect(refreshResponse.ok()).toBeTruthy();
             const refreshed = (await refreshResponse.json())
               .data as WorkspaceListData;
@@ -402,24 +413,28 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               { data: { role: "owner" } },
             );
             expect(repromoted.ok()).toBeTruthy();
-            await memberPage.reload();
+            await test.step("reload membership settings after owner restoration", async () => {
+              await memberPage.reload();
+            });
             const selfRow = memberPage
               .locator(".workspace-member-row")
               .filter({ hasText: memberEmail });
             await expect(selfRow.locator("select")).toHaveValue("owner");
 
-            const removalResponse = memberPage.waitForResponse(
-              (response) =>
-                response.url().endsWith(`/members/${memberUserId}`) &&
-                response.request().method() === "DELETE",
-            );
             await selfRow.getByRole("button", { name: "Remove" }).click();
             const dialog = memberPage.getByRole("dialog", {
               name: "Remove this member?",
             });
             await expect(dialog).toBeVisible();
-            await dialog.getByRole("button", { name: "Remove member" }).click();
-            const removal = await removalResponse;
+            const removal = await test.step("confirm self-removal and finish the DELETE response body", async () => {
+              return runWithCompletedResponse(
+                memberPage,
+                (request) =>
+                  new URL(request.url()).pathname.endsWith(`/members/${memberUserId}`) &&
+                  request.method() === "DELETE",
+                () => dialog.getByRole("button", { name: "Remove member" }).click(),
+              );
+            });
             expect(removal.ok()).toBeTruthy();
             const removalData = (await removal.json()).data as {
               default_workspace_id: string | null;
@@ -428,7 +443,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             expect(removalData.default_workspace_id).toBe(persistedDefault.id);
             expect(removalData.fallback_workspace_id).toBe(persistedDefault.id);
 
-            await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
+            await test.step("navigate to the persisted fallback after self-removal", async () => {
+              await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
+            });
             const persistedSelection = await memberPage.evaluate(() => ({
               id: window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
               slug: window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug"),
@@ -454,7 +471,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               ),
             ).toBeFalsy();
 
-            await memberPage.reload();
+            await test.step("reload the fallback dashboard after self-removal", async () => {
+              await memberPage.reload();
+            });
             await expect(memberPage).toHaveURL(`${frontendBaseUrl}/dashboard`);
             expect(
               await memberPage.evaluate(() => ({
@@ -465,9 +484,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               id: persistedDefault.id,
               slug: persistedDefault.slug,
             });
-            await memberPage
-              .getByRole("button", { name: /Switch workspace, current:/ })
-              .click();
+            await test.step("open the workspace switcher after the fallback reload", async () => {
+              await memberPage
+                .getByRole("button", { name: /Switch workspace, current:/ })
+                .click();
+            });
             const picker = memberPage.getByRole("dialog", {
               name: "Workspace switcher",
             });
@@ -490,7 +511,16 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             ).toBeVisible();
             expect(pageErrors).toEqual([]);
           });
+        } catch (error) {
+          if (lifecycle) {
+            await testInfo.attach("member-page-lifecycle", {
+              body: Buffer.from(JSON.stringify(lifecycle.snapshot(), null, 2)),
+              contentType: "application/json",
+            });
+          }
+          throw error;
         } finally {
+          lifecycle?.stop();
           await Promise.all([ownerContext.close(), memberContext.close()]);
         }
       });

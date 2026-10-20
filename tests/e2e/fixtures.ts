@@ -1,6 +1,7 @@
 import {
   expect,
   test as base,
+  type Locator,
   type Page,
   type Request,
 } from "@playwright/test";
@@ -9,7 +10,6 @@ export { expect };
 export type {
   APIRequestContext,
   APIResponse,
-  BoundingBox,
   Browser,
   BrowserContext,
   Locator,
@@ -18,6 +18,8 @@ export type {
   Response,
   TestInfo,
 } from "@playwright/test";
+
+export type BoundingBox = NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>;
 
 import {
   createFailedRequestLog,

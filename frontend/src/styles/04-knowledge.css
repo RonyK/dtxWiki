@@ -3106,6 +3106,10 @@
   gap: 8px;
 }
 
+.workspace-scope-loading {
+  margin: 0;
+}
+
 .workspace-scope-select-all {
   display: inline-flex;
   align-items: center;
@@ -3333,6 +3337,10 @@
 .paginated-credential-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
+}
+
+.credential-list-results {
   min-width: 0;
 }
 

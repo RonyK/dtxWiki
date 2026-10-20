@@ -323,6 +323,7 @@ button {
   align-items: center;
   justify-content: center;
   vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .spinner-glyph {
@@ -333,11 +334,24 @@ button {
   border-right-color: transparent;
   border-radius: 50%;
   animation: spinner-rotate 720ms linear infinite;
+  flex-shrink: 0;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.loading-indicator-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .spinner-glyph {
-    animation-duration: 0s;
+    animation: none;
   }
 }
 

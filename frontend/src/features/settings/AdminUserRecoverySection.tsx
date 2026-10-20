@@ -30,6 +30,7 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
   SettingsEmptyState,
+  SettingsLoadingRow,
   SettingsPaneHeader,
 } from "./SettingsPaneParts";
 import { writeTextToClipboard } from "../../shared/lib/clipboard";
@@ -343,11 +344,11 @@ export function AdminUserRecoverySection() {
         })}
       </StatusBanner>
       {recoveryCapability.status === "loading" ? (
-        <StatusBanner tone="info">
+        <SettingsLoadingRow>
           {t("userRecovery.capabilityLoading", {
             defaultValue: "Checking server recovery availability…",
           })}
-        </StatusBanner>
+        </SettingsLoadingRow>
       ) : recoveryCapability.status === "error" ? (
         <StatusBanner tone="warning">
           {t("userRecovery.capabilityError", {

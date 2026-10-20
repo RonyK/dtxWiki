@@ -15,6 +15,7 @@ import {
 
 import { CountChip } from "./CountChip";
 import { SearchField } from "./SearchField";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 /**
  * Multi-select workspace picker shared by every account-scoped MCP credential
@@ -211,6 +212,11 @@ export function WorkspaceScopePicker({
       );
   }, [known, workspaces, selectedOnly, selected, normalizedQuery]);
   const useRemote = serverPaging && !selectedOnly;
+  // Keep the loading affordance visible from the first keystroke through the
+  // debounce and request. Otherwise the empty-state message disappears before
+  // the next request starts, leaving an unexplained blank list.
+  const remoteLoading =
+    useRemote && (loading || query !== searchTerm) && !loadError;
   const total = useRemote ? (remote?.total ?? 0) : filtered.length;
   const shown = useRemote
     ? loading || loadError || remote?.key !== requestKey
@@ -411,8 +417,10 @@ export function WorkspaceScopePicker({
         >
           {t("workspacePicker.showSelected", { count: selectedIds.length })}
         </button>
-        {useRemote && loading ? (
-          <p role="status">{t("workspacePicker.loading")}</p>
+        {remoteLoading ? (
+          <LoadingIndicator as="p" className="workspace-scope-loading">
+            {t("workspacePicker.loading")}
+          </LoadingIndicator>
         ) : null}
         {useRemote && loadError ? (
           <div role="alert">

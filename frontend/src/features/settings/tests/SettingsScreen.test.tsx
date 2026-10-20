@@ -2483,15 +2483,18 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
 
-    const status = await screen.findByText("Loading lint rules…");
+    const label = await screen.findByText("Loading lint rules…");
+    const status = label.closest(".settings-loading-row");
     expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveClass("settings-loading-row");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status?.querySelector(".spinner")).toHaveAttribute("aria-hidden", "true");
 
     await act(async () => {
       rules.resolve({ data: { rules: [] } });
       await rules.promise;
     });
     expect(await screen.findByText("No lint rules")).toBeInTheDocument();
+    expect(screen.queryByText("Loading lint rules…")).not.toBeInTheDocument();
   });
 
   it("keeps a policy save failure inside the pane that raised it", async () => {
