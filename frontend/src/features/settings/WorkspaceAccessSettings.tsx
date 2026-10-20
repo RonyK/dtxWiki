@@ -1,3 +1,5 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
+import { normalizeAccountEmail } from "../../shared/auth/identityPolicy";
 import { Globe, Inbox, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -123,7 +125,8 @@ export function WorkspaceMembersSection() {
   const [joinNotice, setJoinNotice] = useState<string | null>(null);
   const [joinReloadKey, setJoinReloadKey] = useState(0);
   const joinGeneration = useRef(0);
-  const exactLoginEmail = queryDraft.trim();
+  let exactLoginEmail = "";
+  try { exactLoginEmail = normalizeAccountEmail(queryDraft); } catch { /* Search may be a name rather than an email. */ }
   const canAddExactLoginEmail = looksLikeLoginEmail(exactLoginEmail);
 
   useEffect(() => {
@@ -246,6 +249,8 @@ export function WorkspaceMembersSection() {
 
   function onMemberSearch(event: FormEvent) {
     event.preventDefault();
+    const error = inputTextError(queryDraft, 320);
+    if (error) { setMemberError(error); return; }
     const nextQuery = queryDraft.trim();
     appliedMemberFilterRef.current = {
       ...appliedMemberFilterRef.current,
@@ -549,6 +554,7 @@ export function WorkspaceMembersSection() {
               {t("workspaceMembers.filters.query")}
             </span>
             <input
+              {...textInputLimit(320)}
               aria-describedby="workspace-member-query-help"
               aria-labelledby="workspace-member-query-label"
               autoComplete="off"

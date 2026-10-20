@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import pytest
 from sqlalchemy import select
 
 from backend.app.db import make_session_factory_from_settings
@@ -16,6 +17,14 @@ from backend.scripts.seed_remote_mcp_smoke import (
 from backend.services.api_token_service import ApiTokenService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.session_service import SessionService, SessionTokenCodec
+
+
+def test_explicit_empty_seed_password_is_rejected_before_provisioning(tmp_path):
+    path = tmp_path / "must-not-exist.sqlite"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{path}")
+    with pytest.raises(RuntimeError, match="password"):
+        seed_remote_mcp_smoke(settings, login_password="")
+    assert not path.exists()
 
 
 def test_seed_remote_mcp_smoke_outputs_usable_material(tmp_path):

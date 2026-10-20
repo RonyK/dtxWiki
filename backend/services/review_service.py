@@ -9,6 +9,7 @@ from sqlalchemy import and_, exists, false, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from backend.context_media.ports import ContextMediaRepository
+from backend.domain.input_policy import validate_text
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
@@ -37,6 +38,7 @@ from backend.schemas.context_write import (
     UpdateDraftRequest,
     WriteDraftRequest,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.mcp.review_tools import (
     ListRequestedChangesPayload,
     RequestedChangeClaim,
@@ -201,6 +203,8 @@ class ReviewService:
         actor_kind: str,
         actor_id: str,
     ):
+        if reason is not None:
+            validate_text(reason, field="reason", max_length=2000)
         from backend.models.context import ContextPage, ContextPageVersion
         from backend.schemas.context_reconciliation import (
             ContextReconciliationBulkDiscardResult,
@@ -1105,6 +1109,7 @@ class ReviewService:
         actor_role: str | None = None,
         actor: ActorContext | None = None,
     ) -> ReviewItemDetail:
+        validate_request_inputs(request)
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")

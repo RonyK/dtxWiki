@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 
 AGENT_PAGE_CATEGORIES = (
     "agent_guide",
@@ -18,7 +19,7 @@ SENSITIVE_AGENT_PAGE_CATEGORIES = {
 }
 
 
-class AgentPageDraftRequest(BaseModel):
+class AgentPageDraftRequest(InputRequest):
     category: Literal[
         "agent_guide",
         "persona",
@@ -55,7 +56,7 @@ class AgentPageDraftResultResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class AgentPageActivateRequest(BaseModel):
+class AgentPageActivateRequest(InputRequest):
     version_id: UUID
     reason: str
 
@@ -78,7 +79,7 @@ class AgentPageActivateResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BuildBundleRequest(BaseModel):
+class BuildBundleRequest(InputRequest):
     task_intent: str
     client_id: UUID
     token_budget: int = Field(ge=512, le=200_000)

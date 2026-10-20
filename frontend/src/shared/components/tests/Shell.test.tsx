@@ -1081,6 +1081,14 @@ describe("Shell", () => {
       "button",
       { name: "Create" },
     );
+    fireEvent.change(titleInput, { target: { value: "😀".repeat(129) } });
+    await user.click(createSubmit);
+    expect(createRequestCount).toBe(0);
+    expect(shouldProceed).not.toHaveBeenCalled();
+    expect(titleInput).toHaveValue("😀".repeat(129));
+    expect(titleInput).toBeInvalid();
+    expect((titleInput as HTMLInputElement).validationMessage).toBe("Use 128 characters or fewer.");
+    fireEvent.input(titleInput, { target: { value: "Committed workspace" } });
     await waitFor(() =>
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),

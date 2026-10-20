@@ -1,3 +1,4 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import {
   AlertTriangle,
   Archive,
@@ -122,6 +123,11 @@ export function ChatsDetailScreen() {
 
   async function saveTitle() {
     if (!state || editTitle === null || savingTitle) {
+      return;
+    }
+    const titleError = inputTextError(editTitle, 120);
+    if (titleError) {
+      setActionError(titleError);
       return;
     }
     const trimmed = editTitle.trim();
@@ -260,6 +266,7 @@ export function ChatsDetailScreen() {
                     <input
                       ref={titleInputRef}
                       aria-label={t("detail.titleLabel")}
+                      {...textInputLimit(120)}
                       disabled={savingTitle}
                       value={visibleTitle}
                       onChange={(event) => setEditTitle(event.currentTarget.value)}

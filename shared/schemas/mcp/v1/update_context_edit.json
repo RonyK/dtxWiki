@@ -16,7 +16,10 @@
           }
         ],
         "default": null,
-        "title": "Aliases"
+        "maxItems": 32,
+        "title": "Aliases",
+        "x-normalized-item-maxLength": 80,
+        "x-normalized-item-minLength": 1
       },
       "base_content_hash": {
         "anyOf": [
@@ -141,7 +144,10 @@
           }
         ],
         "default": null,
-        "title": "Tags"
+        "maxItems": 32,
+        "title": "Tags",
+        "x-normalized-item-maxLength": 48,
+        "x-normalized-item-minLength": 1
       },
       "title": {
         "anyOf": [
@@ -154,7 +160,9 @@
           }
         ],
         "default": null,
-        "title": "Title"
+        "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+        "title": "Title",
+        "x-normalized-maxLength": 256
       },
       "version_id": {
         "anyOf": [

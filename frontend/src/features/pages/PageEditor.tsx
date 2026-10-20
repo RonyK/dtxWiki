@@ -1,3 +1,4 @@
+import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { autocompletion, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
@@ -325,8 +326,7 @@ const COMPACT_ACTION_BAR_MAX_WIDTH = 720;
 const SINGLE_PANE_EDITOR_MAX_WIDTH = 640;
 const TITLE_TEXTAREA_MIN_HEIGHT = 44;
 const TITLE_TEXTAREA_MAX_HEIGHT = 132;
-const TITLE_MAX_LENGTH = 200;
-const TITLE_CONTROL_CHARS_PATTERN = /[\u0000-\u001F\u007F\u2028\u2029]+/g;
+const TITLE_MAX_LENGTH = 256;
 // Defense-in-depth for legacy or manually pasted upload markers. Interactive
 // uploads keep their transient slots outside EditorState.doc.
 const UPLOAD_PLACEHOLDER_PATTERN = /!\[[^\]]*\]\(\u200b/;
@@ -1122,6 +1122,7 @@ export function PageEditor({
   const canSave =
     isEditorReady &&
     title.trim().length > 0 &&
+    !inputTextError(title, TITLE_MAX_LENGTH) &&
     normalizedSlug.length > 0 &&
     !aliasValidationMessage &&
     !hasPendingImageUpload &&
@@ -2705,6 +2706,12 @@ export function PageEditor({
   async function save(options: SaveOptions = {}) {
     const source = options.source ?? "manual";
     const submittedBody = options.bodyOverride ?? body;
+    const inputError = inputTextError(title, TITLE_MAX_LENGTH) || markdownInputError(submittedBody);
+    if (inputError) {
+      setStatus(inputError);
+      setSaveError(true);
+      return;
+    }
     if (options.publish && stalePublishState !== "idle") {
       return;
     }
@@ -3950,6 +3957,11 @@ export function PageEditor({
       return;
     }
     const note = commentPreview.note.trim();
+    const noteError = inputTextError(note, 5000, false);
+    if (noteError) {
+      setStatus(noteError);
+      return;
+    }
     if (!note) {
       setStatus(
         t("editor.commentNoteRequired", {
@@ -4725,7 +4737,7 @@ export function PageEditor({
               aria-label={t("editor.titleAria", { defaultValue: "Title" })}
               className="editor-title-input"
               data-testid="page-title-editor"
-              maxLength={TITLE_MAX_LENGTH}
+              {...textInputLimit(TITLE_MAX_LENGTH)}
               onBlur={() => setTitleValidationRequested(true)}
               onChange={(event) => updateTitle(event.currentTarget.value)}
               onKeyDown={handleTitleKeyDown}
@@ -4738,6 +4750,9 @@ export function PageEditor({
               <div className="editor-title-tags">
                 <ChipInput
                   ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
+                  truncateItems={false}
+                  maxItems={32}
+                  onItemTooLong={() => setStatus(inputTextError("x".repeat(49), 48))}
                   onChange={updateTags}
                   onQueryChange={setTagQuery}
                   placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
@@ -4814,7 +4829,10 @@ export function PageEditor({
                   <ChipInput
                     ariaLabel={t("editor.tagsAria", { defaultValue: "Tags" })}
                     id="editor-mobile-tags"
-                    onChange={updateTags}
+                    truncateItems={false}
+                  maxItems={32}
+                  onItemTooLong={() => setStatus(inputTextError("x".repeat(49), 48))}
+                  onChange={updateTags}
                     onQueryChange={setTagQuery}
                     placeholder={t("editor.tagPlaceholder", { defaultValue: "+ Tag" })}
                     suggestions={tagSuggestions}
@@ -4885,6 +4903,7 @@ export function PageEditor({
                       ariaLabel={t("editor.aliasesLabel", { defaultValue: "Aliases" })}
                       id="editor-aliases"
                       maxItemLength={80}
+                      maxItems={32}
                       onChange={updateAliases}
                       onItemTooLong={(alias) => setAliasItemError(t(
                         "editor.aliasTooLong",
@@ -5565,7 +5584,7 @@ function CommentPreviewPopover({
   state: CommentPreviewState;
 }) {
   const { t } = useTranslation("pages");
-  const readyToCreate = canCreate && state.note.trim().length > 0 && !isSubmitting;
+  const readyToCreate = canCreate && state.note.trim().length > 0 && !inputTextError(state.note, 5000, false) && !isSubmitting;
   return (
     <section
       aria-label={t("editor.commentPreviewAria", { defaultValue: "Comment preview" })}
@@ -5601,6 +5620,7 @@ function CommentPreviewPopover({
           })}
           ref={noteRef}
           rows={3}
+          {...textInputLimit(5000, false)}
           value={state.note}
         />
       </label>
@@ -6663,14 +6683,13 @@ function sameBreadcrumbLabel(left: string | undefined, right: string) {
 }
 
 function normalizeInitialTitle(value: string | null) {
-  return value?.trim().slice(0, 80) ?? "";
+  return value?.trim() ?? "";
 }
 
-// Every title input path (typing, paste, drop, programmatic) funnels through
-// updateTitle, so collapsing newline/control runs here covers multi-line
-// paste that bypasses the Enter-key interceptor.
+// Preserve explicit text so the shared policy can report invalid characters
+// or length without rewriting an author's input.
 function normalizeTitleInput(value: string) {
-  return value.replace(TITLE_CONTROL_CHARS_PATTERN, " ").slice(0, TITLE_MAX_LENGTH);
+  return value;
 }
 
 // Walk parent_id links from the destination node up to the root so the editor

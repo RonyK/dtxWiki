@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import and_, case, func, not_, or_, select, tuple_
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import normalize_short_text, validate_text
 from backend.models.base import utc_now
 from backend.models.workspace import (
     NEW_LIBRARY_MAX_UPLOAD_BYTES,
@@ -192,9 +193,7 @@ class LibraryPolicyBatchUpdateRequired(SettingsPolicyUpdateRejected):
     error_code = "library_policy_batch_update_required"
 
 
-class LibraryFormatExtensionTransferRequiresRelease(
-    SettingsPolicyUpdateRejected
-):
+class LibraryFormatExtensionTransferRequiresRelease(SettingsPolicyUpdateRejected):
     error_code = "library_format_extension_transfer_requires_release"
 
 
@@ -442,9 +441,7 @@ class SettingsService:
                     func.sum(
                         case(
                             (
-                                not_(
-                                    _mcp_client_active_connection_predicate(health)
-                                ),
+                                not_(_mcp_client_active_connection_predicate(health)),
                                 1,
                             ),
                             else_=0,
@@ -468,9 +465,7 @@ class SettingsService:
         if status == "active":
             data_filters.append(_mcp_client_active_connection_predicate(health))
         elif status == "disabled":
-            data_filters.append(
-                not_(_mcp_client_active_connection_predicate(health))
-            )
+            data_filters.append(not_(_mcp_client_active_connection_predicate(health)))
         if typed_cursor is not None:
             cursor_created_at, cursor_id = typed_cursor
             data_filters.append(
@@ -782,9 +777,7 @@ class SettingsService:
                     "format_families": 3,
                     "format_overrides": 3,
                 }
-                ordered_changes.sort(
-                    key=lambda item: library_order.get(item[0], 3)
-                )
+                ordered_changes.sort(key=lambda item: library_order.get(item[0], 3))
             for key, value in ordered_changes:
                 if group == "library" and key in RETIRED_LIBRARY_SOURCE_RULE_KEYS:
                     raise LibrarySourceRulesRetired(
@@ -1057,7 +1050,11 @@ class SettingsService:
                 )
             workspace.ask_retrieval_mode = normalized
             return
-        text = _coerce_string(value).strip()
+        text = (
+            normalize_short_text(value, field=key, max_length=128)
+            if key == "title"
+            else validate_text(_coerce_string(value).strip(), field=key, max_length=512)
+        )
         if not text:
             raise SettingsPolicyUpdateRejected(f"{key} cannot be empty")
         setattr(workspace, key, text)
@@ -1147,9 +1144,7 @@ class SettingsService:
         elif key == "builtin_format_overrides":
             try:
                 policy_value = (
-                    self.library_family_policy.coerce_builtin_format_overrides(
-                        value
-                    )
+                    self.library_family_policy.coerce_builtin_format_overrides(value)
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1159,9 +1154,7 @@ class SettingsService:
                     value,
                     existing_families=policy.get("format_families", []),
                     custom_formats=policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get(
-                        "builtin_format_overrides", {}
-                    ),
+                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
                 )
             except LibraryFamilyPolicyError as exc:
                 raise LibraryPolicyValidationRejected(exc) from exc
@@ -1186,9 +1179,7 @@ class SettingsService:
                 str(item["format_id"])
                 for item in self.library_family_policy.coerce_custom_formats(
                     policy.get("custom_formats", []),
-                    builtin_format_overrides=policy.get(
-                        "builtin_format_overrides", {}
-                    ),
+                    builtin_format_overrides=policy.get("builtin_format_overrides", {}),
                 )
             }
             raw_format_id = key.removeprefix("format_overrides.")
@@ -1233,14 +1224,11 @@ def _validate_policy_cross_fields(
         return
     if group == "library":
         family_policy = (
-            library_family_policy
-            or get_default_library_family_policy_service()
+            library_family_policy or get_default_library_family_policy_service()
         )
         try:
-            builtin_format_overrides = (
-                family_policy.coerce_builtin_format_overrides(
-                    policy.get("builtin_format_overrides", {})
-                )
+            builtin_format_overrides = family_policy.coerce_builtin_format_overrides(
+                policy.get("builtin_format_overrides", {})
             )
             custom_formats = family_policy.coerce_custom_formats(
                 policy.get("custom_formats", []),
@@ -1250,8 +1238,7 @@ def _validate_policy_cross_fields(
             orphaned_custom_overrides = sorted(
                 format_id
                 for format_id in policy.get("format_overrides", {})
-                if str(format_id).startswith("custom-")
-                and format_id not in custom_ids
+                if str(format_id).startswith("custom-") and format_id not in custom_ids
             )
             if orphaned_custom_overrides:
                 raise LibraryFamilyPolicyError(
@@ -1456,6 +1443,7 @@ def _coerce_policy_value(key: str, value):
 
 
 def _normalize_workspace_slug(value) -> str:
+    validate_text(_coerce_string(value), field="slug", max_length=80, min_length=1)
     slug = re.sub(r"[^a-z0-9-]+", "-", _coerce_string(value).lower()).strip("-")
     slug = re.sub(r"-{2,}", "-", slug)[:80].strip("-")
     if not slug:
@@ -1497,9 +1485,7 @@ def normalized_library_policy(
         max_bytes=MAX_LIBRARY_WORKSPACE_UPLOAD_BYTES,
     )
     try:
-        policy_service = (
-            family_policy or get_default_library_family_policy_service()
-        )
+        policy_service = family_policy or get_default_library_family_policy_service()
         normalized["builtin_format_overrides"] = (
             policy_service.coerce_builtin_format_overrides(
                 source.get("builtin_format_overrides", {})
@@ -1516,9 +1502,7 @@ def normalized_library_policy(
         )
     except LibraryFamilyPolicyError as exc:
         raise LibraryPolicyValidationRejected(exc) from exc
-    custom_ids = {
-        str(item["format_id"]) for item in normalized["custom_formats"]
-    }
+    custom_ids = {str(item["format_id"]) for item in normalized["custom_formats"]}
     allowed_override_ids = LIBRARY_FORMATS | custom_ids
     normalized["format_overrides"] = {
         format_id: limit
@@ -1573,9 +1557,7 @@ def library_upload_limit_bytes(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized[
-                    "builtin_format_overrides"
-                ],
+                builtin_format_overrides=normalized["builtin_format_overrides"],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference = family.max_upload_bytes
@@ -1620,9 +1602,7 @@ def library_upload_limit_sources(
                 normalized["format_families"],
                 format_id,
                 custom_formats=normalized["custom_formats"],
-                builtin_format_overrides=normalized[
-                    "builtin_format_overrides"
-                ],
+                builtin_format_overrides=normalized["builtin_format_overrides"],
             )
             if family is not None and family.max_upload_bytes is not None:
                 preference_source = "family"
@@ -1679,9 +1659,7 @@ def _coerce_library_upload_limit(
             f"{field_name} must be at least {MIN_LIBRARY_UPLOAD_BYTES}"
         )
     if value > max_bytes:
-        raise SettingsPolicyUpdateRejected(
-            f"{field_name} must be at most {max_bytes}"
-        )
+        raise SettingsPolicyUpdateRejected(f"{field_name} must be at most {max_bytes}")
     return value
 
 

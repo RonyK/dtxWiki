@@ -44,6 +44,18 @@ describe("Library format alias-group input", () => {
     ])).toBe("[Report files](.report,.rpt), [Backup](.bak)");
   });
 
+  it("counts normalized alias labels as code points at the 80/81 emoji boundary", () => {
+    const validLabel = "😀".repeat(80);
+    expect(parseAliasGroupInput(`[  ${validLabel}  ](.emoji)`)).toMatchObject({
+      ok: true,
+      groups: [{ label: validLabel, extensions: [".emoji"] }],
+    });
+    expect(parseAliasGroupInput(`[${validLabel}😀](.emoji)`)).toMatchObject({
+      ok: false,
+      error: { code: "invalid_label" },
+    });
+  });
+
   it.each([
     ["", "empty_input"],
     [".foo,.FOO", "duplicate_extension"],

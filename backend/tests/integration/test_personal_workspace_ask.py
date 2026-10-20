@@ -23,7 +23,7 @@ def test_personal_workspace_lazily_creates_only_ask_tree(page_service):
     )
     signup = client.post(
         "/api/v1/auth/signup",
-        json={"email": "personal-ask@example.com", "password": "owner-pass"},
+        json={"email": "personal-ask@example.com", "password": "owner-password-123"},
     )
     assert signup.status_code == 201, signup.text
     workspace_id = UUID(

@@ -11,6 +11,9 @@ from uuid import UUID
 from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import (
+    validate_text,
+)
 from backend.models.base import utc_now
 from backend.models.normalized_keys import normalize_search_key
 from backend.models.user import User
@@ -69,9 +72,7 @@ class WorkspaceMemberInactiveError(WorkspaceMembershipConflictError):
         )
 
 
-class WorkspaceFirstShareConfirmationRequiredError(
-    WorkspaceMembershipConflictError
-):
+class WorkspaceFirstShareConfirmationRequiredError(WorkspaceMembershipConflictError):
     def __init__(self) -> None:
         super().__init__(FIRST_SHARE_WARNING, error_code=FIRST_SHARE_WARNING_CODE)
 
@@ -222,15 +223,18 @@ class WorkspaceMembershipService:
                     )
                 )
 
-            total = session.scalar(
-                select(func.count())
-                .select_from(User)
-                .join(
-                    WorkspaceMembership,
-                    WorkspaceMembership.user_id == User.id,
+            total = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(User)
+                    .join(
+                        WorkspaceMembership,
+                        WorkspaceMembership.user_id == User.id,
+                    )
+                    .where(*predicates)
                 )
-                .where(*predicates)
-            ) or 0
+                or 0
+            )
             page_predicates = list(predicates)
             if after is not None:
                 joined_after, user_after = after
@@ -266,8 +270,7 @@ class WorkspaceMembershipService:
                     (last_membership.joined_at.isoformat(), last_user.id.hex),
                 )
             items = [
-                self._view(workspace, user, membership)
-                for user, membership in selected
+                self._view(workspace, user, membership) for user, membership in selected
             ]
             return WorkspaceMemberPage(
                 items=items,
@@ -755,10 +758,7 @@ class WorkspaceMembershipService:
                 continue
             if session.get(Workspace, candidate_id) is None:
                 continue
-            if (
-                session.get(WorkspaceMembership, (user.id, candidate_id))
-                is not None
-            ):
+            if session.get(WorkspaceMembership, (user.id, candidate_id)) is not None:
                 return candidate_id
 
         return session.scalar(
@@ -847,6 +847,7 @@ class WorkspaceMembershipService:
 
 
 def _normalize_member_query(value: str) -> str:
+    validate_text(value, field="query", max_length=320)
     return normalize_search_key(value)
 
 

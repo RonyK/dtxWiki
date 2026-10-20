@@ -49,7 +49,7 @@ def _create_user(
             "add",
             email,
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             database_url,
         ],

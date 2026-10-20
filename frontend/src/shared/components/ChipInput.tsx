@@ -1,3 +1,4 @@
+import { codePointLength, inputListLimitMessage, textInputLimit } from "../lib/inputPolicy";
 import { X } from "lucide-react";
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 
@@ -12,6 +13,7 @@ export type ChipInputProps = {
   id?: string;
   inputDisabled?: boolean;
   maxItemLength?: number;
+  maxItems?: number;
   onChange: (value: string[]) => void | boolean;
   onDuplicate?: (item: string) => void;
   onEditingChange?: (editing: boolean) => void;
@@ -36,6 +38,7 @@ export function ChipInput({
   id,
   inputDisabled = false,
   maxItemLength = 48,
+  maxItems,
   onChange,
   onDuplicate,
   onEditingChange,
@@ -72,8 +75,14 @@ export function ChipInput({
         return value;
       })
       .filter(Boolean);
+    if (maxItems !== undefined && nextTags.length > maxItems) {
+      inputRef.current?.setCustomValidity(inputListLimitMessage(maxItems));
+      inputRef.current?.reportValidity();
+      return null;
+    }
+    inputRef.current?.setCustomValidity("");
     if (!truncateItems) {
-      const tooLong = nextTags.find((tag) => tag.length > maxItemLength);
+      const tooLong = nextTags.find((tag) => codePointLength(tag) > maxItemLength);
       if (tooLong) {
         onItemTooLong?.(tooLong);
         return null;
@@ -101,6 +110,11 @@ export function ChipInput({
       seen.add(key);
       merged.push(tag);
       addedAny = true;
+    }
+    if (maxItems !== undefined && merged.length > maxItems) {
+      inputRef.current?.setCustomValidity(inputListLimitMessage(maxItems));
+      inputRef.current?.reportValidity();
+      return;
     }
     if (!addedAny) {
       inputRef.current?.select();
@@ -189,7 +203,7 @@ export function ChipInput({
                   autoFocus
                   className="chip-input-chip-edit-input"
                   disabled={disabled}
-                  maxLength={maxItemLength}
+                  {...textInputLimit(maxItemLength)}
                   onBlur={(event) => commitEdit(tag, event.currentTarget.value)}
                   onChange={(event) => setEditingValue(event.currentTarget.value)}
                   onKeyDown={(event) => {

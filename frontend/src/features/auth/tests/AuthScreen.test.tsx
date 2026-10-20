@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,54 @@ describe("AuthScreen", () => {
       }
       throw new Error(`Unexpected request: ${url}`);
     });
+  });
+
+  it.each([
+    ["name", "😀".repeat(33)],
+    ["email", "a".repeat(65) + "@example.com"],
+    ["password", "😀".repeat(129)],
+  ])("blocks invalid %s before the authentication request", async (field, value) => {
+    render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Sign up" });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: field === "email" ? value : "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: field === "name" ? value : "New User" } });
+    const password = screen.getByLabelText("Password");
+    fireEvent.change(password, { target: { value: field === "password" ? value : "correct-password" } });
+    fireEvent.submit(password.closest("form")!);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/auth/signup"))).toHaveLength(0);
+    expect(password).toHaveValue(field === "password" ? value : "correct-password");
+  });
+
+  it("accepts Unicode byte/code-point boundaries without native email or UTF-16 restrictions", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let sent: Record<string, unknown> | undefined;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/auth/signup")) {
+        sent = JSON.parse(String(init?.body));
+        return jsonResponse({ data: sessionPayload("한글@example.com") });
+      }
+      return original(input, init);
+    });
+    render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Sign up" });
+    const email = screen.getByLabelText("Email");
+    expect(email).toHaveAttribute("type", "text");
+    fireEvent.change(email, { target: { value: " 한글@EXAMPLE.COM " } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: " " + "😀".repeat(32) + " " } });
+    const password = screen.getByLabelText("Password");
+    fireEvent.change(password, { target: { value: "😀".repeat(128) } });
+    fireEvent.submit(password.closest("form")!);
+    await waitFor(() => expect(sent).toEqual(expect.objectContaining({ email: "한글@example.com", display_name: "😀".repeat(32), password: "😀".repeat(128) })));
+  });
+
+  it("rejects raw multiline name paste without sanitizing it into another name", async () => {
+    render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Sign up" });
+    const name = screen.getByLabelText("Display name");
+    expect(fireEvent.paste(name, { clipboardData: { getData: () => "Alice\nBob" } })).toBe(false);
+    expect(name).toHaveValue("");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 
   it("directs password recovery to the server operator, not a workspace admin", async () => {
@@ -303,14 +351,14 @@ describe("AuthScreen", () => {
     );
 
     await screen.findByRole("heading", { name: "Sign up" });
-    expect(screen.getByText("At least 8 characters.")).toBeInTheDocument();
+    expect(screen.getByText("15–128 characters.")).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("radio", { name: /^Sign in$/i }),
     );
 
     expect(
-      screen.queryByText("At least 8 characters."),
+      screen.queryByText("15–128 characters."),
     ).not.toBeInTheDocument();
   });
 

@@ -56,9 +56,7 @@ def test_workspace_list_filters_to_actor_memberships(page_service):
 
     workspaces = client.get("/api/v1/workspaces")
     assert workspaces.status_code == 200
-    slugs = [
-        workspace["slug"] for workspace in workspaces.json()["data"]["workspaces"]
-    ]
+    slugs = [workspace["slug"] for workspace in workspaces.json()["data"]["workspaces"]]
     assert len(slugs) == 1
     assert slugs[0].startswith("personal-")
 
@@ -161,26 +159,32 @@ def test_owner_can_create_select_and_delete_empty_workspace(page_service):
     }
     assert "research-workspace" in workspace_slugs
     assert len(workspace_slugs) == 2
-    assert len(
-        [slug for slug in workspace_slugs if slug.startswith("personal-")]
-    ) == 1
+    assert len([slug for slug in workspace_slugs if slug.startswith("personal-")]) == 1
 
     deleted = client.delete(f"/api/v1/workspaces/{payload['id']}")
     assert deleted.status_code == 200
     assert deleted.json()["data"]["deleted_workspace_id"] == payload["id"]
     with page_service.session_factory() as session:
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM search_doc_fts WHERE workspace_id = :workspace_id"
-            ),
-            {"workspace_id": payload["id"]},
-        ) == 0
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM page_name_trgm WHERE workspace_id = :workspace_id"
-            ),
-            {"workspace_id": payload["id"]},
-        ) == 0
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM search_doc_fts "
+                    "WHERE workspace_id = :workspace_id"
+                ),
+                {"workspace_id": payload["id"]},
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM page_name_trgm "
+                    "WHERE workspace_id = :workspace_id"
+                ),
+                {"workspace_id": payload["id"]},
+            )
+            == 0
+        )
 
 
 def test_workspace_delete_detaches_audit_history_instead_of_blocking(
@@ -382,8 +386,8 @@ def test_purge_is_refused_before_anything_is_deleted_when_the_store_cannot_purge
         """Deliberately has no `purge_workspace` -- the pre-fix duck type."""
 
     container = client.app.state.container
-    container.get_services().blob_store_provider.store_for = (
-        lambda _workspace_id: _StoreWithoutPurgeSupport()
+    container.get_services().blob_store_provider.store_for = lambda _workspace_id: (
+        _StoreWithoutPurgeSupport()
     )
 
     response = client.delete(f"/api/v1/workspaces/{workspace_id}?purge=true")
@@ -542,9 +546,7 @@ def test_bulk_decide_reviews_best_effort_and_editor_gated(page_service):
     approve_id = _seed_review_item(
         page_service, workspace_id, title="Bulk Approve Target"
     )
-    skip_id = _seed_review_item(
-        page_service, workspace_id, title="Bulk Skip Target"
-    )
+    skip_id = _seed_review_item(page_service, workspace_id, title="Bulk Skip Target")
     already_resolved = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{skip_id}/decision",
         json={"decision_type": "approve"},
@@ -576,9 +578,7 @@ def test_bulk_decide_reviews_best_effort_and_editor_gated(page_service):
     assert payload["approved"] == [approve_id]
     assert payload["skipped"][0]["id"] == skip_id
 
-    listed = owner.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews?status=resolved"
-    )
+    listed = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?status=resolved")
     assert listed.status_code == 200
     statuses = {item["id"]: item["status"] for item in listed.json()["data"]["items"]}
     assert statuses[approve_id] == "approved"
@@ -624,13 +624,9 @@ def test_list_reviews_does_not_sweep_auto_approve_policy(page_service):
         review.risk_level = "medium"
         review.created_at = datetime.now(UTC) - timedelta(days=2)
 
-    pending = owner.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews?status=pending"
-    )
+    pending = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?status=pending")
     assert pending.status_code == 200
-    assert review_item_id in [
-        item["id"] for item in pending.json()["data"]["items"]
-    ]
+    assert review_item_id in [item["id"] for item in pending.json()["data"]["items"]]
     with page_service.session_factory.begin() as session:
         decision_count = session.scalar(
             select(func.count(ReviewDecision.id)).where(
@@ -697,9 +693,7 @@ def test_request_changes_routes_to_me_scope(page_service):
     workspace_id = owner.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    review_item_id = _seed_review_item(
-        page_service, workspace_id, title="Scope Target"
-    )
+    review_item_id = _seed_review_item(page_service, workspace_id, title="Scope Target")
     decided = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",
         json={
@@ -711,9 +705,7 @@ def test_request_changes_routes_to_me_scope(page_service):
     assert decided.status_code == 200
     assert decided.json()["data"]["current_audience_kind"] == "workspace_editors"
 
-    to_me = owner.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews?scope=to_me"
-    )
+    to_me = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?scope=to_me")
     assert to_me.status_code == 200
     assert review_item_id in [item["id"] for item in to_me.json()["data"]["items"]]
 
@@ -726,9 +718,7 @@ def test_claim_and_second_claimer_conflicts(page_service):
     workspace_id = owner.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    review_item_id = _seed_review_item(
-        page_service, workspace_id, title="Claim Target"
-    )
+    review_item_id = _seed_review_item(page_service, workspace_id, title="Claim Target")
     # A review must be changes_requested before it can be claimed (status guard).
     requested = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",
@@ -807,16 +797,18 @@ def _mcp_client_actor(workspace_id: UUID | None) -> ActorContext:
 
 
 @pytest.mark.parametrize("claimed_workspace", ("target", "foreign", None))
-def test_direct_mcp_client_credentials_are_rejected(
-    session_factory, claimed_workspace
-):
+def test_direct_mcp_client_credentials_are_rejected(session_factory, claimed_workspace):
     """The retired direct-client identity cannot authorize workspace access."""
     with session_factory.begin() as session:
         target = insert_workspace(
-            session, slug=f"retired-mcp-target-{claimed_workspace}", title="Target"
+            session,
+            slug=f"retired-mcp-target-{str(claimed_workspace).lower()}",
+            title="Target",
         )
         foreign = insert_workspace(
-            session, slug=f"retired-mcp-foreign-{claimed_workspace}", title="Foreign"
+            session,
+            slug=f"retired-mcp-foreign-{str(claimed_workspace).lower()}",
+            title="Foreign",
         )
         target_id = target.id
         claimed_workspace_id = {

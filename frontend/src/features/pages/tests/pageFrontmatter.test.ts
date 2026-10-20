@@ -94,6 +94,19 @@ describe("page frontmatter", () => {
     expect(parsed.metadata.aliases).toEqual(["경로\\docs"]);
   });
 
+  it("preserves 31 quoted comma values and escaped quotes without splitting or dropping", () => {
+    const values = Array.from({ length: 31 }, (_, index) => `alpha${index},"beta"\\suffix`);
+    const markdown = serializePageDocument({
+      body: "# Body",
+      metadata: { ...DEFAULT_PAGE_METADATA, tags: values, aliases: values },
+      slug: "quoted-commas",
+      title: "Quoted commas",
+    });
+    const parsed = parsePageDocument(markdown);
+    expect(parsed.metadata.tags).toEqual(values);
+    expect(parsed.metadata.aliases).toEqual(values);
+  });
+
   it.each([
     ["remote", 'cover: "https://example.com/track.png"'],
     ["relative", "cover: /private/cover.png"],

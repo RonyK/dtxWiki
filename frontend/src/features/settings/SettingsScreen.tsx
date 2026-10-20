@@ -147,6 +147,7 @@ import {
   WorkspaceMembersSection,
 } from "./WorkspaceAccessSettings";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { codePointLength, inputTextError, textInputLimit, trimShortText } from "../../shared/lib/inputPolicy";
 import {
   WorkspaceScopeChips,
   WorkspaceScopePicker,
@@ -178,6 +179,7 @@ import {
   customFormatOption,
   effectiveFormatUploadLimit,
   familyExtensions,
+  normalizeCustomFormatName,
   parsePolicyBuiltinFormatOverrides,
   parsePolicyCustomFormats,
   parsePolicyFormatFamilies,
@@ -273,7 +275,7 @@ class SettingsLocalError extends Error {
     this.name = "SettingsLocalError";
   }
 }
-const CUSTOM_APP_LABEL_MAX_LENGTH = 128;
+const CUSTOM_APP_LABEL_MAX_LENGTH = 160;
 // Loop guard only. A user's approved OAuth apps are bounded by the clients
 // they authorized by hand, so this ceiling is never reached in practice.
 const CONSENT_PAGE_DRAIN_LIMIT = 25;
@@ -1384,7 +1386,7 @@ function SettingsScreenBody() {
     );
     const customAppLabel =
       requestSetup.owner.kind === "generic-profile"
-        ? requestSetup.customAppLabel?.trim() ?? ""
+        ? trimShortText(requestSetup.customAppLabel ?? "")
         : null;
     if (requestSetup.owner.kind === "generic-profile" && !customAppLabel) {
       setCustomAppLabelError(
@@ -1395,19 +1397,16 @@ function SettingsScreenBody() {
       customAppLabelRef.current?.focus();
       return;
     }
-    if (
-      customAppLabel != null &&
-      customAppLabel.length > CUSTOM_APP_LABEL_MAX_LENGTH
-    ) {
-      setCustomAppLabelError(
-        t("access.customAppLabelTooLong", {
-          defaultValue: "Use {{max}} characters or fewer.",
-          max: CUSTOM_APP_LABEL_MAX_LENGTH,
-        }),
-      );
+    const customLabelError = customAppLabel == null
+      ? ""
+      : inputTextError(customAppLabel, CUSTOM_APP_LABEL_MAX_LENGTH);
+    if (customLabelError) {
+      setCustomAppLabelError(customLabelError);
       customAppLabelRef.current?.focus();
       return;
     }
+    const nameError = inputTextError(tokenName, 128);
+    if (nameError) { setTokenError(nameError); return; }
     const requestWorkspaceIds = [...effectiveNewKeyWorkspaceIds];
     if (requestWorkspaceIds.length === 0) {
       setTokenError(
@@ -1442,7 +1441,7 @@ function SettingsScreenBody() {
           selectedScopesRef.current,
         );
     try {
-      const typedName = tokenName.trim();
+      const typedName = trimShortText(tokenName);
       const requestedName = uniqueTokenName(typedName, activeTokenNames(tokens));
       const issued = await createApiToken({
         workspace_grants: requestWorkspaceIds.map((workspace_id) => ({
@@ -1544,7 +1543,9 @@ function SettingsScreenBody() {
   }
 
   async function onRenameToken(token: ApiToken) {
-    const nextName = renameDraft.trim();
+    const nameError = inputTextError(renameDraft, 128);
+    if (nameError) { setTokenError(nameError); return; }
+    const nextName = trimShortText(renameDraft);
     if (!nextName) {
       setTokenError(
         t("errors.accessKeyNameRequired", {
@@ -1892,6 +1893,8 @@ function SettingsScreenBody() {
     if (updates.length === 0) {
       return false;
     }
+    const validation = policyGroupValidationMessages(group, Object.fromEntries(updates.map(({field, value}) => [field.key, value])));
+    if (Object.keys(validation).length) { setPolicySaveError(Object.values(validation)[0]); return false; }
     const busyKey = `${group}:*`;
     setPolicyBusyKey(busyKey);
     setPolicySaveError(null);
@@ -3031,7 +3034,7 @@ function SettingsScreenBody() {
                       aria-invalid={customAppLabelError ? "true" : undefined}
                       disabled={tokenBusy}
                       id="mcp-custom-app-label"
-                      maxLength={CUSTOM_APP_LABEL_MAX_LENGTH}
+                      {...textInputLimit(CUSTOM_APP_LABEL_MAX_LENGTH)}
                       onChange={(event) => {
                         const nextLabel = event.target.value;
                         if (
@@ -3088,7 +3091,7 @@ function SettingsScreenBody() {
                   {t("access.keyName", { defaultValue: "Key name" })}
                   <input
                     disabled={tokenBusy}
-                    maxLength={128}
+                    {...textInputLimit(128)}
                     onChange={(event) => {
                       setTokenNameTouched(true);
                       setTokenName(event.target.value);
@@ -5022,7 +5025,7 @@ function McpKeyRow({
                   name: token.name,
                 })}
                 className="mcp-key-rename-input"
-                maxLength={128}
+                {...textInputLimit(128)}
                 onChange={(event) => onRenameDraftChange(event.target.value)}
                 ref={renameInputRef}
                 value={renameDraft}
@@ -5746,7 +5749,7 @@ export function WorkspaceDangerZone({
             "Workspace deletion is unavailable until the workspace list is loaded.",
         });
   const canDelete = Boolean(workspace && !disabledReasonCode);
-  const normalizedSlug = slugDraft.trim();
+  const normalizedSlug = trimShortText(slugDraft);
   const slugSaveDisabled =
     readOnly || slugBusy || !normalizedSlug || normalizedSlug === activeSlug;
 
@@ -5762,6 +5765,8 @@ export function WorkspaceDangerZone({
     if (slugSaveDisabled) {
       return;
     }
+    const slugValidation = inputTextError(slugDraft, 80) || (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug) ? t("validation.slugFormat", { defaultValue: "Use lowercase letters, numbers, and single hyphens." }) : "");
+    if (slugValidation) { setSlugError(slugValidation); return; }
     setSlugBusy(true);
     setSlugError(null);
     setSlugStatus(null);
@@ -5911,6 +5916,7 @@ export function WorkspaceDangerZone({
                 autoComplete="off"
                 disabled={readOnly}
                 onChange={(event) => setSlugDraft(event.target.value)}
+                {...textInputLimit(80)}
                 value={slugDraft}
               />
             </label>
@@ -7249,10 +7255,11 @@ function libraryPolicyDraftInvalid(draft: LibraryPolicyDraft) {
   const names = new Set<string>();
   const formats = new Set<string>();
   for (const family of draft.formatFamilies) {
-    const name = family.name.trim().toLocaleLowerCase();
+    const normalizedName = normalizeCustomFormatName(family.name);
+    const name = normalizedName.toLocaleLowerCase();
     if (
       !name ||
-      family.name.trim().length > MAX_LIBRARY_FAMILY_NAME_LENGTH ||
+      codePointLength(normalizedName) > MAX_LIBRARY_FAMILY_NAME_LENGTH ||
       family.format_ids.length === 0 ||
       names.has(name)
     ) return true;
@@ -8772,6 +8779,7 @@ function EditablePolicyField({
         ) : field.multiline ? (
           <div className="policy-edit-control is-multiline">
             <textarea
+              {...(group === "workspace" && field.key === "goal" ? textInputLimit(512, false) : {})}
               aria-label={field.label}
               disabled={busy}
               id={fieldId}
@@ -8784,6 +8792,7 @@ function EditablePolicyField({
         ) : (
           <div className="policy-edit-control">
             <input
+              {...(group === "workspace" && ["title", "name"].includes(field.key) ? textInputLimit(128) : {})}
               aria-label={field.label}
               disabled={busy}
               id={fieldId}
@@ -9911,6 +9920,14 @@ function policyGroupValidationMessages(
   group: SettingsPolicyGroup,
   drafts: Record<string, unknown>,
 ): Record<string, string> {
+  if (group === "workspace") {
+    const limits: Record<string, number> = { title: 128, name: 128, goal: 512, slug: 80 };
+    return Object.fromEntries(Object.entries(drafts).flatMap(([key, value]) => {
+      if (typeof value !== "string" || !(key in limits)) return [];
+      const error = inputTextError(value, limits[key], key !== "goal");
+      return error ? [[key, error]] : [];
+    }));
+  }
   if (group !== "agent_injection") {
     return {};
   }
@@ -10664,8 +10681,10 @@ function oauthConsentAppPresentation(
   };
 }
 
-function defaultTokenNameForApp(label?: string | null) {
-  return `${label?.trim() || "MCP connection"} access key`;
+export function defaultTokenNameForApp(label?: string | null) {
+  const suffix = " access key";
+  const base = trimShortText(label ?? "") || "MCP connection";
+  return `${trimShortText(Array.from(base).slice(0, 128 - codePointLength(suffix)).join(""))}${suffix}`;
 }
 
 function mcpOwnerValue(owner: Pick<McpAppOwner, "kind" | "id">) {
@@ -10773,15 +10792,15 @@ function activeTokenNames(tokens: ApiToken[]) {
     .map((token) => token.name);
 }
 
-function uniqueTokenName(baseName: string, existingNames: string[]) {
-  const trimmed = baseName.trim() || "MCP connection key";
+export function uniqueTokenName(baseName: string, existingNames: string[]) {
+  const trimmed = trimShortText(baseName) || "MCP connection key";
   const existing = new Set(existingNames.map((name) => name.toLowerCase()));
   if (!existing.has(trimmed.toLowerCase())) {
     return trimmed;
   }
   for (let suffix = 2; suffix < 1000; suffix += 1) {
     const suffixText = ` ${suffix}`;
-    const base = trimmed.slice(0, 128 - suffixText.length).trimEnd();
+    const base = trimShortText(Array.from(trimmed).slice(0, 128 - codePointLength(suffixText)).join(""));
     const candidate = `${base}${suffixText}`;
     if (!existing.has(candidate.toLowerCase())) {
       return candidate;

@@ -2933,6 +2933,11 @@ describe("SettingsScreen", () => {
     );
 
     const goal = await screen.findByLabelText("Goal");
+    fireEvent.change(goal, { target: { value: "😀".repeat(513) } });
+    expect(goal).toHaveValue("😀".repeat(513));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByText("Use 512 characters or fewer.")).toBeVisible();
+    expect(lastJsonBody(fetchMock, `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`, "PATCH")).toBeUndefined();
     await user.clear(goal);
     await user.type(goal, "Temporary workspace purpose");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
@@ -3348,6 +3353,62 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it.each([80, 81])("counts Library family names as code points when validating a %i-emoji draft", async (length) => {
+    const libraryPolicy = {
+      policy_schema_version: 5,
+      builtin_format_overrides: {},
+      custom_formats: [],
+      format_families: [{
+        family_id: "family-emoji",
+        name: "😀".repeat(length),
+        format_ids: ["markdown"],
+        max_upload_bytes: null,
+      }],
+      max_upload_bytes: 20_000_000,
+      format_overrides: {},
+      allow_store_without_converter: true,
+    };
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [workspaceSummary(WORKSPACE_ID, "Default Workspace", "default")],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy", libraryPolicy),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy("agent_injection", "Agent injection policy"),
+          mcp_clients: [],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`]: {
+        data: settingsLibraryCapabilities(),
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=library"]}>
+        <WorkspaceProvider>
+          <WorkspaceRefreshGate><SettingsScreen /></WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
+    const card = (await screen.findByRole("heading", {
+      name: "Library upload policy",
+    })).closest(".policy-card") as HTMLElement;
+    const limit = within(card).getByRole("spinbutton", { name: "Manual upload limit" });
+    await waitFor(() => expect(limit).toHaveValue(20));
+    fireEvent.change(limit, { target: { value: "21" } });
+    const save = within(card).getByRole("button", { name: "Save changes" });
+    if (length === 80) expect(save).toBeEnabled();
+    else expect(save).toBeDisabled();
   });
 
   it("manages custom aliases and families while keeping individual limits advanced", async () => {
@@ -7334,6 +7395,11 @@ describe("SettingsScreen", () => {
     const renameInput = screen.getByRole("textbox", { name: "Rename Laptop" });
     expect(renameInput).toHaveClass("mcp-key-rename-input");
     expect(renameInput.closest("label")).toHaveClass("mcp-key-rename-field");
+    fireEvent.change(renameInput, { target: { value: "😀".repeat(129) } });
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(renameInput).toHaveValue("😀".repeat(129));
+    expect(screen.getByText("Use 128 characters or fewer.")).toBeVisible();
+    expect(lastJsonBody(fetchMock, `${BASE}/api/v1/auth/tokens/token-rename`, "PATCH")).toBeUndefined();
     await user.clear(renameInput);
     await user.type(renameInput, "Research laptop");
     await user.click(screen.getByRole("button", { name: "Save name" }));
@@ -7776,7 +7842,7 @@ describe("SettingsScreen", () => {
     const customAppLabel = screen.getByRole("textbox", {
       name: "AI app display name",
     });
-    expect(customAppLabel).toHaveAttribute("maxLength", "128");
+    expect(customAppLabel).not.toHaveAttribute("maxLength");
     expect(
       screen.getByText(/does not identify or authorize the app/),
     ).toBeInTheDocument();

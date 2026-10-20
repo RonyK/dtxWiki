@@ -1,3 +1,4 @@
+import { inputTextError, textInputLimit, trimShortText } from "../../shared/lib/inputPolicy";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -323,6 +324,10 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
         customAppLabelRef.current?.focus();
         return;
       }
+      if (customAppLabel) {
+        const error = inputTextError(customAppLabel, 160);
+        if (error) { setCustomAppLabelError(error); customAppLabelRef.current?.focus(); return; }
+      }
       const requestGeneration = planRequestGeneration.current + 1;
       const requestContextKey = contextKey;
       planRequestGeneration.current = requestGeneration;
@@ -561,7 +566,7 @@ export const McpAppHub = forwardRef<McpAppHubHandle, McpAppHubProps>(
                       }
                       aria-invalid={customAppLabelError ? "true" : undefined}
                       id="mcp-picker-custom-app-label"
-                      maxLength={128}
+                      {...textInputLimit(160)}
                       onChange={(event) => {
                         setCustomAppLabelDraft(event.target.value);
                         setCustomAppLabelError(null);
@@ -1289,6 +1294,6 @@ function genericOwner(profile: McpGenericProfile): McpAppOwner {
 }
 
 function normalizeGenericLabelDraft(value: string) {
-  const normalized = value.trim();
-  return normalized ? normalized.slice(0, 128) : null;
+  const normalized = trimShortText(value);
+  return normalized || null;
 }

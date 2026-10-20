@@ -1334,7 +1334,8 @@
     "reconciliationReminderMax": "Reconciliation reminder delay must be 30 days or shorter.",
     "reconciliationAttentionMin": "Reconciliation attention window must be at least 1 day.",
     "reconciliationAttentionMax": "Reconciliation attention window must be 365 days or shorter.",
-    "webRulePattern": "Web URL rule {{index}} requires a pattern."
+    "webRulePattern": "Web URL rule {{index}} requires a pattern.",
+    "slugFormat": "Use lowercase letters, numbers, and single hyphens."
   },
   "state": {
     "unsaved": "{{count}} unsaved",

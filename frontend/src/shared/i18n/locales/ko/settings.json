@@ -1334,7 +1334,8 @@
     "reconciliationReminderMax": "조정 브랜치 알림 대기 시간은 30일 이하여야 합니다.",
     "reconciliationAttentionMin": "조정 브랜치 주의 기간은 최소 1일이어야 합니다.",
     "reconciliationAttentionMax": "조정 브랜치 주의 기간은 365일 이하여야 합니다.",
-    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다."
+    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다.",
+    "slugFormat": "소문자·숫자와 단일 하이픈을 사용해 주세요."
   },
   "state": {
     "unsaved": "저장 안 됨 {{count}}개",

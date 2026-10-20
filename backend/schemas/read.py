@@ -10,6 +10,7 @@ from backend.schemas.common import (
     RetrievalMode,
     SearchScope,
 )
+from backend.schemas.input_policy import InputRequest
 from backend.spi.types import (
     RankedResult as RankedResult,
 )
@@ -72,7 +73,7 @@ class WorkspaceListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class WorkspaceCreateRequest(BaseModel):
+class WorkspaceCreateRequest(InputRequest):
     title: str = Field(min_length=1, max_length=128)
     slug: str | None = Field(default=None, min_length=1, max_length=80)
     goal: str | None = Field(default=None, min_length=1, max_length=512)
@@ -620,9 +621,7 @@ class LibraryFormatCapabilityPayload(BaseModel):
     upload_limit_sources: dict[
         Literal["workspace", "family", "format", "instance"], int
     ]
-    upload_limiting_source: Literal[
-        "workspace", "family", "format", "instance"
-    ]
+    upload_limiting_source: Literal["workspace", "family", "format", "instance"]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -650,9 +649,7 @@ class LibraryFormatFamilyCapabilityPayload(BaseModel):
     unavailable_count: int = Field(ge=0)
     max_upload_bytes: int | None = Field(default=None, gt=0)
     effective_max_upload_bytes: int = Field(gt=0)
-    upload_limiting_source: Literal[
-        "workspace", "family", "instance"
-    ]
+    upload_limiting_source: Literal["workspace", "family", "instance"]
     blockers: list[str]
 
     model_config = ConfigDict(extra="forbid")
@@ -817,7 +814,7 @@ class ListChangesResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class SearchRequest(BaseModel):
+class SearchRequest(InputRequest):
     query: str = Field(default="", max_length=SEARCH_QUERY_MAX_LENGTH)
     scope: SearchScope = "all"
     filters: SearchFilters = Field(default_factory=SearchFilters)

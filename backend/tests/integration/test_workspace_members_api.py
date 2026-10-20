@@ -193,7 +193,7 @@ def test_member_list_cursor_filters_normalize_without_read_audit_noise(
     with page_service.session_factory.begin() as session:
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
-        persisted_member.display_name = "Straße\tﬁ   Member"
+        persisted_member.display_name = "Straße\u2003ﬁ   Member"
     assert owner_client.post(
         endpoint,
         json={"email": member.email, "confirm_first_share": True},

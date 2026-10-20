@@ -35,7 +35,7 @@ PreviewKind = Literal[
     "markdown", "pdf", "image", "audio", "video", "table", "metadata"
 ]
 
-_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\u2028\u2029]")
 _HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 _HDF4_SIGNATURE = b"\x0e\x03\x13\x01"
 _OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"

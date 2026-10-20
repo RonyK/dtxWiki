@@ -24,6 +24,11 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
+from backend.domain.input_policy import (
+    validate_body,
+    validate_text,
+    validate_title,
+)
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
@@ -132,6 +137,7 @@ from backend.utils.page_frontmatter import (
     derive_nav_description,
     parse_page_frontmatter,
     upsert_page_frontmatter,
+    validate_page_markdown_input,
 )
 from backend.utils.uuid import parse_uuid_or_none
 
@@ -1145,7 +1151,7 @@ class PageService:
                         merged_body_markdown=result.preview_body_markdown,
                         predicted_block_map=result.predicted_block_map,
                         unresolved_count=0,
-                    )
+                    ),
                 )
             if result.draft_version_id is None:
                 raise RuntimeError("reconciliation commit did not return a draft")
@@ -1156,7 +1162,7 @@ class PageService:
                     head_version_id=request.expected_head_version_id,
                     branch_status="superseded",
                     review_item_id=result.review_item_id,
-                )
+                ),
             )
 
     def discard_alternative(
@@ -1167,6 +1173,8 @@ class PageService:
         reason: str,
         actor: ActorContext | None = None,
     ) -> PageVersionEntry:
+        if reason is not None:
+            validate_text(reason, field="reason", max_length=2000)
         if not actor_can_read_drafts(actor):
             raise PageNotFoundError("page version not found")
         with self.session_factory.begin() as session:
@@ -1243,6 +1251,8 @@ class PageService:
         actor_provenance: str,
         expected_content_hash: str | None = None,
     ) -> PagePublishResult:
+        if reason is not None:
+            validate_text(reason, field="reason", max_length=2000)
         from backend.schemas.context_write import PublishContextPageRequest
         from backend.services.context_write_service import ContextWriteService
 
@@ -1630,7 +1640,9 @@ class PageService:
                 actor_id=actor_id,
                 page_id=page.id,
                 version_id=anchor.version_id,
-                note=note.strip(),
+                note=validate_text(
+                    note.strip(), field="note", max_length=5000, min_length=1
+                ),
                 anchor=anchor.model_dump(mode="json"),
                 actor_provenance=actor_provenance,
             )
@@ -1863,9 +1875,7 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
-                        "base_version_id": (
-                            str(base.id) if base is not None else None
-                        ),
+                        "base_version_id": (str(base.id) if base is not None else None),
                     },
                 )
                 return self._payload_from_page(
@@ -1911,7 +1921,7 @@ class PageService:
         reason: str = "author submitted for review",
         retry_only: bool = False,
     ) -> PagePayload:
-        """"Save draft": lock the caller's own editing content and submit it (P8.1).
+        """ "Save draft": lock the caller's own editing content and submit it (P8.1).
 
         Author-only -- this is not a reviewer action. Requires the caller's
         own current ``editing_revision`` (covers body, title, slug, tags,
@@ -1925,6 +1935,8 @@ class PageService:
         P8.5: ``idempotency_key`` is required -- a retried "Save draft" must
         never create a second ``ReviewItem`` for the same submission.
         """
+        if reason is not None:
+            validate_text(reason, field="reason", max_length=2000)
 
         with self.session_factory.begin() as session:
 
@@ -1984,6 +1996,9 @@ class PageService:
                             server_version_id=existing_draft.id,
                             server_content_hash=existing_draft.content_hash,
                         )
+                # Historical editing versions remain readable, but a new
+                # submission must satisfy today's complete stored-body policy.
+                validate_page_markdown_input(version.body_md)
                 version.version_status = "draft"
                 # ReviewService.apply_decision's supersession check requires
                 # page.latest_draft_version_id == the reviewed version (a
@@ -4110,6 +4125,7 @@ class PageService:
                 identity_seed=str(version.id),
             )
         version.block_map = prepared_block_map
+        validate_body(body_md)
         version.body_md = body_md
         version.content_hash = content_hash
 
@@ -5172,6 +5188,13 @@ def prepare_page_write(
     fallback_aliases: list[str] | None = None,
     auto_fix: bool = False,
 ) -> PreparedPageWrite:
+    from backend.utils.page_frontmatter import validate_frontmatter_input
+
+    validate_frontmatter_input(body_md)
+    from backend.domain.input_policy import validate_labels
+
+    validate_labels(tags, field="tags", max_length=48)
+    validate_labels(aliases, field="aliases", max_length=80)
     parsed = parse_page_frontmatter(body_md)
     next_page_type = page_type or parsed.page_type
     next_tags = normalize_page_tags(tags) if tags is not None else parsed.tags
@@ -5218,6 +5241,12 @@ def prepare_page_write(
     # manual "Format now" button. Fail-closed: a normalizer fault leaves it as-is.
     if auto_fix:
         body_md = safe_normalize_markdown(body_md)
+    validate_body(body_md)
+    if title is not None:
+        validate_title(title)
+    heading_title = title_from_markdown_heading(parse_page_frontmatter(body_md).body)
+    if heading_title is not None:
+        validate_title(heading_title)
     return PreparedPageWrite(
         body_md=body_md,
         page_type=next_page_type,

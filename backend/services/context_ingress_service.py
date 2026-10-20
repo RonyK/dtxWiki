@@ -13,6 +13,7 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
+from backend.domain.input_policy import validate_text
 from backend.models.ask import (
     AskSession,
     AskTurn,
@@ -37,6 +38,7 @@ from backend.schemas.context_ingress import (
     ContextIngressRejectRequest,
     ProposalSourceRef,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.services.audit_service import AuditService
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.page_service import refresh_page_links
@@ -79,6 +81,7 @@ class ContextIngressService:
         actor_id: str,
         actor: ActorContext | None = None,
     ) -> ContextIngressProposalDetail:
+        validate_request_inputs(request)
         turn, ask_session = require_ask_turn(session, workspace_id, ask_turn_id)
         # H-01: promotion materializes the turn's answer into a proposal. An
         # actor who cannot see the turn's grounding evidence must not promote it,
@@ -192,6 +195,7 @@ class ContextIngressService:
         # flush far below, so without write intent two concurrent accepts both
         # pass the "proposed" guard and materialize the proposal twice.
         # PostgreSQL keeps using the narrower row lock below.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         if (
             request.final_save_mode != "feedback_only"
@@ -338,6 +342,7 @@ class ContextIngressService:
     ) -> ContextIngressProposalDetail:
         # SQLite: see accept_proposal. Without write intent a reject can race an
         # accept, recording the rejection while the page is materialized anyway.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         proposal = require_proposal_for_update(session, workspace_id, proposal_id)
         if proposal.status != "proposed":
@@ -827,6 +832,8 @@ def create_ingress_change_set(
     risk_level: str,
     review_required: bool = False,
 ) -> ChangeSet:
+    if reason is not None:
+        validate_text(reason, field="reason", max_length=2000)
     workspace = session.get(Workspace, workspace_id)
     if workspace is None:
         raise ReadNotFoundError("workspace not found")

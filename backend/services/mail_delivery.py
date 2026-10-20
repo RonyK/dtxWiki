@@ -18,6 +18,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.settings import Settings
+from backend.domain.identity_policy import EmailPolicyError, normalize_email
 from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
 from backend.models.mail import EmailOutbox
@@ -117,6 +118,13 @@ class MailDeliveryConfigurationError(MailDeliveryError):
 
 class MailProviderError(MailDeliveryError):
     error_code = "mail_provider_failed"
+
+
+def _validated_recipient(value: str) -> str:
+    try:
+        return normalize_email(value)
+    except EmailPolicyError as exc:
+        raise MailDeliveryConfigurationError("recipient email is invalid") from exc
 
 
 @dataclass(frozen=True)
@@ -265,9 +273,7 @@ class EmailDeliveryService:
         if self.provider is not None:
             return self.provider
         if not self.settings.mail_configured:
-            raise MailDeliveryConfigurationError(
-                "email recovery is not configured"
-            )
+            raise MailDeliveryConfigurationError("email recovery is not configured")
         assert self.settings.smtp_host is not None
         return SMTPMailProvider(
             host=self.settings.smtp_host,
@@ -296,7 +302,7 @@ class EmailDeliveryService:
             id=outbox_id,
             recipient_user_id=user.id,
             token_id=token_model.id,
-            recipient_email=user.email,
+            recipient_email=_validated_recipient(user.email),
             message_kind=message_kind,
             encrypted_token=self.cipher.encrypt(
                 outbox_id=outbox_id,
@@ -321,7 +327,7 @@ class EmailDeliveryService:
             return None
         outbox = EmailOutbox(
             recipient_user_id=user.id,
-            recipient_email=user.email,
+            recipient_email=_validated_recipient(user.email),
             message_kind="password_changed",
             status="queued",
         )
@@ -386,9 +392,7 @@ class EmailDeliveryService:
         ).all()
         queued: list[EmailOutbox] = []
         for owner in owners:
-            outbox_id = job_failure_outbox_id(
-                job_id=job_id, recipient_user_id=owner.id
-            )
+            outbox_id = job_failure_outbox_id(job_id=job_id, recipient_user_id=owner.id)
             existing = session.get(EmailOutbox, outbox_id)
             if existing is not None:
                 if (
@@ -400,7 +404,7 @@ class EmailDeliveryService:
             outbox = EmailOutbox(
                 id=outbox_id,
                 recipient_user_id=owner.id,
-                recipient_email=owner.email,
+                recipient_email=_validated_recipient(owner.email),
                 message_kind="job_failed",
                 source_job_type=job_type,
                 status="queued",
@@ -459,7 +463,7 @@ class EmailDeliveryService:
             outbox = EmailOutbox(
                 id=outbox_id,
                 recipient_user_id=owner.id,
-                recipient_email=owner.email,
+                recipient_email=_validated_recipient(owner.email),
                 message_kind="reconciliation_reminder",
                 status="queued",
             )
@@ -742,9 +746,7 @@ class EmailDeliveryService:
         )
         session.flush()
 
-    def _reload(
-        self, *, session_factory: sessionmaker, outbox_id: UUID
-    ) -> EmailOutbox:
+    def _reload(self, *, session_factory: sessionmaker, outbox_id: UUID) -> EmailOutbox:
         with session_factory() as session:
             outbox = session.get(EmailOutbox, outbox_id)
         if outbox is None:
@@ -867,9 +869,7 @@ class EmailDeliveryService:
         try:
             self.reclaim_stale_sending(session_factory=session_factory, now=now)
         except Exception:
-            logger.exception(
-                "email outbox lease reclaim failed; continuing this sweep"
-            )
+            logger.exception("email outbox lease reclaim failed; continuing this sweep")
         with session_factory() as read_session:
             due_ids = list(
                 read_session.scalars(
@@ -944,8 +944,7 @@ class EmailDeliveryService:
     def status(self, session: Session) -> EmailOutboxStatus:
         counts = dict(
             session.execute(
-                select(EmailOutbox.status, func.count())
-                .group_by(EmailOutbox.status)
+                select(EmailOutbox.status, func.count()).group_by(EmailOutbox.status)
             ).all()
         )
         latest_attempt = session.execute(
@@ -985,9 +984,7 @@ class EmailDeliveryService:
             else "mail_delivery_failed"
         )
         stable_path = (
-            delivery_path
-            if delivery_path in STABLE_MAIL_DELIVERY_PATHS
-            else "worker"
+            delivery_path if delivery_path in STABLE_MAIL_DELIVERY_PATHS else "worker"
         )
         event_payload_ref = f"email_outbox:{outbox.id}:terminal_failure"
         already_audited = session.scalar(
@@ -1144,9 +1141,7 @@ class EmailDeliveryService:
 
     def _assert_configured(self) -> None:
         if not self.settings.mail_configured:
-            raise MailDeliveryConfigurationError(
-                "email recovery is not configured"
-            )
+            raise MailDeliveryConfigurationError("email recovery is not configured")
 
 
 def build_email_delivery_service(

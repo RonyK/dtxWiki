@@ -21,6 +21,7 @@ from backend.schemas.agent import (
     BuildBundleResult,
     BundleItemEntry,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.services.actor_visible_read import (
     actor_can_read_agent_page,
     actor_can_read_library_trust_level,
@@ -81,6 +82,7 @@ class AgentInputBundleService:
         actor_kind: str = "system",
         actor_id: str = "system",
     ) -> BuildBundleResult:
+        validate_request_inputs(request)
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")

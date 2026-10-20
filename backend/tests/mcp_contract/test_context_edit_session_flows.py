@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from backend.domain.input_policy import InputPolicyError
 from backend.mcp.router import dispatch
 from backend.models.change import ChangeOperation
 from backend.models.context import ContextPageVersion
@@ -203,6 +204,47 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     )
     assert submitted.envelope.result_status == "succeeded", submitted.envelope
     assert _review_statuses_for_page(page_service, created.id) == ["pending"]
+
+
+@pytest.mark.parametrize(
+    "legacy_body",
+    [
+        "x" * 1_000_001,
+        "# " + "x" * 257,
+        "---\ntags: [" + ",".join(['"same"'] * 33) + "]\n---\nBody",
+        "invalid\x00body",
+    ],
+    ids=["body-budget", "heading-budget", "raw-tag-count", "nul"],
+)
+def test_resubmitting_invalid_legacy_edit_is_rejected_atomically(
+    page_service, actor, legacy_body
+):
+    workspace_id = _workspace(page_service)
+    created = _create(page_service, actor, workspace_id, "# Valid\n\nOriginal body.")
+    # Simulate an editing draft written before the policy existed. Historical
+    # text stays stored and readable; submitting it is a new write boundary.
+    with page_service.session_factory.begin() as session:
+        version = session.get(ContextPageVersion, created.version_id)
+        version.body_md = legacy_body
+
+    with pytest.raises(InputPolicyError):
+        dispatch(
+            "submit_context_edit_for_review",
+            {
+                "workspace_id": str(workspace_id),
+                "page_id": str(created.id),
+                "version_id": str(created.version_id),
+                "expected_editing_revision": created.editing_revision,
+                "idempotency_key": "reject-legacy-submit",
+            },
+            actor=actor,
+            page_service=page_service,
+        )
+    stored = _stored(page_service, created.version_id)
+    assert stored.version_status == "editing"
+    assert stored.body_md == legacy_body
+    assert stored.editing_revision == created.editing_revision
+    assert _review_statuses_for_page(page_service, created.id) == []
 
 
 def test_a_whole_body_update_stores_the_map_of_its_own_body(page_service, actor):

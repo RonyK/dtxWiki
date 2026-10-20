@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import validate_text
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.review import ReviewItem
@@ -17,6 +18,7 @@ from backend.schemas.agent import (
     AgentPageDraftRequest,
     AgentPageDraftResult,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.page import PageVersionDiff
 from backend.services.actor_visible_read import agent_version_is_visible
 from backend.services.audit_service import AuditService
@@ -35,6 +37,7 @@ from backend.services.review_risk_policy import (
 from backend.services.tree_service import ensure_primary_tree_placement
 from backend.spi.types import AI_PROVENANCES
 from backend.utils.actor_display import resolve_actor_display_name
+from backend.utils.page_frontmatter import validate_page_markdown_input
 from backend.utils.uuid import parse_uuid_or_none
 
 CATEGORY_PRIORITIES = {
@@ -101,6 +104,7 @@ class AgentPageService:
         # SQLite: FOR UPDATE is a no-op and pysqlite defers BEGIN until the
         # first DML, so take write intent before the page resolve and the
         # version_no allocation below. PostgreSQL keeps the narrower row lock.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
@@ -127,9 +131,7 @@ class AgentPageService:
         risk_resolution = self.risk_resolver.resolve(
             workspace=workspace,
             event=(
-                "agent_sensitive_draft"
-                if is_sensitive
-                else "agent_non_sensitive_draft"
+                "agent_sensitive_draft" if is_sensitive else "agent_non_sensitive_draft"
             ),
             signals={
                 # Report who wrote it; the resolver decides what that costs.
@@ -138,8 +140,8 @@ class AgentPageService:
             },
             actor_provenance=actor_provenance,
         )
-        operation_kind = "create_draft" if page.latest_draft_version_id is None else (
-            "update_draft"
+        operation_kind = (
+            "create_draft" if page.latest_draft_version_id is None else ("update_draft")
         )
         change_set = ChangeSet(
             workspace_id=workspace_id,
@@ -279,6 +281,7 @@ class AgentPageService:
         actor_id: str,
         actor_role: str,
     ) -> AgentPageActivateResult:
+        validate_text(reason, field="reason", max_length=2000)
         # SQLite: FOR UPDATE is a no-op, so without write intent two activations
         # of different drafts of this page both read the same
         # current_active_version_id, each supersede only that one, and both land
@@ -295,6 +298,7 @@ class AgentPageService:
         version = session.get(AgentPageVersion, version_id)
         if version is None or version.agent_page_id != page.id:
             raise ReadNotFoundError("agent page version not found")
+        validate_page_markdown_input(version.body_markdown)
         proposed_meta = self._proposed_page_meta(version)
         proposed_category = proposed_meta.get("category", page.category)
         self._ensure_activation_allowed(
@@ -649,8 +653,9 @@ class AgentPageService:
     def _next_version_no(session: Session, page_id: UUID) -> int:
         return (
             session.scalar(
-                select(func.coalesce(func.max(AgentPageVersion.version_no), 0) + 1)
-                .where(AgentPageVersion.agent_page_id == page_id)
+                select(
+                    func.coalesce(func.max(AgentPageVersion.version_no), 0) + 1
+                ).where(AgentPageVersion.agent_page_id == page_id)
             )
             or 1
         )

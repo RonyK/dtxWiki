@@ -231,15 +231,7 @@ function parseTags(value: string) {
   if (!trimmed || trimmed === "[]") {
     return [];
   }
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return normalizeTags(
-      trimmed
-        .slice(1, -1)
-        .split(",")
-        .map(parseScalar),
-    );
-  }
-  return normalizeTagsInput(trimmed);
+  return normalizeTags(parseInlineMetadataValues(trimmed));
 }
 
 function parseBlockTags(lines: string[]) {
@@ -256,15 +248,31 @@ function parseAliases(value: string) {
   if (!trimmed || trimmed === "[]") {
     return [];
   }
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return normalizeAliases(
-      trimmed
-        .slice(1, -1)
-        .split(",")
-        .map(parseScalar),
-    );
+  return normalizeAliases(parseInlineMetadataValues(trimmed));
+}
+
+function parseInlineMetadataValues(value: string) {
+  const raw = value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value;
+  const values: string[] = [];
+  let token = "";
+  let quote = "";
+  let escaped = false;
+  for (const character of raw) {
+    if (quote) {
+      token += character;
+      if (escaped) escaped = false;
+      else if (character === "\\" && quote === '"') escaped = true;
+      else if (character === quote) quote = "";
+    } else if (character === ",") {
+      values.push(parseScalar(token));
+      token = "";
+    } else {
+      if ((character === '"' || character === "'") && !token.trim()) quote = character;
+      token += character;
+    }
   }
-  return normalizeAliasesInput(trimmed);
+  values.push(parseScalar(token));
+  return values;
 }
 
 function parseBlockAliases(lines: string[]) {
@@ -332,8 +340,7 @@ function normalizeTag(tag: string) {
   return tag
     .trim()
     .replace(/^#+/, "")
-    .replace(/\s+/g, " ")
-    .slice(0, 48);
+    .replace(/\s+/g, " ");
 }
 
 function normalizeAlias(alias: string) {

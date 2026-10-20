@@ -141,6 +141,7 @@
               }
             ],
             "default": null,
+            "maxLength": 1000000,
             "title": "Body Markdown"
           },
           "citations": {
@@ -214,9 +215,11 @@
               }
             ],
             "default": null,
+            "maxLength": 2000,
             "title": "Patch Description"
           },
           "reason": {
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
@@ -260,7 +263,10 @@
               }
             ],
             "default": null,
-            "title": "Aliases"
+            "maxItems": 32,
+            "title": "Aliases",
+            "x-normalized-item-maxLength": 80,
+            "x-normalized-item-minLength": 1
           },
           "page_type": {
             "anyOf": [
@@ -313,7 +319,10 @@
               }
             ],
             "default": null,
-            "title": "Tags"
+            "maxItems": 32,
+            "title": "Tags",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
           },
           "title": {
             "anyOf": [
@@ -326,7 +335,9 @@
               }
             ],
             "default": null,
-            "title": "Title"
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
           }
         },
         "title": "PageMetadataPatch",
@@ -385,6 +396,7 @@
             "title": "Placement Parent Node Id"
           },
           "reason": {
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
@@ -399,6 +411,7 @@
               }
             ],
             "default": null,
+            "maxLength": 2000,
             "title": "Risk Notes"
           },
           "source_context": {
@@ -410,9 +423,11 @@
             "type": "array"
           },
           "title": {
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "minLength": 1,
             "title": "Title",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 256
           }
         },
         "required": [

@@ -12,6 +12,7 @@
           "format": "uuid",
           "type": "string"
         },
+        "maxItems": 128,
         "title": "Context Refs",
         "type": "array"
       },
@@ -35,6 +36,7 @@
           "format": "uuid",
           "type": "string"
         },
+        "maxItems": 128,
         "title": "Library Artifact Refs",
         "type": "array"
       },
@@ -47,6 +49,7 @@
         "items": {
           "type": "string"
         },
+        "maxItems": 4,
         "title": "Requested Categories",
         "type": "array"
       },

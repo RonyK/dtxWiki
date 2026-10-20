@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -940,9 +941,7 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
     assert listed_titles[page_visible_asset.id] == "diagram.png"
     assert listed_paths[page_visible_asset.id] == f"/context?target={visible_page.id}"
     assert listed_titles[owned_editing_asset.id] == "diagram.png"
-    assert (
-        listed_paths[owned_editing_asset.id] == f"/context?target={visible_page.id}"
-    )
+    assert listed_paths[owned_editing_asset.id] == f"/context?target={visible_page.id}"
 
 
 def test_media_asset_title_lookup_is_workspace_scoped_for_colliding_ids(
@@ -3873,6 +3872,7 @@ def test_actor_bound_detail_and_export_redact_unlinked_error_calls(
     gated_export_chat = next(item for item in gated_export.chats if item.id == gated.id)
     owned_export_chat = next(item for item in owned_export.chats if item.id == owned.id)
     markers = {spec[-1] for spec in specs}
+
     def assert_shape_only(entry, spec) -> None:
         status, _tool, id_field, _target, _marker = spec
         assert entry.result_status == status
@@ -4130,8 +4130,22 @@ def test_chat_search_paginates_after_actor_visible_projection(session_factory):
     assert raw_page.next_cursor == "1"
 
 
-def test_actor_search_has_a_strict_query_and_latency_budget_for_1000_chats(
+@pytest.fixture
+def benchmark_lane(request):
+    """Run wall-clock budgets serially through the explicit benchmark lane."""
+    if os.environ.get("DTXWIKI_TEST_BENCHMARKS") != "1":
+        pytest.skip("wall-clock budget; run `make test-backend-benchmarks`")
+    if hasattr(request.config, "workerinput"):
+        pytest.fail(
+            "DTXWIKI_TEST_BENCHMARKS=1 under pytest-xdist: run the benchmark "
+            "lane without -n, as `make test-backend-benchmarks` does",
+            pytrace=False,
+        )
+
+
+def test_actor_search_query_and_latency_benchmark_for_1000_chats(
     session_factory,
+    benchmark_lane,
 ):
     service = McpChatService()
     base = datetime(2026, 8, 5, 7, 0, tzinfo=UTC)

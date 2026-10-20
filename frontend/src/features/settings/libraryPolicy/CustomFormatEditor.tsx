@@ -1,3 +1,4 @@
+import { codePointLength, inputTextError, textInputLimit } from "../../../shared/lib/inputPolicy";
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -98,9 +99,9 @@ export function CustomFormatEditor({
   );
   const atFormatLimit = !initialFormat && customFormats.length >= MAX_LIBRARY_CUSTOM_FORMATS;
   const invalid =
-    !normalizedName ||
+    !normalizedName || Boolean(inputTextError(name, Number.MAX_SAFE_INTEGER)) ||
     !validCustomFormatName(name) ||
-    normalizedName.length > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH ||
+    codePointLength(normalizedName) > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH ||
     extensions.length === 0 ||
     extensions.length > MAX_LIBRARY_CUSTOM_FORMAT_EXTENSIONS ||
     malformedExtensions.length > 0 ||
@@ -169,7 +170,7 @@ export function CustomFormatEditor({
           autoFocus
           disabled={busy || hasRawSource}
           id={`${titleId ?? "inline"}-custom-format-name`}
-          maxLength={MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH}
+          {...textInputLimit(MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH, true, (value) => value.trim().replace(/\s+/g, " "))}
           onChange={(event) => {
             setName(event.target.value);
             onInputChange?.();

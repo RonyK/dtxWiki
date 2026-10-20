@@ -18,7 +18,8 @@ from backend.models.search_index import include_non_fts5_object
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 INITIAL_REVISION = "bd62193d5cf6"
-HEAD_REVISION = "efcbcf724889"
+HEAD_REVISION = "19db79d3e622"
+CORE_REVISION = "efcbcf724889"
 
 
 def _config(database_url: str) -> Config:
@@ -504,7 +505,7 @@ def test_core_revision_round_trips_from_initial_release(tmp_path, sqlite_templat
         }[("workspace_id",)]["options"].get("ondelete") is None
 
         with _captured_statements() as statements:
-            command.upgrade(config, HEAD_REVISION)
+            command.upgrade(config, CORE_REVISION)
         _assert_each_table_rebuilt_at_most_once(statements)
         head_snapshot = _schema_snapshot(engine)
         after = inspect(engine)
@@ -591,13 +592,13 @@ def test_core_revision_round_trips_from_initial_release(tmp_path, sqlite_templat
             for fk in downgraded.get_foreign_keys("audit_event")
         }[("workspace_id",)]["options"].get("ondelete") is None
 
-        command.upgrade(config, HEAD_REVISION)
+        command.upgrade(config, CORE_REVISION)
         assert _schema_snapshot(engine) == head_snapshot
         with engine.connect() as connection:
             revision = connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-        assert revision == HEAD_REVISION
+        assert revision == CORE_REVISION
     finally:
         engine.dispose()
 

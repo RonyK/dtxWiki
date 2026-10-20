@@ -34,11 +34,12 @@ class UserAdminService:
     ) -> AuthenticatedUser:
         normalized_email = normalize_email(email)
         validate_password(password)
+        name = normalize_display_name(display_name, normalized_email)
         with self.session_factory.begin() as session:
             user = User(
                 email=normalized_email,
                 password_hash=self.credential_hasher.hash_password(password),
-                display_name=normalize_display_name(display_name, normalized_email),
+                display_name=name,
                 status="active",
             )
             session.add(user)

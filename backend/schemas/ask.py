@@ -4,10 +4,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.read import GraphNeighborEntry, TreePathEntry
 
 
-class AskSessionCreate(BaseModel):
+class AskSessionCreate(InputRequest):
     title: str | None = None
     default_topic_tags: list[str] = Field(default_factory=list)
     default_context_parent_tree_node_id: UUID | None = None
@@ -15,7 +16,7 @@ class AskSessionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class AskTurnCreate(BaseModel):
+class AskTurnCreate(InputRequest):
     user_message: str
     ttl_override_seconds: int | None = None
 

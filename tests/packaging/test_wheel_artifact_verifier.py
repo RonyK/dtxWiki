@@ -163,7 +163,7 @@ def _write_revision(stage, revision, down_revision):
 
 
 def _write_stray_revision(stage):
-    _write_revision(stage, "0003_stray", "efcbcf724889")
+    _write_revision(stage, "0003_stray", "19db79d3e622")
 
 
 def _write_branch_revision(stage):
@@ -269,7 +269,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
     assert REVISION_MODULES == 10
     for name in (WHEEL_NAME, SDIST_NAME):
         assert (
-            f"{name}: alembic head efcbcf724889, "
+            f"{name}: alembic head 19db79d3e622, "
             f"{REVISION_MODULES} packaged core revision modules, "
             "15 frozen migration files intact, "
             "frontend bundle intact"
@@ -339,7 +339,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     assert probe.returncode == 0, probe.stdout + probe.stderr
     resolved = json.loads(probe.stdout)
-    assert resolved["heads"] == ["efcbcf724889"], "cwd bought no isolation at all"
+    assert resolved["heads"] == ["19db79d3e622"], "cwd bought no isolation at all"
     leaked = {
         name: origin
         for name, origin in resolved["foreign"].items()
@@ -356,7 +356,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
     [
         (
             _write_branch_revision,
-            "packaged Alembic heads are ['0003_branch', 'efcbcf724889'], expected "
+            "packaged Alembic heads are ['0003_branch', '19db79d3e622'], expected "
             "exactly one",
         ),
         (

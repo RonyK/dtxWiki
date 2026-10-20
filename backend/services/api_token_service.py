@@ -14,6 +14,10 @@ from backend.catalog.mcp_apps import (
     CatalogRepository,
     get_mcp_app_catalog_repository,
 )
+from backend.domain.input_policy import (
+    normalize_short_text,
+    validate_list_count,
+)
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.base import utc_now
 from backend.models.user import User
@@ -840,9 +844,7 @@ def _primary_workspace_id(token: ApiToken) -> UUID | None:
     return min(live, key=lambda grant: grant.workspace_id).workspace_id
 
 
-def api_token_records(
-    session: Session, tokens: list[ApiToken]
-) -> list[ApiTokenRecord]:
+def api_token_records(session: Session, tokens: list[ApiToken]) -> list[ApiTokenRecord]:
     """Batch-build display records for a page of tokens (T4).
 
     Each live grant is enriched with the granting workspace's title/slug and
@@ -929,7 +931,7 @@ def api_token_record(session: Session, token: ApiToken) -> ApiTokenRecord:
 
 
 def normalize_token_name(name: str) -> str:
-    normalized = name.strip()
+    normalized = normalize_short_text(name, field="name", max_length=128)
     if not normalized:
         raise InvalidApiTokenRequestError("API token name is required")
     if len(normalized) > 128:
@@ -976,7 +978,13 @@ def resolve_catalog_app_association(
     snapshot = repository.snapshot()
     requested_app_id = _normalized_optional_text(catalog_app_id)
     legacy_type = _normalized_optional_text(legacy_mcp_client_type)
-    requested_custom_label = _normalized_optional_text(custom_app_label)
+    requested_custom_label = (
+        normalize_short_text(
+            custom_app_label, field="custom_app_label", max_length=160, optional=True
+        )
+        if custom_app_label is not None
+        else None
+    )
     if requested_custom_label is not None and len(requested_custom_label) > 160:
         raise InvalidApiTokenRequestError("custom app label is too long")
 
@@ -987,8 +995,7 @@ def resolve_catalog_app_association(
             )
         return CatalogAppAssociation(
             catalog_app_id=None,
-            label_snapshot=requested_custom_label
-            or LEGACY_GENERIC_MCP_CLIENT_LABEL,
+            label_snapshot=requested_custom_label or LEGACY_GENERIC_MCP_CLIENT_LABEL,
             catalog_revision=snapshot.catalog_revision,
             legacy_client_type=LEGACY_GENERIC_MCP_CLIENT_TYPE,
         )
@@ -1015,9 +1022,7 @@ def resolve_catalog_app_association(
 
     app = repository.find_app(effective_app_id)
     if app is None or app.lifecycle != "active":
-        field_name = (
-            "MCP client type" if requested_app_id is None else "catalog app"
-        )
+        field_name = "MCP client type" if requested_app_id is None else "catalog app"
         raise InvalidApiTokenRequestError(
             f"unsupported {field_name}: {effective_app_id}"
         )
@@ -1109,15 +1114,12 @@ def require_scopes_subset_of_ceiling(scopes: list[str], ceiling: list[str]) -> N
 
 
 def require_unique_workspace_grants(grants: list[WorkspaceGrantRequest]) -> None:
+    validate_list_count(grants, field="workspace_grants", max_items=256)
     if not grants:
-        raise InvalidApiTokenRequestError(
-            "at least one workspace grant is required"
-        )
+        raise InvalidApiTokenRequestError("at least one workspace grant is required")
     workspace_ids = [grant.workspace_id for grant in grants]
     if len(set(workspace_ids)) != len(workspace_ids):
-        raise InvalidApiTokenRequestError(
-            "duplicate workspace_id in workspace grants"
-        )
+        raise InvalidApiTokenRequestError("duplicate workspace_id in workspace grants")
 
 
 def normalize_access_key_list_status(value: str) -> AccessKeyListStatus:
@@ -1178,9 +1180,7 @@ def count_api_tokens(session: Session, *predicates) -> int:
     # ApiTokenWorkspace join -- and therefore no DISTINCT to undo the
     # one-row-per-grant fan-out that join used to introduce.
     return int(
-        session.scalar(
-            select(func.count()).select_from(ApiToken).where(*predicates)
-        )
+        session.scalar(select(func.count()).select_from(ApiToken).where(*predicates))
         or 0
     )
 

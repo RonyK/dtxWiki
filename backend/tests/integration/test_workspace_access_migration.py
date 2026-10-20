@@ -41,6 +41,7 @@ def test_workspace_access_schema_at_head(tmp_path: Path, sqlite_templates):
         } == {
             "workspace_join_request_attempt_check",
             "workspace_join_request_status_check",
+            "ck_workspace_join_requests_decision_note_input_v1",
         }
         assert {
             constraint["name"]

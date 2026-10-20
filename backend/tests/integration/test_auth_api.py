@@ -368,15 +368,17 @@ def test_remembered_refresh_emits_a_renewal_audit_event(page_service):
         )
     assert event is not None
     assert event.workspace_id is None
-    assert event.payload["previous_expires_at"] == (
-        datetime(2030, 6, 1, tzinfo=UTC) + timedelta(seconds=100)
-    ).isoformat()
-    assert event.payload["expires_at"] == (
-        clock[0] + timedelta(seconds=100)
-    ).isoformat()
-    assert event.payload["authenticated_at"] == datetime(
-        2030, 6, 1, tzinfo=UTC
-    ).isoformat()
+    assert (
+        event.payload["previous_expires_at"]
+        == (datetime(2030, 6, 1, tzinfo=UTC) + timedelta(seconds=100)).isoformat()
+    )
+    assert (
+        event.payload["expires_at"] == (clock[0] + timedelta(seconds=100)).isoformat()
+    )
+    assert (
+        event.payload["authenticated_at"]
+        == datetime(2030, 6, 1, tzinfo=UTC).isoformat()
+    )
 
 
 def test_unrecordable_renewal_keeps_the_presented_cookie(page_service):
@@ -581,13 +583,16 @@ def test_signup_marks_session_cookie_secure_for_forwarded_https(page_service):
 def test_signup_rejects_duplicate_email(page_service):
     client = make_client(page_service)
 
-    assert client.post(
-        "/api/v1/auth/signup",
-        json={"email": "same@example.com", "password": "first-pass"},
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/auth/signup",
+            json={"email": "same@example.com", "password": "first-password-123"},
+        ).status_code
+        == 201
+    )
     duplicate = client.post(
         "/api/v1/auth/signup",
-        json={"email": " SAME@example.com ", "password": "second-pass"},
+        json={"email": " SAME@example.com ", "password": "second-password-123"},
     )
 
     assert duplicate.status_code == 409
@@ -601,7 +606,7 @@ def test_signup_disabled_returns_403_with_error_code(page_service):
 
     response = client.post(
         "/api/v1/auth/signup",
-        json={"email": "blocked@example.com", "password": "blocked-pass"},
+        json={"email": "blocked@example.com", "password": "blocked-password-123"},
     )
 
     assert response.status_code == 403
@@ -610,7 +615,7 @@ def test_signup_disabled_returns_403_with_error_code(page_service):
 
     login = client.post(
         "/api/v1/auth/login",
-        json={"email": "blocked@example.com", "password": "blocked-pass"},
+        json={"email": "blocked@example.com", "password": "blocked-password-123"},
     )
     assert login.status_code == 401
 
@@ -620,7 +625,7 @@ def test_team_mode_signup_grants_personal_owner_only(page_service):
 
     response = client.post(
         "/api/v1/auth/signup",
-        json={"email": "team-viewer@example.com", "password": "viewer-pass"},
+        json={"email": "team-viewer@example.com", "password": "viewer-password-123"},
     )
 
     assert response.status_code == 201
@@ -647,7 +652,7 @@ def test_login_rejects_invalid_credentials(page_service):
     client = make_client(page_service)
     client.post(
         "/api/v1/auth/signup",
-        json={"email": "login@example.com", "password": "right-pass"},
+        json={"email": "login@example.com", "password": "right-password-123"},
     )
 
     response = client.post(
@@ -665,7 +670,7 @@ def test_login_rate_limited_per_email_returns_429(page_service):
     client = make_client(page_service)
     client.post(
         "/api/v1/auth/signup",
-        json={"email": "bruteforce@example.com", "password": "right-pass"},
+        json={"email": "bruteforce@example.com", "password": "right-password-123"},
     )
     client.cookies.clear()
 
@@ -682,7 +687,7 @@ def test_login_rate_limited_per_email_returns_429(page_service):
     # password is rejected with 429 + the standard envelope.
     blocked = client.post(
         "/api/v1/auth/login",
-        json={"email": "BruteForce@Example.COM", "password": "right-pass"},
+        json={"email": "BruteForce@Example.COM", "password": "right-password-123"},
     )
     assert blocked.status_code == 429
     body = blocked.json()
@@ -706,13 +711,16 @@ def test_signup_rate_limited_per_email_returns_429(page_service):
     for i in range(AUTH_RATE_LIMIT_PER_EMAIL):
         attempt = client.post(
             "/api/v1/auth/signup",
-            json={"email": "signup-flood@example.com", "password": "first-pass"},
+            json={
+                "email": "signup-flood@example.com",
+                "password": "first-password-123",
+            },
         )
         assert attempt.status_code == (201 if i == 0 else 409)
 
     blocked = client.post(
         "/api/v1/auth/signup",
-        json={"email": "signup-flood@example.com", "password": "first-pass"},
+        json={"email": "signup-flood@example.com", "password": "first-password-123"},
     )
     assert blocked.status_code == 429
     assert blocked.json()["error_code"] == "rate_limited"
@@ -724,7 +732,7 @@ def test_password_change_rotates_password_and_session(page_service):
         "/api/v1/auth/signup",
         json={
             "email": "change@example.com",
-            "password": "old-password",
+            "password": "old-password-123",
             # Explicit: remember_me now defaults to False, and this test is
             # about a remembered session surviving a password change.
             "remember_me": True,
@@ -749,8 +757,8 @@ def test_password_change_rotates_password_and_session(page_service):
     changed = client.post(
         "/api/v1/auth/password",
         json={
-            "current_password": "old-password",
-            "new_password": "new-password",
+            "current_password": "old-password-123",
+            "new_password": "new-password-123",
         },
     )
 
@@ -778,13 +786,13 @@ def test_password_change_rotates_password_and_session(page_service):
 
     old_login = client.post(
         "/api/v1/auth/login",
-        json={"email": "change@example.com", "password": "old-password"},
+        json={"email": "change@example.com", "password": "old-password-123"},
     )
     assert old_login.status_code == 401
 
     new_login = client.post(
         "/api/v1/auth/login",
-        json={"email": "change@example.com", "password": "new-password"},
+        json={"email": "change@example.com", "password": "new-password-123"},
     )
     assert new_login.status_code == 200
     assert new_login.json()["data"]["user"]["email"] == "change@example.com"
@@ -796,7 +804,7 @@ def test_password_change_preserves_session_only_cookie_policy(page_service):
         "/api/v1/auth/signup",
         json={
             "email": "session-only-password@example.com",
-            "password": "old-password",
+            "password": "old-password-123",
             "remember_me": False,
         },
     )
@@ -806,8 +814,8 @@ def test_password_change_preserves_session_only_cookie_policy(page_service):
     changed = client.post(
         "/api/v1/auth/password",
         json={
-            "current_password": "old-password",
-            "new_password": "new-password",
+            "current_password": "old-password-123",
+            "new_password": "new-password-123",
         },
     )
 
@@ -854,14 +862,20 @@ def test_password_reset_confirm_is_single_use_and_does_not_auto_login(page_servi
     assert "dtxwiki_session=" in confirmed.headers["set-cookie"]
     assert "Max-Age=0" in confirmed.headers["set-cookie"]
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"email": "reset-web@example.com", "password": "original-password"},
-    ).status_code == 401
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"email": "reset-web@example.com", "password": "replacement-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "reset-web@example.com", "password": "original-password"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "reset-web@example.com", "password": "replacement-password"},
+        ).status_code
+        == 200
+    )
 
     reused = client.post(
         "/api/v1/auth/password-reset/confirm",
@@ -883,7 +897,7 @@ def test_logout_revokes_presented_session_cookie(page_service):
     client = make_client(page_service)
     client.post(
         "/api/v1/auth/signup",
-        json={"email": "logout@example.com", "password": "logout-pass"},
+        json={"email": "logout@example.com", "password": "logout-password-123"},
     )
     session_cookie = client.cookies.get("dtxwiki_session")
     assert session_cookie is not None
@@ -902,10 +916,10 @@ def test_api_token_issue_list_and_revoke_are_session_scoped(page_service):
     client = make_client(page_service)
     client.post(
         "/api/v1/auth/signup",
-        json={"email": "token-owner@example.com", "password": "owner-pass"},
+        json={"email": "token-owner@example.com", "password": "owner-password-123"},
     )
     sign_in_on_held_session_clock(
-        client, email="token-owner@example.com", password="owner-pass"
+        client, email="token-owner@example.com", password="owner-password-123"
     )
     with page_service.session_factory() as session:
         user = session.scalar(
@@ -1021,7 +1035,7 @@ def test_api_token_create_requires_supported_scope(page_service):
     client = make_client(page_service)
     client.post(
         "/api/v1/auth/signup",
-        json={"email": "bad-scope@example.com", "password": "owner-pass"},
+        json={"email": "bad-scope@example.com", "password": "owner-password-123"},
     )
     with page_service.session_factory() as session:
         user = session.scalar(select(User).where(User.email == "bad-scope@example.com"))
@@ -1050,11 +1064,11 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service, api_token_c
     client = make_client(page_service)
     signup = client.post(
         "/api/v1/auth/signup",
-        json={"email": "paged-keys@example.com", "password": "owner-pass"},
+        json={"email": "paged-keys@example.com", "password": "owner-password-123"},
     )
     assert signup.status_code == 201
     sign_in_on_held_session_clock(
-        client, email="paged-keys@example.com", password="owner-pass"
+        client, email="paged-keys@example.com", password="owner-password-123"
     )
     with page_service.session_factory() as session:
         user = session.scalar(
@@ -1172,9 +1186,7 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service, api_token_c
     # /record accepts an inactive token -- expired or revoked, matching the
     # deleted workspace-scoped delete_inactive_token's contract exactly. Only
     # a still-active token 422s.
-    active_delete = client.delete(
-        f"{base_url}/{active[0]['api_token']['id']}/record"
-    )
+    active_delete = client.delete(f"{base_url}/{active[0]['api_token']['id']}/record")
     assert active_delete.status_code == 422
     assert active_delete.json()["error_code"] == "invalid_api_token_request"
 
@@ -1240,14 +1252,12 @@ def test_user_tokens_cursor_traverses_more_than_one_default_page_exactly_once(
     client = make_client(page_service)
     signup = client.post(
         "/api/v1/auth/signup",
-        json={"email": "many-keys@example.com", "password": "owner-pass"},
+        json={"email": "many-keys@example.com", "password": "owner-password-123"},
     )
     assert signup.status_code == 201
     now = utc_now()
     with page_service.session_factory.begin() as session:
-        user = session.scalar(
-            select(User).where(User.email == "many-keys@example.com")
-        )
+        user = session.scalar(select(User).where(User.email == "many-keys@example.com"))
         assert user is not None
         assert user.personal_workspace_id is not None
         rows = []
@@ -1335,7 +1345,7 @@ def test_auth_lifecycle_emits_an_audit_event_per_step(page_service):
     before = _audit_action_counts(page_service)
     response = client.post(
         "/api/v1/auth/signup",
-        json={"email": "audit-lifecycle@example.com", "password": "owner-pass"},
+        json={"email": "audit-lifecycle@example.com", "password": "owner-password-123"},
     )
     assert response.status_code == 201
     assert (_audit_action_counts(page_service) - before)["auth.user.signed_up"] == 1
@@ -1345,7 +1355,7 @@ def test_auth_lifecycle_emits_an_audit_event_per_step(page_service):
     before = _audit_action_counts(page_service)
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "audit-lifecycle@example.com", "password": "owner-pass"},
+        json={"email": "audit-lifecycle@example.com", "password": "owner-password-123"},
     )
     assert response.status_code == 200
     assert (_audit_action_counts(page_service) - before)["auth.session.created"] == 1
@@ -1354,8 +1364,8 @@ def test_auth_lifecycle_emits_an_audit_event_per_step(page_service):
     response = client.post(
         "/api/v1/auth/password",
         json={
-            "current_password": "owner-pass",
-            "new_password": "rotated-pass",
+            "current_password": "owner-password-123",
+            "new_password": "rotated-password-123",
         },
     )
     assert response.status_code == 200

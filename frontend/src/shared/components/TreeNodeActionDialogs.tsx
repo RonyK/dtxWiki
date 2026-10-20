@@ -1,3 +1,4 @@
+import { textInputLimit } from "../lib/inputPolicy";
 import type { FormEvent } from "react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -68,7 +69,7 @@ export function RenameTreeNodeDialog({
           <input
             aria-label={t("dialogs.rename.displayName")}
             autoFocus
-            maxLength={80}
+            {...textInputLimit(node.node_kind === "folder" ? 80 : 256)}
             value={displayName}
             onChange={(event) => setDisplayName(event.currentTarget.value)}
           />
@@ -176,6 +177,7 @@ export function MoveTreeNodeDialog({
           <span>{t("dialogs.move.reasonOptional")}</span>
           <input
             aria-label={t("dialogs.move.reasonOptional")}
+            {...textInputLimit(2000, false)}
             value={reason}
             onChange={(event) => setReason(event.currentTarget.value)}
           />

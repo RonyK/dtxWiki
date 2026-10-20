@@ -8,6 +8,11 @@ from sqlalchemy import select
 
 from backend.app.settings import Settings
 from backend.app.state import get_session_factory_from_app
+from backend.domain.credential_input import (
+    OAUTH_JWT_MAX_BYTES,
+    ascii_token_is_valid,
+    authorization_header_is_valid,
+)
 from backend.models.oauth import OAuthConsent
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
@@ -43,6 +48,8 @@ def get_rest_actor(
         Security(bearer_scheme),
     ] = None,
 ) -> ActorContext:
+    if not authorization_header_is_valid(request.headers.get("authorization", "")):
+        raise_unauthorized("Authorization header is invalid")
     settings = request.app.state.settings
     session_factory = _session_factory(request)
     if credentials is not None:
@@ -82,6 +89,8 @@ def get_rest_actor(
 
 
 def authenticate_bearer_token(request: Request, token: str) -> ActorContext:
+    if not authorization_header_is_valid(request.headers.get("authorization", "")):
+        raise_unauthorized("Authorization header is invalid")
     actor = _authenticate_api_token(
         token=token,
         session_factory=_session_factory(request),
@@ -99,6 +108,8 @@ def _authenticate_api_token(
     settings: Settings,
     public_base_url: str,
 ) -> ActorContext:
+    if not ascii_token_is_valid(token, OAUTH_JWT_MAX_BYTES):
+        raise_unauthorized("Bearer token is invalid")
     if not token.startswith("dtxw_"):
         return _authenticate_oauth_token(
             token=token,

@@ -60,6 +60,7 @@ from backend.policy.rbac import (
 )
 from backend.repositories.audit_repo import insert_audit_event
 from backend.repositories.workspace_repo import get_workspace_by_slug
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import WorkspaceCreateRequest, WorkspaceSummary
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG, seed_default_workspace
 from backend.services.db_write_intent import acquire_write_intent
@@ -146,6 +147,7 @@ class WorkspaceWriteService:
         request: WorkspaceCreateRequest,
         actor: ActorContext,
     ) -> WorkspaceSummary:
+        validate_request_inputs(request)
         if actor.user_id is None:
             raise RejectedByPolicyError(
                 "human session is required",

@@ -36,6 +36,60 @@ class PageFrontmatter:
     title: str | None = None
 
 
+def validate_frontmatter_input(markdown: str) -> None:
+    """Validate authored metadata before the forgiving read parser deduplicates.
+
+    Reads keep supporting historical metadata. Only write boundaries call this.
+    """
+    from backend.domain.input_policy import validate_labels, validate_title
+
+    lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    closing = _frontmatter_closing_index(lines)
+    if closing is None:
+        return
+    header = lines[1:closing]
+    for index, line in enumerate(header):
+        pair = _frontmatter_key_value(line)
+        if pair is None:
+            continue
+        key, raw = pair
+        if key == "title":
+            validate_title(_parse_scalar(raw))
+        elif key in {"tags", "aliases"}:
+            values = []
+            if raw and raw != "[]":
+                try:
+                    decoded = json.loads(raw)
+                except json.JSONDecodeError:
+                    decoded = None
+                values = (
+                    decoded
+                    if isinstance(decoded, list)
+                    else _inline_metadata_values(raw)
+                )
+            elif not raw:
+                for following in header[index + 1 :]:
+                    if not following.strip():
+                        continue
+                    if not following.lstrip().startswith("- "):
+                        break
+                    values.append(_parse_scalar(following.lstrip()[2:]))
+            validate_labels(values, field=key, max_length=48 if key == "tags" else 80)
+
+
+def validate_page_markdown_input(markdown: str) -> None:
+    """Check the complete stored Markdown when creating or resubmitting it."""
+    from backend.domain.input_policy import validate_body, validate_title
+
+    validate_body(markdown)
+    validate_frontmatter_input(markdown)
+    parsed = parse_page_frontmatter(markdown)
+    for line in parsed.body.splitlines():
+        if line.strip().startswith("# "):
+            validate_title(line.strip()[2:].strip())
+            break
+
+
 def render_frontmatter(fields: dict[str, object]) -> str:
     """Render a small YAML frontmatter mapping without a YAML dependency."""
     lines = ["---"]
@@ -224,9 +278,7 @@ def _parse_inline_tags(value: str) -> list[str]:
     trimmed = value.strip()
     if not trimmed or trimmed == "[]":
         return []
-    if trimmed.startswith("[") and trimmed.endswith("]"):
-        return _dedupe_tags(_parse_scalar(part) for part in trimmed[1:-1].split(","))
-    return _dedupe_tags(trimmed.split(","))
+    return _dedupe_tags(_inline_metadata_values(trimmed))
 
 
 def _parse_block_tags(lines: list[str]) -> list[str]:
@@ -245,9 +297,36 @@ def _parse_inline_aliases(value: str) -> list[str]:
     trimmed = value.strip()
     if not trimmed or trimmed == "[]":
         return []
-    if trimmed.startswith("[") and trimmed.endswith("]"):
-        return _dedupe_aliases(_parse_scalar(part) for part in trimmed[1:-1].split(","))
-    return _dedupe_aliases(trimmed.split(","))
+    return _dedupe_aliases(_inline_metadata_values(trimmed))
+
+
+def _inline_metadata_values(value: str) -> list[str]:
+    """Split flow-list commas without splitting quoted aliases or escapes."""
+    raw = value.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    values: list[str] = []
+    token: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in raw:
+        if quote is not None:
+            token.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\" and quote == '"':
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character == ",":
+            values.append(_parse_scalar("".join(token)))
+            token = []
+        else:
+            if character in {"'", '"'} and not "".join(token).strip():
+                quote = character
+            token.append(character)
+    values.append(_parse_scalar("".join(token)))
+    return values
 
 
 def _parse_block_aliases(lines: list[str]) -> list[str]:

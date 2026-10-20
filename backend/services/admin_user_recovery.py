@@ -6,6 +6,9 @@ from uuid import UUID
 
 from sqlalchemy import exists, func, or_, select
 
+from backend.domain.input_policy import (
+    validate_text,
+)
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.services.audit_service import AuditService
@@ -46,6 +49,7 @@ class AdminUserRecoveryService:
         limit: int = 25,
         offset: int = 0,
     ) -> AdminUserSearchResult:
+        validate_text(query, field="query", max_length=320)
         normalized = unicodedata.normalize("NFKC", query).strip().casefold()
         pattern = f"%{normalized}%"
         with self.session_factory.begin() as session:
@@ -73,9 +77,7 @@ class AdminUserRecoveryService:
                     ),
                 )
             total = int(
-                session.scalar(
-                    select(func.count()).select_from(User).where(*filters)
-                )
+                session.scalar(select(func.count()).select_from(User).where(*filters))
                 or 0
             )
             users = list(

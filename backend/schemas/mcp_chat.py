@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 
 McpChatArtifactKind = Literal[
     "context_page", "library_item", "agent_page", "context_media_asset"
@@ -369,7 +370,7 @@ class McpChatDetailResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class McpChatTitleUpdateRequest(BaseModel):
+class McpChatTitleUpdateRequest(InputRequest):
     title: str = Field(min_length=1, max_length=120)
 
     model_config = ConfigDict(extra="forbid")

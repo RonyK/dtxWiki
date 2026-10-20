@@ -30,6 +30,7 @@ from backend.app.state import (
     get_session_factory_from_app,
 )
 from backend.context_media.domain.policy import MAX_CONTEXT_IMAGE_UPLOAD_BYTES
+from backend.domain.credential_input import authorization_header_is_valid
 from backend.mcp.protocol.instructions import MCP_SERVER_INSTRUCTIONS
 from backend.mcp.protocol.lifecycle import enforce_actor_mcp_surface_lifecycle
 from backend.mcp.protocol.prompts_resources import (
@@ -255,9 +256,11 @@ async def mcp_http(request: Request):
     # does not drift for an MCP endpoint whose contract is JSON-RPC based.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(authorization) or not authorization.startswith(
+        "Bearer "
+    ):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ").strip()
+    token = authorization.removeprefix("Bearer ")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -382,9 +385,11 @@ async def mcp_http_get(request: Request):
     # OpenAPI does not carry the MCP transport design text.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(authorization) or not authorization.startswith(
+        "Bearer "
+    ):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ").strip()
+    token = authorization.removeprefix("Bearer ")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -430,9 +435,11 @@ async def mcp_http_delete(request: Request):
     # remains idempotent for missing or unknown session ids.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(authorization) or not authorization.startswith(
+        "Bearer "
+    ):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ").strip()
+    token = authorization.removeprefix("Bearer ")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -476,9 +483,7 @@ async def mcp_http_delete(request: Request):
     # ``terminate()`` runs (sets ``_terminated=True`` + closes the
     # streams + removes the entry from its session pool). The SDK
     # responds 200 on success — we forward that response verbatim.
-    response = await _dispatch_via_lifespan_manager(
-        request, manager, actor, b""
-    )
+    response = await _dispatch_via_lifespan_manager(request, manager, actor, b"")
     # Phase_2 Task 2.6 branch (4) cooperation: record the session id in
     # the terminated-ledger so a subsequent POST surfaces 410 (expired)
     # instead of 404 (unknown). The SDK removes the id immediately on
@@ -546,9 +551,7 @@ class _StreamingMCPResponse(Response):
         # sees the post-negotiation Accept header.
         self._scope_override = scope_override
 
-    async def __call__(
-        self, scope: Scope, receive: Receive, send: Send
-    ) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         actor_var: ContextVar[ActorContext | None] = (
             self._request.app.state.mcp_actor_var
         )
@@ -620,16 +623,12 @@ class _StreamingMCPResponse(Response):
             await send(message)
 
         forwarded_scope = (
-            self._scope_override
-            if self._scope_override is not None
-            else scope
+            self._scope_override if self._scope_override is not None else scope
         )
         try:
             with sessions_opened_during_request() as opened_session_ids:
                 try:
-                    await self._manager.handle_request(
-                        forwarded_scope, _receive, _send
-                    )
+                    await self._manager.handle_request(forwarded_scope, _receive, _send)
                 finally:
                     await _discard_unowned_mcp_sessions(
                         self._request.app.state, self._manager, opened_session_ids
@@ -714,9 +713,7 @@ def install_mcp_session_manager(app: FastAPI) -> StreamableHTTPSessionManager | 
     app.state.mcp_actor_var = ContextVar("mcp_actor", default=None)
     app.state.mcp_page_service_var = ContextVar("mcp_page_service", default=None)
     app.state.mcp_settings_var = ContextVar("mcp_settings", default=None)
-    app.state.mcp_session_factory_var = ContextVar(
-        "mcp_session_factory", default=None
-    )
+    app.state.mcp_session_factory_var = ContextVar("mcp_session_factory", default=None)
     app.state.mcp_session_id_var = ContextVar("mcp_session_id", default=None)
     # Phase_2 Task 2.6 branch (4): SDK removes terminated session ids
     # after DELETE, so we cannot distinguish
@@ -1357,7 +1354,6 @@ def _mcp_manager_has_session(
     return manager_has_session(manager, session_id)
 
 
-
 def _mcp_request_id(body: bytes | None):
     if not body:
         return None
@@ -1368,9 +1364,11 @@ def _mcp_request_id(body: bytes | None):
     if not isinstance(payload, dict):
         return None
     value = payload.get("id")
-    if isinstance(value, str) or (
-        isinstance(value, int) and not isinstance(value, bool)
-    ) or value is None:
+    if (
+        isinstance(value, str)
+        or (isinstance(value, int) and not isinstance(value, bool))
+        or value is None
+    ):
         return value
     return None
 
@@ -1870,9 +1868,8 @@ def _negotiate_transport(scope: dict, mode: str) -> tuple[str, dict]:
     sse_score = _score(q_map, _SSE_CANDIDATES)
     star_only = set(q_map.keys()) == {"*/*"}
     missing = accept_missing
-    unsupported = (
-        not missing
-        and (not q_map or (not star_only and json_score == 0 and sse_score == 0))
+    unsupported = not missing and (
+        not q_map or (not star_only and json_score == 0 and sse_score == 0)
     )
 
     if unsupported:

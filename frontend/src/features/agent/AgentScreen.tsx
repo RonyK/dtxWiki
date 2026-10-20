@@ -1,3 +1,4 @@
+import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import type { TFunction } from "i18next";
 import {
   Bot,
@@ -1790,7 +1791,7 @@ function AgentCreationModal({
     : showAdvanced
       ? normalizeSlugInput(customSlug)
       : derivedSlug;
-  const invalidTitle = title.trim().length === 0 || title.trim().length > 100;
+  const invalidTitle = title.trim().length === 0 || Boolean(inputTextError(title, 256));
   const invalidSlug = slug.length === 0;
 
   // The body is auto-replaceable only while the user hasn't edited it (still the
@@ -1875,6 +1876,11 @@ function AgentCreationModal({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const bodyError = markdownInputError(body);
+    if (bodyError) {
+      setError(bodyError);
+      return;
+    }
     if (invalidTitle || invalidSlug || submitting) {
       return;
     }
@@ -2048,7 +2054,7 @@ function AgentCreationModal({
               <input
                 aria-label={t("dialog.title", { defaultValue: "Title" })}
                 autoFocus
-                maxLength={100}
+                {...textInputLimit(256)}
                 onChange={(event) => changeTitle(event.currentTarget.value)}
                 placeholder={t("dialog.defaultPersona", {
                   defaultValue: "Default persona",
@@ -2058,7 +2064,7 @@ function AgentCreationModal({
               <small className="field-hint">
                 {invalidTitle
                   ? t("dialog.titleHintInvalid", {
-                      defaultValue: "Enter 1-100 characters.",
+                      defaultValue: "Enter 1-256 characters.",
                     })
                   : t("dialog.slugPreview", {
                       slug,
@@ -2125,7 +2131,7 @@ function AgentCreationModal({
           <span>{t("dialog.reason", { defaultValue: "Reason" })}</span>
           <input
             aria-label={t("dialog.reason", { defaultValue: "Reason" })}
-            maxLength={160}
+            {...textInputLimit(2000, false)}
             onChange={(event) => setReason(event.currentTarget.value)}
             value={reason}
           />

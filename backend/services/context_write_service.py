@@ -66,6 +66,7 @@ from backend.schemas.context_write import (
     WriteDraftRequest,
     WriteDraftResult,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.page import BODY_MD_MAX_LENGTH, PageMetadataPatch
 from backend.services.actor_visible_read import (
     context_page_visible,
@@ -175,6 +176,7 @@ from backend.utils.content_hash import canonicalize_markdown
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_outline import parse_outline
 from backend.utils.markdown_parser import parse_markdown
+from backend.utils.page_frontmatter import validate_page_markdown_input
 from backend.utils.uuid import parse_uuid_or_none
 
 
@@ -729,6 +731,7 @@ class ContextWriteService:
         # allocation in insert_version. Outside the SAVEPOINT on purpose: the
         # writer lock belongs to the whole transaction, not to the rollback
         # scope. PostgreSQL keeps using the narrower row locks below.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
@@ -1005,6 +1008,7 @@ class ContextWriteService:
         # change_set together.
         # SQLite: see write_draft. Write intent goes outside the SAVEPOINT so it
         # covers the guarded read below and the version_no allocation.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
@@ -1107,6 +1111,7 @@ class ContextWriteService:
         auto_approve_format_only: bool = True,
         require_current_base: bool = False,
     ) -> UpdateDraftResult:
+        validate_request_inputs(request)
         anchor_operation_count = sum(
             isinstance(getattr(operation, "at", None), AnchorAddress)
             for operation in request.operations
@@ -3075,6 +3080,7 @@ class ContextWriteService:
         # SQLite: see write_draft. page_service.publish_draft already holds write
         # intent, but read.py and review_service reach this entry point directly,
         # and repeating the statement in one transaction is safe.
+        validate_request_inputs(request)
         acquire_write_intent(session)
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
@@ -3093,6 +3099,7 @@ class ContextWriteService:
             )
             if version is None or version.page_id != page.id:
                 raise ReadNotFoundError("context page version not found")
+            validate_page_markdown_input(version.body_md)
             # A draft row is mutable, so without this a concurrent session of
             # the same author can change the body between staging and
             # publishing. PublishContextPageRouteRequest (the externally

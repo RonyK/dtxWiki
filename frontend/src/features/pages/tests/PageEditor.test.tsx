@@ -7408,7 +7408,7 @@ describe("PageEditor", () => {
     expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
   });
 
-  it("collapses multi-line title input into single spaces and caps the length", async () => {
+  it("preserves explicit title input and rejects controls or more than 256 code points", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -7437,13 +7437,21 @@ describe("PageEditor", () => {
     );
 
     const titleInput = await findTitleEditor();
-    expect(titleInput).toHaveAttribute("maxlength", "200");
+    expect(titleInput).not.toHaveAttribute("maxlength");
 
-    await setEditorTitle(titleInput, "Line one\nLine two\r\n\tLine three");
-    expect(titleInput).toHaveValue("Line one Line two Line three");
+    const multiline = "Line one\nLine two\n\tLine three";
+    await setEditorTitle(titleInput, multiline);
+    fireEvent.input(titleInput);
+    expect(titleInput).toHaveValue(multiline);
+    expect(titleInput).toBeInvalid();
 
-    fireEvent.change(titleInput, { target: { value: `Long${"x".repeat(300)}` } });
-    expect((titleInput as HTMLTextAreaElement).value).toHaveLength(200);
+    fireEvent.change(titleInput, { target: { value: "😀".repeat(257) } });
+    fireEvent.input(titleInput);
+    expect(titleInput).toHaveValue("😀".repeat(257));
+    expect(titleInput).toBeInvalid();
+    fireEvent.change(titleInput, { target: { value: "😀".repeat(256) } });
+    fireEvent.input(titleInput);
+    expect(titleInput).toBeValid();
   });
 
   it("percent-encodes link dialog URLs and rejects unsafe schemes", async () => {

@@ -33,6 +33,7 @@ from backend.schemas.ask import (
     AskTurnCreate,
     AskTurnDetail,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import GraphNeighborEntry, RankedResult
 from backend.services.actor_visible_read import (
     actor_can_read_library_trust_level,
@@ -248,6 +249,7 @@ class AskService:
         actor_id: str,
         actor: ActorContext | None = None,
     ) -> AskSessionDetail:
+        validate_request_inputs(request)
         now = datetime.now(UTC)
         day_node = self._ensure_ask_day_node(
             session=session,
@@ -330,6 +332,7 @@ class AskService:
         actor_id: str,
         actor: ActorContext | None = None,
     ) -> tuple[AskTurnDetail, list[str]]:
+        validate_request_inputs(request)
         validated_message = _validate_user_message(request.user_message)
         ask_session = self._require_session(session, workspace_id, ask_session_id)
         (
@@ -837,7 +840,7 @@ class AskService:
         if not intent:
             return
         anchor = _dominant_context_anchor(session, ask_session)
-        next_title = f"{anchor}: {intent}" if anchor else intent
+        next_title = (f"{anchor}: {intent}" if anchor else intent)[:256]
         if next_title == ask_session.title:
             return
         ask_session.title = next_title

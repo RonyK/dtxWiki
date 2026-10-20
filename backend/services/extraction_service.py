@@ -351,7 +351,7 @@ class ExtractionService:
             workspace_id=source.workspace_id,
             library_item_id=source.id,
             version_id=version.id,
-            title=source.title or source.uri,
+            title=source.title or source.uri[:256],
             uri=source.uri,
             format_hint=source.format_hint,
         )
@@ -528,7 +528,7 @@ class ExtractionService:
             workspace_id=source.workspace_id,
             target_kind="library_item",
             target_id=source.id,
-            title=source.title or source.uri,
+            title=source.title or source.uri[:256],
             slug=None,
             section="library",
             parent_id=None,
