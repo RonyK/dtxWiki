@@ -278,6 +278,229 @@
         "title": "ActivityTarget",
         "type": "object"
       },
+      "AdminContextMediaAttachmentListData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminContextMediaAttachmentPayload"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "scope": {
+            "const": "server",
+            "default": "server",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AdminContextMediaAttachmentListData",
+        "type": "object"
+      },
+      "AdminContextMediaAttachmentListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminContextMediaAttachmentListData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminContextMediaAttachmentListResponse",
+        "type": "object"
+      },
+      "AdminContextMediaAttachmentPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "association_state": {
+            "enum": [
+              "pending_install",
+              "active",
+              "tombstoned"
+            ],
+            "title": "Association State",
+            "type": "string"
+          },
+          "bytes": {
+            "minimum": 0.0,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "can_delete": {
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "content_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Url"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_actor_id": {
+            "title": "Created By Actor Id",
+            "type": "string"
+          },
+          "created_by_actor_kind": {
+            "title": "Created By Actor Kind",
+            "type": "string"
+          },
+          "created_for_version_id": {
+            "format": "uuid",
+            "title": "Created For Version Id",
+            "type": "string"
+          },
+          "current_published_reference_count": {
+            "minimum": 0.0,
+            "title": "Current Published Reference Count",
+            "type": "integer"
+          },
+          "historical_reference_count": {
+            "minimum": 0.0,
+            "title": "Historical Reference Count",
+            "type": "integer"
+          },
+          "is_mine": {
+            "title": "Is Mine",
+            "type": "boolean"
+          },
+          "is_orphan": {
+            "title": "Is Orphan",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "image",
+              "audio",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_draft_reference_count": {
+            "minimum": 0.0,
+            "title": "Latest Draft Reference Count",
+            "type": "integer"
+          },
+          "logical_ref": {
+            "title": "Logical Ref",
+            "type": "string"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "page_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Title"
+          },
+          "uploaded_by_display_name": {
+            "title": "Uploaded By Display Name",
+            "type": "string"
+          },
+          "usage_state": {
+            "enum": [
+              "active",
+              "history_only",
+              "unused"
+            ],
+            "title": "Usage State",
+            "type": "string"
+          },
+          "usage_token": {
+            "title": "Usage Token",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "workspace_title": {
+            "title": "Workspace Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "workspace_id",
+          "page_id",
+          "page_title",
+          "created_for_version_id",
+          "logical_ref",
+          "original_filename",
+          "kind",
+          "media_type",
+          "bytes",
+          "association_state",
+          "usage_state",
+          "latest_draft_reference_count",
+          "current_published_reference_count",
+          "historical_reference_count",
+          "is_orphan",
+          "is_mine",
+          "can_delete",
+          "usage_token",
+          "content_url",
+          "uploaded_by_display_name",
+          "created_by_actor_kind",
+          "created_by_actor_id",
+          "created_at",
+          "workspace_title"
+        ],
+        "title": "AdminContextMediaAttachmentPayload",
+        "type": "object"
+      },
       "AdminJobListData": {
         "additionalProperties": false,
         "description": "Server-admin cross-workspace job listing.\n\nAdds the incompleteness signal the workspace-scoped listing has no use\nfor: that route reads exactly one workspace, so it can never come back\npartially answered and keeps the plain JobListData shape above.",
@@ -19157,6 +19380,272 @@
         "summary": "Oauth Protected Resource",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/v1/admin/context-media/attachments": {
+      "get": {
+        "operationId": "admin_list_context_media_attachments_api_v1_admin_context_media_attachments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Mine",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orphan_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Orphan Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminContextMediaAttachmentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Context Media Attachments",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/context-media/attachments/{asset_id}": {
+      "delete": {
+        "operationId": "admin_delete_context_media_attachment_api_v1_admin_context_media_attachments__asset_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextMediaDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Delete Context Media Attachment",
+        "tags": [
+          "admin"
         ]
       }
     },

@@ -1235,6 +1235,7 @@
     },
     "policy": {
       "title": "미사용 파일 자동 회수",
+      "edit": "설정 변경",
       "unknown": "미사용 파일 보존 기간을 확인하지 못했습니다. 필요 없는 파일은 지금 삭제할 수 있습니다.",
       "days_one": "{{count}}일",
       "days_other": "{{count}}일",
@@ -1264,7 +1265,15 @@
       "conflict": "정책이 변경되었습니다. 최신 정책을 확인한 뒤 다시 저장하세요.",
       "saveError": "정책을 저장하지 못했습니다. 입력값은 유지됩니다.",
       "invalid": "1~{{max}}시간 범위의 정수 일수 또는 시간을 입력하세요."
-    }
+    },
+    "scope": {
+      "label": "첨부 파일 조회 범위",
+      "workspace": "현재 워크스페이스",
+      "server": "전체 워크스페이스"
+    },
+    "workspaceName": "워크스페이스: {{name}}",
+    "adminNotice": "전체 워크스페이스의 첨부 파일입니다. 미사용 파일을 선택해 정리할 수 있습니다.",
+    "serverDescription": "전체 워크스페이스의 페이지에 업로드된 첨부 파일입니다."
   },
   "deployment": {
     "serverAdminOnlyNotice": "이 설정은 dtxWiki 서버(시스템) 설정으로 서버 관리자만 볼 수 있습니다. 서버 관리자에게 요청하거나 `dtxwiki admin grant` 로 권한을 부여하세요.",

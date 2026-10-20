@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures";
-import { signUp, currentWorkspace, backendBaseUrl } from "./auth";
+import {
+  signUp,
+  login,
+  seededAdminEmail,
+  currentWorkspace,
+  backendBaseUrl,
+} from "./auth";
+import type { APIRequestContext } from "./fixtures";
 import { evidenceScreenshot } from "./evidence";
 
 const png = Buffer.from(
@@ -126,6 +133,26 @@ for (const locale of ["en", "ko"]) {
           : "미사용 파일 보존 기간: 7일",
       ),
     ).toBeVisible();
+    const editor = policyCard.locator("details");
+    await expect(editor).not.toHaveAttribute("open", "");
+    await evidenceScreenshot(
+      page,
+      testInfo,
+      `attachments-${locale}-collapsed-desktop`,
+    );
+    const desktopViewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await evidenceScreenshot(
+      page,
+      testInfo,
+      `attachments-${locale}-collapsed-mobile`,
+    );
+    await page.setViewportSize(desktopViewport);
+    await policyCard
+      .getByText(locale === "en" ? "Change settings" : "설정 변경", {
+        exact: true,
+      })
+      .click();
     const input = policyCard.getByRole("spinbutton");
     await input.fill("14");
     await policyCard
@@ -203,6 +230,10 @@ for (const locale of ["en", "ko"]) {
     );
     await card.scrollIntoViewIfNeeded();
     await evidenceScreenshot(page, testInfo, `attachments-${locale}-mobile`);
+    const picker = page.locator(".settings-section-picker");
+    await expect(picker).toHaveCSS("position", "static");
+    const pickerBox = await picker.boundingBox();
+    expect(pickerBox!.y + pickerBox!.height).toBeLessThan(0);
     await selectAll.check();
     await section
       .getByRole("button", {
@@ -340,5 +371,194 @@ for (const locale of ["en", "ko"]) {
       `attachment-format-fixtures-${locale}-mobile`,
     );
     expect(consoleErrors).toBe(0);
+  });
+}
+
+async function uploadOrphan(request: APIRequestContext, filename: string) {
+  const workspace = await currentWorkspace(request);
+  const base = `${backendBaseUrl}/api/v1/workspaces/${workspace.id}`;
+  const caps = await request.get(`${base}/context/media/capabilities`);
+  const revision = (await caps.json()).data.policy_revision;
+  const made = await request.post(`${base}/context/pages`, {
+    data: {
+      title: "Attachment scope test",
+      body_md: "# Range test",
+      page_type: "concept",
+      tags: [],
+    },
+  });
+  expect(made.ok(), await made.text()).toBeTruthy();
+  const created = (await made.json()).data;
+  const uploaded = await request.post(
+    `${base}/context/pages/${created.id}/media`,
+    {
+      headers: { "X-DTX-Media-Policy-Revision": revision },
+      multipart: {
+        file: { name: filename, mimeType: "image/png", buffer: png },
+        marker_uuid: randomUUID(),
+        editing_version_id: created.version_id,
+      },
+    },
+  );
+  expect(uploaded.ok(), await uploaded.text()).toBeTruthy();
+  const submitted = await request.post(
+    `${base}/context/pages/${created.id}/submit-for-review`,
+    {
+      data: {
+        version_id: created.version_id,
+        expected_editing_revision: created.editing_revision,
+        idempotency_key: randomUUID(),
+      },
+    },
+  );
+  expect(submitted.ok(), await submitted.text()).toBeTruthy();
+  return workspace;
+}
+
+for (const locale of ["en", "ko"]) {
+  test(`administrator attachment scope and cross-workspace cleanup ${locale}`, async ({
+    page,
+    browser,
+  }, testInfo) => {
+    const prefix = `range-${randomUUID()}`;
+    const other = await browser.newContext();
+    await signUp(other.request, `${prefix}@example.com`);
+    const otherWorkspace = await uploadOrphan(
+      other.request,
+      `${prefix}-other.png`,
+    );
+    const otherPage = await other.newPage();
+    await otherPage.goto("/settings?section=attachments");
+    await expect(
+      otherPage.getByRole("radio", {
+        name: /All workspaces|전체 워크스페이스/,
+      }),
+    ).toHaveCount(0);
+    await login(
+      page.request,
+      seededAdminEmail("1280x720", testInfo.project.name),
+    );
+    await uploadOrphan(page.request, `${prefix}-current.png`);
+    await page.addInitScript(
+      (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
+      locale,
+    );
+    await page.goto("/settings?section=attachments");
+    const current = page.getByRole("radio", {
+      name: locale === "en" ? "Current workspace" : "현재 워크스페이스",
+      exact: true,
+    });
+    const all = page.getByRole("radio", {
+      name: locale === "en" ? "All workspaces" : "전체 워크스페이스",
+      exact: true,
+    });
+    await expect(current).toBeChecked();
+    const section = page.locator(".attachments");
+    await expect(
+      section.getByText(`${prefix}-current.png`, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      section.getByText(`${prefix}-other.png`, { exact: true }),
+    ).toHaveCount(0);
+    await all.click();
+    await expect(all).toBeChecked();
+    const search = section.getByRole("searchbox", {
+      name:
+        locale === "en"
+          ? "Search attachments by file name"
+          : "파일 이름으로 첨부 파일 검색",
+    });
+    await search.fill(prefix);
+    await search.press("Enter");
+    await expect(
+      section.getByText(`${prefix}-other.png`, { exact: true }),
+    ).toBeVisible();
+    const otherRow = section
+      .locator(".attachments-card")
+      .filter({ hasText: `${prefix}-other.png` });
+    await expect(
+      otherRow.getByText(
+        locale === "en"
+          ? `Workspace: ${otherWorkspace.title}`
+          : `워크스페이스: ${otherWorkspace.title}`,
+      ),
+    ).toBeVisible();
+    await expect(section.locator(".attachments-policy")).toHaveCount(0);
+    await expect(section.locator(".attachments-card img")).toHaveCount(0);
+    await evidenceScreenshot(
+      page,
+      testInfo,
+      `admin-attachments-${locale}-desktop`,
+    );
+    await section
+      .getByRole("radio", {
+        name: locale === "en" ? "Unused" : "미사용",
+        exact: true,
+      })
+      .click();
+    await section
+      .getByRole("checkbox", { name: /Select all|전체 선택/ })
+      .check();
+    await section
+      .getByRole("button", {
+        name: locale === "en" ? "Delete selected" : "선택 삭제",
+        exact: true,
+      })
+      .click();
+    await current.click();
+    await expect(
+      section.getByRole("button", {
+        name: locale === "en" ? "Confirm deletion" : "삭제 확인",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await all.click();
+    await search.fill(prefix);
+    await search.press("Enter");
+    await section
+      .getByRole("radio", {
+        name: locale === "en" ? "Unused" : "미사용",
+        exact: true,
+      })
+      .click();
+    await expect(
+      section.getByText(`${prefix}-other.png`, { exact: true }),
+    ).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await evidenceScreenshot(
+      page,
+      testInfo,
+      `admin-attachments-${locale}-mobile`,
+    );
+    await section
+      .getByRole("checkbox", { name: /Select all|전체 선택/ })
+      .check();
+    await section
+      .getByRole("button", {
+        name: locale === "en" ? "Delete selected" : "선택 삭제",
+        exact: true,
+      })
+      .click();
+    await section
+      .getByRole("button", {
+        name: locale === "en" ? "Confirm deletion" : "삭제 확인",
+        exact: true,
+      })
+      .click();
+    await expect(
+      section.getByText(
+        locale === "en" ? "2 deleted, 0 failed" : "2개 삭제, 0개 실패",
+      ),
+    ).toBeVisible();
+    const remaining = await other.request.get(
+      `${backendBaseUrl}/api/v1/workspaces/${otherWorkspace.id}/context/media/attachments?scope=workspace`,
+    );
+    expect((await remaining.json()).data.items).toHaveLength(0);
+    await other.close();
   });
 }

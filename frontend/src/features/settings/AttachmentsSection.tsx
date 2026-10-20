@@ -10,6 +10,8 @@ import {
 import { deletePageContextMedia } from "../../shared/api/contextMedia";
 import {
   listWorkspaceContextMediaAttachments,
+  listAdminContextMediaAttachments,
+  deleteAdminContextMediaAttachment,
   type ContextMediaAttachment,
   type AttachmentRetentionPolicy,
 } from "../../shared/api/contextMediaAttachments";
@@ -49,9 +51,7 @@ type AttachmentsFilter = "all" | "mine" | "orphans";
 
 /** Where focus goes once the inline confirmation closes. */
 type PendingFocus =
-  | { kind: "trigger"; assetId: string }
-  | { kind: "heading" }
-  | { kind: "bulk" };
+  { kind: "trigger"; assetId: string } | { kind: "heading" } | { kind: "bulk" };
 
 const PAGE_SIZE = 24;
 
@@ -73,7 +73,7 @@ export function AttachmentsSection({
   const { t, i18n } = useTranslation("settings");
   const serverScope = scope === "server";
   const [filter, setFilter] = useState<AttachmentsFilter>(
-    canViewEveryUpload ? "all" : "mine",
+    canViewEveryUpload || serverScope ? "all" : "mine",
   );
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -148,24 +148,24 @@ export function AttachmentsSection({
         if (!resolved) {
           throw new Error("no current workspace");
         }
-        if (serverScope) {
-          setItems([]);
-          setNextCursor(null);
-          return;
-        }
-        const page = await listWorkspaceContextMediaAttachments(resolved, {
+        const query = {
           // Only an owner may ask for `workspace`, and only "Mine" is
           // deliberately narrow. "Unused" stays workspace-wide for an owner:
           // cleaning up storage is a workspace job, and scoping it to the
           // owner's own uploads would make this screen answer LESS than the
           // orphan screen it replaces.
           scope:
-            filter === "mine" || !canViewEveryUpload ? "mine" : "workspace",
+            filter === "mine" || (!canViewEveryUpload && !serverScope)
+              ? "mine"
+              : "workspace",
           orphanOnly: filter === "orphans",
           query: appliedSearch,
           limit: PAGE_SIZE,
           cursor: cursor ?? undefined,
-        });
+        } as const;
+        const page = serverScope
+          ? await listAdminContextMediaAttachments(query)
+          : await listWorkspaceContextMediaAttachments(resolved, query);
         if (generation !== loadGenerationRef.current) return;
         setItems((current) =>
           cursor ? [...current, ...page.items] : page.items,
@@ -256,7 +256,13 @@ export function AttachmentsSection({
       // referenced or edited the asset in between; a 409 means it is still in
       // use -- reachable even from a row that said can_delete, because that
       // flag derives from viewer-MASKED usage.
-      await deletePageContextMedia(resolved, item.asset_id, item.usage_token);
+      await (
+        serverScope ? deleteAdminContextMediaAttachment : deletePageContextMedia
+      )(
+        serverScope ? item.workspace_id : resolved,
+        item.asset_id,
+        item.usage_token,
+      );
       // The row the trigger lived on is about to disappear; the section
       // heading is the nearest thing that survives.
       if (
@@ -292,7 +298,7 @@ export function AttachmentsSection({
 
   const selectable = items.filter((item) => item.is_orphan && item.can_delete);
   const selectedCount = selectable.filter((item) =>
-    selected.has(item.asset_id),
+    selected.has(attachmentKey(item)),
   ).length;
   const locked =
     deleteBusy || loadingMore || Boolean(batch) || Boolean(pendingDeleteId);
@@ -324,8 +330,12 @@ export function AttachmentsSection({
       for (const item of snapshot) {
         if (!current()) return;
         try {
-          await deletePageContextMedia(
-            resolved,
+          await (
+            serverScope
+              ? deleteAdminContextMediaAttachment
+              : deletePageContextMedia
+          )(
+            serverScope ? item.workspace_id : resolved,
             item.asset_id,
             item.usage_token,
           );
@@ -367,7 +377,7 @@ export function AttachmentsSection({
   }
 
   const filterOptions = [
-    ...(canViewEveryUpload
+    ...(canViewEveryUpload || serverScope
       ? [
           {
             key: "all" as const,
@@ -388,7 +398,7 @@ export function AttachmentsSection({
   const viewer =
     viewerAssetId === null
       ? null
-      : (items.find((item) => item.asset_id === viewerAssetId) ?? null);
+      : (items.find((item) => attachmentKey(item) === viewerAssetId) ?? null);
   const rowCount = items.length;
 
   return (
@@ -411,10 +421,14 @@ export function AttachmentsSection({
             {t("attachments.refresh", { defaultValue: "Refresh" })}
           </button>
         }
-        description={t("attachments.description", {
-          defaultValue:
-            "Images, audio and video uploaded into this workspace's pages.",
-        })}
+        description={
+          serverScope
+            ? t("attachments.serverDescription")
+            : t("attachments.description", {
+                defaultValue:
+                  "Images, audio and video uploaded into this workspace's pages.",
+              })
+        }
         eyebrow={
           serverScope
             ? t("attachments.serverEyebrow", {
@@ -433,57 +447,52 @@ export function AttachmentsSection({
 
       {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
 
-      {serverScope ? (
-        <StatusBanner tone="info">
-          {t("attachments.serverAdminFallbackNotice", {
-            defaultValue: "Join this workspace to view its attachments.",
+      <fieldset className="attachments-controls" disabled={locked}>
+        <SegmentedControl
+          compact
+          label={t("attachments.filters.label", {
+            defaultValue: "Which attachments",
           })}
-        </StatusBanner>
-      ) : (
-        <fieldset className="attachments-controls" disabled={locked}>
-          <SegmentedControl
-            compact
-            label={t("attachments.filters.label", {
-              defaultValue: "Which attachments",
-            })}
-            options={filterOptions}
-            value={filter}
-            onChange={(next) => {
-              setFilter(next);
-              setNextCursor(null);
-              setPendingDeleteId(null);
-            }}
-          />
-          <SearchField
-            ariaLabel={t("attachments.search.label", {
-              defaultValue: "Search attachments by file name",
-            })}
-            clearLabel={t("attachments.search.clear", {
-              defaultValue: "Clear search",
-            })}
-            compact
-            maxLength={200}
-            onChange={setSearch}
-            onClear={() => applySearch("")}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                // This filter sits inside the Settings form; Enter must run
-                // the search rather than trip that form's implicit submit.
-                event.preventDefault();
-                applySearch(search);
-              }
-            }}
-            placeholder={t("attachments.search.placeholder", {
-              defaultValue: "File name",
-            })}
-            submitLabel={t("attachments.search.submit", {
-              defaultValue: "Search",
-            })}
-            value={search}
-          />
-        </fieldset>
-      )}
+          options={filterOptions}
+          value={filter}
+          onChange={(next) => {
+            setFilter(next);
+            setNextCursor(null);
+            setPendingDeleteId(null);
+          }}
+        />
+        <SearchField
+          ariaLabel={t("attachments.search.label", {
+            defaultValue: "Search attachments by file name",
+          })}
+          clearLabel={t("attachments.search.clear", {
+            defaultValue: "Clear search",
+          })}
+          compact
+          maxLength={200}
+          onChange={setSearch}
+          onClear={() => applySearch("")}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              // This filter sits inside the Settings form; Enter must run
+              // the search rather than trip that form's implicit submit.
+              event.preventDefault();
+              applySearch(search);
+            }
+          }}
+          placeholder={t("attachments.search.placeholder", {
+            defaultValue: "File name",
+          })}
+          submitLabel={t("attachments.search.submit", {
+            defaultValue: "Search",
+          })}
+          value={search}
+        />
+      </fieldset>
 
+      {serverScope ? (
+        <StatusBanner tone="info">{t("attachments.adminNotice")}</StatusBanner>
+      ) : null}
       {batchResult ? <p role="status">{batchResult}</p> : null}
 
       {!serverScope ? (
@@ -536,7 +545,7 @@ export function AttachmentsSection({
         />
       ) : (
         <>
-          {!serverScope && filter === "orphans" ? (
+          {filter === "orphans" ? (
             <div className="attachments-bulk">
               <label className="attachments-checkbox">
                 <input
@@ -549,7 +558,7 @@ export function AttachmentsSection({
                   onChange={(event) =>
                     setSelected(
                       event.target.checked
-                        ? new Set(selectable.map((item) => item.asset_id))
+                        ? new Set(selectable.map(attachmentKey))
                         : new Set(),
                     )
                   }
@@ -567,7 +576,7 @@ export function AttachmentsSection({
                 onClick={() => {
                   setBatch(
                     selectable
-                      .filter((item) => selected.has(item.asset_id))
+                      .filter((item) => selected.has(attachmentKey(item)))
                       .map((item) => ({ ...item })),
                   );
                   setBatchResult(null);
@@ -621,13 +630,9 @@ export function AttachmentsSection({
             // Naming the active filter rather than repeating the section's own
             // "Attachments" heading two lines above it: the count means
             // nothing without knowing what it counted.
-            title={t(
-              `attachments.listTitle.${serverScope ? "orphans" : filter}`,
-              {
-                defaultValue:
-                  LIST_TITLE_FALLBACK[serverScope ? "orphans" : filter],
-              },
-            )}
+            title={t(`attachments.listTitle.${filter}`, {
+              defaultValue: LIST_TITLE_FALLBACK[filter],
+            })}
             // One localized string rather than "<n> <unit>": Korean writes
             // "5개" with no space, which a composed label cannot express.
             countText={t("attachments.countText", {
@@ -641,8 +646,8 @@ export function AttachmentsSection({
               const state = attachmentState(item);
               return (
                 <li
-                  className={`attachments-card${selected.has(item.asset_id) ? " is-selected" : ""}`}
-                  key={item.asset_id}
+                  className={`attachments-card${selected.has(attachmentKey(item)) ? " is-selected" : ""}`}
+                  key={attachmentKey(item)}
                 >
                   {filter === "orphans" ? (
                     <label className="attachments-checkbox attachments-row-checkbox">
@@ -652,12 +657,13 @@ export function AttachmentsSection({
                           filename: item.original_filename,
                         })}
                         disabled={locked || !item.is_orphan || !item.can_delete}
-                        checked={selected.has(item.asset_id)}
+                        checked={selected.has(attachmentKey(item))}
                         onChange={(event) =>
                           setSelected((previous) => {
                             const next = new Set(previous);
-                            if (event.target.checked) next.add(item.asset_id);
-                            else next.delete(item.asset_id);
+                            if (event.target.checked)
+                              next.add(attachmentKey(item));
+                            else next.delete(attachmentKey(item));
                             return next;
                           })
                         }
@@ -673,7 +679,7 @@ export function AttachmentsSection({
                     // broken-image glyph. getApiBaseUrl() is "" in the
                     // same-origin case, so this stays relative there.
                     <button
-                      aria-expanded={viewerAssetId === item.asset_id}
+                      aria-expanded={viewerAssetId === attachmentKey(item)}
                       aria-haspopup="dialog"
                       aria-label={t("attachments.expandPreview", {
                         defaultValue: "Expand {{filename}}",
@@ -681,7 +687,7 @@ export function AttachmentsSection({
                       })}
                       className="attachments-preview-trigger"
                       type="button"
-                      onClick={() => setViewerAssetId(item.asset_id)}
+                      onClick={() => setViewerAssetId(attachmentKey(item))}
                     >
                       <img
                         alt=""
@@ -689,7 +695,7 @@ export function AttachmentsSection({
                         loading="lazy"
                         onError={() =>
                           setUnpreviewable((current) =>
-                            new Set(current).add(item.asset_id),
+                            new Set(current).add(attachmentKey(item)),
                           )
                         }
                         src={`${getApiBaseUrl()}${item.content_url}`}
@@ -706,6 +712,13 @@ export function AttachmentsSection({
                   )}
                   <div className="attachments-card-main">
                     <div className="attachments-identity">
+                      {serverScope && item.workspace_title ? (
+                        <span className="meta-line">
+                          {t("attachments.workspaceName", {
+                            name: item.workspace_title,
+                          })}
+                        </span>
+                      ) : null}
                       <strong title={item.original_filename}>
                         {item.original_filename}
                       </strong>
@@ -783,13 +796,17 @@ export function AttachmentsSection({
                                   vanished between the listing and its title
                                   lookup, so the id stays the fallback rather
                                   than a blank cell. */}
-                          <a
-                            className="attachments-page-link"
-                            href={`/context?target=${encodeURIComponent(item.page_id)}`}
-                            title={item.page_id}
-                          >
-                            {item.page_title ?? item.page_id}
-                          </a>
+                          {serverScope ? (
+                            <span>{item.page_title ?? item.page_id}</span>
+                          ) : (
+                            <a
+                              className="attachments-page-link"
+                              href={`/context?target=${encodeURIComponent(item.page_id)}`}
+                              title={item.page_id}
+                            >
+                              {item.page_title ?? item.page_id}
+                            </a>
+                          )}
                         </dd>
                       </div>
                       <div>
@@ -811,7 +828,7 @@ export function AttachmentsSection({
                     </dl>
 
                     {item.can_delete ? (
-                      pendingDeleteId === item.asset_id ? (
+                      pendingDeleteId === attachmentKey(item) ? (
                         <div className="attachments-confirm">
                           <p className="field-hint">
                             {t("attachments.confirmDelete.body", {
@@ -835,7 +852,7 @@ export function AttachmentsSection({
                               onClick={() => {
                                 pendingFocusRef.current = {
                                   kind: "trigger",
-                                  assetId: item.asset_id,
+                                  assetId: attachmentKey(item),
                                 };
                                 setPendingDeleteId(null);
                                 setDeleteError(null);
@@ -870,16 +887,18 @@ export function AttachmentsSection({
                             disabled={locked}
                             onClick={() => {
                               setDeleteError(null);
-                              setPendingDeleteId(item.asset_id);
+                              setPendingDeleteId(attachmentKey(item));
                             }}
                             ref={(node) => {
                               if (node) {
                                 deleteTriggerRefs.current.set(
-                                  item.asset_id,
+                                  attachmentKey(item),
                                   node,
                                 );
                               } else {
-                                deleteTriggerRefs.current.delete(item.asset_id);
+                                deleteTriggerRefs.current.delete(
+                                  attachmentKey(item),
+                                );
                               }
                             }}
                             type="button"
@@ -935,7 +954,7 @@ export function AttachmentsSection({
             // unpreviewable so the card stops offering an enlargement it
             // cannot produce, and close rather than leave an empty dialog.
             setUnpreviewable((current) =>
-              new Set(current).add(viewer.asset_id),
+              new Set(current).add(attachmentKey(viewer)),
             );
             setViewerAssetId(null);
           }}
@@ -959,7 +978,7 @@ function previewable(
   unpreviewable: ReadonlySet<string>,
 ): boolean {
   if (item.kind !== "image") return false;
-  if (!item.content_url || unpreviewable.has(item.asset_id)) return false;
+  if (!item.content_url || unpreviewable.has(attachmentKey(item))) return false;
   return !item.is_orphan || item.is_mine;
 }
 
@@ -984,17 +1003,17 @@ function previewPlaceholderHint(item: ContextMediaAttachment, t: Translate) {
 // One generic "nothing here" cannot tell an operator whether the workspace is
 // empty, whether their own uploads are, or whether their query simply missed.
 function emptyTitle(
-  serverScope: boolean,
+  _serverScope: boolean,
   filter: AttachmentsFilter,
   search: string,
   t: Translate,
 ) {
-  if (search && !serverScope) {
+  if (search) {
     return t("attachments.empty.search", {
       defaultValue: "No attachment matches that name",
     });
   }
-  if (serverScope || filter === "orphans") {
+  if (filter === "orphans") {
     return t("attachments.empty.orphans", {
       defaultValue: "Nothing to clean up",
     });
@@ -1008,17 +1027,17 @@ function emptyTitle(
 }
 
 function emptyHint(
-  serverScope: boolean,
+  _serverScope: boolean,
   filter: AttachmentsFilter,
   search: string,
   t: Translate,
 ) {
-  if (search && !serverScope) {
+  if (search) {
     return t("attachments.emptyHint.search", {
       defaultValue: "Clear the search box to see every attachment again.",
     });
   }
-  if (serverScope || filter === "orphans") {
+  if (filter === "orphans") {
     return t("attachments.emptyHint.orphans", {
       defaultValue:
         "Every uploaded file in this workspace is either published, in a draft, or still an upload in progress.",
@@ -1087,4 +1106,8 @@ function attachmentState(item: ContextMediaAttachment): AttachmentState {
   if (item.usage_state === "active") return "inUse";
   if (item.usage_state === "history_only") return "historyOnly";
   return item.is_orphan ? "unused" : "staging";
+}
+
+function attachmentKey(item: ContextMediaAttachment): string {
+  return `${item.workspace_id}:${item.asset_id}`;
 }

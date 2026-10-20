@@ -64,6 +64,7 @@ describe("attachment retention policy", () => {
   it("keeps the applied period until save succeeds and cancels without saving", async () => {
     const user = userEvent.setup();
     render(<Host />);
+    await userEvent.click(screen.getByText("Change settings", { exact: true }));
     const period = screen.getByRole("spinbutton", { name: "Retention period" });
     await user.clear(period);
     await user.type(period, "14");
@@ -101,6 +102,7 @@ describe("attachment retention policy", () => {
         }}
       />,
     );
+    await userEvent.click(screen.getByText("Change settings", { exact: true }));
     await user.click(
       screen.getByRole("button", { name: "Use server default" }),
     );
@@ -138,6 +140,7 @@ describe("attachment retention policy", () => {
         }}
       />,
     );
+    await userEvent.click(screen.getByText("Change settings", { exact: true }));
     expect(
       screen.getByText("Unused file retention: 1 day 12 hours"),
     ).toBeInTheDocument();
@@ -161,6 +164,7 @@ describe("attachment retention policy", () => {
     const user = userEvent.setup();
     const reload = vi.fn();
     render(<Host onReload={reload} />);
+    await userEvent.click(screen.getByText("Change settings", { exact: true }));
     await user.clear(screen.getByRole("spinbutton"));
     await user.type(screen.getByRole("spinbutton"), "14");
     vi.mocked(apiRequest).mockRejectedValue(
@@ -176,7 +180,7 @@ describe("attachment retention policy", () => {
     expect(apiRequest).toHaveBeenCalledTimes(1);
   });
 
-  it("shows unknown metadata without enabling edits, and renders read-only policy for members", () => {
+  it("shows unknown metadata without enabling edits, and renders read-only policy for members", async () => {
     const { rerender } = render(
       <AttachmentRetentionCard
         workspaceId="a"
@@ -186,6 +190,7 @@ describe("attachment retention policy", () => {
         onReload={vi.fn()}
       />,
     );
+    await userEvent.click(screen.getByText("Change settings", { exact: true }));
     expect(screen.getByRole("spinbutton")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save policy" })).toBeDisabled();
     rerender(<Host owner={false} />);
@@ -241,6 +246,7 @@ it("ignores a superseded save without unlocking a newer request", async () => {
       onReload={vi.fn()}
     />,
   );
+  await userEvent.click(screen.getByText("Change settings", { exact: true }));
   await user.clear(screen.getByRole("spinbutton"));
   await user.type(screen.getByRole("spinbutton"), "14");
   await user.click(screen.getByRole("button", { name: "Save policy" }));
@@ -278,6 +284,7 @@ it("disables reclamation explicitly and confirms enabling with a new exact hour 
   vi.mocked(apiRequest).mockReset();
   const user = userEvent.setup();
   render(<Host />);
+  await userEvent.click(screen.getByText("Change settings", { exact: true }));
   await user.click(
     screen.getByRole("checkbox", { name: "Enable auto reclamation" }),
   );
@@ -305,4 +312,20 @@ it("disables reclamation explicitly and confirms enabling with a new exact hour 
   expect(
     JSON.parse(vi.mocked(apiRequest).mock.calls[1][1]!.body as string).changes,
   ).toEqual({ orphan_retention_hours: 36 });
+});
+
+it("starts collapsed, keeps the applied policy visible, and preserves edits when folded", async () => {
+  vi.mocked(apiRequest).mockClear();
+  const user = userEvent.setup();
+  render(<Host />);
+  expect(screen.getByText("Unused file retention: 7 days")).toBeVisible();
+  expect(screen.getByRole("spinbutton")).not.toBeVisible();
+  await user.click(screen.getByText("Change settings", { exact: true }));
+  await user.clear(screen.getByRole("spinbutton"));
+  await user.type(screen.getByRole("spinbutton"), "14");
+  await user.click(screen.getByText("Change settings", { exact: true }));
+  expect(screen.getByRole("spinbutton")).not.toBeVisible();
+  await user.click(screen.getByText("Change settings", { exact: true }));
+  expect(screen.getByRole("spinbutton")).toHaveValue(14);
+  expect(apiRequest).not.toHaveBeenCalled();
 });

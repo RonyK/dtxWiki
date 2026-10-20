@@ -1235,6 +1235,7 @@
     },
     "policy": {
       "title": "Unused file auto reclamation",
+      "edit": "Change settings",
       "unknown": "Could not confirm the unused file retention period. You can delete unwanted files now.",
       "days_one": "{{count}} day",
       "days_other": "{{count}} days",
@@ -1264,7 +1265,15 @@
       "conflict": "The policy changed. Review the latest policy before saving again.",
       "saveError": "Could not save the policy. Your edits have been kept.",
       "invalid": "Enter a whole number of days or hours, from 1 to {{max}} hours."
-    }
+    },
+    "scope": {
+      "label": "Attachment scope",
+      "workspace": "Current workspace",
+      "server": "All workspaces"
+    },
+    "workspaceName": "Workspace: {{name}}",
+    "adminNotice": "Attachments from all workspaces. Select unused files to clean up.",
+    "serverDescription": "Attachments uploaded into pages across all workspaces."
   },
   "deployment": {
     "serverAdminOnlyNotice": "These are dtxWiki server (system) settings, visible to server admins only. Ask a server admin, or grant access with `dtxwiki admin grant`.",

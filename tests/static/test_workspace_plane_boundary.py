@@ -75,6 +75,12 @@ from tests.static.test_architecture_boundaries import (
 # file (relative to repo root, posix) -> one-line reason this file is allowed
 # to call `.control_session_factory()`. Each entry records the allowed routing.
 CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
+    "backend/services/admin_context_media.py": (
+        "FIXED. Control sessions read only Workspace roster/existence and users "
+        "uploader labels, after shard sessions close. Metadata and cleanup route "
+        "through session_for(workspace_id); split-database API tests cover both."
+    ),
+
     # -- WorkspaceDirectory thin-lookup pattern:
     # resolve workspace_id + membership role on the control session, then do
     # the actual page read/write through session_for(workspace_id).
@@ -1058,6 +1064,12 @@ def test_workspace_factory_gate_catches_the_documented_pre_fix_shape(
 # rotting -- add or remove an importer and this goes red until the record is
 # rewritten.
 ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
+    "backend/services/admin_context_media.py": (
+        "FIXED. Control sessions read only Workspace roster/existence and users "
+        "uploader labels, after shard sessions close. Metadata and cleanup route "
+        "through session_for(workspace_id); split-database API tests cover both."
+    ),
+
     "backend/api/admin.py": (
         "FIXED. admin_list_context_media_orphans lists the orphans on "
         "WorkspaceSessionFactoryDep, closes it, and resolves uploader names on "

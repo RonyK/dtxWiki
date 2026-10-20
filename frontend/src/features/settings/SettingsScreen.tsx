@@ -118,7 +118,7 @@ import { AdminUserRecoverySection } from "./AdminUserRecoverySection";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 
-import { AttachmentsSection } from "./AttachmentsSection";
+import { AttachmentManager } from "./AttachmentManager";
 import {
   SettingsDirtyProvider,
   useGuardedSettingsChange,
@@ -909,7 +909,7 @@ function SettingsScreenBody() {
   const canEditPolicies = selectedWorkspaceRole.toLowerCase() === "owner";
   // All members can inspect the effective policy and their readable uploads.
   // Only owners edit retention; each row's server capability gates deletion.
-  const canViewAttachments = ["owner", "editor", "viewer"].includes(selectedWorkspaceRole.toLowerCase());
+  const canViewAttachments = isServerAdmin || ["owner", "editor", "viewer"].includes(selectedWorkspaceRole.toLowerCase());
 
   // Every allowed-workspace picker on this screen reads the same membership
   // list the shell switcher does. No second endpoint (section 3.2).
@@ -3630,10 +3630,10 @@ function SettingsScreenBody() {
             ) : null}
             {activeSection === "attachments" ? (
               canViewAttachments ? (
-                <AttachmentsSection
+                <AttachmentManager
                   key={selectedWorkspaceApiId}
+                  isServerAdmin={isServerAdmin}
                   canViewEveryUpload={canEditPolicies}
-                  scope="workspace"
                   workspaceId={selectedWorkspaceApiId}
                 />
               ) : (

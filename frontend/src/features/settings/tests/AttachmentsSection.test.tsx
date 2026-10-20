@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../shared/api/contextMediaAttachments", () => ({
   listWorkspaceContextMediaAttachments: vi.fn(),
+  listAdminContextMediaAttachments: vi.fn(),
+  deleteAdminContextMediaAttachment: vi.fn(),
 }));
 vi.mock("../../../shared/api/contextMediaOrphans", () => ({
   listAdminContextMediaOrphans: vi.fn(),
@@ -24,7 +26,12 @@ vi.mock("../../../shared/api/client", async (importOriginal) => ({
 
 import { ApiError, getApiBaseUrl } from "../../../shared/api/client";
 import { deletePageContextMedia } from "../../../shared/api/contextMedia";
-import { listWorkspaceContextMediaAttachments } from "../../../shared/api/contextMediaAttachments";
+import {
+  listWorkspaceContextMediaAttachments,
+  listAdminContextMediaAttachments,
+  deleteAdminContextMediaAttachment,
+} from "../../../shared/api/contextMediaAttachments";
+import { AttachmentManager } from "../AttachmentManager";
 import { listAdminContextMediaOrphans } from "../../../shared/api/contextMediaOrphans";
 import { getCurrentWorkspaceId } from "../../../shared/api/workspace";
 import { AttachmentsSection } from "../AttachmentsSection";
@@ -264,12 +271,34 @@ describe("AttachmentsSection", () => {
     expect(screen.queryByText(/1 KB/)).not.toBeInTheDocument();
   });
 
-  it("does not fetch attachments for a nonmember server admin", async () => {
+  it("uses the explicit operator API and displays workspace metadata without retention editing", async () => {
+    vi.mocked(listAdminContextMediaAttachments).mockResolvedValue(
+      page([
+        { ...ATTACHMENT, workspace_title: "Other team", content_url: null },
+      ]) as never,
+    );
     render(<AttachmentsSection scope="server" workspaceId="ws-1" />);
-    expect(await screen.findByText(/Join this workspace/)).toBeInTheDocument();
+    expect(
+      await screen.findByText("Workspace: Other team"),
+    ).toBeInTheDocument();
+    expect(listAdminContextMediaAttachments).toHaveBeenCalled();
     expect(listAdminContextMediaOrphans).not.toHaveBeenCalled();
     expect(listWorkspaceContextMediaAttachments).not.toHaveBeenCalled();
-    expect(screen.queryByText("stray.png")).not.toBeInTheDocument();
+    expect(screen.queryByText("Change settings")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete attachment" }),
+    );
+    await waitFor(() =>
+      expect(deleteAdminContextMediaAttachment).toHaveBeenCalledWith(
+        "ws-1",
+        ATTACHMENT.asset_id,
+        ATTACHMENT.usage_token,
+      ),
+    );
   });
 
   it("shows a reassuring empty state, not an error, when there is nothing to clean up", async () => {
@@ -735,6 +764,89 @@ it("marks retention unknown after a failed later-page fetch while keeping readab
   expect(
     screen.queryByText("Unused file retention: 7 days"),
   ).not.toBeInTheDocument();
+  await user.click(screen.getByText("Change settings", { exact: true }));
   expect(screen.getByRole("spinbutton")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Save policy" })).toBeDisabled();
+});
+
+it("offers only administrators the two scopes and resets confirmations and filters on switching", async () => {
+  vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
+    page([ATTACHMENT]) as never,
+  );
+  vi.mocked(listAdminContextMediaAttachments).mockResolvedValue(
+    page([
+      {
+        ...ATTACHMENT,
+        workspace_id: "other",
+        workspace_title: "Other team",
+        content_url: null,
+      },
+    ]) as never,
+  );
+  const user = userEvent.setup();
+  const view = render(
+    <AttachmentManager workspaceId="ws-1" isServerAdmin canViewEveryUpload />,
+  );
+  expect(
+    screen.getByRole("radio", { name: "Current workspace" }),
+  ).toBeChecked();
+  await user.click(screen.getByRole("radio", { name: "All workspaces" }));
+  await screen.findByText("Workspace: Other team");
+  await user.click(screen.getByRole("radio", { name: "Unused" }));
+  await user.click(screen.getByRole("checkbox", { name: /Select all/ }));
+  await user.click(screen.getByRole("button", { name: "Delete selected" }));
+  expect(
+    screen.getByRole("button", { name: "Confirm deletion" }),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("radio", { name: "Current workspace" }));
+  await screen.findByText("diagram.png");
+  expect(
+    screen.queryByRole("button", { name: "Confirm deletion" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("Workspace: Other team")).not.toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
+  view.rerender(
+    <AttachmentManager
+      workspaceId="ws-1"
+      isServerAdmin={false}
+      canViewEveryUpload
+    />,
+  );
+  expect(
+    screen.queryByRole("radio", { name: "All workspaces" }),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps identical asset IDs from separate workspaces independent during bulk cleanup", async () => {
+  const first = { ...ATTACHMENT, workspace_title: "Team A", content_url: null };
+  const second = {
+    ...ATTACHMENT,
+    workspace_id: "ws-2",
+    original_filename: "second-team.png",
+    workspace_title: "Team B",
+    content_url: null,
+  };
+  vi.mocked(listAdminContextMediaAttachments).mockResolvedValue(
+    page([first, second]) as never,
+  );
+  vi.mocked(deleteAdminContextMediaAttachment).mockReset();
+  vi.mocked(deleteAdminContextMediaAttachment).mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  render(<AttachmentsSection scope="server" workspaceId="ws-1" />);
+  await screen.findByText("Workspace: Team B");
+  await user.click(screen.getByRole("radio", { name: "Unused" }));
+  await user.click(
+    screen.getByRole("checkbox", { name: /Select diagram.png/ }),
+  );
+  expect(
+    screen.getByRole("checkbox", { name: /Select second-team.png/ }),
+  ).not.toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: /Select all/ }));
+  await user.click(screen.getByRole("button", { name: "Delete selected" }));
+  await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
+  await screen.findByText("2 deleted, 0 failed");
+  expect(vi.mocked(deleteAdminContextMediaAttachment).mock.calls).toEqual([
+    ["ws-1", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
+    ["ws-2", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
+  ]);
 });

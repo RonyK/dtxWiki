@@ -1384,3 +1384,22 @@
   width: 120px;
   max-width: 100%;
 }
+
+.attachments-policy-editor > summary {
+  width: fit-content;
+  cursor: pointer;
+  padding-block: 6px;
+}
+
+.attachments-policy-editor-content {
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.attachments-scope {
+  border: 0;
+  padding: 0;
+  margin: 0 0 16px;
+  min-width: 0;
+}

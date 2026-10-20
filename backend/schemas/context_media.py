@@ -206,3 +206,19 @@ class ContextMediaAttachmentListData(BaseModel):
 
 class ContextMediaAttachmentListResponse(RESTResponseBase):
     data: ContextMediaAttachmentListData
+
+
+class AdminContextMediaAttachmentPayload(ContextMediaAttachmentPayload):
+    workspace_title: str
+
+
+class AdminContextMediaAttachmentListData(BaseModel):
+    items: tuple[AdminContextMediaAttachmentPayload, ...]
+    next_cursor: str | None
+    scope: Literal["server"] = "server"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AdminContextMediaAttachmentListResponse(RESTResponseBase):
+    data: AdminContextMediaAttachmentListData

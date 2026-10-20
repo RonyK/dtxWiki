@@ -2,7 +2,9 @@ import { apiRequest } from "./client";
 import type { components } from "./types.gen";
 
 export type ContextMediaAttachment =
-  components["schemas"]["ContextMediaAttachmentPayload"];
+  components["schemas"]["ContextMediaAttachmentPayload"] & {
+    workspace_title?: string;
+  };
 
 /**
  * `mine` is the default the server also defaults to, and the only scope a
@@ -27,7 +29,7 @@ export type ContextMediaAttachmentPage = {
   /** Null once the last page has been served. */
   nextCursor: string | null;
   /** Echoed back so an empty list can say whose emptiness it is describing. */
-  scope: ContextMediaAttachmentScope;
+  scope: ContextMediaAttachmentScope | "server";
 };
 
 type ContextMediaAttachmentListResponse = {
@@ -70,7 +72,8 @@ export async function listWorkspaceContextMediaAttachments(
   };
 }
 
-export type AttachmentRetentionPolicy = components["schemas"]["ContextMediaRetentionPolicyPayload"];
+export type AttachmentRetentionPolicy =
+  components["schemas"]["ContextMediaRetentionPolicyPayload"];
 
 export function parseAttachmentRetentionPolicy(
   value: unknown,
@@ -102,4 +105,38 @@ export function parseAttachmentRetentionPolicy(
   )
     return null;
   return policy;
+}
+
+export async function listAdminContextMediaAttachments(
+  query: ContextMediaAttachmentQuery = {},
+): Promise<ContextMediaAttachmentPage> {
+  const params = new URLSearchParams();
+  if (query.scope === "mine") params.set("mine", "true");
+  if (query.orphanOnly) params.set("orphan_only", "true");
+  if (query.query?.trim()) params.set("q", query.query.trim());
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.cursor) params.set("cursor", query.cursor);
+  const response = await apiRequest<{
+    data: {
+      items: ContextMediaAttachment[];
+      next_cursor: string | null;
+    };
+  }>(`/api/v1/admin/context-media/attachments?${params}`);
+  return {
+    items: response.data.items,
+    nextCursor: response.data.next_cursor,
+    retentionPolicy: null,
+    scope: "server",
+  };
+}
+
+export async function deleteAdminContextMediaAttachment(
+  workspaceId: string,
+  assetId: string,
+  usageToken: string,
+) {
+  await apiRequest(
+    `/api/v1/admin/context-media/attachments/${encodeURIComponent(assetId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { method: "DELETE", headers: { "If-Match": usageToken } },
+  );
 }

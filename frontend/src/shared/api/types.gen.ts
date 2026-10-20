@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/context-media/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Context Media Attachments */
+        get: operations["admin_list_context_media_attachments_api_v1_admin_context_media_attachments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/context-media/attachments/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Admin Delete Context Media Attachment */
+        delete: operations["admin_delete_context_media_attachment_api_v1_admin_context_media_attachments__asset_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/context-media/orphans": {
         parameters: {
             query?: never;
@@ -2773,6 +2807,101 @@ export interface components {
             target_id?: string | null;
             /** Target Kind */
             target_kind: string;
+        };
+        /** AdminContextMediaAttachmentListData */
+        AdminContextMediaAttachmentListData: {
+            /** Items */
+            items: components["schemas"]["AdminContextMediaAttachmentPayload"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Scope
+             * @default server
+             * @constant
+             */
+            scope: "server";
+        };
+        /** AdminContextMediaAttachmentListResponse */
+        AdminContextMediaAttachmentListResponse: {
+            data: components["schemas"]["AdminContextMediaAttachmentListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** AdminContextMediaAttachmentPayload */
+        AdminContextMediaAttachmentPayload: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /**
+             * Association State
+             * @enum {string}
+             */
+            association_state: "pending_install" | "active" | "tombstoned";
+            /** Bytes */
+            bytes: number;
+            /** Can Delete */
+            can_delete: boolean;
+            /** Content Url */
+            content_url: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By Actor Id */
+            created_by_actor_id: string;
+            /** Created By Actor Kind */
+            created_by_actor_kind: string;
+            /**
+             * Created For Version Id
+             * Format: uuid
+             */
+            created_for_version_id: string;
+            /** Current Published Reference Count */
+            current_published_reference_count: number;
+            /** Historical Reference Count */
+            historical_reference_count: number;
+            /** Is Mine */
+            is_mine: boolean;
+            /** Is Orphan */
+            is_orphan: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image" | "audio" | "video";
+            /** Latest Draft Reference Count */
+            latest_draft_reference_count: number;
+            /** Logical Ref */
+            logical_ref: string;
+            /** Media Type */
+            media_type: string;
+            /** Original Filename */
+            original_filename: string;
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /** Page Title */
+            page_title: string | null;
+            /** Uploaded By Display Name */
+            uploaded_by_display_name: string;
+            /**
+             * Usage State
+             * @enum {string}
+             */
+            usage_state: "active" | "history_only" | "unused";
+            /** Usage Token */
+            usage_token: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Workspace Title */
+            workspace_title: string;
         };
         /**
          * AdminJobListData
@@ -9677,6 +9806,166 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    admin_list_context_media_attachments_api_v1_admin_context_media_attachments_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                mine?: boolean;
+                orphan_only?: boolean;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminContextMediaAttachmentListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_delete_context_media_attachment_api_v1_admin_context_media_attachments__asset_id__delete: {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header: {
+                "If-Match": string;
+            };
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextMediaDeleteResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
         };

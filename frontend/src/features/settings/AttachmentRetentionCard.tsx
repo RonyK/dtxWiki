@@ -176,131 +176,138 @@ export function AttachmentRetentionCard({
         </button>
       ) : null}
       {canEdit ? (
-        <>
-          <fieldset disabled={!policy || busy || confirm}>
-            <label className="attachments-checkbox">
-              <input
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.preventDefault();
-                }}
-                type="checkbox"
-                checked={enabled}
-                onChange={(event) => {
-                  setEnabled(event.target.checked);
-                  setInherit(false);
-                }}
-              />
-              {t("attachments.policy.enabled")}
-            </label>
-            <label className="field-stack">
-              {t("attachments.policy.period")}
-              <input
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.preventDefault();
-                }}
-                type="number"
-                min="1"
-                step="1"
-                value={value}
-                disabled={!enabled}
-                onChange={(event) => {
-                  setValue(event.target.value);
-                  setInherit(false);
-                }}
-              />
-            </label>
-            <label className="field-stack">
-              {t("attachments.policy.unit")}
-              <select
-                value={unit}
-                disabled={!enabled}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  const converted =
-                    next === "hours" ? Number(value) * 24 : Number(value) / 24;
-                  setValue(String(converted));
-                  setUnit(next);
-                  setInherit(false);
-                }}
-              >
-                <option value="days">{t("attachments.policy.dayUnit")}</option>
-                <option value="hours">
-                  {t("attachments.policy.hourUnit")}
-                </option>
-              </select>
-            </label>
-            <button
-              className="icon-button"
-              type="button"
-              onClick={() => {
-                setInherit(true);
-                const hours = policy?.default_orphan_retention_hours ?? 0;
-                setEnabled(hours > 0);
-                setUnit("hours");
-                setValue(hours > 0 ? String(hours) : "");
-              }}
-            >
-              {t("attachments.policy.useDefault")}
-            </button>
-          </fieldset>
-          {!valid && policy ? (
-            <p role="alert">
-              {t("attachments.policy.invalid", {
-                max: policy.max_orphan_retention_hours,
-              })}
-            </p>
-          ) : null}
-          <p>{t("attachments.policy.nextSweep")}</p>
-          <div className="attachments-confirm-actions">
-            <button
-              className="icon-button"
-              type="button"
-              disabled={!dirty || busy || confirm}
-              onClick={reset}
-            >
-              {t("attachments.policy.cancel")}
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              ref={saveRef}
-              disabled={!valid || !dirty || busy || confirm}
-              onClick={() => {
-                if (impactsExisting) setConfirm(true);
-                else void save();
-              }}
-            >
-              {t("attachments.policy.save")}
-            </button>
-          </div>
-          {confirm ? (
-            <div className="attachments-confirm">
-              <p>{t("attachments.policy.impact")}</p>
-              <div className="attachments-confirm-actions">
-                <button
-                  className="icon-button"
-                  type="button"
-                  ref={cancelRef}
-                  disabled={busy}
-                  onClick={() => {
-                    setConfirm(false);
-                    requestAnimationFrame(() => saveRef.current?.focus());
+        <details className="attachments-policy-editor" key={workspaceId}>
+          <summary>{t("attachments.policy.edit")}</summary>
+          <div className="attachments-policy-editor-content">
+            <fieldset disabled={!policy || busy || confirm}>
+              <label className="attachments-checkbox">
+                <input
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.preventDefault();
+                  }}
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(event) => {
+                    setEnabled(event.target.checked);
+                    setInherit(false);
+                  }}
+                />
+                {t("attachments.policy.enabled")}
+              </label>
+              <label className="field-stack">
+                {t("attachments.policy.period")}
+                <input
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.preventDefault();
+                  }}
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={value}
+                  disabled={!enabled}
+                  onChange={(event) => {
+                    setValue(event.target.value);
+                    setInherit(false);
+                  }}
+                />
+              </label>
+              <label className="field-stack">
+                {t("attachments.policy.unit")}
+                <select
+                  value={unit}
+                  disabled={!enabled}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    const converted =
+                      next === "hours"
+                        ? Number(value) * 24
+                        : Number(value) / 24;
+                    setValue(String(converted));
+                    setUnit(next);
+                    setInherit(false);
                   }}
                 >
-                  {t("attachments.policy.cancel")}
-                </button>
-                <button
-                  className="icon-button danger-action"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void save()}
-                >
-                  {t("attachments.policy.confirm")}
-                </button>
-              </div>
+                  <option value="days">
+                    {t("attachments.policy.dayUnit")}
+                  </option>
+                  <option value="hours">
+                    {t("attachments.policy.hourUnit")}
+                  </option>
+                </select>
+              </label>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => {
+                  setInherit(true);
+                  const hours = policy?.default_orphan_retention_hours ?? 0;
+                  setEnabled(hours > 0);
+                  setUnit("hours");
+                  setValue(hours > 0 ? String(hours) : "");
+                }}
+              >
+                {t("attachments.policy.useDefault")}
+              </button>
+            </fieldset>
+            {!valid && policy ? (
+              <p role="alert">
+                {t("attachments.policy.invalid", {
+                  max: policy.max_orphan_retention_hours,
+                })}
+              </p>
+            ) : null}
+            <p>{t("attachments.policy.nextSweep")}</p>
+            <div className="attachments-confirm-actions">
+              <button
+                className="icon-button"
+                type="button"
+                disabled={!dirty || busy || confirm}
+                onClick={reset}
+              >
+                {t("attachments.policy.cancel")}
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                ref={saveRef}
+                disabled={!valid || !dirty || busy || confirm}
+                onClick={() => {
+                  if (impactsExisting) setConfirm(true);
+                  else void save();
+                }}
+              >
+                {t("attachments.policy.save")}
+              </button>
             </div>
-          ) : null}
-        </>
+            {confirm ? (
+              <div className="attachments-confirm">
+                <p>{t("attachments.policy.impact")}</p>
+                <div className="attachments-confirm-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    ref={cancelRef}
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirm(false);
+                      requestAnimationFrame(() => saveRef.current?.focus());
+                    }}
+                  >
+                    {t("attachments.policy.cancel")}
+                  </button>
+                  <button
+                    className="icon-button danger-action"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void save()}
+                  >
+                    {t("attachments.policy.confirm")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </details>
       ) : null}
     </section>
   );
