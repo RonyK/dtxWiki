@@ -137,6 +137,9 @@ class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
     )
     default_language: Mapped[str] = mapped_column(Text, nullable=False, default="en")
+    context_media_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     library_policy: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,

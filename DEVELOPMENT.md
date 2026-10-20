@@ -440,6 +440,26 @@ revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.j
 패키지 검증기의 해시 목록에 함께 고정합니다. 기존에 배포된 migration은 수정하거나
 다시 합치지 않습니다.
 
+### Migration 테스트 수 제한
+
+새 migration의 기본 예산은 DB별 upgrade → downgrade → re-upgrade 시나리오
+1건, SQLite·PostgreSQL 합계 **2건 이하**입니다. `parametrize`로 생성되는
+실행 건수도 포함합니다. 데이터 보존, 기본값, 제약조건은 같은 시나리오에서
+검증하고 각 중간 단계의 assertion을 유지합니다. 컬럼·입력값·단계·부모 revision마다
+별도의 전체 migration 테스트를 만들지 않습니다. 여러 부모를 지원하면 가능할 때
+DB 하나를 순서대로 업그레이드하면서 각 부모 상태를 확인합니다.
+
+SQL 생성·입력 경계·변환 규칙처럼 Alembic 실행 없이 검증할 수 있는 것은
+작은 스키마나 메모리 DB를 사용하는 단위 테스트로 통합합니다. 같은 조건을 필드마다
+별도 테스트와 DB로 반복하지 않습니다. 체인 연결과 패키징 검증은 기존 공통 테스트를
+확장합니다. 기존 동작 검증과 중복되거나, 구현을 그대로 반복하거나, 실제 결함으로
+실패할 수 없는 무의미한 테스트는 추가하지 않습니다.
+
+예산을 넘는 독립 시나리오가 꼭 필요하면 해당 테스트 주석에 **별도 실패 경로**와
+**기존 시나리오 또는 단위 테스트로 통합할 수 없는 이유**를 명시합니다. 테스트 수를
+줄이려고 assertion을 삭제하거나 실행을 생략해서는 안 됩니다. 검증 결과를 보고할 때는
+이번에 추가한 테스트 수와 기존 회귀 테스트 실행 수를 구분합니다.
+
 `backend/static/`은 생성물이라 gitignored입니다. 따라서 fresh checkout에서 raw
 `python -m build`, `pip install git+...`, Git archive만 사용하면 UI 없는 wheel이 생길 수 있습니다.
 반드시 `make install` 후 `make build-wheel` 또는 이를 호출하는 `make test-packaged`를 사용하고

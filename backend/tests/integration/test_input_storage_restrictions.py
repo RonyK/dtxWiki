@@ -1,4 +1,9 @@
-"""Storage bypasses and pre-upgrade recovery exercise the real frozen policy."""
+"""Real migration/recovery paths only; scalar CHECK cases live in unit tests.
+
+Consolidate compatible checks into one traversal, preserving intermediate-state
+assertions. See DEVELOPMENT.md for the per-migration test budget. The recovery
+scenarios below cover distinct CLI, revocation and projection side effects.
+"""
 
 import os
 from datetime import UTC, datetime
@@ -8,7 +13,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
@@ -23,49 +28,10 @@ from backend.services.ops.input_maintenance import (
     repair_input,
 )
 
-
-@pytest.mark.parametrize("rule", RULES, ids=lambda r: f"{r.table}.{r.field}")
-def test_raw_storage_rejects_overflow_nul_and_blob(rule):
-    engine = sa.create_engine("sqlite://")
-    metadata = sa.MetaData()
-    table = sa.Table(
-        "probe",
-        metadata,
-        sa.Column(rule.field, sa.Text),
-        sa.Column("node_kind", sa.Text),
-        sa.CheckConstraint(StoredInputCheck(rule), name=rule.name),
-    )
-    metadata.create_all(engine)
-    maximum = rule.maximum
-    valid = "x" * maximum
-    invalid = "x" * (maximum + 1)
-    if rule.kind == "email":
-        valid = "a" * 64 + "@" + "b" * 189
-        invalid = "a" * 64 + "@" + "b" * 190
-    with engine.begin() as connection:
-        connection.execute(
-            table.insert().values({rule.field: valid, "node_kind": "saved_view"})
-        )
-    for value in (invalid, "x\x00" + "x" * maximum, b"blob"):
-        with pytest.raises(IntegrityError), engine.begin() as connection:
-            connection.execute(
-                table.insert().values({rule.field: value, "node_kind": "saved_view"})
-            )
-    if rule.nullable:
-        with engine.begin() as connection:
-            connection.execute(table.insert().values({rule.field: None}))
-    if rule.kind in {"line", "tree", "email"}:
-        for value in (" x", "x\t", "x\u0085x", "x\u2028x"):
-            with pytest.raises(IntegrityError), engine.begin() as connection:
-                connection.execute(
-                    table.insert().values(
-                        {rule.field: value, "node_kind": "saved_view"}
-                    )
-                )
-    engine.dispose()
+PRE_INPUT_REVISION = "d148b9746ff5"
 
 
-def _database(tmp_path, revision="efcbcf724889"):
+def _database(tmp_path, revision=PRE_INPUT_REVISION):
     url = f"sqlite:///{tmp_path / 'inputs.db'}"
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
@@ -95,42 +61,53 @@ def _user(connection, *, name="Alice", email="alice@example.test"):
     return identity
 
 
-@pytest.mark.parametrize("revision", ["bd62193d5cf6", "efcbcf724889"])
-def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(tmp_path, revision):
-    url, config = _database(tmp_path, revision)
+def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(tmp_path):
+    # Separate from the successful policy round trip: dirty data must refuse
+    # upgrade without advancing the stamp, then remain repairable in each schema.
+    # Each parent has a different schema; traverse once and assert at each stop.
+    url, config = _database(tmp_path, "bd62193d5cf6")
     engine = sa.create_engine(url)
     with engine.begin() as connection:
-        identity = _user(connection, name="x" * 33)
-    report = audit_inputs(url)
-    assert report[0]["count"] == 1
-    assert "x" * 33 not in str(report)
-    with pytest.raises(RuntimeError, match="preflight failed"):
-        command.upgrade(config, "head")
-    with engine.connect() as connection:
-        assert (
+        identity = _user(connection)
+    for revision in ("bd62193d5cf6", "efcbcf724889", PRE_INPUT_REVISION):
+        command.upgrade(config, revision)
+        with engine.begin() as connection:
             connection.execute(
-                sa.text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-            == revision
-        )
-        assert (
-            connection.execute(sa.text("SELECT display_name FROM users")).scalar_one()
-            == "x" * 33
-        )
-    repair_input(url, "user", identity, "display_name", "한글😀")
-    repair_input(url, "user", identity, "email", " 새주소@EXAMPLE.TEST ")
-    assert audit_inputs(url) == []
-    with engine.connect() as connection:
-        assert (
-            connection.execute(
-                sa.text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-            == revision
-        )
-        assert (
-            connection.execute(sa.text("SELECT email FROM users")).scalar_one()
-            == "새주소@example.test"
-        )
+                sa.text("UPDATE users SET display_name=:name, email=:email"),
+                {"name": "x" * 33, "email": "alice@example.test"},
+            )
+        report = audit_inputs(url)
+        assert report[0]["count"] == 1
+        assert "x" * 33 not in str(report)
+        with pytest.raises(RuntimeError, match="preflight failed"):
+            command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    sa.text("SELECT version_num FROM alembic_version")
+                ).scalar_one()
+                == revision
+            )
+            assert (
+                connection.execute(
+                    sa.text("SELECT display_name FROM users")
+                ).scalar_one()
+                == "x" * 33
+            )
+        repair_input(url, "user", identity, "display_name", "한글😀")
+        repair_input(url, "user", identity, "email", " 새주소@EXAMPLE.TEST ")
+        assert audit_inputs(url) == []
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    sa.text("SELECT version_num FROM alembic_version")
+                ).scalar_one()
+                == revision
+            )
+            assert (
+                connection.execute(sa.text("SELECT email FROM users")).scalar_one()
+                == "새주소@example.test"
+            )
     command.upgrade(config, "head")
     with engine.connect() as connection:
         assert (
@@ -139,7 +116,7 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(tmp_path, rev
             ).scalar_one()
             == REVISION
         )
-    command.downgrade(config, "efcbcf724889")
+    command.downgrade(config, PRE_INPUT_REVISION)
     command.upgrade(config, "head")
     with engine.connect() as connection:
         assert (
@@ -491,7 +468,7 @@ def test_cli_repairs_do_not_bootstrap_and_reject_unknown_fields(tmp_path, monkey
             connection.execute(
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "efcbcf724889"
+            == PRE_INPUT_REVISION
         )
     engine.dispose()
 

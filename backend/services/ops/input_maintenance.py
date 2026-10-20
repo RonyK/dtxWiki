@@ -30,7 +30,7 @@ from backend.services.ops.migration_preflight import (
     make_non_mutating_engine,
 )
 
-SUPPORTED = frozenset({"bd62193d5cf6", "efcbcf724889", REVISION})
+SUPPORTED = frozenset({"bd62193d5cf6", "efcbcf724889", "d148b9746ff5", REVISION})
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),
@@ -126,6 +126,7 @@ def audit_inputs(database_url: str) -> list[dict]:
                     report.append(
                         {
                             "rule": "historical_outbox_recipient",
+                            "classification": "preserved_history",
                             "count": count,
                             "ids": invalid_ids,
                         }
@@ -159,7 +160,12 @@ def repair_input(
                     "NULL is only supported for optional notes/summaries/titles"
                 )
         elif field in {"goal", "decision_note", "nav_summary"}:
-            value = validate_text(value, field=field, max_length=maximum)
+            value = validate_text(
+                value, field=field, max_length=maximum,
+                min_length=1 if field == "goal" else 0,
+            )
+            if field == "goal" and not value.strip():
+                raise InputMaintenanceError("goal cannot be empty")
         elif field == "slug":
             import re
 
@@ -210,7 +216,7 @@ def repair_input(
                 if entity == "tree-node" and (
                     row["node_kind"] == "folder"
                     or row.get("target_kind")
-                    in {"context_page", "agent_page", "ask_session", "library_item"}
+                    in {"context_page", "agent_page", "ask_session"}
                 ):
                     raise InputMaintenanceError(
                         "repair the canonical target or use tree-folder"

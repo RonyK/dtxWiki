@@ -1,7 +1,7 @@
 """enforce input storage restrictions
 
 Revision ID: 19db79d3e622
-Revises: efcbcf724889
+Revises: d148b9746ff5
 Create Date: 2026-10-20 22:58:47.475913
 """
 
@@ -14,7 +14,7 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
 )
 
 revision = "19db79d3e622"
-down_revision = "efcbcf724889"
+down_revision = "d148b9746ff5"
 branch_labels = None
 depends_on = None
 

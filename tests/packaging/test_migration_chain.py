@@ -29,6 +29,7 @@ RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
 # Canonical head of the 0.1 schema release group.
 CORE_REVISION = "efcbcf724889"
+RETENTION_REVISION = "d148b9746ff5"
 INPUT_REVISION = "19db79d3e622"
 ALEMBIC_REVISION_METADATA = {
     "revision",
@@ -85,7 +86,8 @@ def test_the_chain_is_linear_and_starts_with_the_released_revisions():
     assert chain == [
         (INITIAL_REVISION, None),
         (CORE_REVISION, INITIAL_REVISION),
-        (INPUT_REVISION, CORE_REVISION),
+        (RETENTION_REVISION, CORE_REVISION),
+        (INPUT_REVISION, RETENTION_REVISION),
     ]
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
