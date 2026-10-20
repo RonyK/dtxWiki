@@ -77,6 +77,8 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
     # Epic-2 Phase 5c (orphaned Context-media reclamation): same
     # require_server_admin-only gate as the job-visibility routes above.
     ("GET", "/api/v1/admin/context-media/orphans"),
+    ("GET", "/api/v1/admin/context-media/attachments"),
+    ("DELETE", "/api/v1/admin/context-media/attachments/{asset_id}"),
 }
 
 OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {

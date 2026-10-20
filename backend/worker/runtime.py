@@ -26,6 +26,7 @@ from backend.repositories.workspace_scoped import get_in_workspace
 from backend.services.actor_identities import SYSTEM_FEEDBACK_RESOLVER_ACTOR_ID
 from backend.services.bundle_expiration import BundleExpirationService
 from backend.services.context_media_orphan_sweep import ContextMediaOrphanSweepService
+from backend.services.context_media_policy import read_context_media_policy
 from backend.services.context_reconciliation_reminder import (
     RECONCILIATION_REMINDER_JOB_TYPE,
     ContextReconciliationReminderService,
@@ -1250,6 +1251,25 @@ class OneShotWorker:
                         workspace_session_factory,
                         claimed_job,
                     )
+                elif claimed_job.job_type == "context_media_orphan_sweep":
+                    if self._settings is None:
+                        raise RuntimeError(
+                            "Attachment retention settings are unavailable"
+                        )
+                    with control_session_factory() as policy_session:
+                        policy = read_context_media_policy(
+                            policy_session,
+                            claimed_job.workspace_id,
+                            self._settings.context_media_orphan_retention_hours,
+                        )
+                    run_at = datetime.now(UTC)
+                    with workspace_session_factory.begin() as work_session:
+                        detail = self._sweep_context_media(
+                            work_session,
+                            claimed_job.workspace_id,
+                            policy.effective_hours,
+                            run_at,
+                        )
                 else:
                     with workspace_session_factory.begin() as work_session:
                         detail = self._run_business_logic(
@@ -1871,17 +1891,36 @@ class OneShotWorker:
     def _business_context_media_orphan_sweep(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
+        # Legacy single-DB dispatch only. Production resolves CONTROL before
+        # opening the workspace mutation transaction in the orchestrator.
         del queue_job
-        retention_hours = (
-            self._settings.context_media_orphan_retention_hours
-            if self._settings is not None
-            else 0
+        if self._settings is None:
+            raise RuntimeError("Attachment retention settings are unavailable")
+        if self._database_provider is not None:
+            with self._database_provider.control_session_factory()() as control_session:
+                policy = read_context_media_policy(
+                    control_session,
+                    job.workspace_id,
+                    self._settings.context_media_orphan_retention_hours,
+                )
+        else:
+            policy = read_context_media_policy(
+                session,
+                job.workspace_id,
+                self._settings.context_media_orphan_retention_hours,
+            )
+        return self._sweep_context_media(
+            session, job.workspace_id, policy.effective_hours, datetime.now(UTC)
         )
+
+    def _sweep_context_media(
+        self, session: Session, workspace_id: UUID, hours: int, now: datetime
+    ) -> dict[str, Any]:
         result = self._context_media_orphan_sweep_service().sweep(
             session,
-            workspace_id=job.workspace_id,
-            retention_hours=retention_hours,
-            now=self._datetime_target(job=job, key="scheduled_for"),
+            workspace_id=workspace_id,
+            retention_hours=hours,
+            now=now,
         )
         return {
             "inspected_count": result.inspected_count,
