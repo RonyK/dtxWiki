@@ -21,6 +21,7 @@
   "build": {
     "appId": "io.dtxsuite.dtxwiki",
     "productName": "dtxWiki",
+    "icon": "assets/icon.svg",
     "copyright": "Copyright © 2026 Minsoo Kim (dtxSuite)",
     "asar": true,
     "directories": {
