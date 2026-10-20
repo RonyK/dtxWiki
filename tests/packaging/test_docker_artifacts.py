@@ -20,6 +20,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -681,33 +682,82 @@ http.server.ThreadingHTTPServer(("0.0.0.0", 21080), Handler).serve_forever()
 _CLIENT = """
 import http.client, json, ssl, sys
 
-host, port = sys.argv[1], int(sys.argv[2])
-
-
 def call(method, path, body=None, headers=None):
     context = ssl._create_unverified_context()
     connection = http.client.HTTPSConnection(host, port, context=context, timeout=60)
+    send_error = None
     try:
-        connection.request(method, path, body=body, headers=headers or {})
+        try:
+            connection.request(method, path, body=body, headers=headers or {})
+        except OSError as exc:
+            # A proxy can send 413 and close while the body is still being sent.
+            # Read that response on this connection; never resend the request.
+            if connection.sock is None:
+                raise
+            send_error = repr(exc)
         response = connection.getresponse()
         response.read()
         return {"status": response.status, "headers": response.getheaders()}
     except OSError as exc:
-        return {"status": None, "error": repr(exc)}
+        result = {"status": None, "error": repr(exc)}
+        if send_error is not None:
+            result["send_error"] = send_error
+        return result
     finally:
         connection.close()
 
 
-print(json.dumps({
-    "app": call(
-        "GET", "/app-headers?token=SECRET-TOKEN&page=2",
-        headers={"Referer": "https://wiki/reset-password?token=SECRET-REFERER"},
-    ),
-    "plain": call("GET", "/plain"),
-    "small": call("POST", "/upload", body=b"x" * 1024),
-    "large": call("POST", "/upload", body=b"x" * 70_000_000),
-}))
+if __name__ == "__main__":
+    host, port = sys.argv[1], int(sys.argv[2])
+    print(json.dumps({
+        "app": call(
+            "GET", "/app-headers?token=SECRET-TOKEN&page=2",
+            headers={"Referer": "https://wiki/reset-password?token=SECRET-REFERER"},
+        ),
+        "plain": call("GET", "/plain"),
+        "small": call("POST", "/upload", body=b"x" * 1024),
+        "large": call("POST", "/upload", body=b"x" * 70_000_000),
+    }))
 """
+
+
+@pytest.mark.parametrize("failure", ["send", "send_and_response", "connect"])
+def test_proxy_client_reads_rejection_after_send_error(monkeypatch, failure: str):
+    connection = Mock()
+    send_error = ConnectionResetError(104, "Connection reset by peer")
+    response_error = ConnectionResetError(104, "No response available")
+    connection.request.side_effect = send_error
+    connection.getresponse.return_value.status = 413
+    connection.getresponse.return_value.getheaders.return_value = []
+    if failure == "send_and_response":
+        connection.getresponse.side_effect = response_error
+    elif failure == "connect":
+        connection.sock = None
+    monkeypatch.setattr("http.client.HTTPSConnection", Mock(return_value=connection))
+    namespace = {"__name__": "proxy_client_test", "host": "proxy", "port": 443}
+    exec(_CLIENT, namespace)
+
+    result = namespace["call"]("POST", "/upload", body=b"body")
+
+    if failure == "send":
+        assert result == {"status": 413, "headers": []}
+        connection.getresponse.return_value.read.assert_called_once_with()
+    elif failure == "send_and_response":
+        assert result == {
+            "status": None,
+            "error": repr(response_error),
+            "send_error": repr(send_error),
+        }
+    else:
+        assert result == {"status": None, "error": repr(send_error)}
+    if failure == "connect":
+        connection.getresponse.assert_not_called()
+    else:
+        connection.getresponse.assert_called_once_with()
+    connection.request.assert_called_once_with(
+        "POST", "/upload", body=b"body", headers={}
+    )
+    connection.close.assert_called_once_with()
 
 
 def _headers(response: dict) -> dict[str, list[str]]:
@@ -824,10 +874,10 @@ def test_caddy_keeps_app_headers_caps_bodies_and_logs_no_tokens(
     assert responses["small"]["status"] == 200
     assert responses["large"]["status"] != 200
     if image == "caddy:2":
-        assert responses["large"]["status"] == 413
+        assert responses["large"]["status"] == 413, responses["large"]
     sizes = _upload_sizes(upstream)
     assert 1024 in sizes
-    assert max(sizes) < LARGE_UPLOAD
+    assert max(sizes) <= 64_000_000
     # C6: the access log keeps neither the query token nor the Referer.
     logs = _docker("logs", proxy)
     access = [

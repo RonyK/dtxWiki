@@ -43,7 +43,10 @@ from backend.repositories.mcp_chat_repo import (
     list_call_artifact_edges,
     list_calls_naming_page,
 )
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 from backend.schemas.mcp_chat import (
     McpChatAction,
@@ -2230,10 +2233,10 @@ class _ReaderGate:
         ids = list(wanted)
         for start in range(0, len(ids), 500):
             versions = self.session.scalars(
-                select(ContextPageVersion)
-                .where(
-                    ContextPageVersion.workspace_id == self.workspace_id,
-                    ContextPageVersion.id.in_(ids[start : start + 500]),
+                select_in_workspace_by_ids(
+                    ContextPageVersion,
+                    workspace_id=self.workspace_id,
+                    resource_ids=ids[start : start + 500],
                 )
                 .options(
                     load_only(
