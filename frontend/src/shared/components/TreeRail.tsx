@@ -1052,8 +1052,23 @@ function TreeRow({
   const statusId = useId();
   const tooltipId = useId();
   const [tooltipRect, setTooltipRect] = useState<DOMRect | null>(null);
+  const tooltipOwnerRef = useRef<HTMLElement | null>(null);
   const pointerOverRef = useRef(false);
   const focusWithinRef = useRef(false);
+  useEffect(() => {
+    if (!tooltipRect) return;
+    const handlePointerMove = (event: Event) => {
+      const owner = tooltipOwnerRef.current;
+      if (!owner) return;
+      // WebKit can miss mouseleave when expanding a row replaces its hovered
+      // chevron SVG. Reconcile against the next real pointer target instead.
+      const pointerWithin = event.target instanceof Node && owner.contains(event.target);
+      pointerOverRef.current = pointerWithin;
+      if (!pointerWithin && !owner.contains(document.activeElement)) setTooltipRect(null);
+    };
+    document.addEventListener("pointermove", handlePointerMove, true);
+    return () => document.removeEventListener("pointermove", handlePointerMove, true);
+  }, [tooltipRect]);
   const status = treeNodeStatus(node, now);
   const statusDescription = treeNodeStatusDescription(node, now, i18n.resolvedLanguage ?? i18n.language, t);
   const level = visualLevel;
@@ -1354,6 +1369,7 @@ function TreeRow({
         );
       }}
       onFocus={(event) => {
+        tooltipOwnerRef.current = event.currentTarget;
         focusWithinRef.current = true;
         setTooltipRect(event.currentTarget.getBoundingClientRect());
         onFocusNode(node.id);
@@ -1365,6 +1381,7 @@ function TreeRow({
         }
       }}
       onMouseEnter={(event) => {
+        tooltipOwnerRef.current = event.currentTarget;
         pointerOverRef.current = true;
         setTooltipRect(event.currentTarget.getBoundingClientRect());
       }}

@@ -1917,6 +1917,8 @@
   height: 7px;
   left: 0;
   top: 0;
+  /* WebKit drops the top raster row at fractional positions with SVG clipping. */
+  overflow: visible;
 }
 
 .tree-row-document-icon {

@@ -104,6 +104,34 @@ describe("TreeRail document status and personal favorites", () => {
     expect(row).toHaveAccessibleDescription("Normal · Last content change 12 days ago · My favorite");
   });
 
+  it("dismisses a stale hover tooltip after its hovered chevron is replaced without a mouseleave", () => {
+    const folder = node({ node_kind: "folder", target_kind: null, target_id: null,
+      title: "Inbox", can_have_children: true, children_count: 1 });
+    const onExpandedNodeIdsChange = vi.fn();
+    const { rerender } = render(<TreeRail title="Context" nodes={[folder]} expandedNodeIds={[]}
+      onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    const row = screen.getByRole("treeitem", { name: "Inbox" });
+    fireEvent.mouseEnter(row);
+    act(() => { within(row).getByRole("button", { name: "Expand Inbox" }).focus(); });
+    fireEvent.click(within(row).getByRole("button", { name: "Expand Inbox" }));
+    rerender(<TreeRail title="Context" nodes={[folder]} expandedNodeIds={[folder.id]}
+      onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    act(() => { screen.getByRole("searchbox").focus(); });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Inbox");
+    fireEvent.pointerMove(document.body);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("keeps a keyboard focus tooltip when the pointer leaves and dismisses it when focus leaves", () => {
+    render(<TreeRail title="Context" nodes={[node()]} />);
+    const row = screen.getByRole("treeitem", { name: "A page" });
+    act(() => { row.focus(); });
+    fireEvent.pointerMove(document.body);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("A page");
+    act(() => { screen.getByRole("searchbox").focus(); });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("announces absent/invalid timestamps without invented elapsed times, including Korean", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

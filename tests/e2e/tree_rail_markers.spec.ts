@@ -148,6 +148,14 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
         expect((await rail.boundingBox())!.width).toBeCloseTo(280, 1);
       }
       await expectNoHorizontalOverflow(page, rail);
+      await attachJson(testInfo, `${viewport.key}-baseline-overlays`, await page.evaluate(() => ({
+        active: document.activeElement?.outerHTML,
+        tooltips: [...document.querySelectorAll('[role="tooltip"]')].map((node) => ({ text: node.textContent, rect: node.getBoundingClientRect().toJSON() })),
+        rows: [...document.querySelectorAll('.tree-row')].map((node) => ({ title: node.querySelector('.tree-row-title')?.textContent, hover: node.matches(':hover'), focusWithin: node.matches(':focus-within') })),
+      })));
+      await expect(page.getByRole("tooltip"), "the initial tree overview has no hover/focus overlays").toHaveCount(0);
+      await expectReviewClockPaint(page, treeRow(rail, fixtures[2].id),
+        [treeRow(rail, fixtures[4].id), treeRow(rail, fixtures[5].id)], testInfo, viewport.key);
       await evidenceLocatorScreenshot(rail, testInfo, `${viewport.key}-six-combinations`, { animations: "disabled" });
       await evidenceScreenshot(page, testInfo, `${viewport.key}-viewport`, { fullPage: false, animations: "disabled" });
 
@@ -158,10 +166,12 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       await expect(focusedRow).toHaveAccessibleDescription(/Pending review.*Review requested.*My favorite/);
       const tooltip = page.getByRole("tooltip").filter({ hasText: reviewFavorite.title });
       await expect(tooltip).toBeVisible();
+      await expect(page.getByRole("tooltip"), "only the deliberately focused row has a tooltip").toHaveCount(1);
       await expect(tooltip).toContainText(reviewFavorite.title);
       await expect(tooltip).toContainText(/Pending review.*Review requested.*My favorite/);
       expectSameTitleGeometry(await rowGeometry(focusedRow), baseline!);
       await evidenceLocatorScreenshot(focusedRow, testInfo, `${viewport.key}-focused-review-favorite`, { animations: "disabled" });
+      await evidenceScreenshot(page, testInfo, `${viewport.key}-focused-status-tooltip`, { fullPage: false, animations: "disabled" });
       await focusedRow.hover();
       expectSameTitleGeometry(await rowGeometry(focusedRow), baseline!);
 
@@ -533,6 +543,47 @@ async function markerGeometry(row: Locator) {
 async function expectNoHorizontalOverflow(page: Page, rail: Locator) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   expect(await rail.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+}
+
+async function expectReviewClockPaint(page: Page, recentRow: Locator, reviewRows: Locator[], testInfo: TestInfo, name: string) {
+  const slots = await Promise.all([recentRow, ...reviewRows].map((row) => row.locator(".tree-row-state-dot").boundingBox()));
+  expect(slots.every(Boolean), "all state markers have visible bounds").toBe(true);
+  // Preserve the page's subpixel positions: an element screenshot can round
+  // the clip and hide WebKit's missing first device-pixel row at DPR 2.
+  const screenshot = await page.screenshot({ animations: "disabled", scale: "device" });
+  const paint = await page.evaluate(async ({ png, slots }) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${png}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(image, 0, 0);
+    const scale = image.width / innerWidth;
+    return slots.map((slot) => {
+      const left = Math.ceil(slot!.x * scale);
+      const right = Math.floor((slot!.x + slot!.width) * scale);
+      const top = Math.ceil(slot!.y * scale);
+      const bottom = Math.floor((slot!.y + slot!.height) * scale) - 1;
+      const purplePixels = (y: number) => {
+        const pixels = context.getImageData(left, y, right - left, 1).data;
+        let count = 0;
+        for (let x = 0; x < pixels.length; x += 4) {
+          // Include antialiased purple while excluding the background and hands.
+          if (pixels[x + 2] - pixels[x + 1] > 24 && pixels[x] - pixels[x + 1] > 8) count++;
+        }
+        return count;
+      };
+      return { slot, scale, top, bottom, topPurplePixels: purplePixels(top), bottomPurplePixels: purplePixels(bottom) };
+    });
+  }, { png: screenshot.toString("base64"), slots });
+  await testInfo.attach(`${name}-state-marker-raster`, { body: screenshot, contentType: "image/png" });
+  await attachJson(testInfo, `${name}-state-marker-paint`, paint);
+  for (const [index, label] of ["recent circle", "review clock", "favorite review clock"].entries()) {
+    expect(paint[index].topPurplePixels, `${label} paints its first fully inside device-pixel row`).toBeGreaterThan(0);
+    expect(paint[index].bottomPurplePixels, `${label} paints its last fully inside device-pixel row`).toBeGreaterThan(0);
+  }
 }
 
 async function attachJson(testInfo: TestInfo, name: string, value: unknown) {
