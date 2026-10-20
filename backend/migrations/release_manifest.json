@@ -9,6 +9,10 @@
     "0.1.1": {
       "group": "v0_1",
       "head": "efcbcf724889"
+    },
+    "0.1.2": {
+      "group": "v0_1",
+      "head": "c7a4e91b2d60"
     }
   },
   "legacy_revision_aliases": {

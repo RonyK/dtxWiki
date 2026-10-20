@@ -84,6 +84,7 @@ class AgentPage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     created_by_actor_type: Mapped[str | None] = mapped_column(Text)
     created_by_actor_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    content_changed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=utc_now,

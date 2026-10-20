@@ -4367,6 +4367,7 @@ export function PageEditor({
             </header>
           ) : null}
           <TreeRail
+            favoriteScope={actorId && workspaceId ? { actorId, workspaceId } : undefined}
             title={contextRailLabel}
             accent="context"
             nodes={contextTree}

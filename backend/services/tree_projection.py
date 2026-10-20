@@ -27,9 +27,9 @@ from backend.policy.trust_boundaries import (
     actor_can_read_drafts,
     actor_can_read_sensitive_agent_pages,
 )
+from backend.repositories.context_visibility import visible_context_version_expression
 from backend.services.actor_visible_read import (
     agent_page_requires_sensitive_access,
-    context_page_visible,
     library_item_visible,
 )
 from backend.services.library_canonical import get_canonical_library_version
@@ -218,14 +218,19 @@ class TreeProjectionService:
 
         visible_pages: set[UUID] = set()
         if page_targets:
-            for page in session.scalars(
-                select(ContextPage).where(
-                    ContextPage.id.in_(page_targets),
-                    ContextPage.workspace_id.in_(target_workspaces),
+            # The canonical visibility expression checks private editing-row
+            # ownership in SQL. A tree needs identifiers, not version bodies or
+            # one lazy relationship lookup per page.
+            visible_pages = set(
+                session.scalars(
+                    select(ContextPage.id).where(
+                        ContextPage.id.in_(page_targets),
+                        ContextPage.workspace_id.in_(target_workspaces),
+                        ContextPage.lifecycle_status != "archived",
+                        visible_context_version_expression(actor).is_not(None),
+                    )
                 )
-            ).all():
-                if context_page_visible(page, actor):
-                    visible_pages.add(page.id)
+            )
 
         # Keyed by item so the artifact branch can enforce current-version.
         visible_library: dict[UUID, LibraryItem] = {}

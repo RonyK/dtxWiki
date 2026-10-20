@@ -33,6 +33,7 @@ from backend.models.context_media import (
 )
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.delegated_task import ClientDelegatedTask
+from backend.models.favorite import UserFavorite
 from backend.models.feedback import FeedbackItem
 from backend.models.graph import KnowledgeNodeStat
 from backend.models.job import Job, WorkspaceJobHint
@@ -207,6 +208,7 @@ __all__ = [
     "UploadAsset",
     "UploadAssetBinding",
     "User",
+    "UserFavorite",
     "WorkspaceTreeNode",
     "Workspace",
     "WorkspaceMembership",

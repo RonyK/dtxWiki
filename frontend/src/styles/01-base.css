@@ -222,6 +222,8 @@ button {
   --lifecycle-library: #0f9f8f;
   --lifecycle-context: #7c3aed;
   --lifecycle-agent: #d97706;
+  --tree-favorite-fill: #facc15;
+  --tree-favorite-edge: #9a7411;
   --paper: oklch(0.99 0.005 80);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 5%);
 }

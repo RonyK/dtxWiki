@@ -24,6 +24,7 @@ REVISION_MODULES = len(
 )
 WHEEL_NAME = "dtxwiki-0.0.0-py3-none-any.whl"
 SDIST_NAME = "dtxwiki-0.0.0.tar.gz"
+TREE_RAIL_REVISION = "c7a4e91b2d60"
 INDEX_HTML = (
     "<!doctype html><html><head>"
     '<link rel="stylesheet" href="/assets/index-abc123.css">'
@@ -163,7 +164,7 @@ def _write_revision(stage, revision, down_revision):
 
 
 def _write_stray_revision(stage):
-    _write_revision(stage, "0003_stray", "efcbcf724889")
+    _write_revision(stage, "0003_stray", TREE_RAIL_REVISION)
 
 
 def _write_branch_revision(stage):
@@ -173,8 +174,8 @@ def _write_branch_revision(stage):
 
 
 def _write_merge_revision(stage):
-    _write_revision(stage, "0003_one", "efcbcf724889")
-    _write_revision(stage, "0003_two", "efcbcf724889")
+    _write_revision(stage, "0003_one", TREE_RAIL_REVISION)
+    _write_revision(stage, "0003_two", TREE_RAIL_REVISION)
     _write_revision(stage, "0004_merge", ("0003_one", "0003_two"))
 
 
@@ -269,7 +270,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
     assert REVISION_MODULES == 10
     for name in (WHEEL_NAME, SDIST_NAME):
         assert (
-            f"{name}: alembic head efcbcf724889, "
+            f"{name}: alembic head {TREE_RAIL_REVISION}, "
             f"{REVISION_MODULES} packaged core revision modules, "
             "15 frozen migration files intact, "
             "frontend bundle intact"
@@ -339,7 +340,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     assert probe.returncode == 0, probe.stdout + probe.stderr
     resolved = json.loads(probe.stdout)
-    assert resolved["heads"] == ["efcbcf724889"], "cwd bought no isolation at all"
+    assert resolved["heads"] == [TREE_RAIL_REVISION], "cwd bought no isolation at all"
     leaked = {
         name: origin
         for name, origin in resolved["foreign"].items()
@@ -356,7 +357,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
     [
         (
             _write_branch_revision,
-            "packaged Alembic heads are ['0003_branch', 'efcbcf724889'], expected "
+            "packaged Alembic heads are ['0003_branch', 'c7a4e91b2d60'], expected "
             "exactly one",
         ),
         (
