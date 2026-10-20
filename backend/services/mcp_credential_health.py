@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, tuple_
 from sqlalchemy.orm import Session
 
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
@@ -143,8 +143,14 @@ def load_credential_health(
                 OAuthConsent.user_id, OAuthConsent.client_id, OAuthConsent.removed_at
             ).where(
                 OAuthConsent.workspace_id == workspace_id,
-                OAuthConsent.user_id.in_(user_ids),
-                OAuthConsent.client_id.in_(client_ids),
+                # Independent user/client sets also match unrelated cross-pairs.
+                # Resolve exact pairs on the control plane, without expanding
+                # two bind parameters per pair (lists can name a whole workspace).
+                tuple_(OAuthConsent.user_id, OAuthConsent.client_id).in_(
+                    select(
+                        OAuthRefreshToken.user_id, OAuthRefreshToken.client_id
+                    ).where(OAuthRefreshToken.grant_id.in_(grant_ids))
+                ),
             )
         )
     }

@@ -1452,7 +1452,8 @@
     "oauthAppsIntroUrlClientId": "HTTPS URL 클라이언트 식별자가 설정된 MCP 클라이언트는 OAuth를 사용할 수 있습니다. 이 서버에서는 클라이언트 자동 등록이 비활성화되어 있습니다.",
     "oauthAppsIntroUnavailable": "보통 OAuth 지원 MCP 클라이언트가 여기로 연결하지만, 이 서버에서는 사용할 수 없습니다(위 참고). 대신 액세스 키를 사용하세요.",
     "oauthDetailsToggle": "OAuth 상세 보기 (이 서버에서는 사용 불가)",
-    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다). 아래의 액세스 키를 대신 사용하세요.",
+    "useAccessKey": "Access Key를 사용하세요.",
+    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다).",
     "pill": {
       "recommended": "권장",
       "unavailable": "설정 필요",
@@ -1552,7 +1553,7 @@
       "template": "템플릿"
     },
     "setupCommandPlaceholder": "키를 만들면 설정 명령이 여기에 나타납니다.",
-    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하거나 아래의 액세스 키를 사용하세요.",
+    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하세요.",
     "oauthCapabilityRetry": "다시 시도"
   },
   "clipboard": {

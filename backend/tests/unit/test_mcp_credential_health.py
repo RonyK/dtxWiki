@@ -401,6 +401,97 @@ def test_loader_reads_only_the_named_credentials(db):
         assert load() == {}
 
 
+def test_loader_reads_only_consents_for_named_user_app_pairs(db, monkeypatch):
+    now = utc_now()
+    count = 50
+    expected = {}
+    with db.factory.begin() as session:
+        users = [
+            User(
+                email=f"pair-{index}@example.com",
+                password_hash="not-used",
+                display_name=f"Pair {index}",
+            )
+            for index in range(count)
+        ]
+        clients = [
+            _oauth_client(f"pair-app-{index}", client_name=f"Pair app {index}")
+            for index in range(count)
+        ]
+        session.add_all(users + clients)
+        session.flush()
+        for index, user in enumerate(users):
+            session.add(
+                WorkspaceMembership(
+                    user_id=user.id, workspace_id=db.workspace_id, role="editor"
+                )
+            )
+            # Only diagonal pairs below have named grants. The remaining
+            # 2,450 consents must stay in the database, not in the snapshot.
+            for client_index, client in enumerate(clients):
+                session.add(
+                    OAuthConsent(
+                        user_id=user.id,
+                        client_id=client.id,
+                        workspace_id=db.workspace_id,
+                        scope="mcp:read",
+                        removed_at=now
+                        if index == client_index and index % 3 == 2
+                        else None,
+                    )
+                )
+            grant_id = uuid4()
+            expiry = now + timedelta(days=1) if index % 3 != 1 else now
+            session.add(
+                OAuthRefreshToken(
+                    user_id=user.id,
+                    client_id=clients[index].id,
+                    grant_id=grant_id,
+                    token_lookup_hash=f"pair-grant-{index}",
+                    scope="mcp:read",
+                    expires_at=expiry,
+                )
+            )
+            expected[(user.id, f"oauth_grant:{grant_id}")] = (
+                ("active", "expired", "revoked")[index % 3],
+                expiry,
+                clients[index].id,
+            )
+
+    consent_rows = []
+    with db.factory() as session:
+        execute = session.execute
+
+        def observe_consents(statement, *args, **kwargs):
+            result = execute(statement, *args, **kwargs)
+            if any(
+                column.table is OAuthConsent.__table__
+                for column in statement.selected_columns
+            ):
+                frozen = result.freeze()
+                consent_rows.extend(frozen.data)
+                return frozen()
+            return result
+
+        monkeypatch.setattr(session, "execute", observe_consents)
+        health = load_credential_health(
+            session,
+            workspace_id=db.workspace_id,
+            now=now,
+            bindings=[binding for _user, binding in expected],
+        )
+
+    assert len(consent_rows) == count
+    assert {(row.user_id, row.client_id) for row in consent_rows} == {
+        (user_id, client_id)
+        for (user_id, _binding), (_state, _expiry, client_id) in expected.items()
+    }
+    assert {
+        key: (value.state, value.expires_at, value.oauth_client_id)
+        for key, value in health.items()
+    } == expected
+
+
 def test_policies_judge_only_the_page_bindings(db, monkeypatch):
     now = utc_now()
     with db.factory.begin() as session:

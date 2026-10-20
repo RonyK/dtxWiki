@@ -29,7 +29,11 @@ from backend.cli.integrations._common import (
     atomic_write_text,
     restrict_to_owner,
 )
-from backend.cli.mcp_url import is_loopback_hostname, normalize_mcp_endpoint_url
+from backend.cli.mcp_url import (
+    is_loopback_hostname,
+    is_private_network_ip,
+    normalize_mcp_endpoint_url,
+)
 
 DEFAULT_SERVER_NAME = "dtxwiki"
 CODEX_BEARER_TOKEN_ENV_VAR = "DTXWIKI_MCP_PAT"
@@ -759,6 +763,8 @@ def _endpoint_reachability(url: str) -> str:
     hostname = urlparse(url).hostname or ""
     if is_loopback_hostname(hostname):
         return "loopback"
+    if urlparse(url).scheme == "http" and is_private_network_ip(hostname):
+        return "private-network"
     return "public-https"
 
 
@@ -814,12 +820,13 @@ def _normalize_url(url: str, *, allow_insecure_local: bool = False) -> str:
     return normalize_mcp_endpoint_url(
         url,
         allow_http_loopback=allow_insecure_local,
+        allow_http_private_network=allow_insecure_local,
     )
 
 
 def _validate_auth_transport(url: str, *, token: str | None) -> None:
     if urlparse(url).scheme == "http" and not (token and token.strip()):
-        raise ValueError("plaintext loopback HTTP registration requires a PAT")
+        raise ValueError("plaintext HTTP registration requires a PAT")
 
 
 def _shell_quote(value: str) -> str:

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { useState } from "react";
@@ -215,4 +215,77 @@ it("debounces server search and keeps the selection count against all workspaces
   expect(screen.getByText("3/17 selected")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /Selected items/ }));
   expect(screen.getByText("3/17 selected")).toBeInTheDocument();
+});
+
+it("shows no matches only after the current server request succeeds with an empty page", async () => {
+  let resolvePage!: (page: CredentialWorkspacePage) => void;
+  vi.mocked(listCredentialWorkspaces).mockReturnValue(
+    new Promise((resolve) => { resolvePage = resolve; }),
+  );
+  render(
+    <WorkspaceScopePicker serverPaging selectedIds={[]} onChange={vi.fn()} labels={labels} workspaces={[]} />,
+  );
+  expect(screen.getByText("Loading workspaces…")).toBeInTheDocument();
+  expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+  await act(async () => resolvePage(response([])));
+  expect(screen.queryByText("Loading workspaces…")).not.toBeInTheDocument();
+  expect(screen.getByText("No matches")).toBeInTheDocument();
+});
+
+it("keeps failure and retry states distinct from a successful empty result", async () => {
+  const user = userEvent.setup();
+  let resolveRetry!: (page: CredentialWorkspacePage) => void;
+  vi.mocked(listCredentialWorkspaces)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve; }));
+  render(
+    <WorkspaceScopePicker serverPaging selectedIds={[]} onChange={vi.fn()} labels={labels} workspaces={[]} />,
+  );
+  const alert = await screen.findByRole("alert");
+  expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
+  expect(screen.getByText("Loading workspaces…")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+  await act(async () => resolveRetry(response([])));
+  expect(screen.getByText("No matches")).toBeInTheDocument();
+});
+
+it("hides a stale empty result while a new search is debouncing or loading", async () => {
+  vi.useFakeTimers();
+  try {
+    let resolveSearch!: (page: CredentialWorkspacePage) => void;
+    vi.mocked(listCredentialWorkspaces)
+      .mockResolvedValueOnce(response([]))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSearch = resolve; }));
+    await act(async () => {
+      render(
+        <WorkspaceScopePicker serverPaging selectedIds={[]} onChange={vi.fn()} labels={labels} workspaces={[]} />,
+      );
+    });
+    expect(screen.getByText("No matches")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "new" } });
+    expect(listCredentialWorkspaces).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(250); });
+    expect(listCredentialWorkspaces).toHaveBeenLastCalledWith("new", null);
+    expect(screen.getByText("Loading workspaces…")).toBeInTheDocument();
+    expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+    await act(async () => resolveSearch(response([16])));
+    expect(screen.getByRole("option", { name: /Workspace 16/ })).toBeInTheDocument();
+    expect(screen.queryByText("No matches")).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("can show an empty selected view while the all-items request is still pending", async () => {
+  const user = userEvent.setup();
+  vi.mocked(listCredentialWorkspaces).mockReturnValue(new Promise(() => {}));
+  render(
+    <WorkspaceScopePicker serverPaging selectedIds={[]} onChange={vi.fn()} labels={labels} workspaces={[]} />,
+  );
+  await user.click(screen.getByRole("button", { name: /Selected items/ }));
+  expect(screen.queryByText("Loading workspaces…")).not.toBeInTheDocument();
+  expect(screen.getByText("No matches")).toBeInTheDocument();
 });

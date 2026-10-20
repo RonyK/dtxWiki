@@ -217,6 +217,10 @@ export function WorkspaceScopePicker({
       ? []
       : remote.rows
     : filtered.slice(page * 8, (page + 1) * 8);
+  const showNoMatches =
+    shown.length === 0 &&
+    (!useRemote ||
+      (!loading && !loadError && remote?.key === requestKey && query === searchTerm));
   const hasNext = useRemote
     ? remote?.key === requestKey && Boolean(remote.next)
     : (page + 1) * 8 < total;
@@ -431,7 +435,7 @@ export function WorkspaceScopePicker({
         ref={listRef}
         role="listbox"
       >
-        {shown.length === 0 ? (
+        {showNoMatches ? (
           <p className="empty-state compact-empty">{labels.noMatches}</p>
         ) : (
           shown.map((option, index) => {

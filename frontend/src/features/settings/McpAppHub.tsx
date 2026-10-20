@@ -36,7 +36,7 @@ import type {
 import { normalizeMcpCompatibilityReasonCode } from "../../shared/api/mcpApps";
 import { Dialog } from "../../shared/components/Dialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { canWriteToClipboard, selectText } from "../../shared/lib/clipboard";
+import { canCopyText, selectText, writeTextToClipboard } from "../../shared/lib/clipboard";
 import { renderMcpSetupPlan } from "./mcpSetupRenderer";
 import type {
   McpSetupStep,
@@ -791,7 +791,7 @@ export function SetupRecipeView({
     };
     let key: string;
     let defaultValue: string;
-    if (canWriteToClipboard()) {
+    if (canCopyText()) {
       if (artifact.kind === "command") {
         key = "appHub.copyCommandForShell";
         defaultValue = "Copy {{label}} for {{shell}}";
@@ -910,26 +910,11 @@ export function SetupRecipeView({
                       // action color rather than one solid and one outline.
                       className="icon-button primary mcp-copy-artifact"
                       onClick={async () => {
-                        if (!canWriteToClipboard()) {
-                          setCopyNotice({
-                            index,
-                            mode: selectText(codeRefs.current[index])
-                              ? "selected"
-                              : "failed",
-                          });
-                          return;
-                        }
-                        try {
-                          await navigator.clipboard.writeText(artifact.value);
-                          setCopyNotice({ index, mode: "copied" });
-                        } catch {
-                          setCopyNotice({
-                            index,
-                            mode: selectText(codeRefs.current[index])
-                              ? "selected"
-                              : "failed",
-                          });
-                        }
+                        const copied = await writeTextToClipboard(artifact.value);
+                        setCopyNotice({
+                          index,
+                          mode: copied ? "copied" : selectText(codeRefs.current[index]) ? "selected" : "failed",
+                        });
                       }}
                       type="button"
                     >
@@ -941,7 +926,7 @@ export function SetupRecipeView({
                             : copyNotice.mode === "selected"
                               ? t("appHub.selected", { defaultValue: "Selected" })
                               : t("appHub.copyFailed", { defaultValue: "Copy failed" })
-                          : canWriteToClipboard()
+                          : canCopyText()
                             ? t("appHub.copy", { defaultValue: "Copy" })
                             : t("appHub.select", { defaultValue: "Select text" })}
                       </span>

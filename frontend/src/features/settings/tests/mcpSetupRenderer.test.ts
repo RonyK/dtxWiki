@@ -4,6 +4,27 @@ import type { McpSetupPlan } from "../../../shared/api/mcpApps";
 import { renderMcpSetupPlan } from "../mcpSetupRenderer";
 
 describe("MCP setup renderer", () => {
+  it.each(["10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.10", "[fc00::1]", "[fdff::1]"])("renders access-key recipes on private HTTP %s", (host) => {
+    const url = `http://${host}:21080/wiki/mcp`;
+    const recipe = plan("codex", "codex", {
+      kind: "command", step: "register", executableId: "codex", commandName: "codex",
+      argv: [[{ literal: "mcp" }], [{ slot: "mcp-url" }]],
+      env: { DTXWIKI_MCP_PAT: [{ slot: "access-token-env" }] },
+    });
+    recipe.mcp_url = url;
+    const [rendered] = renderMcpSetupPlan(recipe, { accessToken: "dummy-key", locale: "ko", shell: "bash" });
+    expect(rendered.value).toContain(url);
+    expect(rendered.value).toContain("DTXWIKI_MCP_PAT=dummy-key");
+    const oauth: McpSetupPlan = { ...recipe, auth: "oauth", artifacts: [{ kind: "copy-mcp-url", step: "register", label: { en: "URL", ko: "URL" }, value: [{ slot: "mcp-url" }] }] };
+    expect(() => renderMcpSetupPlan(oauth, { locale: "ko", shell: "bash" })).toThrow("HTTPS");
+  });
+
+  it.each(["8.8.8.8", "172.15.255.255", "172.32.0.1", "192.169.0.1", "100.64.0.1", "169.254.1.1", "wiki.example", "127.example.com", "192.168.1.1.example", "[2001:4860::1]", "[fe80::1]", "[::ffff:192.168.1.1]"])("rejects HTTP outside permitted networks: %s", (host) => {
+    const recipe = plan("other", "other", { kind: "json-config", step: "register", label: { en: "Config", ko: "설정" }, value: { headers: { Authorization: { slot: "authorization-bearer" } } } });
+    recipe.mcp_url = `http://${host}/mcp`;
+    expect(() => renderMcpSetupPlan(recipe, { accessToken: "dummy-key", locale: "en", shell: "bash" })).toThrow("HTTPS");
+  });
+
   it("renders current Claude access-key artifacts without an app-id branch", () => {
     const rendered = renderMcpSetupPlan(
       plan("claude-code", "claude", {

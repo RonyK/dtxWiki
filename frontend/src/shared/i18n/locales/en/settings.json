@@ -1452,7 +1452,8 @@
     "oauthAppsIntroUrlClientId": "OAuth is available for MCP clients configured with an HTTPS URL client identifier. Automatic client self-registration is disabled on this server.",
     "oauthAppsIntroUnavailable": "OAuth-aware MCP clients normally connect here, but it is unavailable on this server (see above). Use an Access Key instead.",
     "oauthDetailsToggle": "Show OAuth details (unavailable on this server)",
-    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+    "useAccessKey": "Use an Access Key.",
+    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server).",
     "pill": {
       "recommended": "Recommended",
       "unavailable": "Not configured",
@@ -1552,7 +1553,7 @@
       "template": "Template"
     },
     "setupCommandPlaceholder": "The setup command appears here once a key exists.",
-    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
     "oauthCapabilityRetry": "Try again"
   },
   "clipboard": {

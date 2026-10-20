@@ -54,7 +54,7 @@ def mcp_register_http(
     allow_insecure_local: bool = typer.Option(
         False,
         "--allow-insecure-local",
-        help="Allow http://localhost or http://127.0.0.1 /mcp for dev only.",
+        help="Allow HTTP /mcp on loopback or private IPs with a PAT.",
     ),
 ) -> None:
     """Register a remote HTTP MCP endpoint from the packaged app catalog."""

@@ -156,7 +156,7 @@ import {
 } from "../../shared/components/WorkspaceScopePicker";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useCursorPage } from "../../shared/hooks/useCursorPage";
-import { canWriteToClipboard, selectText } from "../../shared/lib/clipboard";
+import { writeTextToClipboard, selectText } from "../../shared/lib/clipboard";
 import { i18n, setLocale, translate } from "../../shared/i18n";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { humanizeEnum } from "../../shared/lib/domainLabel";
@@ -1860,33 +1860,12 @@ function SettingsScreenBody() {
     success: string;
     text: string;
   }) {
-    if (!canWriteToClipboard()) {
-      if (selectText(selectTarget)) {
-        setCopyStatus(t("clipboard.selected", { label, defaultValue: "{{label}} selected" }));
-      } else {
-        setCopyStatus(
-          t("clipboard.unavailable", {
-            label,
-            defaultValue: "Copy unavailable - select the {{label}} text instead",
-          }),
-        );
-      }
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await writeTextToClipboard(text)) {
       setCopyStatus(success);
-    } catch {
-      if (selectText(selectTarget)) {
-        setCopyStatus(t("clipboard.selected", { label, defaultValue: "{{label}} selected" }));
-      } else {
-        setCopyStatus(
-          t("clipboard.failed", {
-            label,
-            defaultValue: "Copy failed - select the {{label}} text instead",
-          }),
-        );
-      }
+    } else {
+      setCopyStatus(selectText(selectTarget)
+        ? t("clipboard.selected", { label, defaultValue: "{{label}} selected" })
+        : t("clipboard.failed", { label, defaultValue: "Copy failed - select the {{label}} text instead" }));
     }
   }
 
@@ -2162,12 +2141,21 @@ function SettingsScreenBody() {
             {oauthCapabilityUnknown
               ? t("access.oauthCapabilityUnknown", {
                   defaultValue:
-                    "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+                    "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
                 })
               : t("access.oauthUnavailable", {
                   defaultValue:
-                    "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+                    "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server).",
                 })}
+          </p>
+          <p>
+            <a
+              className="inline-action mcp-access-key-link"
+              href="#mcp-key-setup"
+              onClick={() => mcpKeySetupHeadingRef.current?.focus({ preventScroll: true })}
+            >
+              {t("access.useAccessKey", { defaultValue: "Use an Access Key." })}
+            </a>
           </p>
           {serverOauthReason ? (
             <p className="feature-subtitle">{serverOauthReason}</p>
@@ -3983,46 +3971,15 @@ function CommandBlock({
 
   async function handleSelfCopy() {
     const node = snippetRef.current;
-    if (!canWriteToClipboard()) {
-      flashStatus(
-        selectText(node)
-          ? t("clipboard.selected", {
-              label: targetLabel,
-              defaultValue: "{{label}} selected",
-            })
-          : t("clipboard.unavailable", {
-              label: targetLabel,
-              defaultValue:
-                "Copy unavailable - select the {{label}} text instead",
-            }),
-        4000,
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(command);
-      flashStatus(
-        successMessage ??
-          t("clipboard.copied", {
-            label: targetLabel,
-            defaultValue: "{{label}} copied",
-          }),
-        1600,
-      );
-    } catch {
-      flashStatus(
-        selectText(node)
-          ? t("clipboard.selected", {
-              label: targetLabel,
-              defaultValue: "{{label}} selected",
-            })
-          : t("clipboard.failed", {
-              label: targetLabel,
-              defaultValue: "Copy failed - select the {{label}} text instead",
-            }),
-        4000,
-      );
-    }
+    const copied = await writeTextToClipboard(command);
+    flashStatus(
+      copied
+        ? successMessage ?? t("clipboard.copied", { label: targetLabel, defaultValue: "{{label}} copied" })
+        : selectText(node)
+          ? t("clipboard.selected", { label: targetLabel, defaultValue: "{{label}} selected" })
+          : t("clipboard.failed", { label: targetLabel, defaultValue: "Copy failed - select the {{label}} text instead" }),
+      copied ? 1600 : 4000,
+    );
   }
 
   const copyLabel =
@@ -4197,34 +4154,15 @@ function DeploymentSection() {
     );
   }
 
-  // The async clipboard API is missing in non-secure contexts (plain HTTP) -
-  // exactly the state this tab helps fix - so fall back to selecting the
-  // command text instead of failing silently.
   async function copyCommand(
     title: string,
     target: HTMLElement | null,
     feedbackKey = title,
   ) {
     const text = target?.textContent ?? "";
-    if (!text) {
-      return;
-    }
-    if (!canWriteToClipboard()) {
-      flashCopyFeedback(
-        feedbackKey,
-        selectText(target) ? "selected" : "unavailable",
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      flashCopyFeedback(feedbackKey, "copied");
-    } catch {
-      flashCopyFeedback(
-        feedbackKey,
-        selectText(target) ? "selected" : "unavailable",
-      );
-    }
+    if (!text) return;
+    const copied = await writeTextToClipboard(text);
+    flashCopyFeedback(feedbackKey, copied ? "copied" : selectText(target) ? "selected" : "unavailable");
   }
 
   function commandCopyLabel(title: string, feedbackKey = title) {

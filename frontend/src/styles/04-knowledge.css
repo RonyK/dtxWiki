@@ -2566,6 +2566,17 @@
   gap: 12px;
 }
 
+/* Leave room for the narrow-screen Settings section picker on anchor jumps. */
+#mcp-key-setup {
+  scroll-margin-top: 80px;
+}
+
+.mcp-access-key-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 .mcp-access-section {
   display: grid;
   gap: 12px;

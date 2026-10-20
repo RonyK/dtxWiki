@@ -9244,9 +9244,12 @@ describe("SettingsScreen", () => {
       // server's unlocalized reason)...
       expect(
         screen.getByText(
-          "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다). 아래의 액세스 키를 대신 사용하세요.",
+          "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다).",
         ),
       ).toBeInTheDocument();
+      const fallbackLink = screen.getByRole("link", { name: "Access Key를 사용하세요." });
+      expect(fallbackLink).toHaveAttribute("href", "#mcp-key-setup");
+      expect(document.getElementById("mcp-key-setup")).toHaveTextContent("액세스 키");
       // ...and the server's own detail should still be visible, as
       // supplementary information, not silently dropped.
       expect(
