@@ -22,6 +22,7 @@ from backend.schemas.context_write import (
     UpdateDraftRequest,
     WriteDraftRequest,
 )
+from backend.schemas.input_policy import InputRequest
 
 CONVERSATION_TOKEN_FIELD = Field(
     default=None,
@@ -104,7 +105,7 @@ class MCPRevisionUpdateRequest(UpdateDraftRequest):
     model_config = ConfigDict(extra="forbid")
 
 
-class SubmitRevisionForReviewInput(BaseModel):
+class SubmitRevisionForReviewInput(InputRequest):
     workspace_id: UUID
     review_item_id: UUID
     # EXACTLY ONE revision source. `update` revises an existing page version
@@ -120,9 +121,7 @@ class SubmitRevisionForReviewInput(BaseModel):
     @model_validator(mode="after")
     def _exactly_one_source(self) -> "SubmitRevisionForReviewInput":
         if (self.update is None) == (self.create is None):
-            raise ValueError(
-                "exactly one of 'update' or 'create' is required"
-            )
+            raise ValueError("exactly one of 'update' or 'create' is required")
         return self
 
 

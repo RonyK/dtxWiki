@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, apiErrorMessage } from "../api/client";
 import type { TreeNodePayload } from "../api/workspace";
+import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { normalizeSlugInput, slugify } from "../text/slug";
 import { AdvancedSection } from "./AdvancedSection";
 import { Dialog, DialogCloseButton } from "./Dialog";
@@ -127,8 +128,10 @@ export function NewItemDialog({
   // already promises it) instead of producing an empty string.
   const normalizedCustomSlug = normalizeSlugInput(customSlug);
   const slug = showAdvanced && normalizedCustomSlug ? normalizedCustomSlug : derivedSlug;
-  const invalidTitle = title.trim().length === 0 || title.trim().length > 80;
-  const canSubmit = itemType !== "upload" && !invalidTitle && !submitting;
+  const titleLimit = itemType === "folder" ? 80 : 256;
+  const invalidTitle = !trimShortText(title) || Boolean(inputTextError(title, titleLimit));
+  const invalidSlug = showAdvanced && Boolean(inputTextError(customSlug, 64));
+  const canSubmit = itemType !== "upload" && !invalidTitle && !invalidSlug && !submitting;
 
   if (availableTypes.length === 0) {
     return null;
@@ -158,7 +161,7 @@ export function NewItemDialog({
           itemType === "folder" && showAdvanced && normalizedCustomSlug
             ? normalizedCustomSlug
             : undefined,
-        title: title.trim(),
+        title: trimShortText(title),
       });
       onClose();
     } catch (exc) {
@@ -321,14 +324,15 @@ export function NewItemDialog({
                   : t("newItem.folderName", { defaultValue: "Folder name" })
               }
               autoFocus
-              maxLength={80}
+              {...textInputLimit(titleLimit)}
               onChange={(event) => setTitle(event.currentTarget.value)}
               value={title}
             />
             <small className="field-hint">
               {invalidTitle
                 ? t("newItem.titleLength", {
-                    defaultValue: "Enter 1-80 characters.",
+                    defaultValue: "Enter 1-{{maximum}} characters.",
+                    maximum: titleLimit,
                   })
                 : itemType === "folder"
                   ? t("newItem.slugPreview", {
@@ -352,7 +356,7 @@ export function NewItemDialog({
               <span>{t("newItem.slug", { defaultValue: "Slug" })}</span>
               <input
                 aria-label={t("newItem.slug", { defaultValue: "Slug" })}
-                maxLength={64}
+                {...textInputLimit(64)}
                 onChange={(event) => setCustomSlug(event.currentTarget.value)}
                 placeholder={derivedSlug}
                 value={customSlug}

@@ -37,6 +37,7 @@
       },
       "reason": {
         "default": "author submitted for review",
+        "maxLength": 2000,
         "minLength": 1,
         "title": "Reason",
         "type": "string"

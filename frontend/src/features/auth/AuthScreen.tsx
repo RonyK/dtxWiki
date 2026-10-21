@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { login, signup } from "../../shared/api/auth";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
+import { normalizeAccountEmail, normalizeAccountName, validateAccountPassword, rejectMultilinePaste, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
@@ -116,6 +117,16 @@ export function AuthScreen() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    let normalizedEmail: string;
+    let normalizedName: string | undefined;
+    try {
+      normalizedEmail = normalizeAccountEmail(email);
+      normalizedName = mode === "signup" ? normalizeAccountName(displayName) : undefined;
+      validateAccountPassword(password, mode === "signup");
+    } catch (caught) {
+      setError(t((caught as Error).message));
+      return;
+    }
     // Freeze automatic existing-session redirects and fence the pre-login
     // /auth/me probe before the credential request starts. Failures release
     // the guard and explicitly reconcile the surviving cookie below.
@@ -129,12 +140,12 @@ export function AuthScreen() {
       const session =
         mode === "signup"
           ? await signup({
-              email,
+              email: normalizedEmail,
               password,
-              display_name: displayName.trim() || undefined,
+              display_name: normalizedName,
               remember_me: rememberMe,
             })
-          : await login({ email, password, remember_me: rememberMe });
+          : await login({ email: normalizedEmail, password, remember_me: rememberMe });
       setAuthenticatedSession(session);
       setStatus(mode === "signup" ? t("status.created") : t("status.signedIn"));
       const next = searchParams.get("next");
@@ -190,7 +201,7 @@ export function AuthScreen() {
           />
         </div>
         {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <div id="auth-input-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
         {capabilitiesChecked && capabilitiesError ? (
           <StatusBanner tone="warning">{t("capabilitiesUnavailable")}</StatusBanner>
         ) : null}
@@ -230,11 +241,16 @@ export function AuthScreen() {
             <label className="field-stack">
               {t("fields.email")}
               <input
+                  onKeyDown={preventCompositionSubmit}
                 autoComplete="email"
                 name="email"
                 onChange={(event) => setEmail(event.target.value)}
                 required
-                type="email"
+                type="text"
+                inputMode="email"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "auth-input-error" : undefined}
+                onPaste={(event) => rejectMultilinePaste(event, () => setError(t("validation.email")))}
                 value={email}
               />
             </label>
@@ -242,20 +258,26 @@ export function AuthScreen() {
               <label className="field-stack">
                 {t("fields.displayName")}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="name"
                   name="displayName"
+                  aria-describedby={error ? "display-name-rule auth-input-error" : "display-name-rule"}
+                  aria-invalid={Boolean(error)}
+                  onPaste={(event) => rejectMultilinePaste(event, () => setError(t("validation.displayName")))}
                   onChange={(event) => setDisplayName(event.target.value)}
                   type="text"
                   value={displayName}
                 />
               </label>
             ) : null}
+            {mode === "signup" ? <p id="display-name-rule" className="field-hint field-hint--attached">{t("validation.displayNameHint")}</p> : null}
             <label className="field-stack">
               {t("fields.password")}
               <input
-                aria-describedby={mode === "signup" ? "signup-password-rule" : undefined}
+                  onKeyDown={preventCompositionSubmit}
+                aria-describedby={mode === "signup" ? (error ? "signup-password-rule auth-input-error" : "signup-password-rule") : (error ? "auth-input-error" : undefined)}
+                aria-invalid={Boolean(error)}
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                minLength={mode === "signup" ? 8 : 1}
                 name="password"
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -269,11 +291,12 @@ export function AuthScreen() {
               // least 8 characters." instead of "Password"). Same pattern
               // and copy as AccountSecurityScreen's new-password-rule.
               <p className="field-hint field-hint--attached" id="signup-password-rule">
-                {t("password.rule", { defaultValue: "At least 8 characters." })}
+                {t("password.rule", { defaultValue: "15–128 characters." })}
               </p>
             ) : null}
             <label className="checkbox-field auth-remember">
               <input
+                  onKeyDown={preventCompositionSubmit}
                 checked={rememberMe}
                 onChange={(event) => setRememberMe(event.target.checked)}
                 type="checkbox"

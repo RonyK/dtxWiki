@@ -14,6 +14,7 @@ from backend.repositories.context_visibility import (
     visible_context_version_expression,
     visible_context_version_id,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.lint import (
     LintFindingBatchDecisionFailure,
     LintFindingBatchDecisionRequest,
@@ -178,9 +179,7 @@ class LintService:
             base = self._exclude_draft_only_findings(session, base)
         numeric_pagination = page is not None or page_size is not None
         if numeric_pagination and (limit is not None or cursor is not None):
-            raise ValueError(
-                "page/page_size cannot be combined with limit/cursor"
-            )
+            raise ValueError("page/page_size cannot be combined with limit/cursor")
         effective_page = page or 1
         effective_page_size = page_size or 20
         effective_limit = limit or 50
@@ -192,9 +191,7 @@ class LintService:
         )
         if numeric_pagination:
             page_count = (
-                (total + effective_page_size - 1) // effective_page_size
-                if total
-                else 0
+                (total + effective_page_size - 1) // effective_page_size if total else 0
             )
             finding_rows = session.scalars(
                 stmt.offset((effective_page - 1) * effective_page_size).limit(
@@ -262,6 +259,7 @@ class LintService:
         """Execute the enabled lint rules over the scope's targets and persist a
         run + its findings. ``policy`` is the workspace ``lint`` toggle map
         ({rule_id: bool}); ``rules`` overrides the registry for testing."""
+        validate_request_inputs(request)
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")
@@ -414,6 +412,7 @@ class LintService:
         # Resolve the per-workspace lint toggle policy ({rule_id: bool}); rules
         # with no entry fall back to default_enabled. (workspace None -> run_lint
         # raises not-found.)
+        validate_request_inputs(request)
         workspace = session.get(Workspace, workspace_id)
         policy = (
             dict(workspace.lint_policy)
@@ -432,6 +431,7 @@ class LintService:
         actor_kind: str,
         actor_id: str,
     ) -> LintRunRead:
+        validate_request_inputs(request)
         if session.get(Workspace, workspace_id) is None:
             raise ReadNotFoundError("workspace not found")
         lint_run = LintRun(
@@ -704,6 +704,7 @@ class LintService:
         actor_id: str,
         actor: ActorContext | None,
     ) -> LintFindingRead:
+        validate_request_inputs(request)
         finding = session.get(LintFinding, finding_id)
         if finding is None or finding.workspace_id != workspace_id:
             raise ReadNotFoundError("lint finding not found")
@@ -790,6 +791,7 @@ class LintService:
         actor_id: str,
         actor: ActorContext | None,
     ) -> dict:
+        validate_request_inputs(request)
         updated = []
         failed = []
 

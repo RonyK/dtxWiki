@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import validate_body
 from backend.models.base import utc_now
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.library_semantic_overlay import LibrarySemanticOverlay
@@ -124,7 +125,8 @@ class LibrarySemanticOverlayService:
         expected_base_artifact_id: UUID,
         expected_base_content_sha256: str,
     ) -> LibrarySemanticMarkdownProjection:
-        if not body_markdown or len(body_markdown) > BODY_MD_MAX_LENGTH:
+        validate_body(body_markdown, max_length=BODY_MD_MAX_LENGTH)
+        if not body_markdown:
             raise ReadValidationError(
                 f"body_markdown must contain 1..{BODY_MD_MAX_LENGTH} characters"
             )

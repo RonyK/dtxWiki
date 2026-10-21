@@ -164,8 +164,8 @@ describe("AccountSecurityScreen", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Update password" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Current password"), "old-password");
-    await user.type(screen.getByLabelText("New password"), "new-password");
+    await user.type(screen.getByLabelText("Current password"), "old-password-123");
+    await user.type(screen.getByLabelText("New password"), "new-password-123");
     await user.type(screen.getByLabelText("Confirm new password"), "different-password");
     await user.click(screen.getByRole("button", { name: "Update password" }));
 
@@ -173,15 +173,15 @@ describe("AccountSecurityScreen", () => {
     expect(passwordRequests).toHaveLength(0);
 
     await user.clear(screen.getByLabelText("Confirm new password"));
-    await user.type(screen.getByLabelText("Confirm new password"), "new-password");
+    await user.type(screen.getByLabelText("Confirm new password"), "new-password-123");
     await user.click(screen.getByRole("button", { name: "Update password" }));
 
     expect(await screen.findByText("Password updated. Returning to account…"))
       .toBeInTheDocument();
     expect(passwordRequests).toEqual([
       {
-        current_password: "old-password",
-        new_password: "new-password",
+        current_password: "old-password-123",
+        new_password: "new-password-123",
       },
     ]);
     expect(globalThis.fetch).toHaveBeenCalledWith(

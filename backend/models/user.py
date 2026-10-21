@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import ForeignKey, Integer, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
+from backend.domain.identity_policy import normalize_email, validate_display_name
 from backend.models.base import (
     Base,
     CreatedAtMixin,
@@ -87,13 +88,14 @@ class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 
     @validates("email", "display_name")
     def _maintain_member_search_key(self, key: str, value: str) -> str:
+        value = (
+            normalize_email(value) if key == "email" else validate_display_name(value)
+        )
         email = value if key == "email" else (getattr(self, "email", "") or "")
         display_name = (
             value
             if key == "display_name"
             else (getattr(self, "display_name", "") or "")
         )
-        self.member_search_key = normalize_search_key(
-            f"{display_name} {email}"
-        )
+        self.member_search_key = normalize_search_key(f"{display_name} {email}")
         return value

@@ -72,7 +72,7 @@ def test_directory_is_normalized_cursor_bound_and_membership_neutral(page_servic
     owner, requester, workspace = _actors(page_service)
     with page_service.session_factory.begin() as session:
         persisted = session.get(Workspace, workspace.id)
-        persisted.title = "Straße\tﬁ   Ａlpha Team"
+        persisted.title = "Straße\u2003ﬁ   Ａlpha Team"
         persisted.description = "  A directory-safe   short description.  "
 
     current_access = owner_client.get(
@@ -155,7 +155,7 @@ def test_directory_is_normalized_cursor_bound_and_membership_neutral(page_servic
     assert data["items"] == [
         {
             "workspace_id": str(workspace.id),
-            "title": "Straße\tﬁ   Ａlpha Team",
+            "title": "Straße\u2003ﬁ   Ａlpha Team",
             "description": "A directory-safe short description.",
             "visibility": "team",
             "join_policy": "request",
@@ -232,7 +232,7 @@ def test_directory_uses_binary_normalized_order_with_equal_key_cursors(page_serv
     _, requester_client = _clients(page_service)
     owner, _, _ = _actors(page_service)
     workspace_specs = [
-        (UUID(int=100), "Straße\tﬁ"),
+        (UUID(int=100), "Straße\u2003ﬁ"),
         (UUID(int=101), "STRASSE FI"),
         (UUID(int=102), "Zulu"),
         (UUID(int=103), "Ångstrom"),

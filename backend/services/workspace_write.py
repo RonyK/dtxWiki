@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import validate_text
 from backend.models import (
     AgentInputBundle,
     AgentPage,
@@ -60,7 +61,8 @@ from backend.policy.rbac import (
     normalize_role,
 )
 from backend.repositories.audit_repo import insert_audit_event
-from backend.repositories.workspace_repo import get_workspace_by_slug
+from backend.repositories.workspace_repo import get_workspace_by_slug, insert_workspace
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import WorkspaceCreateRequest, WorkspaceSummary
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG, seed_default_workspace
 from backend.services.db_write_intent import acquire_write_intent
@@ -68,6 +70,7 @@ from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyErro
 from backend.services.tree_service import ensure_context_inbox_node
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_read import WorkspaceReadService
+from backend.utils.database_errors import is_single_column_unique_violation
 
 SUPPORTED_WORKSPACE_LANGUAGES = {"en", "ko"}
 
@@ -147,15 +150,23 @@ class WorkspaceWriteService:
         request: WorkspaceCreateRequest,
         actor: ActorContext,
     ) -> WorkspaceSummary:
+        validate_request_inputs(request)
         if actor.user_id is None:
             raise RejectedByPolicyError(
                 "human session is required",
                 error_code="workspace_user_required",
             )
-        slug = normalize_workspace_slug(request.slug or request.title)
+        slug = normalize_workspace_slug(
+            request.slug if request.slug is not None else request.title,
+            generated=request.slug is None,
+        )
         if get_workspace_by_slug(session, slug) is not None:
             raise WorkspaceCreateConflictError("workspace slug already exists")
         try:
+            # Insert before seeding: seeding is get-or-create by slug, so a
+            # competitor that committed after the check above would otherwise
+            # be adopted and re-owned instead of failing the UNIQUE slug.
+            insert_workspace(session, slug=slug, title=request.title.strip())
             workspace = seed_default_workspace(
                 session,
                 slug=slug,
@@ -184,6 +195,10 @@ class WorkspaceWriteService:
             )
             session.flush()
         except IntegrityError as exc:
+            if not is_single_column_unique_violation(
+                exc, table="workspace", column="slug"
+            ):
+                raise
             raise WorkspaceCreateConflictError("workspace slug already exists") from exc
         return WorkspaceReadService._summary(workspace, role="owner")
 
@@ -586,11 +601,17 @@ class WorkspaceWriteService:
         session.flush()
 
 
-def normalize_workspace_slug(value: str) -> str:
+def normalize_workspace_slug(value: str, *, generated: bool = False) -> str:
+    if not generated:
+        validate_text(value, field="slug", max_length=80, min_length=1)
     slug = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)[:80].strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    if generated:
+        slug = slug[:80].strip("-")
     if not slug:
         raise WorkspaceCreateConflictError("workspace slug is required")
+    if not generated:
+        validate_text(slug, field="slug", max_length=80, min_length=1)
     return slug
 
 

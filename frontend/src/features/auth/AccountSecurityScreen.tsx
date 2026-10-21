@@ -28,6 +28,7 @@ import {
   type WorkspaceListData,
 } from "../../shared/api/workspace";
 import { useAuth } from "../../shared/auth/AuthContext";
+import { validateAccountPassword, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import {
   clearStoredUiLocale,
   hasStoredUiLocale,
@@ -497,6 +498,10 @@ export function AccountPasswordScreen() {
     event.preventDefault();
     setError(null);
     setStatus(null);
+    try {
+      validateAccountPassword(currentPassword);
+      validateAccountPassword(newPassword, true);
+    } catch (caught) { setError(t((caught as Error).message)); return; }
     if (newPassword !== confirmPassword) {
       setError(
         t("password.mismatch", { defaultValue: "New passwords do not match." }),
@@ -569,7 +574,7 @@ export function AccountPasswordScreen() {
           </div>
         </div>
         {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <div id="account-password-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
         {user ? (
           <section
             className="auth-panel"
@@ -579,8 +584,11 @@ export function AccountPasswordScreen() {
               <label className="field-stack">
                 {t("password.current", { defaultValue: "Current password" })}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="current-password"
                   name="currentPassword"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "account-password-error" : undefined}
                   onChange={(event) => setCurrentPassword(event.target.value)}
                   required
                   type="password"
@@ -590,25 +598,28 @@ export function AccountPasswordScreen() {
               <label className="field-stack">
                 {t("password.new", { defaultValue: "New password" })}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="new-password"
-                  minLength={8}
                   name="newPassword"
+                  aria-invalid={Boolean(error)}
                   onChange={(event) => setNewPassword(event.target.value)}
                   required
-                  aria-describedby="new-password-rule"
+                  aria-describedby={error ? "new-password-rule account-password-error" : "new-password-rule"}
                   type="password"
                   value={newPassword}
                 />
               </label>
               <p className="field-hint field-hint--attached" id="new-password-rule">
-                {t("password.rule", { defaultValue: "At least 8 characters." })}
+                {t("password.rule", { defaultValue: "15–128 characters." })}
               </p>
               <label className="field-stack">
                 {t("password.confirm", { defaultValue: "Confirm new password" })}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="new-password"
-                  minLength={8}
                   name="confirmPassword"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "account-password-error" : undefined}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   required
                   type="password"

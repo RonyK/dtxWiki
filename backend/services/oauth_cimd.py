@@ -14,6 +14,15 @@ from urllib.parse import unquote, urljoin, urlparse
 import httpcore
 import httpx
 
+from backend.domain.credential_input import OAUTH_IDENTIFIER_MAX_BYTES
+from backend.domain.oauth_input import (
+    validate_client_name,
+    validate_identifier,
+    validate_redirect_list,
+    validate_scope_input,
+    validate_supported_metadata,
+)
+
 CIMD_CACHE_TTL_SECONDS = 300
 CIMD_CACHE_MAX_ENTRIES = 256
 CIMD_CONNECT_TIMEOUT_SECONDS = 2.0
@@ -21,7 +30,7 @@ CIMD_READ_TIMEOUT_SECONDS = 3.0
 CIMD_TOTAL_TIMEOUT_SECONDS = 5.0
 CIMD_MAX_BYTES = 5 * 1024
 CIMD_MAX_REDIRECTS = 3
-CIMD_MAX_URL_CHARS = 2048
+CIMD_MAX_URL_BYTES = OAUTH_IDENTIFIER_MAX_BYTES
 # MCP-08: only successes were cached before this fix, so a repeated
 # bad/slow client_id re-paid DNS + TLS + HTTP (up to CIMD_TOTAL_TIMEOUT_SECONDS
 # each) on every /oauth/authorize hit. Negative-cache failures for a shorter
@@ -112,6 +121,7 @@ def address_is_forbidden(
 
 
 def fetch_client_metadata_document(client_id: str) -> CIMDClientMetadata:
+    _validate_client_identifier_url(client_id)
     started_at = time.monotonic()
     cached = _cached_metadata(client_id)
     if cached is not None:
@@ -167,10 +177,7 @@ def fetch_client_metadata_document(client_id: str) -> CIMDClientMetadata:
             lock_state.lock.release()
         with _CIMD_CACHE_LOCK:
             lock_state.users -= 1
-            if (
-                lock_state.users == 0
-                and _CIMD_FETCH_LOCKS.get(client_id) is lock_state
-            ):
+            if lock_state.users == 0 and _CIMD_FETCH_LOCKS.get(client_id) is lock_state:
                 del _CIMD_FETCH_LOCKS[client_id]
 
 
@@ -232,7 +239,11 @@ def _fetch_uncached(
 
 
 def _validate_client_identifier_url(url: str) -> None:
-    if len(url) > CIMD_MAX_URL_CHARS:
+    try:
+        validate_identifier(url)
+    except ValueError:
+        raise CIMDFetchError() from None
+    if any(character.isspace() for character in url):
         raise CIMDFetchError()
     try:
         parsed = urlparse(url)
@@ -266,9 +277,7 @@ def _resolve_public_destination(
         raise CIMDFetchError() from None
 
     effective_deadline = (
-        time.monotonic() + CIMD_TOTAL_TIMEOUT_SECONDS
-        if deadline is None
-        else deadline
+        time.monotonic() + CIMD_TOTAL_TIMEOUT_SECONDS if deadline is None else deadline
     )
     remaining = effective_deadline - time.monotonic()
     if remaining <= 0:
@@ -442,12 +451,22 @@ def _is_json_content_type(value: str) -> bool:
 
 
 def _parse_metadata(client_id: str, body: bytes) -> CIMDClientMetadata:
+    if not isinstance(body, bytes) or len(body) > CIMD_MAX_BYTES:
+        raise CIMDFetchError()
     try:
         payload = json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise CIMDFetchError() from None
     if not isinstance(payload, dict) or payload.get("client_id") != client_id:
         raise CIMDFetchError()
+    try:
+        validate_identifier(client_id)
+        validate_supported_metadata(payload)
+        validate_redirect_list(payload.get("redirect_uris"))
+        validate_client_name(payload.get("client_name", "Client ID Metadata client"))
+        validate_scope_input(payload.get("scope", "mcp:read"))
+    except ValueError:
+        raise CIMDFetchError() from None
 
     client_name = payload.get("client_name", "Client ID Metadata client")
     redirect_uris = payload.get("redirect_uris")

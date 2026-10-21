@@ -39,6 +39,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { normalizeLocale, setLocale, syncLocaleFromWorkspace } from "../i18n";
 import { domainLabel } from "../lib/domainLabel";
+import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { SEARCH_QUERY_MAX_LENGTH } from "../lib/searchLimits";
 import { searchResultHref } from "../lib/searchResultHref";
 import { trapTabFocus } from "../lib/trapTabFocus";
@@ -1748,7 +1749,9 @@ function WorkspaceControls({
 
   function submitWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const title = newWorkspaceTitle.trim();
+    const title = trimShortText(newWorkspaceTitle);
+    const error = inputTextError(newWorkspaceTitle, 128);
+    if (error) { event.currentTarget.querySelector("input")?.reportValidity(); return; }
     if (!title) {
       return;
     }
@@ -2041,6 +2044,7 @@ function WorkspaceControls({
               <label className="field-stack">
                 {t("workspace.nameLabel", { defaultValue: "Workspace name" })}
                 <input
+                  {...textInputLimit(128)}
                   onChange={(event) => setNewWorkspaceTitle(event.target.value)}
                   placeholder={t("workspace.namePlaceholder", {
                     defaultValue: "Research workspace",

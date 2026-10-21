@@ -170,8 +170,8 @@ def remote_seed_material() -> RemoteSeedMaterial:
         or "alice@dtxwiki.test",
         bob_email=_env("DTXWIKI_REMOTE_E2E_BOB", "bob@dtxwiki.test")
         or "bob@dtxwiki.test",
-        workspace_a=_env("DTXWIKI_REMOTE_E2E_WORKSPACE_A", "wsA") or "wsA",
-        workspace_b=_env("DTXWIKI_REMOTE_E2E_WORKSPACE_B", "wsB") or "wsB",
+        workspace_a=_env("DTXWIKI_REMOTE_E2E_WORKSPACE_A", "wsa") or "wsa",
+        workspace_b=_env("DTXWIKI_REMOTE_E2E_WORKSPACE_B", "wsb") or "wsb",
         pat_read=_required_secret("DTXWIKI_REMOTE_E2E_PAT_READ"),
         pat_agent=_required_secret("DTXWIKI_REMOTE_E2E_PAT_AGENT"),
         workspace_id=_required_secret("DTXWIKI_REMOTE_E2E_WORKSPACE_ID"),

@@ -7,6 +7,9 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
+from backend.domain.input_policy import (
+    validate_text,
+)
 from backend.models.base import utc_now
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
@@ -122,8 +125,7 @@ class WorkspaceJoinService:
                 request = session.scalar(
                     select(WorkspaceJoinRequest).where(
                         WorkspaceJoinRequest.workspace_id == workspace_id,
-                        WorkspaceJoinRequest.requester_user_id
-                        == requester_user_id,
+                        WorkspaceJoinRequest.requester_user_id == requester_user_id,
                     )
                 )
                 requester = session.get(User, requester_user_id)
@@ -153,10 +155,13 @@ class WorkspaceJoinService:
                 for_update=True,
             )
             self._require_request_policy(workspace)
-            if session.get(
-                WorkspaceMembership,
-                (requester_user_id, workspace_id),
-            ) is not None:
+            if (
+                session.get(
+                    WorkspaceMembership,
+                    (requester_user_id, workspace_id),
+                )
+                is not None
+            ):
                 raise WorkspaceJoinNotAllowedError(
                     "workspace members cannot request to join again"
                 )
@@ -215,9 +220,7 @@ class WorkspaceJoinService:
                             request=self._view(request, requester),
                             new_attempt=False,
                         )
-                    raise WorkspaceJoinRequestStaleError(
-                        "join request changed; retry"
-                    )
+                    raise WorkspaceJoinRequestStaleError("join request changed; retry")
             session.flush()
             session.refresh(request)
             self._emit_audit(
@@ -353,6 +356,8 @@ class WorkspaceJoinService:
         expected_attempt_no: int,
         decision_note: str | None = None,
     ) -> WorkspaceJoinMutation:
+        if decision_note is not None:
+            validate_text(decision_note, field="decision_note", max_length=500)
         if decision not in {"approve", "reject"}:
             raise ValueError("decision must be approve or reject")
         try:
@@ -406,9 +411,7 @@ class WorkspaceJoinService:
             if request is None:
                 raise WorkspaceJoinRequestNotFoundError("join request not found")
             if request.attempt_no != expected_attempt_no:
-                raise WorkspaceJoinRequestStaleError(
-                    "join request attempt is stale"
-                )
+                raise WorkspaceJoinRequestStaleError("join request attempt is stale")
             if request.status != "pending":
                 raise WorkspaceJoinRequestTerminalError(
                     "join request is already terminal"
@@ -488,9 +491,7 @@ class WorkspaceJoinService:
                 .execution_options(synchronize_session=False)
             )
             if claimed.rowcount != 1:
-                raise WorkspaceJoinRequestStaleError(
-                    "join request attempt is stale"
-                )
+                raise WorkspaceJoinRequestStaleError("join request attempt is stale")
             if membership_created:
                 session.add(
                     WorkspaceMembership(
@@ -554,9 +555,7 @@ class WorkspaceJoinService:
             statement = statement.with_for_update()
         requester = session.scalar(statement)
         if requester is None or requester.status != "active":
-            raise WorkspaceJoinRequesterInactiveError(
-                "join requester is not active"
-            )
+            raise WorkspaceJoinRequesterInactiveError("join requester is not active")
         return requester
 
     @staticmethod

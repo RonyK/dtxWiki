@@ -20,6 +20,7 @@ from backend.schemas.context_write import (
     SubmitFeedbackRequest,
     SubmitFeedbackResult,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.services.actor_visible_read import (
     actor_can_read_agent_page,
     actor_can_read_feedback,
@@ -67,6 +68,7 @@ class FeedbackService:
         actor_kind: str,
         actor_id: str,
     ) -> SubmitFeedbackResult:
+        validate_request_inputs(request)
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")

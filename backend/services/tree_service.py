@@ -9,11 +9,16 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import (
+    validate_text,
+    validate_title,
+)
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
 from backend.models.workspace import Workspace, default_actor_id
 from backend.repositories.workspace_scoped import get_in_workspace
+from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import TreeNodePayload
 from backend.schemas.tree import (
     TreeFolderCreateRequest,
@@ -71,8 +76,12 @@ class TreeService:
         actor_id: str,
         actor: ActorContext | None = None,
     ) -> TreeNodePayload:
+        validate_request_inputs(request)
         node = require_visible_tree_node(
             session, workspace_id, node_id, actor, self.tree_read_service
+        )
+        normalized_title = validate_title(
+            request.display_name, max_length=80 if node.node_kind == "folder" else 256
         )
         if "nav_summary" in request.model_fields_set:
             if node.node_kind != "folder":
@@ -81,7 +90,7 @@ class TreeService:
                 )
             node.nav_summary = request.nav_summary
         previous_title = node.title
-        node.title = request.display_name
+        node.title = normalized_title
         if node.target_kind == "ask_session" and node.target_id is not None:
             from backend.models.ask import AskSession
 
@@ -169,6 +178,7 @@ class TreeService:
         actor_kind: str,
         actor_id: str,
     ) -> TreeNodePayload:
+        validate_request_inputs(request)
         policy = session.get(TreePolicy, (workspace_id, request.section))
         if policy is None or not policy.allow_user_folder_create:
             raise RejectedByPolicyError(
@@ -1010,6 +1020,8 @@ def create_tree_change_set(
     actor_kind: str,
     actor_id: str,
 ) -> ChangeSet:
+    if reason is not None:
+        validate_text(reason, field="reason", max_length=2000)
     workspace = session.get(Workspace, workspace_id)
     if workspace is None:
         raise ReadNotFoundError("workspace not found")

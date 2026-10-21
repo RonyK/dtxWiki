@@ -3,6 +3,7 @@
     "additionalProperties": false,
     "properties": {
       "body": {
+        "maxLength": 10000,
         "minLength": 1,
         "title": "Body",
         "type": "string"
@@ -43,6 +44,7 @@
           }
         ],
         "default": null,
+        "maxLength": 2000,
         "title": "Suggested Action"
       },
       "target_id": {

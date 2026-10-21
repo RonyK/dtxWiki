@@ -63,7 +63,9 @@ from backend.services.session_service import (
     RECENT_REAUTHENTICATION_TTL_SECONDS,
     AuthenticatedUser,
     AuthRateLimitError,
+    DisplayNameInputPolicyError,
     DuplicateEmailError,
+    EmailInputPolicyError,
     InvalidCredentialsError,
     InvalidSessionError,
     PasswordPolicyError,
@@ -147,9 +149,7 @@ def get_password_recovery_service(
             if request.app.state.settings.canonical_https_ready
             else None
         ),
-        mail_delivery_service=EmailDeliveryService(
-            settings=request.app.state.settings
-        ),
+        mail_delivery_service=EmailDeliveryService(settings=request.app.state.settings),
     )
     request.app.state.password_recovery_service = service
     return service
@@ -199,8 +199,7 @@ def reject_token_in_query_string(request: Request) -> None:
             detail={
                 "error_code": "invalid_password_reset_request",
                 "message": (
-                    "send the one-time token in the JSON request body, "
-                    "not in the URL"
+                    "send the one-time token in the JSON request body, not in the URL"
                 ),
             },
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
@@ -510,8 +509,7 @@ def request_password_reset(
         "data": {
             "requested": True,
             "message": (
-                "If the email is registered, password reset instructions "
-                "were sent."
+                "If the email is registered, password reset instructions were sent."
             ),
         }
     }
@@ -566,9 +564,7 @@ def request_email_verification(
     except SessionServiceError as exc:
         return no_store_response(auth_error_response(exc))
     except PasswordRecoveryError as exc:
-        return no_store_response(
-            password_recovery_error_response(exc)
-        )
+        return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
     return {
         "data": {
@@ -592,9 +588,7 @@ def confirm_email_verification(
     try:
         recovery_service.consume_email_verification(token=request_body.token)
     except PasswordRecoveryError as exc:
-        return no_store_response(
-            password_recovery_error_response(exc)
-        )
+        return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
     return {"data": {"requested": False, "verified": True}}
 
@@ -620,9 +614,7 @@ def confirm_password_reset(
     except PasswordPolicyError as exc:
         return no_store_response(auth_error_response(exc))
     except PasswordRecoveryError as exc:
-        return no_store_response(
-            password_recovery_error_response(exc)
-        )
+        return no_store_response(password_recovery_error_response(exc))
     clear_session_cookie(response, request.app.state.settings, request)
     clear_recent_reauthentication_cookie(
         response,
@@ -973,7 +965,9 @@ def set_session_cookie(
             int((result.expires_at - result.issued_at).total_seconds()),
         )
         cookie_options["expires"] = result.expires_at
-    response.set_cookie(**cookie_options)
+    from backend.api.cookie_budget import set_bounded_cookie
+
+    set_bounded_cookie(response, **cookie_options)
 
 
 def clear_session_cookie(
@@ -1000,7 +994,10 @@ def set_recent_reauthentication_cookie(
     request: Request,
     result: RecentReauthenticationResult,
 ) -> None:
-    response.set_cookie(
+    from backend.api.cookie_budget import set_bounded_cookie
+
+    set_bounded_cookie(
+        response,
         key=recent_reauthentication_cookie_name(settings),
         value=result.proof_token,
         httponly=True,
@@ -1157,7 +1154,9 @@ def status_code_for_auth_error(exc: SessionServiceError) -> int:
         return 401
     if isinstance(exc, SignupDisabledError | SuspendedUserError):
         return 403
-    if isinstance(exc, PasswordPolicyError):
+    if isinstance(
+        exc, PasswordPolicyError | EmailInputPolicyError | DisplayNameInputPolicyError
+    ):
         return 422
     if isinstance(exc, AuthRateLimitError):
         return 429

@@ -419,9 +419,7 @@ class PasswordRecoveryService:
                 "password reset links require a canonical HTTPS public base URL"
             )
         normalized_email = normalize_email(email) if email is not None else None
-        raw_token = generate_password_reset_token(
-            revoke_api_tokens=revoke_api_tokens
-        )
+        raw_token = generate_password_reset_token(revoke_api_tokens=revoke_api_tokens)
         token_digest = password_reset_token_digest(raw_token)
         issued_at = self.now()
         expires_at = issued_at + timedelta(seconds=expires_in_seconds)
@@ -440,16 +438,13 @@ class PasswordRecoveryService:
                     {requested_by_user_id, target_user_id}, key=lambda value: value.int
                 ):
                     locked_users[locked_user_id] = session.scalar(
-                        select(User)
-                        .where(User.id == locked_user_id)
-                        .with_for_update()
+                        select(User).where(User.id == locked_user_id).with_for_update()
                     )
                 requester = locked_users[requested_by_user_id]
                 if (
                     requester is None
                     or requester.status != "active"
-                    or requester.session_generation
-                    != requested_by_session_generation
+                    or requester.session_generation != requested_by_session_generation
                 ):
                     raise PasswordRecoveryRecentReauthenticationRequiredError(
                         "recent password reauthentication is required"
@@ -466,9 +461,7 @@ class PasswordRecoveryService:
                 user = locked_users[target_user_id]
             else:
                 user = session.scalar(
-                    select(User)
-                    .where(User.email == normalized_email)
-                    .with_for_update()
+                    select(User).where(User.email == normalized_email).with_for_update()
                 )
             if user is None or user.status != "active":
                 raise PasswordRecoveryUserNotFoundError("active user not found")
@@ -680,9 +673,7 @@ class PasswordRecoveryService:
                 "oauth_access_tokens": 0,
                 "oauth_authorization_codes": 0,
             }
-            effective_revoke_api_tokens = (
-                model.revoke_api_tokens or revoke_api_tokens
-            )
+            effective_revoke_api_tokens = model.revoke_api_tokens or revoke_api_tokens
             if effective_revoke_api_tokens:
                 api_tokens = list(
                     session.scalars(
@@ -953,15 +944,13 @@ class PasswordRecoveryService:
         )
         return len(token_ids)
 
+
 def generate_password_reset_token(*, revoke_api_tokens: bool = False) -> str:
     revocation_flag = "1" if revoke_api_tokens else "0"
     # token_urlsafe(32) contributes 256 bits of CSPRNG entropy.  The clear flag
     # lets the reset UI describe the issue-time credential scope, while the
     # digest over the complete token makes changing that flag invalidate it.
-    return (
-        f"{PASSWORD_RESET_TOKEN_PREFIX}{revocation_flag}_"
-        f"{secrets.token_urlsafe(32)}"
-    )
+    return f"{PASSWORD_RESET_TOKEN_PREFIX}{revocation_flag}_{secrets.token_urlsafe(32)}"
 
 
 def generate_email_verification_token() -> str:
@@ -978,9 +967,7 @@ def _raise_password_reset_token_state(
     at: datetime,
 ) -> None:
     if token.used_at is not None:
-        raise UsedPasswordResetTokenError(
-            "password reset link has already been used"
-        )
+        raise UsedPasswordResetTokenError("password reset link has already been used")
     if token.revoked_at is not None:
         raise InvalidPasswordResetTokenError(
             "password reset link is invalid or unavailable"
@@ -990,6 +977,13 @@ def _raise_password_reset_token_state(
 
 
 def recovery_token_digest(token: str, *, purpose: str) -> str:
+    from backend.domain.credential_input import (
+        RECOVERY_TOKEN_MAX_BYTES,
+        ascii_token_is_valid,
+    )
+
+    if not ascii_token_is_valid(token, RECOVERY_TOKEN_MAX_BYTES):
+        raise InvalidPasswordResetTokenError("recovery link is invalid or unavailable")
     if purpose == "password_reset":
         prefix = PASSWORD_RESET_TOKEN_PREFIX
         namespace = PASSWORD_RESET_TOKEN_NAMESPACE
@@ -1012,8 +1006,7 @@ def recovery_token_digest(token: str, *, purpose: str) -> str:
             revocation_flag not in {"0", "1"}
             or len(random_payload) < 43
             or any(
-                character not in _TOKEN_URLSAFE_ALPHABET
-                for character in random_payload
+                character not in _TOKEN_URLSAFE_ALPHABET for character in random_payload
             )
         ):
             raise InvalidPasswordResetTokenError(invalid_message)

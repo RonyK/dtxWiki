@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { requestPasswordReset } from "../../shared/api/auth";
 import { apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
+import { normalizeAccountEmail, rejectMultilinePaste, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 
@@ -24,10 +25,13 @@ export function ForgotPasswordScreen() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    let normalizedEmail: string;
+    try { normalizedEmail = normalizeAccountEmail(email); }
+    catch (caught) { setError(t((caught as Error).message)); return; }
     setSubmitting(true);
     setError(null);
     try {
-      await requestPasswordReset({ email });
+      await requestPasswordReset({ email: normalizedEmail });
       setComplete(true);
     } catch (caught) {
       setError(apiErrorMessage(caught, t("forgot.requestFailed")));
@@ -68,7 +72,7 @@ export function ForgotPasswordScreen() {
             {t("forgot.capabilityFailed")}
           </StatusBanner>
         ) : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <div id="forgot-input-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
         {complete ? (
           <StatusBanner tone="info">{t("forgot.complete")}</StatusBanner>
         ) : null}
@@ -88,11 +92,16 @@ export function ForgotPasswordScreen() {
                 <label className="field-stack">
                   {t("fields.email")}
                   <input
+                  onKeyDown={preventCompositionSubmit}
                     autoComplete="email"
                     name="email"
                     onChange={(event) => setEmail(event.target.value)}
                     required
-                    type="email"
+                    type="text"
+                    inputMode="email"
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? "forgot-input-error" : undefined}
+                    onPaste={(event) => rejectMultilinePaste(event, () => setError(t("validation.email")))}
                     value={email}
                   />
                 </label>

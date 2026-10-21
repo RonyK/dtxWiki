@@ -61,7 +61,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       const published: ContextVersion[] = [];
       for (let index = 0; index < 32; index++) {
         published.push(await publishContext(page.request, workspace.id,
-          `Tooltip review fixture ${String(index).padStart(2, "0")} — a long document title with readable status details${". Extended title content must remain readable in a short viewport".repeat(12)}`));
+          `Tooltip review fixture ${String(index).padStart(2, "0")} — a long document title with readable status details${". Extended title content must remain readable in a short viewport".repeat(2)}`));
       }
       const nodes = await treeNodes(page.request, workspace.id, "context");
       await page.goto("/context");

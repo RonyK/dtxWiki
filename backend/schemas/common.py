@@ -132,7 +132,13 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        revision. Descriptions of update/patch_context_edit and the edit
 #        receipt say when a block keeps its id and that update_context_edit
 #        with no open edit stages a reviewed draft. No tool added/removed.
-MCP_TOOL_CONTRACT_REVISION = 11
+#  12 -- Shared write-input limits: normalized titles and labels, final body
+#        budgets, human explanations, feedback and submitted reference lists.
+#        Refresh tools/list; oversized explicit input now fails validation.
+#  13 -- Bundle categories now expose the supported enum, review notes reject
+#        invalid Unicode, and body budgets describe the final stored Markdown.
+#        Refresh tools/list before submitting content and bundle requests.
+MCP_TOOL_CONTRACT_REVISION = 13
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

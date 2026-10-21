@@ -6,7 +6,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.domain.input_policy import validate_body
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import BODY_MD_MAX_LENGTH
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -29,7 +31,7 @@ class LibrarySemanticMarkdownPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class LibrarySemanticMarkdownUpdateRequest(BaseModel):
+class LibrarySemanticMarkdownUpdateRequest(InputRequest):
     body_markdown: str = Field(min_length=1, max_length=BODY_MD_MAX_LENGTH)
     expected_revision: int = Field(ge=0)
     expected_base_artifact_id: UUID
@@ -38,10 +40,9 @@ class LibrarySemanticMarkdownUpdateRequest(BaseModel):
     @field_validator("body_markdown")
     @classmethod
     def _bounded_utf8_body(cls, value: str) -> str:
+        validate_body(value)
         if len(value.encode("utf-8")) > LIBRARY_SEMANTIC_MARKDOWN_MAX_BYTES:
-            raise ValueError(
-                "body_markdown exceeds the 1000000-byte UTF-8 limit"
-            )
+            raise ValueError("body_markdown exceeds the 1000000-byte UTF-8 limit")
         return value
 
     model_config = ConfigDict(extra="forbid")

@@ -30,7 +30,7 @@
     "slug": "Slug",
     "slugPreview": "Slug preview: {{slug}}",
     "title": "Title",
-    "titleHintInvalid": "Enter 1-100 characters.",
+    "titleHintInvalid": "Enter 1-256 characters.",
     "updateDraft": "Update draft",
     "updating": "Updating…"
   },

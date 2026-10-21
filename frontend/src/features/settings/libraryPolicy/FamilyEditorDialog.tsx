@@ -1,3 +1,4 @@
+import { codePointLength, inputTextError, textInputLimit } from "../../../shared/lib/inputPolicy";
 import type { TFunction } from "i18next";
 import {
   useCallback,
@@ -332,7 +333,7 @@ export function FamilyEditorDialog({
     draft.max_upload_bytes > MAX_LIBRARY_FAMILY_BYTES
   );
   const atFamilyLimit = initialFamily === null && families.length >= MAX_LIBRARY_FORMAT_FAMILIES;
-  const invalid = !draft.name.trim() || draft.name.trim().length > MAX_LIBRARY_FAMILY_NAME_LENGTH ||
+  const invalid = !draft.name.trim() || codePointLength(draft.name.trim().replace(/\s+/g, " ")) > MAX_LIBRARY_FAMILY_NAME_LENGTH || Boolean(inputTextError(draft.name, Number.MAX_SAFE_INTEGER)) ||
     draft.format_ids.length === 0 ||
     Boolean(nameConflict) || formatConflicts.length > 0 ||
     limitInvalid || atFamilyLimit || customFormatEditorOpen || blockedAliasGroupIds.size > 0 ||
@@ -975,7 +976,7 @@ export function FamilyEditorDialog({
               autoFocus={Boolean(initialFamily) || startKind === "custom"}
               disabled={busy}
               id="library-family-name"
-              maxLength={MAX_LIBRARY_FAMILY_NAME_LENGTH}
+              {...textInputLimit(MAX_LIBRARY_FAMILY_NAME_LENGTH, true, (value) => value.trim().replace(/\s+/g, " "))}
               onChange={(event) => setDraft((current) => ({
                 ...current,
                 name: event.target.value,

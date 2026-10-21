@@ -1,3 +1,4 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import {
   Check,
   ChevronDown,
@@ -492,6 +493,8 @@ export function ReviewScreen() {
     // The routing dialog manages its own reason field and passes it explicitly;
     // the inline Approve/Reject buttons fall back to the shared decisionReason.
     const reason = (reasonOverride ?? decisionReason).trim();
+    const reasonError = inputTextError(reason, 2000, false);
+    if (reasonError) throw new Error(reasonError);
     if (
       !state?.workspaceId ||
       !selectedReview ||
@@ -1470,6 +1473,7 @@ export function ReviewScreen() {
                 {t("bulk.discardReason", { defaultValue: "Discard reason" })}
               </span>
               <textarea
+              {...textInputLimit(2000, false)}
                 autoFocus
                 required
                 value={bulkDiscardReason}
@@ -2393,6 +2397,7 @@ function ReviewDetail({
               required only for Request changes (enforced in the routing dialog),
               so this inline field never shows a "required" alert. */}
             <textarea
+              {...textInputLimit(2000, false)}
               aria-describedby={decisionReasonHintId}
               id={decisionReasonId}
               placeholder={t("detail.reasonPlaceholder", {
@@ -2570,6 +2575,7 @@ function ReviewDetail({
               label={t("detail.reasonLabel", { defaultValue: "Decision reason" })}
             >
               <textarea
+              {...textInputLimit(2000, false)}
                 id={`${routingTitleId}-reason`}
                 placeholder={t("detail.reasonPlaceholder", {
                   defaultValue:

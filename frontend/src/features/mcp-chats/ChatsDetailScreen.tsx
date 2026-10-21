@@ -1,3 +1,4 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import {
   AlertTriangle,
   Archive,
@@ -143,6 +144,11 @@ export function ChatsDetailScreen() {
     if (!state || editTitle === null || savingTitle) {
       return;
     }
+    const titleError = inputTextError(editTitle, 120);
+    if (titleError) {
+      setActionError(titleError);
+      return;
+    }
     const trimmed = editTitle.trim();
     if (!trimmed) {
       // Don't PATCH a blank/whitespace title: it would surface a raw 422 and,
@@ -279,6 +285,7 @@ export function ChatsDetailScreen() {
                     <input
                       ref={titleInputRef}
                       aria-label={t("detail.titleLabel")}
+                      {...textInputLimit(120)}
                       disabled={savingTitle}
                       value={visibleTitle}
                       onChange={(event) => setEditTitle(event.currentTarget.value)}

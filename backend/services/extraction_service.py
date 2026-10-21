@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import fit_generated_title
 from backend.models.base import utc_now
 from backend.models.job import Job
 from backend.models.library import (
@@ -351,7 +352,8 @@ class ExtractionService:
             workspace_id=source.workspace_id,
             library_item_id=source.id,
             version_id=version.id,
-            title=source.title or source.uri,
+            title=source.title
+            or fit_generated_title(source.uri, fallback="Library item"),
             uri=source.uri,
             format_hint=source.format_hint,
         )
@@ -528,7 +530,8 @@ class ExtractionService:
             workspace_id=source.workspace_id,
             target_kind="library_item",
             target_id=source.id,
-            title=source.title or source.uri,
+            title=source.title
+            or fit_generated_title(source.uri, fallback="Library item"),
             slug=None,
             section="library",
             parent_id=None,

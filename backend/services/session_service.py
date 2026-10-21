@@ -22,10 +22,17 @@ from backend.app.settings import (
     SESSION_TTL_DEFAULT_SECONDS,
     Settings,
 )
+from backend.domain import identity_policy
+from backend.domain.credential_input import (
+    SESSION_TOKEN_MAX_BYTES,
+    ascii_token_is_valid,
+    require_ascii_token,
+)
 from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.utils.database_errors import is_single_column_unique_violation
 
 logger = logging.getLogger("dtxwiki.session")
 
@@ -46,7 +53,7 @@ DEFAULT_REMEMBERED_SESSION_ABSOLUTE_TTL_SECONDS = (
 RECENT_REAUTHENTICATION_TOKEN_KIND = "recent_reauthentication"
 RECENT_REAUTHENTICATION_TOKEN_VERSION = 1
 RECENT_REAUTHENTICATION_TTL_SECONDS = 5 * 60
-MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_LENGTH = identity_policy.NEW_PASSWORD_MIN_LENGTH
 DUMMY_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$u2au8gUQ3qKl1XimMaOpFQ"
     "$Kvoeh33YAsJ5V/VMP8lB4wS0V3JS85RQUdHFy8Ew0CA"
@@ -91,6 +98,14 @@ class SuspendedUserError(SessionServiceError):
 
 class PasswordPolicyError(SessionServiceError):
     error_code = "password_policy_failed"
+
+
+class EmailInputPolicyError(SessionServiceError):
+    error_code = "email_policy_failed"
+
+
+class DisplayNameInputPolicyError(SessionServiceError):
+    error_code = "display_name_policy_failed"
 
 
 class SignupDisabledError(SessionServiceError):
@@ -170,11 +185,19 @@ class RecentReauthenticationCodec:
         )
         signature = _base64url_encode(self._sign(encoded_payload.encode()))
         return RecentReauthenticationResult(
-            proof_token=f"{encoded_payload}.{signature}",
+            proof_token=require_ascii_token(
+                f"{encoded_payload}.{signature}",
+                SESSION_TOKEN_MAX_BYTES,
+                "recent reauthentication proof",
+            ),
             reauthenticated_until=expires_at,
         )
 
     def verify(self, token: str) -> VerifiedRecentReauthentication:
+        if not ascii_token_is_valid(token, SESSION_TOKEN_MAX_BYTES):
+            raise RecentReauthenticationRequiredError(
+                "recent reauthentication proof is invalid"
+            )
         try:
             encoded_payload, encoded_signature = token.split(".", maxsplit=1)
         except ValueError as exc:
@@ -298,12 +321,17 @@ class SessionTokenCodec:
             json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
         )
         signature = _base64url_encode(self._sign(encoded_payload.encode()))
-        return f"{encoded_payload}.{signature}", expires_at
+        token = require_ascii_token(
+            f"{encoded_payload}.{signature}", SESSION_TOKEN_MAX_BYTES, "session token"
+        )
+        return token, expires_at
 
     def verify(self, token: str) -> UUID:
         return self.verify_session(token).user_id
 
     def verify_session(self, token: str) -> VerifiedSession:
+        if not ascii_token_is_valid(token, SESSION_TOKEN_MAX_BYTES):
+            raise InvalidSessionError("session token is invalid")
         try:
             encoded_payload, encoded_signature = token.split(".", maxsplit=1)
         except ValueError as exc:
@@ -466,6 +494,10 @@ class SessionService:
             try:
                 session.flush()
             except IntegrityError as exc:
+                if not is_single_column_unique_violation(
+                    exc, table="users", column="email"
+                ):
+                    raise
                 raise DuplicateEmailError("email already exists") from exc
             # Onboarding is decoupled from the installation's legacy/default
             # content workspace.  Every signup mode starts in an ordinary,
@@ -492,6 +524,7 @@ class SessionService:
         password: str,
         remember_me: bool = False,
     ) -> SessionResult:
+        validate_password(password, new=False)
         normalized_email = normalize_email(email)
         with self.session_factory.begin() as session:
             user = session.scalar(select(User).where(User.email == normalized_email))
@@ -631,8 +664,7 @@ class SessionService:
                 )
         except SQLAlchemyError:
             logger.warning(
-                "remembered session renewal audit failed; keeping the "
-                "presented cookie",
+                "remembered session renewal audit failed; keeping the presented cookie",
                 exc_info=True,
             )
             return False
@@ -670,6 +702,7 @@ class SessionService:
         new_password: str,
         remember_me: bool = False,
     ) -> SessionResult:
+        validate_password(current_password, new=False)
         validate_password(new_password)
         result: SessionResult | None = None
         invalid_password = False
@@ -696,9 +729,7 @@ class SessionService:
                     payload={"reason": "invalid_credentials"},
                 )
             else:
-                user.password_hash = self.credential_hasher.hash_password(
-                    new_password
-                )
+                user.password_hash = self.credential_hasher.hash_password(new_password)
                 user.session_generation += 1
                 session.flush()
                 self._emit_session_audit(
@@ -738,6 +769,7 @@ class SessionService:
         user_id: UUID,
         current_password: str,
     ) -> RecentReauthenticationResult:
+        validate_password(current_password, new=False)
         result: RecentReauthenticationResult | None = None
         invalid_password = False
         with self.session_factory.begin() as session:
@@ -911,9 +943,7 @@ def consume_auth_slot(client_ip: str, email: str) -> None:
     # deletes it, and so one attempt consumes both axes atomically.
     with _AUTH_BUCKET_LOCK:
         ip_bucket = [
-            stamp
-            for stamp in _AUTH_IP_BUCKET.get(client_ip, [])
-            if now - stamp < 60
+            stamp for stamp in _AUTH_IP_BUCKET.get(client_ip, []) if now - stamp < 60
         ]
         if len(ip_bucket) >= AUTH_RATE_LIMIT_PER_IP:
             raise AuthRateLimitError("auth rate limit exceeded for client IP")
@@ -972,24 +1002,24 @@ def authenticated_user(user: User) -> AuthenticatedUser:
 
 
 def normalize_email(email: str) -> str:
-    normalized = email.strip().lower()
-    if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
-        raise InvalidCredentialsError("email is invalid")
-    return normalized
+    try:
+        return identity_policy.normalize_email(email)
+    except identity_policy.EmailPolicyError as exc:
+        raise EmailInputPolicyError(str(exc)) from exc
 
 
 def normalize_display_name(display_name: str | None, email: str) -> str:
-    normalized = (display_name or "").strip()
-    if normalized:
-        return normalized
-    return email.split("@", maxsplit=1)[0]
+    try:
+        return identity_policy.normalize_display_name(display_name, email)
+    except identity_policy.DisplayNamePolicyError as exc:
+        raise DisplayNameInputPolicyError(str(exc)) from exc
 
 
-def validate_password(password: str) -> None:
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise PasswordPolicyError(
-            f"password must be at least {MIN_PASSWORD_LENGTH} characters"
-        )
+def validate_password(password: str, *, new: bool = True) -> None:
+    try:
+        identity_policy.validate_password(password, new=new)
+    except identity_policy.PasswordInputPolicyError as exc:
+        raise PasswordPolicyError(str(exc)) from exc
 
 
 def _base64url_encode(value: bytes) -> str:

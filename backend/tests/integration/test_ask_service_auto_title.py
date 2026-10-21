@@ -413,3 +413,46 @@ def test_ask_auto_title_uses_topic_anchor_when_context_anchor_absent(session_fac
         ask_session = session.get(AskSession, detail.id)
         assert ask_session is not None
         assert ask_session.title == "Retention: Evaluate retention policy"
+
+
+def test_ask_auto_title_space_boundary_and_long_anchor_keep_intent(session_factory):
+    with session_factory.begin() as session:
+        workspace = _default_workspace(session)
+        page = _seed_context_page(session, workspace.id, "a" * 254)
+        for anchor_id, question in (
+            (None, "a" * 95 + " bbb ccc"),
+            (page.id, "Explain the deployment"),
+        ):
+            service = AskService(search_service=FakeSearchService(anchor_id))
+            detail = service.create_session(
+                session=session,
+                workspace_id=workspace.id,
+                request=AskSessionCreate(),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+            service.create_turn(
+                session=session,
+                workspace_id=workspace.id,
+                ask_session_id=detail.id,
+                request=AskTurnCreate(user_message=question),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+            if anchor_id is not None:
+                service.create_turn(
+                    session=session,
+                    workspace_id=workspace.id,
+                    ask_session_id=detail.id,
+                    request=AskTurnCreate(user_message="What follows this deployment?"),
+                    actor_kind="human",
+                    actor_id=ACTOR_ID,
+                )
+            stored = session.get(AskSession, detail.id)
+            node = session.get(WorkspaceTreeNode, stored.placement_tree_node_id)
+            assert 1 <= len(stored.title) <= 256
+            assert stored.title == stored.title.strip() == node.title
+            if anchor_id is None:
+                assert stored.title == "a" * 95
+            else:
+                assert stored.title.endswith(": Explain the deployment")

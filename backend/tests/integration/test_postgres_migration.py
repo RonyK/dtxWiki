@@ -90,6 +90,13 @@ def test_postgres_alembic_upgrade_head_and_downgrade_base():
                     created_at=now,
                 )
             )
+        # Preserve coverage of the released Unicode search-key backfill before
+        # explicitly repairing legacy one-line values for the new constraints.
+        command.upgrade(config, "efcbcf724889")
+        from backend.services.ops.input_maintenance import repair_input
+
+        repair_input(database_url, "user", user_id, "display_name", "Ａlice Smith")
+        repair_input(database_url, "workspace", workspace_id, "title", "Ｔeam Straße")
         command.upgrade(config, "head")
         inspector = inspect(engine)
         assert {

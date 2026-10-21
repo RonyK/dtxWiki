@@ -30,7 +30,7 @@
     "slug": "슬러그",
     "slugPreview": "슬러그 미리보기: {{slug}}",
     "title": "제목",
-    "titleHintInvalid": "1~100자를 입력하세요.",
+    "titleHintInvalid": "1~256자를 입력하세요.",
     "updateDraft": "초안 수정",
     "updating": "수정 중…"
   },

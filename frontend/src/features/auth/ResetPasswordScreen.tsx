@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { checkPasswordResetStatus, confirmPasswordReset } from "../../shared/api/auth";
 import { ApiError } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
+import { validateAccountPassword, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useOneTimeLinkToken } from "./oneTimeLinkToken";
@@ -69,6 +70,9 @@ export function ResetPasswordScreen() {
     if (!token) {
       return;
     }
+    try {
+      validateAccountPassword(newPassword, true);
+    } catch (caught) { setError(t((caught as Error).message)); return; }
     if (newPassword !== confirmation) {
       setError(t("reset.mismatch"));
       return;
@@ -121,7 +125,7 @@ export function ResetPasswordScreen() {
             {linkIssue ?? t("reset.missing")}
           </StatusBanner>
         ) : null}
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <div id="reset-password-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
         <section
           className="auth-panel"
           aria-label={
@@ -136,9 +140,11 @@ export function ResetPasswordScreen() {
               <label className="field-stack">
                 {t("reset.new")}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="new-password"
-                  minLength={8}
+                  aria-describedby={error ? "reset-password-error reset-password-rule" : "reset-password-rule"}
                   name="newPassword"
+                  aria-invalid={Boolean(error)}
                   onChange={(event) => setNewPassword(event.target.value)}
                   required
                   type="password"
@@ -148,16 +154,18 @@ export function ResetPasswordScreen() {
               <label className="field-stack">
                 {t("reset.confirm")}
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   autoComplete="new-password"
-                  minLength={8}
                   name="confirmPassword"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "reset-password-error" : undefined}
                   onChange={(event) => setConfirmation(event.target.value)}
                   required
                   type="password"
                   value={confirmation}
                 />
               </label>
-              <p className="auth-recovery-note">{t("reset.rule")}</p>
+              <p id="reset-password-rule" className="auth-recovery-note">{t("reset.rule")}</p>
               {apiTokenRevocationForced ? (
                 <StatusBanner tone="warning">
                   {t("reset.revokeApiTokensForced", {
@@ -168,6 +176,7 @@ export function ResetPasswordScreen() {
               ) : null}
               <label className="checkbox-field auth-remember">
                 <input
+                  onKeyDown={preventCompositionSubmit}
                   checked={apiTokenRevocationForced || revokeApiTokens}
                   disabled={apiTokenRevocationForced}
                   onChange={(event) => setRevokeApiTokens(event.target.checked)}

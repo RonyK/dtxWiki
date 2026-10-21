@@ -1,3 +1,4 @@
+import { codePointLength, inputTextError, textInputLimit } from "../lib/inputPolicy";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder } from "lucide-react";
@@ -132,6 +133,8 @@ export function FolderSummaryCard({
   const isFolder = node.node_kind === "folder";
   const submit = async () => {
     if (!onSaveNavSummary) return;
+    const inputError = inputTextError(draft, NAV_SUMMARY_MAX, false);
+    if (inputError) { setSaveError(inputError); return; }
     setSaving(true);
     setSaveError(null);
     try {
@@ -176,7 +179,7 @@ export function FolderSummaryCard({
             aria-label={t("navSummary.inputLabel", {
               defaultValue: "Folder routing summary",
             })}
-            maxLength={NAV_SUMMARY_MAX}
+            {...textInputLimit(NAV_SUMMARY_MAX, false)}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={t("navSummary.placeholder", {
               defaultValue:
@@ -188,7 +191,7 @@ export function FolderSummaryCard({
           />
           <div className="folder-nav-summary-editor-footer">
             <span className="folder-nav-summary-counter">
-              {draft.length}/{NAV_SUMMARY_MAX}
+              {codePointLength(draft)}/{NAV_SUMMARY_MAX}
             </span>
             {saveError ? (
               <span className="form-error">{saveError}</span>
@@ -206,7 +209,7 @@ export function FolderSummaryCard({
             </button>
             <button
               className="icon-button primary"
-              disabled={saving}
+              disabled={saving || Boolean(inputTextError(draft, NAV_SUMMARY_MAX, false))}
               onClick={submit}
               type="button"
             >

@@ -1,6 +1,7 @@
 import {
   act,
   render as testingLibraryRender,
+  fireEvent,
   screen,
   waitFor,
   within,
@@ -162,6 +163,11 @@ describe("Workspace Settings membership and access", () => {
     });
     expect(screen.getByText("Add exact login email")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
+    fireEvent.change(memberLookup, { target: { value: "a".repeat(65) + "@example.test" } });
+    expect(memberLookup).toHaveAccessibleDescription(/at most 254 UTF-8 bytes/);
+    expect(memberLookup).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
+    fireEvent.change(memberLookup, { target: { value: "" } });
     await user.type(
       memberLookup,
       "person@example.com",

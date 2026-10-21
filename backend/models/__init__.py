@@ -1,3 +1,15 @@
+from sqlalchemy import event as _event
+from sqlalchemy.engine import Connection as _Connection
+
+from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
+    RULES as _INPUT_RULES,
+)
+from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
+    check_encoding as _check_input_encoding,
+)
+from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
+    constraints_for as _input_constraints_for,
+)
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.app_metadata import AppMetadata
@@ -107,6 +119,20 @@ from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.models.workspace_credential_grant import WorkspaceCredentialGrant
 from backend.models.workspace_join import WorkspaceJoinRequest
 from backend.models.workspace_purge_grant import WorkspacePurgeGrant
+
+# A single versioned storage contract is shared by create_all and Alembic.
+# Historical snapshots/versions deliberately have no retrospective CHECK.
+for _table_name in {rule.table for rule in _INPUT_RULES}:
+    for _constraint in _input_constraints_for(_table_name):
+        Base.metadata.tables[_table_name].append_constraint(_constraint)
+
+
+@_event.listens_for(Base.metadata, "before_create")
+def _verify_input_storage_encoding(_metadata, connection, **_kwargs):
+    # DDL compilation with create_mock_engine has no database to inspect.
+    if isinstance(connection, _Connection):
+        _check_input_encoding(connection)
+
 
 __all__ = [
     "ApiToken",

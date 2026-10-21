@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.read import TreePathEntry
 
 ContextIngressSaveMode = Literal[
@@ -30,7 +31,7 @@ ContextPageType = Literal[
 ]
 
 
-class AskTurnPromoteRequest(BaseModel):
+class AskTurnPromoteRequest(InputRequest):
     save_mode: ContextIngressSaveMode
     parent_node_id: UUID | None = None
     page_type: ContextPageType
@@ -83,7 +84,7 @@ class ContextIngressProposalListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextIngressAcceptRequest(BaseModel):
+class ContextIngressAcceptRequest(InputRequest):
     final_save_mode: ContextIngressSaveMode
     final_parent_node_id: UUID
     final_title: str = Field(min_length=1)
@@ -95,7 +96,7 @@ class ContextIngressAcceptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextIngressRejectRequest(BaseModel):
+class ContextIngressRejectRequest(InputRequest):
     reason: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")

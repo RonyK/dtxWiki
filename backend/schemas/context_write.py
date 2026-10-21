@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.schemas.common import DraftReviewReason, RESTResponseBase
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import (
     BODY_MD_MAX_LENGTH,
     CONTENT_HASH_PATTERN,
@@ -81,7 +82,7 @@ _NEEDS_REVIEW_DESCRIPTION = (
 )
 
 
-class WriteDraftRequest(BaseModel):
+class WriteDraftRequest(InputRequest):
     title: str = Field(min_length=1)
     page_type: Literal[
         "overview",
@@ -184,7 +185,7 @@ class WriteDraftResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class UpdateDraftRequest(BaseModel):
+class UpdateDraftRequest(InputRequest):
     page_id: UUID
     base_version_id: UUID
     base_content_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
@@ -477,7 +478,7 @@ class UpdateDraftResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class PublishContextPageRequest(BaseModel):
+class PublishContextPageRequest(InputRequest):
     # Deliberately carries no floor override. This model is bound by the
     # workspace publish route, which any `draft-write` bearer token reaches, so
     # a field here is a field every non-interactive caller can send. Overriding
@@ -566,7 +567,7 @@ class CiteResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class SubmitFeedbackRequest(BaseModel):
+class SubmitFeedbackRequest(InputRequest):
     target_type: Literal[
         "agent_page",
         "context_page",
@@ -621,7 +622,7 @@ class FeedbackListResponse(RESTResponseBase):
     model_config = ConfigDict(extra="forbid")
 
 
-class ReviewDecisionRequest(BaseModel):
+class ReviewDecisionRequest(InputRequest):
     decision_type: Literal["approve", "reject", "request_changes"]
     decision_reason: str | None = None
     # Optional routing target, only meaningful on request_changes (ⓐ/ⓒ).
