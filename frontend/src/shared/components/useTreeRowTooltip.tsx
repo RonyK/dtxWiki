@@ -58,6 +58,13 @@ export function useTreeRowTooltip({
     setOwner(null);
     if (activeTooltip?.dismiss === dismiss) activeTooltip = null;
   }, []);
+  const dismissForActivation = useCallback((event?: { clientX: number; clientY: number; detail: number }) => {
+    if (event && event.detail > 0) {
+      pointerPositionRef.current = { x: event.clientX, y: event.clientY };
+    }
+    suppressionReleaseRef.current = suppressPointerReentry(pointerPositionRef.current.x, pointerPositionRef.current.y);
+    dismiss();
+  }, [dismiss]);
 
   function show(nodeId: string, element: HTMLElement, pointer: boolean) {
     if (disabled || hasCoveringOverlay(element) || (pointer && suppressedPointer)) return;
@@ -146,8 +153,7 @@ export function useTreeRowTooltip({
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        suppressionReleaseRef.current = suppressPointerReentry(pointerPositionRef.current.x, pointerPositionRef.current.y);
-        dismiss();
+        dismissForActivation();
       }
     };
     const handlePointerMove = (event: globalThis.PointerEvent) => {
@@ -175,10 +181,11 @@ export function useTreeRowTooltip({
       document.removeEventListener("pointermove", handlePointerMove, true);
       document.removeEventListener("dragstart", dismiss, true);
     };
-  }, [owner, node, status, dismiss]);
+  }, [owner, node, status, dismiss, dismissForActivation]);
 
   const rect = owner?.element.getBoundingClientRect();
   return {
+    dismissForActivation,
     focus: (nodeId: string, element: HTMLElement) => show(nodeId, element, false),
     blur: (relatedTarget: EventTarget | null) => {
       if (!ownerRef.current?.element.contains(relatedTarget as Node | null) && !pointerWithinRef.current) dismiss();
@@ -186,6 +193,14 @@ export function useTreeRowTooltip({
     enter: (nodeId: string, element: HTMLElement, event: { clientX: number; clientY: number }) => {
       pointerPositionRef.current = { x: event.clientX, y: event.clientY };
       show(nodeId, element, true);
+    },
+    move: (nodeId: string, element: HTMLElement, event: { clientX: number; clientY: number; pointerType?: string }) => {
+      // A stationary overlay removal can synthesize mouseenter with rounded
+      // MouseEvent coordinates. Only native pointer movement releases the
+      // suppression; its capture listener runs before this row handler.
+      if (event.pointerType === "touch") return;
+      pointerPositionRef.current = { x: event.clientX, y: event.clientY };
+      if (ownerRef.current?.element !== element) show(nodeId, element, true);
     },
     leave,
     popup: owner && node && rect && !disabled ? createPortal(

@@ -359,6 +359,7 @@ export function TreeRail({
     if (!onExpandedNodeIdsChange) {
       return;
     }
+    tooltip.dismissForActivation();
     const next = new Set(expandedNodeIdSet);
     if (next.has(nodeId)) {
       next.delete(nodeId);
@@ -678,6 +679,7 @@ export function TreeRail({
   }
 
   function invokePrimaryAction(node: TreeNodePayload) {
+    tooltip.dismissForActivation();
     if (onSelectTarget) {
       onSelectTarget(node);
       return;
@@ -1334,6 +1336,7 @@ function TreeRow({
       ref={refCallback}
       role="treeitem"
       tabIndex={tabIndex}
+      onClickCapture={tooltip.dismissForActivation}
       onClick={(event) => {
         if (longPressOpenedRef.current) {
           event.preventDefault();
@@ -1384,7 +1387,10 @@ function TreeRow({
       onPointerCancel={clearLongPressTimer}
       onPointerDown={startLongPressContextMenu}
       onPointerLeave={clearLongPressTimer}
-      onPointerMove={updateLongPressContextMenu}
+      onPointerMove={(event) => {
+        updateLongPressContextMenu(event);
+        tooltip.move(node.id, event.currentTarget, event);
+      }}
       onPointerUp={clearLongPressTimer}
     >
       {rowContent}

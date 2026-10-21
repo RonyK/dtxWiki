@@ -54,6 +54,67 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("TreeRail tooltip ownership", () => {
+  it("dismisses on chevron activation after pointer focus and allows the newly expanded child's first hover", () => {
+    const parent = { ...node("parent"), node_kind: "folder" as const, target_kind: null, target_id: null, can_have_children: true, children_count: 1 };
+    const child = { ...node("child"), parent_id: parent.id };
+    const nodes = [parent, child];
+    const onExpandedNodeIdsChange = vi.fn();
+    const { rerender } = render(<TreeRail title="Context" nodes={nodes} expandedNodeIds={[]} onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    const parentRow = screen.getByRole("treeitem", { name: parent.title });
+    fireEvent.mouseEnter(parentRow, { clientX: 40, clientY: 165 });
+    const chevron = within(parentRow).getByRole("button", { name: `Expand ${parent.title}` });
+    fireEvent.pointerDown(chevron, { clientX: 40, clientY: 165, pointerType: "mouse" });
+    act(() => { chevron.focus(); });
+    expect(screen.getByRole("tooltip")).toHaveTextContent(parent.title);
+    fireEvent.click(chevron, { clientX: 40, clientY: 165, detail: 1 });
+    expect(onExpandedNodeIdsChange).toHaveBeenCalledWith([parent.id]);
+    rerender(<TreeRail title="Context" nodes={nodes} expandedNodeIds={[parent.id]} onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    expect(chevron).toHaveFocus();
+    fireEvent.mouseEnter(parentRow, { clientX: 40, clientY: 165 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    // Chromium/WebKit send mouseenter before the next pointermove. The first
+    // actual entry into the newly revealed child must not be suppressed.
+    const childRow = screen.getByRole("treeitem", { name: child.title });
+    fireEvent.mouseEnter(childRow, { clientX: 80, clientY: 201 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.pointerMove(childRow, { clientX: 80, clientY: 201 });
+    expect(screen.getByRole("tooltip")).toHaveTextContent(child.title);
+  });
+
+  it("uses the actual click position after pointer movement while the popup was dismissed", () => {
+    const parent = { ...node("parent"), node_kind: "folder" as const, target_kind: null, target_id: null, can_have_children: true, children_count: 1 };
+    render(<TreeRail title="Context" nodes={[parent]} expandedNodeIds={[]} onExpandedNodeIdsChange={vi.fn()} />);
+    const row = screen.getByRole("treeitem");
+    const chevron = within(row).getByRole("button", { name: `Expand ${parent.title}` });
+    fireEvent.mouseEnter(row, { clientX: 80, clientY: 165 });
+    act(() => { chevron.focus(); });
+    fireEvent.keyDown(chevron, { key: "Escape" });
+    // No active popup is left to track this within-row pointer movement.
+    fireEvent.pointerMove(chevron, { clientX: 40, clientY: 165 });
+    fireEvent.click(chevron, { clientX: 40, clientY: 165, detail: 1 });
+    fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("dismisses during keyboard expansion while preserving tree focus and subsequent child navigation", () => {
+    const parent = { ...node("parent"), node_kind: "folder" as const, target_kind: null, target_id: null, can_have_children: true, children_count: 1 };
+    const child = { ...node("child"), parent_id: parent.id };
+    const nodes = [parent, child];
+    const onExpandedNodeIdsChange = vi.fn();
+    const { rerender } = render(<TreeRail title="Context" nodes={nodes} expandedNodeIds={[]} onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    const parentRow = screen.getByRole("treeitem", { name: parent.title });
+    act(() => { parentRow.focus(); });
+    expect(screen.getByRole("tooltip")).toHaveTextContent(parent.title);
+    fireEvent.keyDown(parentRow, { key: "ArrowRight" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(parentRow).toHaveFocus();
+    rerender(<TreeRail title="Context" nodes={nodes} expandedNodeIds={[parent.id]} onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    fireEvent.keyDown(parentRow, { key: "ArrowDown" });
+    expect(screen.getByRole("treeitem", { name: child.title })).toHaveFocus();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(child.title);
+  });
+
   it("dismisses an unfocused hover tooltip with document Escape and stays dismissed over that row", () => {
     render(<TreeRail title="Context" nodes={[node()]} />);
     const row = screen.getByRole("treeitem");
@@ -95,6 +156,32 @@ describe("TreeRail tooltip ownership", () => {
     fireEvent.pointerMove(second, { clientX: 21, clientY: 80 });
     fireEvent.mouseEnter(second, { clientX: 21, clientY: 80 });
     expect(screen.getByRole("tooltip")).toHaveTextContent("second full title");
+  });
+
+  it("ignores rounded stationary mouseenter after Escape and resumes on actual pointer movement", () => {
+    render(<TreeRail title="Context" nodes={[node(), node("second")]} />);
+    const [first, second] = screen.getAllByRole("treeitem");
+    fireEvent.mouseEnter(first, { clientX: 20, clientY: 30 });
+    const popup = screen.getByRole("tooltip");
+    fireEvent.mouseLeave(first, { relatedTarget: popup });
+    fireEvent.pointerMove(popup, { clientX: 20, clientY: 80.75 });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    // Chromium truncates MouseEvent coordinates while PointerEvent retains
+    // fractions; removing the popup synthesizes enter without moving.
+    fireEvent.mouseEnter(second, { clientX: 20, clientY: 80 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.pointerMove(second, { clientX: 20, clientY: 80.75 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.pointerMove(second, { clientX: 20, clientY: 81 });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("second full title");
+  });
+
+  it("does not open a hover tooltip during touch movement", () => {
+    render(<TreeRail title="Context" nodes={[node()]} />);
+    const move = new MouseEvent("pointermove", { bubbles: true, clientX: 40, clientY: 165 });
+    Object.defineProperty(move, "pointerType", { value: "touch" });
+    fireEvent(screen.getByRole("treeitem"), move);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("allows a tooltip inside its own modal mobile drawer", async () => {

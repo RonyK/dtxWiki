@@ -107,7 +107,7 @@ describe("TreeRail document status and personal favorites", () => {
     expect(row).toHaveAccessibleDescription("Normal · Last content change 12 days ago · My favorite");
   });
 
-  it("dismisses a stale hover tooltip after its hovered chevron is replaced without a mouseleave", () => {
+  it("dismisses on chevron replacement and still reconciles a fresh hover without a mouseleave", () => {
     const folder = node({ node_kind: "folder", target_kind: null, target_id: null,
       title: "Inbox", can_have_children: true, children_count: 1 });
     const onExpandedNodeIdsChange = vi.fn();
@@ -119,7 +119,10 @@ describe("TreeRail document status and personal favorites", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Expand Inbox" }));
     rerender(<TreeRail title="Context" nodes={[folder]} expandedNodeIds={[folder.id]}
       onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     act(() => { screen.getByRole("searchbox").focus(); });
+    fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
+    fireEvent.pointerMove(row, { clientX: 40, clientY: 165 });
     expect(screen.getByRole("tooltip")).toHaveTextContent("Inbox");
     fireEvent.pointerMove(document.body);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
