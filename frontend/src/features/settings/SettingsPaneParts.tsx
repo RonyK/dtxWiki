@@ -1,5 +1,6 @@
 import type { ReactNode, Ref } from "react";
 
+import { LoadingIndicator } from "../../shared/components/LoadingIndicator";
 import { StatusPill } from "../../shared/components/StatusPill";
 
 /**
@@ -56,18 +57,12 @@ export function SettingsPaneHeader({
   );
 }
 
-/**
- * One loading row, announced.
- *
- * `role="status"` is the point: a polite live region tells a screen-reader
- * user that the pane is fetching. Four of the five presentations this replaces
- * did not have it, so the pane simply went quiet.
- */
+/** Settings-specific spacing around the shared, announced loading indicator. */
 export function SettingsLoadingRow({ children }: { children: ReactNode }) {
   return (
-    <p className="settings-loading-row" role="status">
+    <LoadingIndicator as="p" className="settings-loading-row">
       {children}
-    </p>
+    </LoadingIndicator>
   );
 }
 

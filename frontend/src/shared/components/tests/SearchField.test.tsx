@@ -67,7 +67,7 @@ describe("SearchField", () => {
   });
 
   it("exposes a localized manual submit action and loading state", () => {
-    render(
+    const { rerender } = render(
       <form>
         <SearchField
           ariaLabel="Search key name"
@@ -85,5 +85,29 @@ describe("SearchField", () => {
     expect(screen.getByRole("button", { name: "Search keys" })).toBeDisabled();
     expect(screen.getByRole("searchbox").closest(".search-field"))
       .toHaveAttribute("aria-busy", "true");
+    const spinner = screen.getByRole("button", { name: "Search keys" })
+      .querySelector(".spinner");
+    expect(spinner).toHaveAttribute("aria-hidden", "true");
+    expect(spinner?.querySelector(".spinner-glyph"))
+      .toHaveStyle({ width: "14px", height: "14px" });
+    expect(screen.queryByRole("status")).toBeNull();
+
+    rerender(
+      <form>
+        <SearchField
+          ariaLabel="Search key name"
+          clearLabel="Clear key search"
+          onChange={vi.fn()}
+          submitLabel="Search keys"
+          value=""
+        />
+      </form>,
+    );
+
+    expect(screen.getByRole("button", { name: "Search keys" })).toBeEnabled();
+    expect(screen.getByRole("searchbox").closest(".search-field"))
+      .not.toHaveAttribute("aria-busy");
+    expect(screen.getByRole("button", { name: "Search keys" })
+      .querySelector(".spinner")).toBeNull();
   });
 });

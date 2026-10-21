@@ -436,14 +436,18 @@ function LayerToggle({
       ref.current.indeterminate = mixed;
     }
   }, [mixed]);
+  // The wrapping label owns the 24px hit area; the accessible name stays on
+  // the input so assistive tech reads it exactly as before.
   return (
-    <input
-      aria-label={ariaLabel}
-      checked={allOn}
-      disabled={disabled}
-      onChange={() => onToggle(!allOn)}
-      ref={ref}
-      type="checkbox"
-    />
+    <label className="lint-layer-toggle">
+      <input
+        aria-label={ariaLabel}
+        checked={allOn}
+        disabled={disabled}
+        onChange={() => onToggle(!allOn)}
+        ref={ref}
+        type="checkbox"
+      />
+    </label>
   );
 }

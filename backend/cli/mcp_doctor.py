@@ -256,7 +256,9 @@ def _plain_detail(key: str, detail: Any) -> str:
 
 
 def _normalize_mcp_url(url: str) -> str:
-    return normalize_mcp_endpoint_url(url, allow_http_loopback=True)
+    return normalize_mcp_endpoint_url(
+        url, allow_http_loopback=True, allow_http_private_network=True
+    )
 
 
 def _origin_from_mcp_url(url: str) -> str:

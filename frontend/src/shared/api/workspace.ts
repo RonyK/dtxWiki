@@ -3,6 +3,7 @@ import { translate } from "../i18n";
 
 const SELECTED_WORKSPACE_ID_KEY = "dtxwiki.selectedWorkspaceId";
 const SELECTED_WORKSPACE_SLUG_KEY = "dtxwiki.selectedWorkspaceSlug";
+const WORKSPACE_LIST_REQUEST_TIMEOUT_MS = 30_000;
 
 export type WorkspaceSummary = {
   id: string;
@@ -129,10 +130,28 @@ export type TreeNodeReorderInput = {
   direction: "up" | "down";
 };
 
+async function requestWorkspaceList() {
+  // This shared GET owns its cancellation: a caller must not abort another
+  // caller's deduplicated request. Keep the deadline through JSON body reading,
+  // so receiving headers alone cannot leave workspace hydration pending.
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    WORKSPACE_LIST_REQUEST_TIMEOUT_MS,
+  );
+  try {
+    return await apiRequest<WorkspaceListResponse>("/api/v1/workspaces", {
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function listWorkspaces() {
   const generation = workspaceSessionGeneration;
   if (!workspaceListRequest || workspaceListRequest.generation !== generation) {
-    const promise = apiRequest<WorkspaceListResponse>("/api/v1/workspaces")
+    const promise = requestWorkspaceList()
       .then((response) => {
         if (workspaceSessionGeneration === generation) {
           cacheWorkspaceSelection(response.data);

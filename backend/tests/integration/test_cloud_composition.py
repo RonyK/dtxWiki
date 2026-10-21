@@ -2604,6 +2604,7 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
 
     workspace_id = uuid4()
     user_id = uuid4()
+    grant_id = uuid4()
     oauth_client_id = "split-settings-client"
     orphan_oauth_client_id = "split-settings-orphan-client"
     with control_factory.begin() as session:
@@ -2635,6 +2636,11 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
         )
         session.flush()
         session.add(
+            WorkspaceMembership(
+                user_id=user_id, workspace_id=workspace_id, role="owner"
+            )
+        )
+        session.add(
             OAuthConsent(
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -2645,6 +2651,7 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
         )
         session.add(
             OAuthRefreshToken(
+                grant_id=grant_id,
                 token_lookup_hash="sha256:split-settings-live",
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -2676,6 +2683,7 @@ def _seed_split_settings_mcp_fixture(tmp_path, *, slug):
                 scopes=["mcp:read"],
                 status="active",
                 issued_to_user_id=user_id,
+                runtime_binding_key=f"oauth_grant:{grant_id}",
                 token_metadata={"oauth_client_id": oauth_client_id},
             )
         )
@@ -2749,7 +2757,7 @@ def test_split_provider_settings_mcp_client_listing_spans_both_planes(tmp_path):
         "Split settings orphaned grant",
     }
     orphan = rendered["Split settings orphaned grant"]
-    assert orphan.connection_state == "revoked"
+    assert orphan.connection_state == "unknown"
     assert orphan.client_name == "Orphaned Grant App"
 
     # Searching by OAuth client name is the one filter arm that has no
@@ -2838,7 +2846,7 @@ def test_split_provider_settings_policy_cards_read_the_control_plane(tmp_path):
     assert cards["Split settings connection"].client_name == "Split Settings Client"
     assert cards["Split settings connection"].connection_state == "active"
     assert cards["Split settings orphaned grant"].client_name == "Orphaned Grant App"
-    assert cards["Split settings orphaned grant"].connection_state == "revoked"
+    assert cards["Split settings orphaned grant"].connection_state == "unknown"
 
     # Revert-fail companion: the pre-fix shape read the cards off the workspace
     # session, which holds no Workspace row.
@@ -3114,6 +3122,7 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
 
     workspace_id = uuid4()
     user_id = uuid4()
+    grant_id = uuid4()
     oauth_client_id = "shard-write-client"
     with control_factory.begin() as session:
         session.add(
@@ -3144,6 +3153,11 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
         )
         session.flush()
         session.add(
+            WorkspaceMembership(
+                user_id=user_id, workspace_id=workspace_id, role="owner"
+            )
+        )
+        session.add(
             OAuthConsent(
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -3154,6 +3168,7 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
         )
         session.add(
             OAuthRefreshToken(
+                grant_id=grant_id,
                 token_lookup_hash="sha256:shard-write-live",
                 user_id=user_id,
                 client_id=oauth_client_id,
@@ -3174,6 +3189,7 @@ def test_settings_mcp_client_writes_still_fail_on_a_real_shard(true_shard):
                 scopes=["mcp:read"],
                 status="active",
                 issued_to_user_id=user_id,
+                runtime_binding_key=f"oauth_grant:{grant_id}",
                 token_metadata={"oauth_client_id": oauth_client_id},
             )
         )

@@ -1047,11 +1047,11 @@ export function WorkspaceAccessSharingSection() {
         <WorkspaceAccessPolicyGuide />
         {accessError ? <StatusBanner tone="warning">{accessError}</StatusBanner> : null}
         {accessNotice ? <StatusBanner tone="info">{accessNotice}</StatusBanner> : null}
-        {accessLoading || !access ? (
-          <p className="meta-line" role="status">
+        {accessLoading ? (
+          <SettingsLoadingRow>
             {t("workspaceAccess.loading")}
-          </p>
-        ) : (
+          </SettingsLoadingRow>
+        ) : access ? (
           <>
             <fieldset className="workspace-access-choice-group">
               <legend>{t("workspaceAccess.visibility.title")}</legend>
@@ -1144,7 +1144,7 @@ export function WorkspaceAccessSharingSection() {
               </button>
             </div>
           </>
-        )}
+        ) : null}
       </div>
 
       {confirmOpen && access && effects ? (

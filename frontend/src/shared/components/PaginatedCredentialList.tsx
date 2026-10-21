@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 
 import { apiErrorMessage } from "../api/client";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { SearchField } from "./SearchField";
 import { SegmentedControl } from "./SegmentedControl";
 import { StatusBanner } from "./StatusBanner";
@@ -98,7 +99,7 @@ export function PaginatedCredentialList<TFilter extends string>({
   }, [focusRevision]);
 
   return (
-    <div className="paginated-credential-list" aria-busy={loading}>
+    <div className="paginated-credential-list">
       <div className="credential-list-controls">
         <SegmentedControl
           compact
@@ -153,13 +154,16 @@ export function PaginatedCredentialList<TFilter extends string>({
           ) : null}
         </div>
       ) : null}
-      {loading && itemCount === 0 ? (
-        <div className="empty-state compact-empty">{loadingText}</div>
-      ) : error && itemCount === 0 ? null : itemCount === 0 ? (
+      {loading ? <LoadingIndicator>{loadingText}</LoadingIndicator> : null}
+      {!loading && !error && itemCount === 0 ? (
         <div className="empty-state compact-empty">{emptyText}</div>
-      ) : (
-        children
-      )}
+      ) : null}
+      {/* Keep the loading announcement outside the busy results subtree. */}
+      {itemCount > 0 ? (
+        <div aria-busy={loading} className="credential-list-results">
+          {children}
+        </div>
+      ) : null}
       {itemCount > 0 || filteredCount > 0 ? (
         <div className="credential-list-pagination">
           <p

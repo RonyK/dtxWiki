@@ -219,9 +219,11 @@ def test_doctor_timeout_per_step(monkeypatch):
         "http://localhost.:21080/mcp",
         "http://127.0.0.2:21080/prefix/mcp/",
         "http://[::1]:21080/mcp",
+        "http://192.168.1.10:21080/mcp",
+        "http://[fd00::1]:21080/mcp",
     ],
 )
-def test_doctor_accepts_plaintext_only_for_loopback(url):
+def test_doctor_accepts_plaintext_for_local_network(url):
     assert mcp_doctor._normalize_mcp_url(url).endswith("/mcp")
 
 

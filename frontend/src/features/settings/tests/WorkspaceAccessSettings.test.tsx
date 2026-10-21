@@ -1,4 +1,5 @@
 import {
+  act,
   render as testingLibraryRender,
   screen,
   waitFor,
@@ -50,6 +51,45 @@ describe("Workspace Settings membership and access", () => {
     vi.restoreAllMocks();
     window.localStorage.clear();
     setLocale("en", { persist: false });
+  });
+
+  it("stops the access loading indicator when the request fails", async () => {
+    let resolveAccess!: (response: Response) => void;
+    const accessRequest = new Promise<Response>((resolve) => {
+      resolveAccess = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse(workspaceList("owner", "team", "request", false));
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access`) {
+        return accessRequest;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<WorkspaceAccessSharingSection />);
+
+    const status = await waitFor(() => {
+      const row = screen.getByText("Loading access settings…")
+        .closest(".settings-loading-row");
+      expect(row).not.toBeNull();
+      return row;
+    });
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status?.querySelector(".spinner")).toHaveAttribute("aria-hidden", "true");
+
+    await act(async () => {
+      resolveAccess(await errorResponse(503, "access_temporarily_unavailable"));
+      await accessRequest;
+    });
+    expect(await screen.findByText("Request failed. Please try again."))
+      .toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Loading access settings…"))
+      .not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Review change" }))
+      .not.toBeInTheDocument();
   });
 
   it("requires the whole-workspace confirmation before first-sharing Personal", async () => {

@@ -1719,6 +1719,7 @@
   "backend/services/settings_service.py|SettingsService.list_mcp_clients|select_from|MCPClient|19348c4d110405d4": 1,
   "backend/services/settings_service.py|SettingsService.list_mcp_clients|select_from|MCPClient|4701150ca6033778": 1,
   "backend/services/settings_service.py|SettingsService.list_mcp_clients|select|MCPClient|45d6b632f83f58e0": 1,
+  "backend/services/settings_service.py|SettingsService.list_mcp_clients|select|MCPClient|72febe5e44ffa6c1": 1,
   "backend/services/settings_service.py|SettingsService.update_mcp_client_status|select|MCPClient|45d6b632f83f58e0": 1,
   "backend/services/settings_service.py|SettingsService.update_mcp_client_status|where|MCPClient|9d7656cc3beb2f78": 1,
   "backend/services/temporal_read.py|_draft_write_version_ids|select|ContextPageVersion|e4ce5149b6922f43": 1,
