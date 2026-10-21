@@ -14,7 +14,6 @@ import {
   getSettingsPolicies,
   getActivityReadGroup,
   listActivityFeed,
-  listAskSessions,
   listRecentReviewDecisions,
   listReviews,
 } from "../../shared/api/operations";
@@ -35,6 +34,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import {
   FirstUseChecklist,
+  FIRST_USE_STEPS,
   firstIncompleteStep,
   firstUseStepByKey,
   type FirstUseProgress,
@@ -43,6 +43,7 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { activityCountLabel, activityEntryCounts, activityHref, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
 import { iconForActivityLane } from "../../shared/lib/activityLanes";
 import { applyPeriodParam, parsePeriodParam } from "../../shared/lib/urlState";
@@ -70,6 +71,7 @@ type DashboardState = {
 
 export function DashboardScreen() {
   const { t } = useTranslation("dashboard");
+  const { preferences: labsPreferences } = useLabsPreferences();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const period = parsePeriod(searchParams.get("period"));
@@ -100,7 +102,6 @@ export function DashboardScreen() {
         policies,
         sources,
         contextPages,
-        askSessions,
       ] =
         await Promise.all([
           listActivityFeed(workspaceId, {
@@ -113,7 +114,6 @@ export function DashboardScreen() {
           getSettingsPolicies(workspaceId),
           listLibraryItems(workspaceId),
           listContextPages(workspaceId),
-          listAskSessions(workspaceId),
         ]);
       return {
         workspaceId,
@@ -130,7 +130,6 @@ export function DashboardScreen() {
         setupProgress: {
           library: sources.data.length > 0,
           context: contextPages.data.length > 0,
-          ask: askSessions.items.length > 0,
           // Cumulative like the other steps: the team has used Review once any
           // decision exists. A pending-queue check would regress to incomplete
           // the moment every pending review is decided (and read "done" while
@@ -183,7 +182,7 @@ export function DashboardScreen() {
   const needsSetupGuide =
     !state?.setupProgress.library ||
     !state.setupProgress.context ||
-    !state.setupProgress.ask;
+    !state.setupProgress.review;
   const lanes = (() => {
     // Pending reviews appear in the activity feed as one pending-lane row per
     // ReviewItem (carrying review_item_id); those rows are already counted via
@@ -317,17 +316,19 @@ export function DashboardScreen() {
               </div>
               <p>{t("spaces.contextPurpose", { defaultValue: "Durable team knowledge" })}</p>
             </Link>
-            <Link
-              className="metric-card linked"
-              data-kind="agent"
-              to="/agent"
-            >
-              <div className="metric-card-title">
-                <Bot size={16} aria-hidden="true" />
-                <span>{t("spaces.agent", { defaultValue: "Agent" })}</span>
-              </div>
-              <p>{t("spaces.agentPurpose", { defaultValue: "Instructions, skills, and memory" })}</p>
-            </Link>
+            {labsPreferences.agent ? (
+              <Link
+                className="metric-card linked"
+                data-kind="agent"
+                to="/agent"
+              >
+                <div className="metric-card-title">
+                  <Bot size={16} aria-hidden="true" />
+                  <span>{t("spaces.agent", { defaultValue: "Agent" })}</span>
+                </div>
+                <p>{t("spaces.agentPurpose", { defaultValue: "Instructions, skills, and memory" })}</p>
+              </Link>
+            ) : null}
           </div>
         </section>
         <section className="feature-section activity-feed-panel">
@@ -409,8 +410,10 @@ function DashboardWelcome({
   const nextStepLabel = t(`firstUse.steps.${nextStepKey}.label`, {
     defaultValue: nextStep.label,
   });
-  const completedCount = Object.values(setupProgress).filter(Boolean).length;
-  const progressValue = Math.round((completedCount / 4) * 100);
+  const completedCount = FIRST_USE_STEPS.filter(
+    (step) => setupProgress[step.key],
+  ).length;
+  const progressValue = Math.round((completedCount / FIRST_USE_STEPS.length) * 100);
   return (
     <section
       className={`feature-section detail-section dashboard-setup-card ${
@@ -433,14 +436,15 @@ function DashboardWelcome({
             <p className="feature-subtitle">
               {t("setup.progress", {
                 count: completedCount,
-                defaultValue: "{{count}} of 4 setup steps complete.",
+                total: FIRST_USE_STEPS.length,
+                defaultValue: "{{count}} of {{total}} setup steps complete.",
               })}
             </p>
           ) : (
             <p className="feature-subtitle">
               {t("setup.description", {
                 defaultValue:
-                  "Add trusted materials, organize durable pages, ask context-aware questions, then review changes before the wiki is updated.",
+                  "Add trusted materials, organize durable pages, then review changes before the wiki is updated.",
               })}
             </p>
           )}
@@ -557,22 +561,6 @@ function DashboardWelcome({
             <p>
               {t("setup.contextDescription", {
                 defaultValue: "Keep reviewed pages where the team can read and edit them.",
-              })}
-            </p>
-          </Link>
-          <Link
-            className={`metric-card linked ${
-              nextStep.key === "ask" ? "recommended" : ""
-            }`}
-            to="/ask"
-          >
-            <div className="metric-card-title">
-              <Bot size={16} aria-hidden="true" />
-              <span>{t("setup.ask", { defaultValue: "Ask" })}</span>
-            </div>
-            <p>
-              {t("setup.askDescription", {
-                defaultValue: "Ask questions, promote useful answers, and review changes.",
               })}
             </p>
           </Link>

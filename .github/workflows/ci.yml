@@ -205,6 +205,7 @@ jobs:
       # three. The whole suite meets all three engines weekly, in
       # .github/workflows/e2e-browsers.yml.
       - name: Run Playwright e2e
+        id: playwright
         run: npm run test:e2e
       # The suite drives `/reset-password?token=<one-time token>`, and the HTML
       # reporter base64-inlines every step title into index.html on EVERY run,
@@ -217,8 +218,9 @@ jobs:
       # Deliberately NOT `|| true` (unlike the `packaging` job's per-file
       # pipe): the only non-zero exit is the break-glass hard-fail on a
       # production secret env name or a PEM private key, and by then the bytes
-      # have already been scrubbed in place. The upload is `if: always()`, so
-      # that combination turns the job red AND still publishes a safe report.
+      # have already been scrubbed in place. Existing reports still upload
+      # after a failure. A successful run must produce a report; setup/build
+      # failures before Playwright starts have no report to upload.
       - name: Redact the Playwright report before publishing it
         if: always()
         run: |
@@ -226,7 +228,7 @@ jobs:
             bash scripts/redact_evidence.sh --dir playwright-report
           fi
       - name: Upload Playwright report
-        if: always()
+        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
         uses: actions/upload-artifact@v4
         with:
           name: e2e-standard-${{ github.run_id }}

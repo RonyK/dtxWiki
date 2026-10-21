@@ -568,6 +568,25 @@ def delete_workspace(
     # destructive credential must not.
     x_purge_grant: Annotated[str | None, Header(alias="X-Purge-Grant")] = None,
 ):
+    from backend.domain.credential_input import (
+        PURGE_GRANT_MAX_BYTES,
+        ascii_token_is_valid,
+    )
+    from backend.services.credential_hashing import PURGE_GRANT_PREFIX
+
+    if (
+        purge_contents
+        and x_purge_grant is not None
+        and (
+            not ascii_token_is_valid(x_purge_grant, PURGE_GRANT_MAX_BYTES)
+            or not x_purge_grant.startswith(PURGE_GRANT_PREFIX)
+        )
+    ):
+        return build_rest_error_response(
+            error_code="purge_grant_required",
+            message="workspace purge grant is missing, invalid, or expired",
+            status_code=403,
+        )
     # 260912 review, F-1: resolved and capability-checked BEFORE anything is
     # deleted. `store_for` used to be called only after the delete
     # transaction had already committed, so a backend store that does not

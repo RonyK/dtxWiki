@@ -3346,7 +3346,10 @@ export interface components {
         AgentPageDraftRequest: {
             /** Base Version Id */
             base_version_id?: string | null;
-            /** Body Markdown */
+            /**
+             * Body Markdown
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_markdown: string;
             /**
              * Category
@@ -3369,7 +3372,10 @@ export interface components {
             sensitivity: "public" | "workspace" | "private" | "secret_candidate";
             /** Slug */
             slug: string;
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title: string;
         };
         /** AgentPageDraftResult */
@@ -3464,7 +3470,7 @@ export interface components {
             /** Catalog App Id */
             catalog_app_id?: string | null;
             /** Custom App Label */
-            custom_app_label?: string | null;
+            custom_app_label?: (string | null) | null;
             /** Expires In Days */
             expires_in_days?: number | null;
             /** Mcp Client Type */
@@ -3619,7 +3625,10 @@ export interface components {
             default_context_parent_tree_node_id?: string | null;
             /** Default Topic Tags */
             default_topic_tags?: string[];
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title?: string | null;
         };
         /** AskSessionDetail */
@@ -3730,7 +3739,10 @@ export interface components {
         AskTurnCreate: {
             /** Ttl Override Seconds */
             ttl_override_seconds?: number | null;
-            /** User Message */
+            /**
+             * User Message
+             * @description Maximum 8000 Unicode code points after trimming surrounding whitespace.
+             */
             user_message: string;
         };
         /** AskTurnDetail */
@@ -3800,7 +3812,10 @@ export interface components {
             alternatives?: {
                 [key: string]: unknown;
             }[];
-            /** Body Markdown */
+            /**
+             * Body Markdown
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_markdown?: string | null;
             /**
              * Page Type
@@ -3814,7 +3829,10 @@ export interface components {
              * @enum {string}
              */
             save_mode: "create_page" | "create_child_page" | "append_section" | "update_draft" | "feedback_only";
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title?: string | null;
         };
         /** AuthCapabilitiesData */
@@ -3957,7 +3975,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Requested Categories */
-            requested_categories?: string[];
+            requested_categories?: ("agent_guide" | "persona" | "skill" | "memory")[];
             /** Task Intent */
             task_intent: string;
             /** Token Budget */
@@ -4048,7 +4066,10 @@ export interface components {
         ContextImageMediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
         /** ContextIngressAcceptRequest */
         ContextIngressAcceptRequest: {
-            /** Body Markdown */
+            /**
+             * Body Markdown
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_markdown?: string | null;
             /** Final Page Type */
             final_page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
@@ -4062,7 +4083,10 @@ export interface components {
              * @enum {string}
              */
             final_save_mode: "create_page" | "create_child_page" | "append_section" | "update_draft" | "feedback_only";
-            /** Final Title */
+            /**
+             * Final Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             final_title: string;
             /** Review Required */
             review_required?: boolean | null;
@@ -4516,6 +4540,7 @@ export interface components {
             aliases?: string[] | null;
             /**
              * Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
              * @default
              */
             body_md: string;
@@ -4525,7 +4550,10 @@ export interface components {
             placement_parent_node_id?: string | null;
             /** Tags */
             tags?: string[] | null;
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title?: string | null;
         };
         /**
@@ -6475,7 +6503,10 @@ export interface components {
         };
         /** LoginRequest */
         LoginRequest: {
-            /** Email */
+            /**
+             * Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
             email: string;
             /** Password */
             password: string;
@@ -7234,7 +7265,10 @@ export interface components {
         };
         /** McpChatTitleUpdateRequest */
         McpChatTitleUpdateRequest: {
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 120 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title: string;
         };
         /** McpConnectionOptionData */
@@ -7554,7 +7588,10 @@ export interface components {
              * Format: uuid
              */
             base_version_id: string;
-            /** Body Md */
+            /**
+             * Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_md: string;
             /** Destination Node Id */
             destination_node_id?: string | null;
@@ -7582,7 +7619,10 @@ export interface components {
             session_version_id?: string | null;
             /** Tags */
             tags?: string[] | null;
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title?: string | null;
         };
         /** PageBacklink */
@@ -7750,7 +7790,10 @@ export interface components {
              * Format: uuid
              */
             base_version_id: string;
-            /** Body Md */
+            /**
+             * Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_md: string;
             /** Destination Node Id */
             destination_node_id?: string | null;
@@ -7768,7 +7811,10 @@ export interface components {
             session_version_id?: string | null;
             /** Tags */
             tags?: string[] | null;
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title?: string | null;
         };
         /** PageVersionDiff */
@@ -7948,7 +7994,10 @@ export interface components {
         };
         /** PasswordResetRequest */
         PasswordResetRequest: {
-            /** Email */
+            /**
+             * Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
             email: string;
         };
         /** PasswordResetRequestData */
@@ -9056,9 +9105,15 @@ export interface components {
         };
         /** SignupRequest */
         SignupRequest: {
-            /** Display Name */
+            /**
+             * Display Name
+             * @description Optional display name; at most 32 Unicode code points after surrounding spaces are removed. Empty values use an automatic name.
+             */
             display_name?: string | null;
-            /** Email */
+            /**
+             * Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
             email: string;
             /** Password */
             password: string;
@@ -9173,7 +9228,10 @@ export interface components {
             section: "context" | "agent" | "library";
             /** Slug */
             slug?: string | null;
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 80 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title: string;
         };
         /** TreeListData */
@@ -9287,7 +9345,10 @@ export interface components {
         };
         /** TreeNodeUpdate */
         TreeNodeUpdate: {
-            /** Display Name */
+            /**
+             * Display Name
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             display_name: string;
             /** Nav Summary */
             nav_summary?: string | null;
@@ -9592,7 +9653,10 @@ export interface components {
             goal?: string | null;
             /** Slug */
             slug?: string | null;
-            /** Title */
+            /**
+             * Title
+             * @description Maximum 128 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
             title: string;
             /** Visibility */
             visibility?: string | null;
@@ -9877,7 +9941,10 @@ export interface components {
              * @default false
              */
             confirm_first_share: boolean;
-            /** Email */
+            /**
+             * Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
             email: string;
             /**
              * Role

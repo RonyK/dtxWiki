@@ -1,15 +1,22 @@
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     field_validator,
     model_validator,
 )
 
+from backend.domain.identity_policy import (
+    normalize_display_name,
+    normalize_email,
+    validate_password,
+)
+from backend.domain.input_policy import SHORT_TEXT_SPACES, normalize_short_text
 from backend.schemas.common import RESTResponseBase
 from backend.services.api_token_service import (
     ALLOWED_API_TOKEN_SCOPES,
@@ -18,11 +25,40 @@ from backend.services.api_token_service import (
 )
 from backend.services.session_service import MIN_PASSWORD_LENGTH
 
+EmailInput = Annotated[
+    str,
+    BeforeValidator(normalize_email),
+    Field(
+        description=(
+            "One email address, normalized before validating at most 254 UTF-8 "
+            "bytes; local part at most 64 UTF-8 bytes."
+        ),
+        json_schema_extra={"x-normalized-maxBytes": 254, "x-localPart-maxBytes": 64},
+    ),
+]
+NewPasswordInput = Annotated[
+    str,
+    BeforeValidator(lambda value: validate_password(value, new=True)),
+    Field(min_length=MIN_PASSWORD_LENGTH, max_length=128),
+]
+CurrentPasswordInput = Annotated[
+    str,
+    BeforeValidator(validate_password),
+    Field(min_length=1, max_length=128),
+]
+
 
 class SignupRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=1024)
-    display_name: str | None = Field(default=None, min_length=1, max_length=128)
+    email: EmailInput
+    password: NewPasswordInput
+    display_name: str | None = Field(
+        default=None,
+        description=(
+            "Optional display name; at most 32 Unicode code points after "
+            "surrounding spaces are removed. Empty values use an automatic name."
+        ),
+        json_schema_extra={"x-normalized-maxLength": 32},
+    )
     # Fail closed like PasswordResetConfirmRequest below: the SPA always sends
     # an explicit value (AuthScreen.onSubmit), so a caller that omits this
     # field is a script/CI client that never opted into a 30-day renewable
@@ -32,10 +68,15 @@ class SignupRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="after")
+    def _normalize_display_name(self):
+        self.display_name = normalize_display_name(self.display_name, self.email)
+        return self
+
 
 class LoginRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=1, max_length=1024)
+    email: EmailInput
+    password: CurrentPasswordInput
     # See SignupRequest.remember_me: omitting the field must not upgrade a
     # caller to the remembered (30-day, renewable) session policy.
     remember_me: bool = False
@@ -44,21 +85,21 @@ class LoginRequest(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: str = Field(min_length=1, max_length=1024)
-    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=1024)
+    current_password: CurrentPasswordInput
+    new_password: NewPasswordInput
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ReauthenticationRequest(BaseModel):
-    current_password: str = Field(min_length=1, max_length=1024)
+    current_password: CurrentPasswordInput
 
     model_config = ConfigDict(extra="forbid")
 
 
 class PasswordResetConfirmRequest(BaseModel):
     token: str = Field(min_length=16, max_length=1024)
-    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=1024)
+    new_password: NewPasswordInput
     # Fail closed: a caller that omits this field (bypassing the SPA, which
     # always sends an explicit value) gets credential revocation, not
     # silence. The issue-time flag encoded in the token (dtxr_0_/dtxr_1_)
@@ -70,7 +111,7 @@ class PasswordResetConfirmRequest(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
+    email: EmailInput
 
     model_config = ConfigDict(extra="forbid")
 
@@ -114,13 +155,35 @@ def _require_unique_workspace_ids(grants: list[WorkspaceGrantInput]) -> None:
         raise ValueError("duplicate workspace_id in workspace_grants")
 
 
+TokenNameInput = Annotated[
+    str,
+    BeforeValidator(
+        lambda value: normalize_short_text(value, field="name", max_length=128)
+    ),
+    Field(json_schema_extra={"x-normalized-maxLength": 128}),
+]
+CustomAppLabelInput = Annotated[
+    str | None,
+    BeforeValidator(
+        lambda value: (
+            None
+            if isinstance(value, str) and not value.strip(SHORT_TEXT_SPACES)
+            else normalize_short_text(
+                value, field="custom_app_label", max_length=160, optional=True
+            )
+        )
+    ),
+    Field(json_schema_extra={"x-normalized-maxLength": 160}),
+]
+
+
 class ApiTokenCreateRequest(BaseModel):
     # D-01v2: an allowed-workspace SET, not one workspace_id. At least one
     # entry, no duplicate workspace_ids (checked below); every named
     # workspace must be one the caller has live membership in (checked by
     # the service, which needs a DB read this schema cannot do).
-    workspace_grants: list[WorkspaceGrantInput] = Field(min_length=1)
-    name: str = Field(min_length=1, max_length=128)
+    workspace_grants: list[WorkspaceGrantInput] = Field(min_length=1, max_length=256)
+    name: TokenNameInput
     scopes: list[str] = Field(min_length=1, max_length=16)
     # P10.3 decision B (.claude/plan/260909-p10-3-multi-workspace-credential.md
     # section 2.7): PAT default expiration. One of {30, 90, 180, 365} days,
@@ -143,7 +206,7 @@ class ApiTokenCreateRequest(BaseModel):
         pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
     )
     # Used only for a catalog_app_id=null custom/generic client.
-    custom_app_label: str | None = Field(default=None, min_length=1, max_length=160)
+    custom_app_label: CustomAppLabelInput | None = None
     # Compatibility input retained for existing clients. Dynamic catalog
     # validation belongs to the service/repository boundary, not this schema.
     mcp_client_type: str | None = None
@@ -171,9 +234,7 @@ class ApiTokenCreateRequest(BaseModel):
         ceiling = set(self.scopes)
         for grant in self.workspace_grants:
             if grant.scopes is not None and not set(grant.scopes) <= ceiling:
-                raise ValueError(
-                    "workspace grant scopes must be a subset of scopes"
-                )
+                raise ValueError("workspace grant scopes must be a subset of scopes")
         return self
 
     def resolved_expires_at(self, *, now: datetime) -> datetime | None:
@@ -195,10 +256,10 @@ class ApiTokenCreateRequest(BaseModel):
 
 
 class ApiTokenUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=128)
+    name: TokenNameInput | None = None
     # D-01v2: full-set REPLACE semantics when provided (>=1 entries).
     workspace_grants: list[WorkspaceGrantInput] | None = Field(
-        default=None, min_length=1
+        default=None, min_length=1, max_length=256
     )
 
     model_config = ConfigDict(extra="forbid")
@@ -206,9 +267,7 @@ class ApiTokenUpdateRequest(BaseModel):
     @model_validator(mode="after")
     def _require_a_change(self):
         if not self.model_fields_set:
-            raise ValueError(
-                "at least one of name or workspace_grants is required"
-            )
+            raise ValueError("at least one of name or workspace_grants is required")
         if self.workspace_grants is not None:
             _require_unique_workspace_ids(self.workspace_grants)
         return self
@@ -281,9 +340,7 @@ class PasswordResetStatusData(BaseModel):
 
 class PasswordResetRequestData(BaseModel):
     requested: bool = True
-    message: str = (
-        "If the email is registered, password reset instructions were sent."
-    )
+    message: str = "If the email is registered, password reset instructions were sent."
 
     model_config = ConfigDict(extra="forbid")
 
@@ -421,16 +478,13 @@ class OAuthConsentSettingsUpdateRequest(BaseModel):
     # P10.3 T3 (section 2.4): full-set REPLACE of the allowed-workspace set,
     # mirroring ApiTokenUpdateRequest.workspace_grants. Omitted leaves the
     # set unchanged.
-    workspace_ids: list[UUID] | None = Field(default=None, min_length=1)
+    workspace_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def _require_a_setting(self):
         if not self.model_fields_set:
             raise ValueError("at least one consent setting is required")
-        if (
-            "sliding_enabled" in self.model_fields_set
-            and self.sliding_enabled is None
-        ):
+        if "sliding_enabled" in self.model_fields_set and self.sliding_enabled is None:
             raise ValueError("sliding_enabled must be true or false")
         if self.workspace_ids is not None and len(set(self.workspace_ids)) != len(
             self.workspace_ids

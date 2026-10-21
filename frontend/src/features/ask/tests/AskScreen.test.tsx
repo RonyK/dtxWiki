@@ -59,6 +59,10 @@ describe("AskScreen", () => {
   it("renders turns and accepts a placement proposal", async () => {
     let promotedBody: unknown = null;
     let acceptedBody: unknown = null;
+    // The default title is generated from a multi-line question: one line,
+    // at most 60 code points, never a split surrogate pair.
+    const question = `Needle\n${"x".repeat(51)}\u{1F600} tail`;
+    const title = `Needle ${"x".repeat(51)}\u{1F600}`;
     mockFetch((url, init) => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
@@ -77,7 +81,7 @@ describe("AskScreen", () => {
         };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
-        return { data: sessionDetail() };
+        return { data: sessionDetail([askTurn({ user_message: question })]) };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/turns/${TURN_ID}/promote`) {
         promotedBody = JSON.parse(String(init?.body));
@@ -138,7 +142,7 @@ describe("AskScreen", () => {
       save_mode: "create_page",
       parent_node_id: PARENT_ID,
       page_type: "comparison",
-      title: "Needle",
+      title,
       body_markdown: null,
       alternatives: [],
     });
@@ -146,7 +150,7 @@ describe("AskScreen", () => {
       final_save_mode: "create_page",
       final_parent_node_id: PARENT_ID,
       final_page_type: "comparison",
-      final_title: "Needle",
+      final_title: title,
       target_page_id: null,
       review_required: false,
     });
@@ -1274,8 +1278,10 @@ describe("AskScreen", () => {
     expect(screen.getByLabelText("Ask history")).toHaveTextContent(
       "No sessions yet",
     );
-    expect(screen.getByLabelText("Workspace setup sequence"))
-      .toHaveTextContent("Ask a question");
+    const setup = screen.getByLabelText("Workspace setup sequence");
+    expect(setup).toHaveTextContent("Write Context page");
+    expect(setup).toHaveTextContent("Save or review");
+    expect(setup).not.toHaveTextContent("Ask a question");
     expect(screen.getByRole("button", { name: "New Ask" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Start first Ask session" }),

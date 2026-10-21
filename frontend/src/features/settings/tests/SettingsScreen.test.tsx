@@ -81,8 +81,7 @@ describe("SettingsScreen", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it("renders labelled policy groups and MCP clients behind section navigation", async () => {
-    const user = userEvent.setup();
+  function mockPolicyNavigationAndMcpClients() {
     let mcpStatus: "active" | "disabled" = "active";
     const mcpPage = (status: "active" | "disabled" | "all") => {
       const row = {
@@ -199,6 +198,17 @@ describe("SettingsScreen", () => {
         data: [],
       },
     });
+    return {
+      fetchMock,
+      setMcpStatus(status: "active" | "disabled") {
+        mcpStatus = status;
+      },
+    };
+  }
+
+  it("renders labelled workspace and content policies behind section navigation", async () => {
+    const user = userEvent.setup();
+    const { fetchMock } = mockPolicyNavigationAndMcpClients();
 
     render(
       <MemoryRouter>
@@ -290,7 +300,17 @@ describe("SettingsScreen", () => {
     expect(
       screen.queryByRole("button", { name: /Audit & diagnostics/i }),
     ).not.toBeInTheDocument();
+  });
 
+  it("confirms MCP client disabling and updates the status projection", async () => {
+    const user = userEvent.setup();
+    const { fetchMock, setMcpStatus } = mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
     await user.click(screen.getByRole("button", { name: /MCP access/i }));
     expect(screen.getByText("Access key setup")).toBeInTheDocument();
     expect(await screen.findByText("Local MCP")).toBeInTheDocument();
@@ -325,7 +345,7 @@ describe("SettingsScreen", () => {
     );
     // Reopen and confirm: the default Active projection removes the row.
     await user.click(screen.getByRole("button", { name: /^Disable / }));
-    mcpStatus = "disabled";
+    setMcpStatus("disabled");
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
@@ -346,6 +366,17 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients/mcp-1`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it("shows MCP client and access-key metadata from a direct account link", async () => {
+    const user = userEvent.setup();
+    mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter initialEntries={["/settings?section=mcp"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Local MCP");
     await user.click(screen.getByText("View details"));
     expect(screen.getByText("Client ID")).toBeInTheDocument();
     expect(screen.getByText("mcp-1")).toBeInTheDocument();
@@ -2937,6 +2968,10 @@ describe("SettingsScreen", () => {
     );
 
     const goal = await screen.findByLabelText("Goal");
+    fireEvent.change(goal, { target: { value: "😀".repeat(513) } });
+    expect(goal).toHaveValue("😀".repeat(513));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByText("Use 512 characters or fewer.")).toBeVisible();
     await user.clear(goal);
     await user.type(goal, "Temporary workspace purpose");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
@@ -3352,6 +3387,62 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it.each([80, 81])("counts Library family names as code points when validating a %i-emoji draft", async (length) => {
+    const libraryPolicy = {
+      policy_schema_version: 5,
+      builtin_format_overrides: {},
+      custom_formats: [],
+      format_families: [{
+        family_id: "family-emoji",
+        name: "😀".repeat(length),
+        format_ids: ["markdown"],
+        max_upload_bytes: null,
+      }],
+      max_upload_bytes: 20_000_000,
+      format_overrides: {},
+      allow_store_without_converter: true,
+    };
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [workspaceSummary(WORKSPACE_ID, "Default Workspace", "default")],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: {
+        data: {
+          workspace: policy("workspace", "Workspace policy"),
+          library: policy("library", "Library policy", libraryPolicy),
+          citation: policy("citation", "Citation policy"),
+          context_write: policy("context_write", "Context write policy"),
+          agent_injection: policy("agent_injection", "Agent injection policy"),
+          mcp_clients: [],
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`]: {
+        data: settingsLibraryCapabilities(),
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=library"]}>
+        <WorkspaceProvider>
+          <WorkspaceRefreshGate><SettingsScreen /></WorkspaceRefreshGate>
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
+    const card = (await screen.findByRole("heading", {
+      name: "Library upload policy",
+    })).closest(".policy-card") as HTMLElement;
+    const limit = within(card).getByRole("spinbutton", { name: "Manual upload limit" });
+    await waitFor(() => expect(limit).toHaveValue(20));
+    fireEvent.change(limit, { target: { value: "21" } });
+    const save = within(card).getByRole("button", { name: "Save changes" });
+    if (length === 80) expect(save).toBeEnabled();
+    else expect(save).toBeDisabled();
   });
 
   it("manages custom aliases and families while keeping individual limits advanced", async () => {
@@ -7322,6 +7413,11 @@ describe("SettingsScreen", () => {
     const renameInput = screen.getByRole("textbox", { name: "Rename Laptop" });
     expect(renameInput).toHaveClass("mcp-key-rename-input");
     expect(renameInput.closest("label")).toHaveClass("mcp-key-rename-field");
+    fireEvent.change(renameInput, { target: { value: "😀".repeat(129) } });
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(renameInput).toHaveValue("😀".repeat(129));
+    expect(screen.getByText("Use 128 characters or fewer.")).toBeVisible();
+    expect(lastJsonBody(fetchMock, `${BASE}/api/v1/auth/tokens/token-rename`, "PATCH")).toBeUndefined();
     await user.clear(renameInput);
     await user.type(renameInput, "Research laptop");
     await user.click(screen.getByRole("button", { name: "Save name" }));
@@ -7764,7 +7860,7 @@ describe("SettingsScreen", () => {
     const customAppLabel = screen.getByRole("textbox", {
       name: "AI app display name",
     });
-    expect(customAppLabel).toHaveAttribute("maxLength", "128");
+    expect(customAppLabel).not.toHaveAttribute("maxLength");
     expect(
       screen.getByText(/does not identify or authorize the app/),
     ).toBeInTheDocument();
@@ -8752,6 +8848,35 @@ describe("SettingsScreen", () => {
       },
     };
   }
+
+  it("opens Labs from a shared link and through the searchable account navigation", async () => {
+    const user = userEvent.setup();
+    mockFetch(navFixture(false));
+    render(
+      <MemoryRouter initialEntries={["/settings?section=labs"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show Ask menu" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show Agent menu" })).not.toBeChecked();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const labs = within(nav).getByRole("button", { name: "Labs" });
+    expect(labs).toHaveAttribute("aria-current", "page");
+    expect(labs.closest(".settings-subnav-group")).toHaveTextContent("Your account");
+
+    await user.click(within(nav).getByRole("button", { name: "Workspace" }));
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
+    await user.type(
+      within(nav).getByRole("searchbox", { name: "Filter settings sections" }),
+      "experimental",
+    );
+    expect(within(nav).queryByRole("button", { name: "Workspace" })).not.toBeInTheDocument();
+    await user.click(within(nav).getByRole("button", { name: "Labs" }));
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+  });
 
   it("groups Settings sections and marks the server-wide ones for an admin", async () => {
     mockFetch(navFixture(true));

@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
+from backend.utils.markdown_fence import fence_opener, is_fence_closer
+
 FRONTMATTER_DELIMITERS = {"---", "..."}
 PAGE_METADATA_FIELDS = {"title", "slug", "type", "tags", "aliases"}
 TAG_MAX_LENGTH = 48
@@ -34,6 +36,98 @@ class PageFrontmatter:
     tags: list[str] | None
     aliases: list[str] | None
     title: str | None = None
+
+
+def validate_frontmatter_input(markdown: str) -> None:
+    """Validate authored metadata before the forgiving read parser deduplicates.
+
+    Reads keep supporting historical metadata. Only write boundaries call this.
+    """
+    from backend.domain.input_policy import (
+        InputPolicyError,
+        validate_labels,
+        validate_title,
+    )
+
+    lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    closing = _frontmatter_closing_index(lines)
+    if closing is None:
+        return
+    header = lines[1:closing]
+    for index, line in enumerate(header):
+        pair = _frontmatter_key_value(line)
+        if pair is None:
+            continue
+        key, raw = pair
+        if key == "title":
+            # The reader treats an empty or null title as absent.
+            if _parse_scalar(raw):
+                validate_title(_parse_scalar(raw))
+        elif key in {"tags", "aliases"}:
+            values = []
+            flow = raw.startswith("[") and raw.endswith("]")
+            inner = raw[1:-1].strip() if flow else raw
+            if inner and raw != "null":
+                try:
+                    decoded = json.loads(raw)
+                except json.JSONDecodeError:
+                    decoded = None
+                if isinstance(decoded, list) and any(
+                    isinstance(value, (dict, list)) for value in decoded
+                ):
+                    raise InputPolicyError(f"{key} entries must be scalar values")
+                # Share the reader's lexical scalar extraction. str(True) or
+                # str(1e3) would change the stored labels to True or 1000.0.
+                values = _inline_metadata_values(raw)
+                # YAML allows one trailing comma in a flow sequence. Any other
+                # empty item is still rejected.
+                if flow and inner.endswith(","):
+                    values.pop()
+            elif not raw:
+                for following in header[index + 1 :]:
+                    if not following.strip():
+                        continue
+                    if not following.lstrip().startswith("- "):
+                        break
+                    values.append(_parse_scalar(following.lstrip()[2:]))
+            limit = 48 if key == "tags" else 80
+            validate_labels(values, field=key, max_length=limit)
+
+
+def validate_agent_markdown_input(markdown: str) -> None:
+    """Agent titles are explicit metadata, independent of Markdown headings."""
+    from backend.domain.input_policy import validate_body
+
+    validate_body(markdown)
+    validate_frontmatter_input(markdown)
+
+
+def validate_page_markdown_input(markdown: str) -> None:
+    """Check the complete stored Context Markdown and its derived title."""
+    from backend.domain.input_policy import validate_title
+
+    validate_agent_markdown_input(markdown)
+    parsed = parse_page_frontmatter(markdown)
+    title = title_from_markdown_heading(parsed.body)
+    if title is not None:
+        validate_title(title)
+
+
+def title_from_markdown_heading(markdown: str) -> str | None:
+    """Return the first prose H1, ignoring CommonMark fenced code blocks."""
+    fence = None
+    for line in markdown.splitlines():
+        if fence is not None:
+            if is_fence_closer(line, marker=fence[0], minimum=fence[1]):
+                fence = None
+            continue
+        fence = fence_opener(line)
+        if fence is not None:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip() or None
+    return None
 
 
 def render_frontmatter(fields: dict[str, object]) -> str:
@@ -224,9 +318,7 @@ def _parse_inline_tags(value: str) -> list[str]:
     trimmed = value.strip()
     if not trimmed or trimmed == "[]":
         return []
-    if trimmed.startswith("[") and trimmed.endswith("]"):
-        return _dedupe_tags(_parse_scalar(part) for part in trimmed[1:-1].split(","))
-    return _dedupe_tags(trimmed.split(","))
+    return _dedupe_tags(_inline_metadata_values(trimmed))
 
 
 def _parse_block_tags(lines: list[str]) -> list[str]:
@@ -245,9 +337,36 @@ def _parse_inline_aliases(value: str) -> list[str]:
     trimmed = value.strip()
     if not trimmed or trimmed == "[]":
         return []
-    if trimmed.startswith("[") and trimmed.endswith("]"):
-        return _dedupe_aliases(_parse_scalar(part) for part in trimmed[1:-1].split(","))
-    return _dedupe_aliases(trimmed.split(","))
+    return _dedupe_aliases(_inline_metadata_values(trimmed))
+
+
+def _inline_metadata_values(value: str) -> list[str]:
+    """Split flow-list commas without splitting quoted aliases or escapes."""
+    raw = value.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    values: list[str] = []
+    token: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in raw:
+        if quote is not None:
+            token.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\" and quote == '"':
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character == ",":
+            values.append(_parse_scalar("".join(token)))
+            token = []
+        else:
+            if character in {"'", '"'} and not "".join(token).strip():
+                quote = character
+            token.append(character)
+    values.append(_parse_scalar("".join(token)))
+    return values
 
 
 def _parse_block_aliases(lines: list[str]) -> list[str]:

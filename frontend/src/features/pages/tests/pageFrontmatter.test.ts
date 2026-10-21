@@ -61,14 +61,15 @@ describe("page frontmatter", () => {
     expect(markdown.endsWith("# Body")).toBe(true);
   });
 
-  it("round-trips Unicode, quotes, and backslashes in metadata strings", () => {
+  it("round-trips Unicode, quotes, commas, and backslashes in metadata strings", () => {
     const alias = '경로 "C:\\\\docs"';
+    const comma = 'alpha,"beta"\\suffix';
     const markdown = serializePageDocument({
       body: "# 본문",
       metadata: {
         ...DEFAULT_PAGE_METADATA,
-        aliases: [alias],
-        tags: ["한글태그", "경로\\이름"],
+        aliases: [alias, comma],
+        tags: ["한글태그", "경로\\이름", comma],
       },
       slug: "unicode-metadata",
       title: '한국어 "제목"',
@@ -76,8 +77,8 @@ describe("page frontmatter", () => {
 
     const parsed = parsePageDocument(markdown);
 
-    expect(parsed.metadata.tags).toEqual(["한글태그", "경로\\이름"]);
-    expect(parsed.metadata.aliases).toEqual([alias]);
+    expect(parsed.metadata.tags).toEqual(["한글태그", "경로\\이름", comma]);
+    expect(parsed.metadata.aliases).toEqual([alias, comma]);
   });
 
   it("decodes legacy JSON-escaped Unicode frontmatter scalars", () => {

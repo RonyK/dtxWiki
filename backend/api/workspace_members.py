@@ -13,7 +13,10 @@ from backend.schemas.workspace_membership import (
     WorkspaceMemberRemovalResponse,
     WorkspaceMemberRoleUpdateRequest,
 )
-from backend.services.session_service import InvalidCredentialsError
+from backend.services.session_service import (
+    EmailInputPolicyError,
+    InvalidCredentialsError,
+)
 from backend.services.workspace_membership_service import (
     FIRST_SHARE_WARNING_CODE,
     WorkspaceMemberCursorInvalidError,
@@ -120,6 +123,10 @@ def add_workspace_member(
         return _membership_error(exc, 404)
     except WorkspaceMembershipForbiddenError as exc:
         return _membership_error(exc, 403)
+    except EmailInputPolicyError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=422
+        )
     except InvalidCredentialsError:
         return build_rest_error_response(
             error_code="user_not_found",

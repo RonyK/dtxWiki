@@ -500,7 +500,7 @@ def test_admin_reset_is_bound_to_target_user_id_not_reassigned_email(page_servic
     )
     decoy = users.add_user(
         email="decoy@example.com",
-        password="decoy-password",
+        password="decoy-password-123",
     )
     with page_service.session_factory.begin() as session:
         target_model = session.get(User, target.user_id)

@@ -8,6 +8,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import validate_text
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewItem
@@ -916,6 +917,8 @@ def discard_reconciliation_branch(
     audit_service: AuditService,
 ) -> list[UUID]:
     """Explicitly retire one active branch and its review workflow."""
+    if reason is not None:
+        validate_text(reason, field="reason", max_length=2000)
 
     normalized_reason = reason.strip()
     if not normalized_reason:

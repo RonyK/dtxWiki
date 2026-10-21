@@ -50,6 +50,28 @@
 
 ### Fixes
 
+- Apply shared input limits across browser, REST, MCP, CLI, services and storage:
+  display names use 1–32 Unicode code points, email uses at most 254 UTF-8
+  bytes (64 for the local part), and every password is capped at 128 code
+  points. New passwords require at least 15; older longer passwords require
+  password recovery. Explicit input is rejected rather than shortened.
+- Bound content metadata, final edited bodies, OAuth metadata, credentials and
+  submitted grant lists. Existing history and larger stored grant sets remain
+  readable. Add pre-upgrade input audits and UUID-based metadata repairs;
+  migrations refuse invalid current scalar values before changing the schema.
+- Advance the MCP tool contract to revision 13 for input constraints, supported
+  bundle categories, and final stored-body budget guidance.
+  Clients should refresh `tools/list` and handle input validation errors.
+- Keep generated Ask, Library and Chats titles within storage limits, preserve
+  scalar frontmatter labels, and apply the separate Agent body rules.
+- Preserve public-client DCR compatibility and idempotent token revocation, and
+  apply registration rate limits before parsing malformed metadata. DCR registers
+  `web` or `native` as the application type and returns the registered value.
+- Reject a workspace slug that another request claims concurrently instead of
+  adopting and re-owning that workspace.
+- Separate upgrade-blocking input findings from preserved history, support
+  baseline audits and independent Library label repairs, and honor runtime
+  activity locks during maintenance.
 - Select the Context publish replay audit by version and change-set identity.
 - Persist changes to nested workspace settings policies.
 - Prevent Settings draft resets from overwriting the user's first edit.

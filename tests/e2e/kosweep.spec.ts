@@ -102,7 +102,10 @@ test("ko sweep: no English chrome leaks across screens", async ({ page }, testIn
   await visit("05-chats", "Chats (ko)", "/chats");
   await visit("06-search", "Search (ko)", "/search");
   await visit("07-review", "Review (ko)", "/review");
-  await visit("08-ask", "Ask (ko)", "/ask");
+  await visit("08-ask-unavailable", "질문 직접 접근 — 찾을 수 없음 (ko)", "/ask");
+  await expect(page.getByRole("heading", { name: "해당 페이지를 찾을 수 없습니다" }))
+    .toBeVisible();
+  await expect(page.locator(".ask-composer")).toHaveCount(0);
   await visit("11-account", "Account (ko) — role pill", "/account");
   await visit("12-dashboard", "Dashboard (ko)", "/dashboard");
   await visit("13-settings", "Settings (ko) — 워크스페이스 탭/위험 구역", "/settings");
@@ -116,8 +119,11 @@ test("ko sweep: no English chrome leaks across screens", async ({ page }, testIn
     "Context reader (ko)",
     `/context?target=${encodeURIComponent(readerId)}`,
   );
-  // Mobile (A7): Ask composer-fixed + Library floating actions.
-  await visit("09-ask-mobile", "Ask 390px (A7) — FAB가 카드/컴포저 안 가림", "/ask", { width: 390, height: 780 });
+  // Mobile: the unavailable Ask route and Library floating actions.
+  await visit("09-ask-unavailable-mobile", "질문 직접 접근 390px — 찾을 수 없음 (ko)", "/ask?new=1", { width: 390, height: 780 });
+  await expect(page.getByRole("heading", { name: "해당 페이지를 찾을 수 없습니다" }))
+    .toBeVisible();
+  await expect(page.locator(".ask-composer")).toHaveCount(0);
   await visit("10-library-mobile", "Library 390px (A7)", "/library", { width: 390, height: 780 });
 
   // ---- composite ----

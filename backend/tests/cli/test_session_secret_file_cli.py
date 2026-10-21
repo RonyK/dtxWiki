@@ -47,7 +47,7 @@ def _users_add(tmp_path):
             "add",
             "admin@example.com",
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             f"sqlite:///{tmp_path / 'team.sqlite'}",
         ],

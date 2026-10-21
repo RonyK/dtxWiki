@@ -12,6 +12,11 @@ const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "workspace-1";
 const WORKSPACES_URL = `${BASE}/api/v1/workspaces`;
 const workspace = { data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } };
+const activityPreferences = vi.hoisted(() => ({ role: "editor" }));
+
+vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
+  useOptionalWorkspaceContext: () => ({ selectedWorkspace: { role: activityPreferences.role } }),
+}));
 
 function feedUrl(scope: { period?: string; kind?: string; subtype?: string; group_reads?: boolean; lane?: string; cursor?: string } = {}) {
   const params = new URLSearchParams({ period: scope.period ?? "all", kind: scope.kind ?? "all", subtype: scope.subtype ?? "all", group_reads: scope.group_reads === false ? "false" : "true" });
@@ -51,7 +56,7 @@ function show(responses: Record<string, unknown>, initial = "/activity", navigat
   const fetch = mockFetch(responses);
   return { ...render(<MemoryRouter initialEntries={[initial]}>{navigation && <Navigation />}<Routes><Route path="/activity" element={<ActivityScreen />} /><Route path="/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>), fetch };
 }
-beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); activityPreferences.role = "editor"; });
 
 describe("ActivityScreen", () => {
   it("renders three lanes and gives the pending title and footer the same exact review link", async () => {
@@ -252,6 +257,19 @@ describe("ActivityScreen", () => {
     expect(screen.getByRole("link", { name: "View all advisory activity" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View all history activity" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Create a new page" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { role: "editor", visible: true },
+    { role: "viewer", visible: false },
+  ])("shows empty MCP Chats actions only for editors ($role)", async ({ role, visible }) => {
+    activityPreferences.role = role;
+    show({ [feedUrl({ kind: "mcp" })]: data([]) }, "/activity?kind=mcp");
+    await screen.findByRole("heading", { name: "Activity" });
+    expect(screen.getAllByRole("link", { name: "Open MCP setup" })).toHaveLength(3);
+    const links = screen.queryAllByRole("link", { name: "Open Chats" });
+    expect(links).toHaveLength(visible ? 3 : 0);
+    for (const link of links) expect(link).toHaveAttribute("href", "/chats");
   });
 
   it("distinguishes a grouped entry from its four represented original events and resets on grouping change", async () => {

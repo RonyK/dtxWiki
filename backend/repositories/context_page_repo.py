@@ -21,7 +21,10 @@ from backend.utils.block_identity import (
     block_map_for_version,
     compute_block_map_with_ids,
 )
-from backend.utils.page_frontmatter import derive_nav_description
+from backend.utils.page_frontmatter import (
+    derive_nav_description,
+    validate_page_markdown_input,
+)
 from backend.utils.uuid import parse_uuid_or_none
 
 if TYPE_CHECKING:
@@ -359,6 +362,7 @@ def insert_version(
     # The lexical half of the media contract must run before row locks, version
     # allocation, or any PageVersion/Usage DML. SyncVersionUsage repeats the
     # pure validation while atomically authorizing and replacing occurrences.
+    validate_page_markdown_input(body_md)
     validate_markdown_media_policy(body_md)
     # Every Context-media writer uses one lock order: Workspace media intent,
     # then Page, then association/Usage.  Looking up the immutable Workspace id

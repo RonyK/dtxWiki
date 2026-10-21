@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { isValidElement, Suspense, type ReactNode } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { matchRoutes, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ import {
   appRoutes,
   isAuthBootstrapPath,
   RequireAuth,
+  RequireAskEnabled,
   RequireEditor,
   RootRouteError,
 } from "./App";
@@ -441,6 +442,22 @@ describe("appRoutes role gating", () => {
   it("does not register the /context-map alias (no map feature exists)", () => {
     expect(findRoute(appRoutes, "/context-map")).toBeNull();
   });
+
+  it.each(["/ask", "/ask?new=1", "/ask/"])(
+    "registers Ask URL %s behind its experiment gate",
+    (path) => {
+      const matches = matchRoutes(appRoutes, path);
+      const route = matches?.at(-1)?.route;
+      expect(route?.path).toBe("/ask");
+      const element = route?.element;
+      if (!isValidElement<{ children: ReactNode }>(element)) {
+        throw new Error("Ask route has no element");
+      }
+      expect(element.type).toBe(RequireAuth);
+      const child = element.props.children;
+      expect(isValidElement(child) && child.type === RequireAskEnabled).toBe(true);
+    },
+  );
 
   it("keeps the one-time password reset route public", () => {
     const route = findRoute(appRoutes, "/reset-password");

@@ -9,11 +9,13 @@ from alembic.config import Config
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.services.ops.input_maintenance import audit_inputs, repair_input
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 TREE_RAIL = "c7a4e91b2d60"
 RETENTION = "d148b9746ff5"
 MERGED = "49d9c0776c5a"
+INPUTS = "19db79d3e622"
 CREATED_AT = datetime(2026, 10, 20, 12, tzinfo=UTC)
 RETENTION_SENTINEL = {"orphan_retention_hours": 17}
 
@@ -100,12 +102,16 @@ def test_upgrade_from_either_parent_preserves_existing_feature_data(
                     )
                 )
 
+        assert audit_inputs(url) == []
+        repair_input(url, "workspace", workspace_id, "title", "Preserved workspace")
+        command.upgrade(config, MERGED)
+        assert audit_inputs(url) == []
         command.upgrade(config, "head")
 
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == [MERGED]
+            ).scalars().all() == [INPUTS]
             inspector = inspect(connection)
             for table in ("context_page", "agent_page", "library_item"):
                 assert "content_changed_at" in {

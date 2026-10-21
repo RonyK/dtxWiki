@@ -155,7 +155,9 @@ def _managed_worker_pid(runtime: _Runtime) -> int:
     pytest.fail(f"CLI did not start its managed worker:\n{runtime.logs()}")
 
 
-def _upload_and_wait_for_conversion(runtime: _Runtime) -> tuple[str, str]:
+def _upload_and_wait_for_conversion(
+    runtime: _Runtime, selected_db: Path
+) -> tuple[str, str]:
     signup = runtime.client.post(
         "/api/v1/auth/signup",
         json={"email": "managed-runtime@example.com", "password": "runtime-password"},
@@ -177,6 +179,7 @@ def _upload_and_wait_for_conversion(runtime: _Runtime) -> tuple[str, str]:
     detail_url = f"{collection_url}/{uploaded_data['id']}"
     deadline = time.monotonic() + _COMPLETION_TIMEOUT
     detail = uploaded_data
+    conversion_statuses = []
     while time.monotonic() < deadline:
         runtime.assert_running()
         response = runtime.client.get(detail_url)
@@ -191,20 +194,42 @@ def _upload_and_wait_for_conversion(runtime: _Runtime) -> tuple[str, str]:
         if current["processing_status"] == "ready":
             assert detail["current_ready_version"]["id"] == version_id
             assert current["selected_conversion_attempt_id"]
-            markdown = [
-                artifact
-                for artifact in detail["artifacts"]
-                if artifact["stage"] == "conversion" and artifact["role"] == "markdown"
+            # Domain readiness commits in phase 1; the queue's completed
+            # marker commits separately in phase 2. Wait for both lifecycle
+            # events within the same conversion deadline before stopping it.
+            with sqlite3.connect(selected_db) as connection:
+                conversion_jobs = connection.execute(
+                    "SELECT status, target_ref FROM job "
+                    "WHERE workspace_id = ? AND job_type = 'library_conversion'",
+                    (workspace_id.replace("-", ""),),
+                ).fetchall()
+            conversion_statuses = [
+                status
+                for status, target_ref in conversion_jobs
+                if json.loads(target_ref).get("library_item_version_id") == version_id
             ]
-            assert len(markdown) == 1, detail
-            converted = runtime.client.get(markdown[0]["content_url"])
-            assert converted.status_code == 200, converted.text
-            assert (
-                b"This exact document was converted by the worker." in converted.content
-            )
-            return workspace_id, version_id
+            assert len(conversion_statuses) == 1, conversion_jobs
+            assert conversion_statuses[0] in {"running", "completed"}, conversion_jobs
+            if conversion_statuses == ["completed"]:
+                markdown = [
+                    artifact
+                    for artifact in detail["artifacts"]
+                    if artifact["stage"] == "conversion"
+                    and artifact["role"] == "markdown"
+                ]
+                assert len(markdown) == 1, detail
+                converted = runtime.client.get(markdown[0]["content_url"])
+                assert converted.status_code == 200, converted.text
+                assert (
+                    b"This exact document was converted by the worker."
+                    in converted.content
+                )
+                return workspace_id, version_id
         time.sleep(0.05)
-    pytest.fail(f"Uploaded document never became ready: {detail}\n{runtime.logs()}")
+    pytest.fail(
+        f"Uploaded conversion did not finish: {detail}; "
+        f"job statuses: {conversion_statuses}\n{runtime.logs()}"
+    )
 
 
 @pytest.mark.parametrize("command", [(), ("serve",)], ids=["dtxwiki", "dtxwiki-serve"])
@@ -219,7 +244,7 @@ def test_one_cli_converts_upload_with_explicit_database_and_cleans_up_on_sigterm
     ):
         _await_api(runtime)
         worker_pid = _managed_worker_pid(runtime)
-        workspace_id, version_id = _upload_and_wait_for_conversion(runtime)
+        workspace_id, version_id = _upload_and_wait_for_conversion(runtime, selected_db)
 
         with sqlite3.connect(selected_db) as connection:
             jobs = connection.execute(

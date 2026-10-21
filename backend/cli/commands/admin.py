@@ -27,6 +27,7 @@ from backend.services.api_token_service import (
     ApiTokenServiceError,
     InvalidApiTokenRequestError,
     WorkspaceGrantRequest,
+    normalize_token_name,
 )
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.mail_delivery import EmailDeliveryService, MailDeliveryError
@@ -39,10 +40,11 @@ from backend.services.password_recovery_service import (
     PasswordRecoveryService,
 )
 from backend.services.session_service import (
-    DuplicateEmailError,
     InvalidCredentialsError,
-    PasswordPolicyError,
+    SessionServiceError,
+    normalize_display_name,
     normalize_email,
+    validate_password,
 )
 from backend.services.user_admin_service import UserAdminService
 from backend.services.workspace_membership_service import (
@@ -86,14 +88,17 @@ def users_add(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Create a local user account and its Personal workspace."""
-    service = make_user_admin_service(db)
     try:
+        email = _cli_normalize_email(email)
+        validate_password(password)
+        normalize_display_name(display_name, email)
+        service = make_user_admin_service(db)
         user = service.add_user(
             email=email,
             password=password,
             display_name=display_name,
         )
-    except (DuplicateEmailError, InvalidCredentialsError, PasswordPolicyError) as exc:
+    except SessionServiceError as exc:
         typer.echo(f"user add failed: {exc}", err=True)
         raise typer.Exit(2) from exc
     payload = user_payload(user)
@@ -125,14 +130,16 @@ def users_reset_password(
         "choose the password. Use issue-password-reset when available.",
         err=True,
     )
-    service = make_user_admin_service(db)
     try:
+        email = _cli_normalize_email(email)
+        validate_password(password)
+        service = make_user_admin_service(db)
         user = service.reset_password(
             email=email,
             password=password,
             actor_id=cli_operator_actor_id(),
         )
-    except (InvalidCredentialsError, PasswordPolicyError) as exc:
+    except SessionServiceError as exc:
         typer.echo(f"password reset failed: {exc}", err=True)
         raise typer.Exit(2) from exc
     payload = user_payload(user)
@@ -163,6 +170,7 @@ def users_issue_password_reset(
 ) -> None:
     """Issue a one-time reset link without choosing the user's password."""
 
+    email = _cli_normalize_email(email)
     try:
         settings, session_factory = password_recovery_context(db)
         effective_delivery = resolve_cli_password_reset_delivery(
@@ -240,9 +248,7 @@ def users_issue_password_reset(
             raise typer.Exit(2) from exc
         typer.echo("Password reset email sent; no link was printed.")
     else:
-        typer.echo(
-            "One-time password reset link (copy now; it cannot be retrieved):"
-        )
+        typer.echo("One-time password reset link (copy now; it cannot be retrieved):")
         typer.echo(issued.reset_url)
     typer.echo(f"expires_at: {issued.expires_at.isoformat()}")
     typer.echo("browser_sessions: revoke on completion")
@@ -278,13 +284,18 @@ def users_issue_pat(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Issue a personal API token directly from the local database."""
+    normalized_email = _cli_normalize_email(user)
+    try:
+        name = normalize_token_name(name)
+        scopes = parse_pat_scopes(scope)
+        parsed_expires_at = parse_pat_expires_at(expires_at)
+    except (ApiTokenServiceError, ValueError) as exc:
+        typer.echo(f"issue-pat failed: {exc}", err=True)
+        raise typer.Exit(2) from exc
     settings = Settings(database_url=db) if db else Settings()
     bootstrap_app(settings)
     session_factory = make_session_factory_from_settings(settings)
     try:
-        normalized_email = normalize_email(user)
-        scopes = parse_pat_scopes(scope)
-        parsed_expires_at = parse_pat_expires_at(expires_at)
         with session_factory() as session:
             model = session.scalar(select(User).where(User.email == normalized_email))
             if model is None:
@@ -358,6 +369,13 @@ def parse_pat_expires_at(value: str | None) -> datetime | None:
     return parsed
 
 
+def _cli_normalize_email(value: str) -> str:
+    try:
+        return normalize_email(value)
+    except SessionServiceError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
 def make_user_admin_service(db: str | None) -> UserAdminService:
     settings = Settings(database_url=db) if db else Settings()
     bootstrap_app(settings)
@@ -418,15 +436,14 @@ def resolve_cli_password_reset_delivery(
     if requested == PasswordResetDelivery.email:
         if not settings.mail_configured:
             raise PasswordRecoveryConfigurationError(
-                "email delivery is not configured; no reset link was issued "
-                "or printed"
+                "email delivery is not configured; no reset link was issued or printed"
             )
         return PasswordResetDelivery.email
     if requested == PasswordResetDelivery.link:
         return PasswordResetDelivery.link
     if not settings.mail_configured:
         return PasswordResetDelivery.link
-    normalized = normalize_email(email)
+    normalized = _cli_normalize_email(email)
     with session_factory() as session:
         user = session.scalar(select(User).where(User.email == normalized))
         if (
@@ -451,8 +468,7 @@ def parse_duration_seconds(value: str) -> int:
     if not MIN_PASSWORD_RESET_TTL_SECONDS <= seconds <= MAX_PASSWORD_RESET_TTL_SECONDS:
         default_minutes = DEFAULT_PASSWORD_RESET_TTL_SECONDS // 60
         raise ValueError(
-            "duration must be between 5m and 24h "
-            f"(the default is {default_minutes}m)"
+            f"duration must be between 5m and 24h (the default is {default_minutes}m)"
         )
     return seconds
 
@@ -472,7 +488,7 @@ def server_admin_grant(
     factory = _admin_session_factory(db)
     with factory.begin() as session:
         user = session.scalar(
-            select(User).where(User.email == normalize_email(email))
+            select(User).where(User.email == _cli_normalize_email(email))
         )
         if user is None:
             typer.echo(
@@ -494,7 +510,7 @@ def server_admin_revoke(
     factory = _admin_session_factory(db)
     with factory.begin() as session:
         user = session.scalar(
-            select(User).where(User.email == normalize_email(email))
+            select(User).where(User.email == _cli_normalize_email(email))
         )
         if user is None:
             typer.echo(f"admin revoke failed: no user with email {email!r}", err=True)
@@ -567,6 +583,7 @@ def workspace_members_add(
     """Add or update a user's workspace membership."""
     if role not in USER_ROLES:
         raise typer.BadParameter("--role must be one of: owner, editor, viewer")
+    email = _cli_normalize_email(email)
     service = make_workspace_membership_service(db)
     try:
         member = service.add_member(
@@ -595,6 +612,7 @@ def workspace_members_remove(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Remove a user's workspace membership."""
+    email = _cli_normalize_email(email)
     service = make_workspace_membership_service(db)
     try:
         removed = service.remove_member(workspace_slug=workspace, email=email)

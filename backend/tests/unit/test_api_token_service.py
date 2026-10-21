@@ -3,22 +3,23 @@ import shutil
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from argon2 import PasswordHasher, Type
-from sqlalchemy import select
+from sqlalchemy import event, func, select
 from sqlalchemy.dialects import postgresql
 
 from backend.catalog.mcp_apps import (
     CatalogRepository,
     get_mcp_app_catalog_repository,
 )
+from backend.domain.input_policy import InputPolicyError
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
 from backend.models.user import User
-from backend.models.workspace import WorkspaceMembership
+from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.auth import _actor_from_user
 from backend.policy.rbac import grant_workspace_membership
 from backend.policy.trust_boundaries import actor_with_target_workspace_scope
@@ -35,6 +36,7 @@ from backend.services.api_token_service import (
 )
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.session_service import SessionService, SessionTokenCodec
+from backend.services.workspace_read import WorkspaceReadService
 
 
 def fast_hasher() -> CredentialHasher:
@@ -66,7 +68,9 @@ def signed_up_user(session_factory, credential_hasher):
         # signup-disabled scenario.
         signup_enabled=True,
     )
-    return service.signup(email="token-owner@example.com", password="owner-pass").user
+    return service.signup(
+        email="token-owner@example.com", password="owner-password-123"
+    ).user
 
 
 @pytest.fixture
@@ -105,6 +109,173 @@ def _grant(
     workspace_id, scopes: list[str] | None = None
 ) -> list[WorkspaceGrantRequest]:
     return [WorkspaceGrantRequest(workspace_id=workspace_id, scopes=scopes)]
+
+
+def test_existing_257_grants_preserve_read_auth_rename_replace_and_revoke(
+    session_factory,
+    signed_up_user,
+    signed_up_workspace_id,
+    token_service,
+):
+    issued = token_service.create_token(
+        user_id=signed_up_user.user_id,
+        workspace_grants=_grant(signed_up_workspace_id),
+        name="Legacy large grants",
+        scopes=["mcp:read"],
+    )
+    revoke_large = token_service.create_token(
+        user_id=signed_up_user.user_id,
+        workspace_grants=_grant(signed_up_workspace_id),
+        name="Legacy large revoke",
+        scopes=["mcp:read"],
+    )
+    additional_ids = [uuid4() for _ in range(256)]
+    all_ids = [signed_up_workspace_id, *additional_ids]
+    with session_factory.begin() as session:
+        # Simulate durable rows written before request-count limits existed.
+        # Core inserts must remain legal: the cap is never a stored-grant cap.
+        session.execute(
+            Workspace.__table__.insert(),
+            [
+                {
+                    "id": workspace_id,
+                    "slug": f"legacy-pat-workspace-{index}",
+                    "title": f"Legacy PAT Workspace {index}",
+                    "name": f"Legacy PAT Workspace {index}",
+                }
+                for index, workspace_id in enumerate(additional_ids)
+            ],
+        )
+        session.execute(
+            WorkspaceMembership.__table__.insert(),
+            [
+                {
+                    "user_id": signed_up_user.user_id,
+                    "workspace_id": workspace_id,
+                    "role": "owner",
+                }
+                for workspace_id in additional_ids
+            ],
+        )
+        session.execute(
+            ApiTokenWorkspace.__table__.insert(),
+            [
+                {
+                    "token_id": token_id,
+                    "workspace_id": workspace_id,
+                    "desired_scopes": ["mcp:read"],
+                }
+                for token_id in (issued.api_token.id, revoke_large.api_token.id)
+                for workspace_id in additional_ids
+            ],
+        )
+
+    def grant_ids(record):
+        return {grant.workspace_id for grant in record.workspaces}
+
+    records = token_service.list_tokens(signed_up_user.user_id)
+    assert len(records) == 2
+    assert all(grant_ids(record) == set(all_ids) for record in records)
+    page = token_service.list_user_tokens(user_id=signed_up_user.user_id)
+    assert len(page.data) == 2
+    assert all(grant_ids(item.api_token) == set(all_ids) for item in page.data)
+    primary = token_service.authenticate_token(issued.plain_token)
+    assert set(primary.workspace_ids) == set(all_ids)
+    bare_actor = _actor_from_user(
+        user=primary.user,
+        workspace_id=None,
+        role=None,
+        token_kind="api_token",
+        token_id=primary.token_id,
+        scopes=primary.scopes,
+        token_workspace_ids=primary.workspace_ids,
+    )
+    with session_factory() as session:
+        available = WorkspaceReadService().list_workspaces(session, actor=bare_actor)
+    assert {workspace.id for workspace in available.workspaces} == set(all_ids)
+    assert available.other_membership_count == 0
+
+    revoked_large = token_service.revoke_token(
+        user_id=signed_up_user.user_id, token_id=revoke_large.api_token.id
+    )
+    assert revoked_large.revoked_at is not None
+    assert grant_ids(revoked_large) == set(all_ids)
+    with pytest.raises(InvalidApiTokenError, match="revoked"):
+        token_service.authenticate_token(revoke_large.plain_token)
+
+    renamed = token_service.update_token(
+        user_id=signed_up_user.user_id,
+        token_id=issued.api_token.id,
+        name="Renamed legacy large grants",
+    )
+    assert renamed.name == "Renamed legacy large grants"
+    assert grant_ids(renamed) == set(all_ids)
+
+    def stored_state():
+        with session_factory() as session:
+            model = session.get(ApiToken, issued.api_token.id)
+            grants = session.execute(
+                select(
+                    ApiTokenWorkspace.workspace_id,
+                    ApiTokenWorkspace.desired_scopes,
+                    ApiTokenWorkspace.revision,
+                    ApiTokenWorkspace.sync_state,
+                    ApiTokenWorkspace.removed_at,
+                )
+                .where(ApiTokenWorkspace.token_id == issued.api_token.id)
+                .order_by(ApiTokenWorkspace.workspace_id)
+            ).all()
+            audit_count = session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.target_id == issued.api_token.id)
+            )
+            return model.name, grants, audit_count
+
+    before = stored_state()
+    statements = []
+
+    def capture_statement(_connection, _cursor, statement, *_args):
+        statements.append(statement)
+
+    engine = session_factory.kw["bind"]
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    # Count the raw submitted list before duplicate/membership checks.
+    duplicated = [WorkspaceGrantRequest(workspace_id=signed_up_workspace_id)] * 257
+    try:
+        with pytest.raises(InputPolicyError, match="at most 256"):
+            token_service.update_token(
+                user_id=signed_up_user.user_id,
+                token_id=issued.api_token.id,
+                name="Must not be stored",
+                workspace_grants=duplicated,
+            )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+    assert statements == []
+    assert stored_state() == before
+
+    remaining_ids = set(all_ids[:-1])
+    reduced = token_service.update_token(
+        user_id=signed_up_user.user_id,
+        token_id=issued.api_token.id,
+        workspace_grants=[
+            WorkspaceGrantRequest(workspace_id=value) for value in all_ids[:-1]
+        ],
+    )
+    assert grant_ids(reduced) == remaining_ids
+    assert (
+        set(token_service.authenticate_token(issued.plain_token).workspace_ids)
+        == remaining_ids
+    )
+    with session_factory() as session:
+        rows = session.scalars(
+            select(ApiTokenWorkspace).where(
+                ApiTokenWorkspace.token_id == issued.api_token.id
+            )
+        ).all()
+    assert len(rows) == 257
+    assert sum(row.removed_at is None for row in rows) == 256
 
 
 def test_create_token_returns_plaintext_once_and_stores_only_hashes(
@@ -1018,12 +1189,18 @@ def test_legacy_revoked_delete_is_owner_only_and_writes_secret_free_audit(
         user_id=signed_up_user.user_id,
         token_id=issued.api_token.id,
     )
-    other = SessionService(
-        session_factory=session_factory,
-        credential_hasher=token_service.credential_hasher,
-        token_codec=SessionTokenCodec(secret="test-session-secret"),
-        signup_enabled=True,
-    ).signup(email="other-legacy-key-member@example.com", password="owner-pass").user
+    other = (
+        SessionService(
+            session_factory=session_factory,
+            credential_hasher=token_service.credential_hasher,
+            token_codec=SessionTokenCodec(secret="test-session-secret"),
+            signup_enabled=True,
+        )
+        .signup(
+            email="other-legacy-key-member@example.com", password="owner-password-123"
+        )
+        .user
+    )
     with session_factory.begin() as session:
         grant_workspace_membership(
             session,

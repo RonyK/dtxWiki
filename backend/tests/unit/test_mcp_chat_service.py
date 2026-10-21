@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -36,6 +37,70 @@ from backend.services.mcp_chat_service import (
 )
 from backend.services.mcp_trace_capture import derive_artifact_links
 from backend.services.read_errors import ReadNotFoundError
+
+
+def test_chat_auto_title_fits_multicodepoint_subject_without_trailing_space(
+    session_factory,
+):
+    service = McpChatService()
+    with session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        client = session.scalar(
+            select(MCPClient).where(MCPClient.workspace_id == workspace.id)
+        )
+        subject = " ".join(["न्ते"] * 50)
+        page = ContextPage(
+            workspace_id=workspace.id,
+            slug="multicodepoint-subject",
+            title=subject,
+            page_type="overview",
+            lifecycle_status="published",
+        )
+        session.add(page)
+        session.flush()
+        version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=1,
+            body_md="Body",
+            content_hash="published-subject",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=str(uuid4()),
+            version_status="published_snapshot",
+        )
+        session.add(version)
+        session.flush()
+        page.current_version_id = page.current_published_version_id = version.id
+        call = _tool_call(
+            client_id=client.id,
+            workspace_id=workspace.id,
+            mcp_session_id=uuid4(),
+            tool_name="cite",
+            request_id=uuid4(),
+        )
+        session.add(call)
+        session.flush()
+        chat = service.upsert_session_from_tool_call(
+            session=session,
+            workspace_id=workspace.id,
+            client_id=client.id,
+            mcp_session_id=str(call.mcp_session_id),
+            tool_call=call,
+        )
+        service.link_artifact(
+            session=session,
+            chat_session=chat,
+            tool_call=call,
+            resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+            resource_id=page.id,
+            verb=McpChatArtifactVerb.CREATED,
+        )
+        session.flush()
+        assert 1 <= len(chat.title) <= 120
+        assert chat.title == chat.title.strip()
+        assert subject.startswith(chat.title)
+        assert chat.title.startswith("न्ते न्ते")
 
 
 def test_mcp_chat_service_upserts_and_rolls_up_artifact_links(session_factory):
@@ -4130,8 +4195,22 @@ def test_chat_search_paginates_after_actor_visible_projection(session_factory):
     assert raw_page.next_cursor == "1"
 
 
-def test_actor_search_has_a_strict_query_and_latency_budget_for_1000_chats(
+@pytest.fixture
+def benchmark_lane(request):
+    """Run wall-clock budgets serially through the explicit benchmark lane."""
+    if os.environ.get("DTXWIKI_TEST_BENCHMARKS") != "1":
+        pytest.skip("wall-clock budget; run `make test-backend-benchmarks`")
+    if hasattr(request.config, "workerinput"):
+        pytest.fail(
+            "DTXWIKI_TEST_BENCHMARKS=1 under pytest-xdist: run the benchmark "
+            "lane without -n, as `make test-backend-benchmarks` does",
+            pytrace=False,
+        )
+
+
+def test_actor_search_query_and_latency_benchmark_for_1000_chats(
     session_factory,
+    benchmark_lane,
 ):
     service = McpChatService()
     base = datetime(2026, 8, 5, 7, 0, tzinfo=UTC)

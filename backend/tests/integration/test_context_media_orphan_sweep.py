@@ -314,7 +314,12 @@ def test_page_bound_orphan_with_a_blank_page_title_resolves_page_title_to_none(
     actor = ActorIdentity("human", str(uuid4()))
     with session_factory.begin() as session:
         workspace_id = session.scalar(select(Workspace.id).limit(1))
+        # Characterize an existing pre-policy row: new writes reject blanks,
+        # while the read projection must still handle an unmigrated database.
+        session.connection().exec_driver_sql("PRAGMA ignore_check_constraints=ON")
         page, version = _seed_page(session, workspace_id, actor, title="")
+        session.flush()
+        session.connection().exec_driver_sql("PRAGMA ignore_check_constraints=OFF")
         blob, inspection_id = _seed_shared_image(session, workspace_id)
         repository = SqlAlchemyContextMediaRepository(session)
         asset = RegisterMediaAsset().execute(

@@ -2,7 +2,7 @@ import { expect, test } from "./fixtures";
 
 import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
 
-test("promotes a ask answer through review and activity", async ({ page }, testInfo) => {
+test("reviews a retained Ask API proposal and records activity", async ({ page }, testInfo) => {
   await authenticatePage(page, testInfo, "cross-screen");
   const workspace = await currentWorkspace(page.request);
   const evidenceResponse = await page.request.post(
@@ -26,49 +26,71 @@ test("promotes a ask answer through review and activity", async ({ page }, testI
     {
       data: {
         expected_content_hash: evidence.content_hash,
-        reason: "Seed browser-visible Ask evidence.",
+        reason: "Seed evidence for the retained Ask API workflow.",
       },
     },
   );
   expect(publishEvidenceResponse.ok(), await publishEvidenceResponse.text())
     .toBeTruthy();
 
-  await page.goto("/ask");
-
-  const composer = page.getByRole("textbox", { name: "Message" });
-  await expect(composer).toBeVisible();
-  await composer.fill("Capture the review workflow evidence");
-  await page.getByRole("button", { name: "Send" }).click();
-
-  await expect(page.getByText("Turn 1")).toBeVisible();
-  await page.getByRole("button", { name: "Save answer" }).click();
-
-  await expect(page.getByRole("heading", { name: "Save answer" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "Require review" }).check();
-  await page.getByRole("button", { name: "Propose placement" }).click();
-
-  await expect(
-    page.getByRole("button", { name: "Accept placement" }),
-  ).toBeEnabled();
+  // Ask's browser route is unavailable. Seed through its retained API so this
+  // still exercises the real proposal, Review decision, and Activity workflow.
+  const sessionResponse = await page.request.post(
+    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/ask/sessions`,
+    { data: {} },
+  );
+  expect(sessionResponse.ok(), await sessionResponse.text()).toBeTruthy();
+  const sessionId = (await sessionResponse.json()).data.id as string;
+  const turnResponse = await page.request.post(
+    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/ask/sessions/${sessionId}/turns`,
+    { data: { user_message: "Capture the review workflow evidence" } },
+  );
+  expect(turnResponse.ok(), await turnResponse.text()).toBeTruthy();
+  const turn = (await turnResponse.json()).data as {
+    id: string;
+    cited_context_page_ids: string[];
+  };
+  expect(turn.cited_context_page_ids).toContain(evidence.id);
+  const proposalResponse = await page.request.post(
+    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/ask/turns/${turn.id}/promote`,
+    {
+      data: {
+        save_mode: "create_page",
+        page_type: "guide",
+        title: "Cross-screen workflow answer",
+      },
+    },
+  );
+  expect(proposalResponse.ok(), await proposalResponse.text()).toBeTruthy();
+  const proposal = (await proposalResponse.json()).data as {
+    id: string;
+    proposed_parent_tree_node_id: string;
+    proposed_title: string;
+  };
   // A retried Personal workspace can hold a pending request left by the prior
   // attempt, so scope the review assertions to the proposal this run accepts
   // instead of asserting a globally empty rail.
-  const acceptResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      /\/context\/ingress-proposals\/[^/]+\/accept$/.test(response.url()),
+  const acceptResponse = await page.request.post(
+    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/ingress-proposals/${proposal.id}/accept`,
+    {
+      data: {
+        final_save_mode: "create_page",
+        final_parent_node_id: proposal.proposed_parent_tree_node_id,
+        final_title: proposal.proposed_title,
+        final_page_type: "guide",
+        review_required: true,
+      },
+    },
   );
-  await page.getByRole("button", { name: "Accept placement" }).click();
-  const acceptResponse = await acceptResponsePromise;
-  expect(acceptResponse.ok()).toBeTruthy();
-  const proposalId = acceptResponse
-    .url()
-    .match(/\/context\/ingress-proposals\/([^/]+)\/accept$/)?.[1];
-  expect(proposalId).toBeTruthy();
+  expect(acceptResponse.ok(), await acceptResponse.text()).toBeTruthy();
+  const accepted = (await acceptResponse.json()).data as {
+    proposal_id: string;
+    review_item_id: string | null;
+  };
+  expect(accepted.proposal_id).toBe(proposal.id);
+  expect(accepted.review_item_id).toBeTruthy();
 
-  await expect(page.getByText("Saved for review")).toBeVisible();
-
-  await page.goto("/review");
+  await page.goto(`/review?review=${encodeURIComponent(accepted.review_item_id!)}`);
 
   await expect(
     page.getByRole("complementary", { name: "Review queue" }),
@@ -76,17 +98,14 @@ test("promotes a ask answer through review and activity", async ({ page }, testI
   const reviewRequests = page.getByRole("button", {
     name: /context ingress accept/i,
   });
-  // The rail sorts pending requests newest-first, so the request created
-  // moments ago is the first row; the evidence reason pins it to this
-  // run's proposal before approving.
-  const reviewRequest = reviewRequests.first();
-  await expect(reviewRequest).toBeVisible();
-  const pendingBefore = await reviewRequests.count();
-  await reviewRequest.click();
+  // Select this run's exact review through its permalink; older pending
+  // requests must not change which proposal the browser approves.
   await expect(page.getByText("Change evidence")).toBeVisible();
   await expect(
-    page.getByText(`accept context ingress proposal ${proposalId}`),
+    page.getByText(`accept context ingress proposal ${proposal.id}`),
   ).toBeVisible();
+  const pendingBefore = await reviewRequests.count();
+  expect(pendingBefore).toBeGreaterThan(0);
   await page
     .getByLabel("Decision reason")
     .fill("Cross-screen workflow reviewed");

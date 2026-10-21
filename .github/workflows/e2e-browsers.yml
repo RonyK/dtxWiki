@@ -31,6 +31,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Run every spec on every engine
+        id: playwright
         run: npm run test:e2e
       # Same carrier, same 14-day retention as the standard profile in
       # .github/workflows/ci.yml -- see the long note on that job's copy of
@@ -42,7 +43,7 @@ jobs:
             bash scripts/redact_evidence.sh --dir playwright-report
           fi
       - name: Upload the report
-        if: always()
+        if: always() && (steps.playwright.outcome == 'success' || hashFiles('playwright-report/index.html') != '')
         uses: actions/upload-artifact@v4
         with:
           name: e2e-exhaustive-${{ github.run_id }}

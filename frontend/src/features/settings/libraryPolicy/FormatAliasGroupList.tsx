@@ -1,3 +1,4 @@
+import { codePointLength, inputTextError, textInputLimit } from "../../../shared/lib/inputPolicy";
 import { X } from "lucide-react";
 import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -148,8 +149,8 @@ function FormatAliasGroupCard({
     if (!customFormat) return;
     const label = normalizeCustomFormatName(value);
     if (
-      !label || !validCustomFormatName(label) ||
-      label.length > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH
+      !label || Boolean(inputTextError(value, Number.MAX_SAFE_INTEGER)) || !validCustomFormatName(label) ||
+      codePointLength(label) > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH
     ) {
       setError(t("policy.libraryUpload.families.customFormat.errors.invalidName", {
         defaultValue: "Use a name without control characters.",
@@ -314,7 +315,7 @@ function FormatAliasGroupCard({
               })}
               autoFocus
               disabled={busy}
-              maxLength={MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH}
+              {...textInputLimit(MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH, true, (value) => value.trim().replace(/\s+/g, " "))}
               onBlur={(event) => commitName(event.currentTarget.value)}
               onChange={(event) => setEditingName(event.target.value)}
               onKeyDown={handleNameKeyDown}

@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import and_, case, func, not_, or_, select, tuple_
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import normalize_short_text, validate_text
 from backend.models.base import utc_now
 from backend.models.workspace import (
     NEW_LIBRARY_MAX_UPLOAD_BYTES,
@@ -1108,7 +1109,11 @@ class SettingsService:
                 )
             workspace.ask_retrieval_mode = normalized
             return
-        text = _coerce_string(value).strip()
+        text = (
+            normalize_short_text(value, field=key, max_length=128)
+            if key == "title"
+            else validate_text(_coerce_string(value).strip(), field=key, max_length=512)
+        )
         if not text:
             raise SettingsPolicyUpdateRejected(f"{key} cannot be empty")
         setattr(workspace, key, text)
@@ -1497,10 +1502,12 @@ def _coerce_policy_value(key: str, value):
 
 
 def _normalize_workspace_slug(value) -> str:
+    validate_text(_coerce_string(value), field="slug", max_length=80, min_length=1)
     slug = re.sub(r"[^a-z0-9-]+", "-", _coerce_string(value).lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)[:80].strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
     if not slug:
         raise SettingsPolicyUpdateRejected("workspace slug is required")
+    validate_text(slug, field="slug", max_length=80, min_length=1)
     return slug
 
 

@@ -116,19 +116,23 @@ def test_signup_creates_user_and_session_without_plaintext_password(
 
 
 def test_signup_rejects_duplicate_email(session_service):
-    session_service.signup(email="same@example.com", password="first-pass")
+    session_service.signup(email="same@example.com", password="first-password-123")
 
     with pytest.raises(DuplicateEmailError):
-        session_service.signup(email=" SAME@example.com ", password="second-pass")
+        session_service.signup(
+            email=" SAME@example.com ", password="second-password-123"
+        )
 
 
 def test_solo_local_signup_is_personal_only_for_every_user(
     session_factory,
     session_service,
 ):
-    first = session_service.signup(email="solo-one@example.com", password="solo-pass-1")
+    first = session_service.signup(
+        email="solo-one@example.com", password="solo-password-1"
+    )
     second = session_service.signup(
-        email="solo-two@example.com", password="solo-pass-2"
+        email="solo-two@example.com", password="solo-password-2"
     )
 
     assert list(membership_roles(session_factory, first.user.user_id).values()) == [
@@ -148,10 +152,10 @@ def test_solo_remote_signup_is_personal_owner_only(
     remote_service = replace(session_service, app_mode="solo_remote")
 
     first = remote_service.signup(
-        email="remote-one@example.com", password="remote-pass-1"
+        email="remote-one@example.com", password="remote-password-1"
     )
     second = remote_service.signup(
-        email="remote-two@example.com", password="remote-pass-2"
+        email="remote-two@example.com", password="remote-password-2"
     )
 
     assert list(membership_roles(session_factory, first.user.user_id).values()) == [
@@ -165,8 +169,12 @@ def test_solo_remote_signup_is_personal_owner_only(
 def test_team_mode_signup_is_personal_owner_only(session_factory, session_service):
     team_service = replace(session_service, app_mode="team")
 
-    first = team_service.signup(email="team-one@example.com", password="team-pass-1")
-    second = team_service.signup(email="team-two@example.com", password="team-pass-2")
+    first = team_service.signup(
+        email="team-one@example.com", password="team-password-1"
+    )
+    second = team_service.signup(
+        email="team-two@example.com", password="team-password-2"
+    )
 
     assert list(membership_roles(session_factory, first.user.user_id).values()) == [
         "owner"
@@ -180,7 +188,9 @@ def test_signup_disabled_rejects_new_signup(session_factory, session_service):
     disabled_service = replace(session_service, signup_enabled=False)
 
     with pytest.raises(SignupDisabledError):
-        disabled_service.signup(email="blocked@example.com", password="blocked-pass")
+        disabled_service.signup(
+            email="blocked@example.com", password="blocked-password-123"
+        )
 
     with session_factory() as session:
         assert session.scalar(
@@ -230,10 +240,12 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
 
 
 def test_login_rejects_unknown_or_wrong_password(session_service):
-    session_service.signup(email="login@example.com", password="right-pass")
+    session_service.signup(email="login@example.com", password="right-password-123")
 
     with pytest.raises(InvalidCredentialsError):
-        session_service.login(email="missing@example.com", password="right-pass")
+        session_service.login(
+            email="missing@example.com", password="right-password-123"
+        )
     with pytest.raises(InvalidCredentialsError):
         session_service.login(email="login@example.com", password="wrong-pass")
 
@@ -241,19 +253,19 @@ def test_login_rejects_unknown_or_wrong_password(session_service):
 def test_login_and_password_change_rotate_credentials(session_service):
     signed_up = session_service.signup(
         email="change@example.com",
-        password="old-password",
+        password="old-password-123",
     )
     logged_in = session_service.login(
         email="CHANGE@example.com",
-        password="old-password",
+        password="old-password-123",
     )
 
     assert logged_in.user == signed_up.user
 
     changed = session_service.change_password(
         user_id=signed_up.user.user_id,
-        current_password="old-password",
-        new_password="new-password",
+        current_password="old-password-123",
+        new_password="new-password-123",
     )
 
     assert changed.user == signed_up.user
@@ -263,15 +275,20 @@ def test_login_and_password_change_rotate_credentials(session_service):
         session_service.authenticate_session(logged_in.session_token)
     assert session_service.authenticate_session(changed.session_token) == changed.user
     with pytest.raises(InvalidCredentialsError):
-        session_service.login(email="change@example.com", password="old-password")
-    assert session_service.login(
-        email="change@example.com",
-        password="new-password",
-    ).user == signed_up.user
+        session_service.login(email="change@example.com", password="old-password-123")
+    assert (
+        session_service.login(
+            email="change@example.com",
+            password="new-password-123",
+        ).user
+        == signed_up.user
+    )
 
 
 def test_session_token_rejects_tamper_and_expiry(session_service, clock):
-    result = session_service.signup(email="token@example.com", password="token-pass")
+    result = session_service.signup(
+        email="token@example.com", password="token-password-123"
+    )
     payload, signature = result.session_token.split(".", maxsplit=1)
 
     with pytest.raises(InvalidSessionError):
@@ -373,7 +390,7 @@ def test_password_change_preserves_remembered_flag_and_resets_auth_time(
 ):
     remembered = session_service.signup(
         email="remembered-password-change@example.com",
-        password="old-password",
+        password="old-password-123",
         remember_me=True,
     )
     before = session_service.token_codec.verify_session(remembered.session_token)
@@ -382,8 +399,8 @@ def test_password_change_preserves_remembered_flag_and_resets_auth_time(
     clock.advance(timedelta(days=1))
     changed = session_service.change_password(
         user_id=remembered.user.user_id,
-        current_password="old-password",
-        new_password="new-password",
+        current_password="old-password-123",
+        new_password="new-password-123",
         remember_me=before.remember_me,
     )
     after = session_service.token_codec.verify_session(changed.session_token)
@@ -541,7 +558,9 @@ def test_recent_reauthentication_proof_rejects_tamper_expiry_and_wrong_password(
 
 
 def test_logout_revokes_presented_session_token(session_service):
-    result = session_service.signup(email="logout@example.com", password="logout-pass")
+    result = session_service.signup(
+        email="logout@example.com", password="logout-password-123"
+    )
 
     session_service.logout(result.session_token)
 
@@ -553,7 +572,9 @@ def test_suspended_user_cannot_login_or_use_existing_session(
     session_factory,
     session_service,
 ):
-    result = session_service.signup(email="suspend@example.com", password="secret-pass")
+    result = session_service.signup(
+        email="suspend@example.com", password="secret-password-123"
+    )
     with session_factory.begin() as session:
         user = session.get(User, result.user.user_id)
         assert user is not None
@@ -562,7 +583,9 @@ def test_suspended_user_cannot_login_or_use_existing_session(
     with pytest.raises(InvalidCredentialsError):
         session_service.login(email="suspend@example.com", password="wrong-pass")
     with pytest.raises(SuspendedUserError):
-        session_service.login(email="suspend@example.com", password="secret-pass")
+        session_service.login(
+            email="suspend@example.com", password="secret-password-123"
+        )
     with pytest.raises(SuspendedUserError):
         session_service.authenticate_session(result.session_token)
 

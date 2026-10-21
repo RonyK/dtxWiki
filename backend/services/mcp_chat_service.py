@@ -11,6 +11,10 @@ from sqlalchemy import and_, case, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, load_only
 
+from backend.domain.input_policy import (
+    fit_generated_title,
+    validate_title,
+)
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.base import utc_now
 from backend.models.context import ContextClaim, ContextPage, ContextPageVersion
@@ -859,8 +863,7 @@ class McpChatService:
                     and_(
                         media_created_for_version.created_by_actor_kind
                         == actor.actor_kind,
-                        media_created_for_version.created_by_actor_id
-                        == actor.actor_id,
+                        media_created_for_version.created_by_actor_id == actor.actor_id,
                     ),
                 ),
             )
@@ -901,7 +904,7 @@ class McpChatService:
     ) -> McpChatDetail:
         chat = self._get_chat(session, workspace_id, chat_session_id)
         previous_title = chat.title
-        chat.title = title.strip()
+        chat.title = validate_title(title, max_length=120)
         chat.title_user_edited = True
         self.audit_service.emit(
             session=session,
@@ -1111,8 +1114,10 @@ class McpChatService:
         # artifact title or the first tool action). Client identity and the
         # call count are surfaced separately in the UI (client chip + meta),
         # so they are intentionally omitted from the title here.
-        return self._title_anchor(
-            session, chat_session, actor, shared_only=shared_only
+        return fit_generated_title(
+            self._title_anchor(session, chat_session, actor, shared_only=shared_only),
+            max_length=120,
+            fallback="MCP activity",
         )
 
     def _title_anchor(
@@ -1156,13 +1161,12 @@ class McpChatService:
         )
         if not include_search_matches:
             links_query = links_query.where(
-                McpChatArtifactLink.verb
-                != McpChatArtifactVerb.SEARCH_MATCH.value
+                McpChatArtifactLink.verb != McpChatArtifactVerb.SEARCH_MATCH.value
             )
         links = session.scalars(
-            links_query
-            .order_by(desc(McpChatArtifactLink.last_occurred_at))
-            .limit(link_limit)
+            links_query.order_by(desc(McpChatArtifactLink.last_occurred_at)).limit(
+                link_limit
+            )
         ).all()
         # Generated labels are always re-derived from the same read-time,
         # actor-visible descriptor. This heals both legacy count titles and the
@@ -1711,9 +1715,7 @@ class McpChatService:
             result_display_items=result_items,
             redaction_reason=None if is_caller else "error_restricted",
             edit_summary=edit_summary,
-            error_details=_stored_error_details(
-                row, shape_only=not content_visible
-            ),
+            error_details=_stored_error_details(row, shape_only=not content_visible),
             linked_verbs=[],
             linked_artifacts=[],
         )
@@ -2031,7 +2033,9 @@ class McpChatService:
                 source, actor, workspace_id=workspace_id
             ):
                 return None, None
-            return source.title or source.uri, f"/library?target={source.id}"
+            return source.title or fit_generated_title(
+                source.uri, fallback="Library item"
+            ), f"/library?target={source.id}"
         if resource_kind == McpChatArtifactKind.CONTEXT_MEDIA_ASSET.value:
             # ContextMediaAsset has no title column; original_filename is the
             # only author-controlled label, and it is already sanitized at
@@ -2683,9 +2687,7 @@ def _target_hidden_item(
         input_summary=input_summary,
         input_availability="redacted",
         input_display_items=(
-            _structural_display_items(input_summary, edit_summary)
-            if structural
-            else []
+            _structural_display_items(input_summary, edit_summary) if structural else []
         ),
         result_summary=None,
         result_availability="redacted",

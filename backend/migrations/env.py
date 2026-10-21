@@ -1,3 +1,4 @@
+from collections import Counter
 from logging.config import fileConfig
 
 from alembic import context
@@ -134,10 +135,42 @@ def _make_sqlite_ddl_transactional(engine) -> None:
     @event.listens_for(engine, "connect")
     def _driver_does_not_begin(dbapi_connection, _connection_record) -> None:
         dbapi_connection.isolation_level = None
+        # Batch rebuilds drop parent tables. Never inherit a build-dependent
+        # foreign_keys default that could cascade-delete their children.
+        dbapi_connection.execute("PRAGMA foreign_keys=OFF")
+        if dbapi_connection.execute("PRAGMA foreign_keys").fetchone()[0] != 0:
+            raise RuntimeError(
+                "SQLite migrations require foreign_keys=OFF before BEGIN"
+            )
 
     @event.listens_for(engine, "begin")
     def _begin_with_the_write_lock(connection) -> None:
         connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+
+def _sqlite_foreign_key_violations(connection) -> Counter:
+    return Counter(
+        (row[0], row[2])
+        for row in connection.exec_driver_sql("PRAGMA foreign_key_check")
+    )
+
+
+def _reject_new_foreign_key_violations(connection, before: Counter) -> None:
+    """Refuse a run that orphaned rows; leave orphans it did not create.
+
+    Rows orphaned before the run (manual edits, historical bugs) are not the
+    run's doing. Refusing them would block every later upgrade, including the
+    no-op one at startup, with nothing for the operator to repair them with.
+    """
+    added = _sqlite_foreign_key_violations(connection) - before
+    if added:
+        details = ", ".join(
+            f"{table} -> {parent}: {count}"
+            for (table, parent), count in sorted(added.items())
+        )
+        raise RuntimeError(
+            f"SQLite migration refused: new foreign key violations ({details})"
+        )
 
 
 def run_migrations_offline() -> None:
@@ -176,8 +209,12 @@ def run_migrations_online() -> None:
         _reject_unidentifiable_upgrade_start(connection)
 
         with context.begin_transaction():
+            if sqlite:
+                orphans_before = _sqlite_foreign_key_violations(connection)
             context.run_migrations()
             _validate_resulting_revision_shape(connection)
+            if sqlite:
+                _reject_new_foreign_key_violations(connection, orphans_before)
 
 
 if context.is_offline_mode():

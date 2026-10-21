@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import fit_generated_title, validate_title
 from backend.library_media.ports import LibraryLogicalQuotaFactory
 from backend.media.domain import BlobEpoch, BlobReference
 from backend.models.base import utc_now
@@ -180,7 +181,7 @@ class LibraryService:
 
         item.lifecycle_status = "archived"
         sync_library_doc_sources(session, item)
-        title = item.title or item.uri
+        title = item.title or fit_generated_title(item.uri, fallback="Library item")
         uri = item.uri
         last_version_no = max(
             (version.version_no for version in item.versions),
@@ -616,8 +617,7 @@ class LibraryService:
                 and canonical_attempt_ref in attempt_refs
             )
             points_to_preview_run = (
-                isinstance(preview_run_ref, str)
-                and preview_run_ref in preview_run_refs
+                isinstance(preview_run_ref, str) and preview_run_ref in preview_run_refs
             )
             points_to_preview_attempt = (
                 isinstance(preview_attempt_ref, str)
@@ -787,7 +787,7 @@ class LibraryService:
                     session=session,
                     workspace_id=workspace.id,
                     canonical_uri=candidate_input.canonical_uri,
-                    title=candidate_input.title,
+                    title=validate_title(candidate_input.title, optional=True),
                     connector_type=candidate_input.connector_type,
                     format_hint=candidate_input.format_hint,
                     trust_level=candidate_input.trust_level,
@@ -850,6 +850,7 @@ class LibraryService:
         actor_id: UUID | None = None,
         parent_node_id: UUID | None = None,
     ) -> LibraryRegistrationResult:
+        title = validate_title(title, optional=True)
         if not canonical_uri.strip():
             raise ValueError("canonical_uri is required")
 
@@ -904,7 +905,8 @@ class LibraryService:
                     workspace_id=workspace_id,
                     target_kind="library_item",
                     target_id=item.id,
-                    title=item.title or item.uri,
+                    title=item.title
+                    or fit_generated_title(item.uri, fallback="Library item"),
                     slug=None,
                     section="library",
                     parent_id=parent_node_id,
@@ -935,7 +937,8 @@ class LibraryService:
                 workspace_id=workspace_id,
                 target_kind="library_item",
                 target_id=item.id,
-                title=item.title or item.uri,
+                title=item.title
+                or fit_generated_title(item.uri, fallback="Library item"),
                 slug=None,
                 section="library",
                 parent_id=None,
@@ -1093,6 +1096,7 @@ class LibraryService:
 
     @staticmethod
     def _validate_candidate(candidate_input: LibraryCandidateInput) -> None:
+        validate_title(candidate_input.title, optional=True)
         if not candidate_input.canonical_uri.strip():
             raise ValueError("candidate canonical_uri is required")
 
@@ -1109,7 +1113,7 @@ class LibraryService:
             workspace_id=workspace_id,
             discovery_run_id=discovery_run_id,
             canonical_uri=candidate_input.canonical_uri.strip(),
-            title=candidate_input.title,
+            title=validate_title(candidate_input.title, optional=True),
             connector_type=candidate_input.connector_type,
             format_hint=candidate_input.format_hint,
             trust_level=candidate_input.trust_level,

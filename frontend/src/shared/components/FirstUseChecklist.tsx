@@ -3,14 +3,13 @@ import {
   FileText,
   Library,
   ListChecks,
-  MessageSquare,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { useFirstUseProgress } from "../hooks/useFirstUseProgress";
 
-export type FirstUseStepKey = "library" | "context" | "ask" | "review";
+export type FirstUseStepKey = "library" | "context" | "review";
 
 export type FirstUseProgress = Partial<Record<FirstUseStepKey, boolean>>;
 
@@ -39,17 +38,9 @@ export const FIRST_USE_STEPS: Array<{
     icon: FileText,
   },
   {
-    key: "ask",
-    label: "Ask a question",
-    description: "Ask a question after the workspace has usable evidence.",
-    href: "/ask",
-    actionLabel: "Ask a question",
-    icon: MessageSquare,
-  },
-  {
     key: "review",
     label: "Save or review",
-    description: "Promote useful answers only after checking placement.",
+    description: "Review proposed changes before they update the workspace.",
     href: "/review",
     actionLabel: "Open Review queue",
     icon: ListChecks,

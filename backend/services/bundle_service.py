@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import InputPolicyError
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.base import utc_now
 from backend.models.bundle import AgentInputBundle, AgentInputBundleItem
@@ -21,6 +22,7 @@ from backend.schemas.agent import (
     BuildBundleResult,
     BundleItemEntry,
 )
+from backend.schemas.input_policy import validate_request_inputs
 from backend.services.actor_visible_read import (
     actor_can_read_agent_page,
     actor_can_read_library_trust_level,
@@ -81,6 +83,14 @@ class AgentInputBundleService:
         actor_kind: str = "system",
         actor_id: str = "system",
     ) -> BuildBundleResult:
+        validate_request_inputs(request)
+        if any(
+            category not in AGENT_PAGE_CATEGORIES
+            for category in request.requested_categories
+        ):
+            raise InputPolicyError(
+                "requested_categories contains an unsupported category"
+            )
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")

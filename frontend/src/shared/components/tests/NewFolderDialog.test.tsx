@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -6,6 +6,19 @@ import { describe, expect, it, vi } from "vitest";
 import { NewFolderDialog } from "../NewFolderDialog";
 
 describe("NewFolderDialog", () => {
+  it("accepts 80 Unicode characters and keeps an over-limit paste intact", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<NewFolderDialog parentLabel="Context" onClose={() => undefined} onSubmit={onSubmit} />);
+    const input = screen.getByRole("textbox", { name: /Folder name/i });
+    const submit = screen.getByRole("button", { name: "Create folder" });
+    fireEvent.change(input, { target: { value: "😀".repeat(81) } });
+    expect(input).toHaveValue("😀".repeat(81));
+    expect(submit).toBeDisabled();
+    fireEvent.change(input, { target: { value: "😀".repeat(80) } });
+    await userEvent.click(submit);
+    expect(onSubmit).toHaveBeenCalledWith({ title: "😀".repeat(80), slug: undefined });
+  });
+
   it("submits a trimmed name with an optional custom slug", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(

@@ -149,8 +149,12 @@ def _metrics_auth_error(request: Request, settings: Settings):
 
 
 def _has_valid_bearer(request: Request, settings: Settings) -> bool:
+    from backend.domain.credential_input import authorization_header_is_valid
+
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    if not authorization_header_is_valid(authorization) or not authorization.startswith(
+        "Bearer "
+    ):
         return False
     supplied = authorization.removeprefix("Bearer ").strip()
     return hmac.compare_digest(supplied, settings.metrics_bearer_token)
@@ -185,10 +189,7 @@ def _remote_ip(request: Request, settings: Settings) -> str | None:
 
 def _counter_snapshot() -> dict[str, dict[tuple[tuple[str, str], ...], int]]:
     with _lock:
-        return {
-            name: dict(counts)
-            for name, counts in _counters.items()
-        }
+        return {name: dict(counts) for name, counts in _counters.items()}
 
 
 def _format_counter(

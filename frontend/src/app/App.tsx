@@ -19,6 +19,7 @@ import {
   useWorkspaceContext,
   WorkspaceProvider,
 } from "../shared/workspace/WorkspaceContext";
+import { useLabsPreferences } from "../shared/hooks/useLabsPreferences";
 import { isEditorRole } from "../shared/workspace/permissions";
 
 const RoutedPageEditor = lazy(() =>
@@ -40,6 +41,9 @@ const PublishedPageReader = lazy(() =>
   import("../features/pages/PublishedPageReader").then((module) => ({
     default: module.PublishedPageReader,
   })),
+);
+const AskScreen = lazy(() =>
+  import("../features/ask/AskScreen").then((module) => ({ default: module.AskScreen })),
 );
 const AgentScreen = lazy(() =>
   import("../features/agent/AgentScreen").then((module) => ({ default: module.AgentScreen })),
@@ -81,9 +85,6 @@ const VerifyEmailScreen = lazy(() =>
   import("../features/auth/VerifyEmailScreen").then((module) => ({
     default: module.VerifyEmailScreen,
   })),
-);
-const AskScreen = lazy(() =>
-  import("../features/ask/AskScreen").then((module) => ({ default: module.AskScreen })),
 );
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
@@ -181,14 +182,6 @@ export const appRoutes = createRoutesFromElements(
         }
       />
       <Route
-        path="/ask"
-        element={
-          <RequireAuth>
-            <AskScreen />
-          </RequireAuth>
-        }
-      />
-      <Route
         path="/library"
         element={
           <RequireAuth>
@@ -220,6 +213,16 @@ export const appRoutes = createRoutesFromElements(
         element={
           <RequireAuth>
             <AgentScreen />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/ask"
+        element={
+          <RequireAuth>
+            <RequireAskEnabled>
+              <AskScreen />
+            </RequireAskEnabled>
           </RequireAuth>
         }
       />
@@ -552,6 +555,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   return children;
+}
+
+export function RequireAskEnabled({ children }: { children: ReactNode }) {
+  const { preferences } = useLabsPreferences();
+  return preferences.ask ? children : <NotFoundScreen />;
 }
 
 // Codex #25: write routes (page/agent create + page edit) must not render the

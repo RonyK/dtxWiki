@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.schemas.auth import EmailInput
 from backend.schemas.common import RESTResponseBase
 
 WorkspaceMemberRole = Literal["viewer", "editor", "owner"]
@@ -38,7 +39,7 @@ class WorkspaceMemberListResponse(RESTResponseBase):
 
 
 class WorkspaceMemberAddRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
+    email: EmailInput
     role: str = Field(default="viewer", min_length=1, max_length=32)
     confirm_first_share: bool = False
 

@@ -1,3 +1,4 @@
+import { codePointLength } from "../../../shared/lib/inputPolicy";
 import type {
   LibraryFormatCapability,
   LibraryFormatFamilyCapability,
@@ -191,7 +192,7 @@ export function parsePolicyCustomFormats(value: unknown): LibraryPolicyCustomFor
     if (
       !formatId || !/^custom-[a-z0-9][a-z0-9_-]{0,55}$/.test(formatId) ||
       !displayName || !validCustomFormatName(displayName) ||
-      displayName.length > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH ||
+      codePointLength(displayName) > MAX_LIBRARY_CUSTOM_FORMAT_NAME_LENGTH ||
       extensions.length === 0 ||
       extensions.length > MAX_LIBRARY_CUSTOM_FORMAT_EXTENSIONS ||
       invalidCustomFormatExtensions(extensions).length > 0 ||

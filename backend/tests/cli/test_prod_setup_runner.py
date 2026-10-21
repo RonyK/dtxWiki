@@ -96,3 +96,17 @@ def test_setup_production_step_failure_exits_clean(tmp_path: Path, monkeypatch):
     assert "ERROR: step failed" in result.stdout
     assert "re-run with sudo" in result.stdout
     assert "Setup aborted" in result.stdout
+
+
+def test_setup_rejects_invalid_owner_email_before_provisioning(monkeypatch):
+    def unexpected_read(*args, **kwargs):
+        raise AssertionError("invalid owner email reached production configuration")
+
+    monkeypatch.setattr(prod_setup, "read_env_file", unexpected_read)
+    email = "a" * 65 + "@b"
+    result = runner.invoke(
+        cli_main.app,
+        ["setup", "production", "--domain", "wiki.example.com", "--email", email],
+    )
+    assert result.exit_code == 2
+    assert isinstance(result.exception, SystemExit)

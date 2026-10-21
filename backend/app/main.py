@@ -59,6 +59,7 @@ from backend.catalog.library_family_presets import (
     get_library_family_preset_catalog_repository,
 )
 from backend.catalog.mcp_apps import get_mcp_app_catalog_repository
+from backend.domain.input_policy import InputPolicyError
 
 
 async def http_exception_handler(
@@ -93,6 +94,17 @@ async def request_validation_exception_handler(
     return build_rest_error_response(
         error_code="validation_failed",
         message=summarize_validation_errors(exc.errors()),
+        status_code=422,
+    )
+
+
+async def input_policy_exception_handler(
+    _request: Request,
+    exc: InputPolicyError,
+) -> JSONResponse:
+    return build_rest_error_response(
+        error_code="validation_failed",
+        message=str(exc),
         status_code=422,
     )
 
@@ -312,6 +324,7 @@ def create_app(
         request_validation_exception_handler,
     )
     app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_exception_handler(InputPolicyError, input_policy_exception_handler)
     app.include_router(health_root_router)
     mount_storage_topology_health(app, resolved_container)
     app.include_router(auth_router, prefix="/api/v1")

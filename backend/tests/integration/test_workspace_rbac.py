@@ -813,10 +813,14 @@ def test_direct_mcp_client_credentials_are_rejected(
     """The retired direct-client identity cannot authorize workspace access."""
     with session_factory.begin() as session:
         target = insert_workspace(
-            session, slug=f"retired-mcp-target-{claimed_workspace}", title="Target"
+            session,
+            slug=f"retired-mcp-target-{str(claimed_workspace).lower()}",
+            title="Target",
         )
         foreign = insert_workspace(
-            session, slug=f"retired-mcp-foreign-{claimed_workspace}", title="Foreign"
+            session,
+            slug=f"retired-mcp-foreign-{str(claimed_workspace).lower()}",
+            title="Foreign",
         )
         target_id = target.id
         claimed_workspace_id = {

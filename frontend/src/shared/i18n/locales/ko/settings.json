@@ -87,6 +87,10 @@
     "deployment": {
       "label": "배포",
       "description": "도메인·TLS·서비스 상태입니다. 변경은 dtxwiki CLI로 합니다."
+    },
+    "labs": {
+      "label": "실험실",
+      "description": "표시할 실험 중인 메뉴를 선택합니다."
     }
   },
   "crossLinks": {
@@ -424,21 +428,21 @@
     "loadError": "서버 설치 정보를 불러오지 못했습니다",
     "eyebrow": "워크스페이스 준비하기",
     "title": "서버 설치",
-    "description": "AI가 답변에 사용할 소스, 페이지, 규칙을 추가하세요.",
+    "description": "소스 자료를 추가하고 워크스페이스 지식을 정리하세요.",
     "status": {
-      "ready": "3개 중 3개 · 준비 완료",
-      "pending": "3개 중 0개 · 대기",
-      "partial": "3개 중 {{count}}개 · 일부 완료"
+      "ready": "{{total}}개 중 {{total}}개 · 준비 완료",
+      "pending": "{{total}}개 중 0개 · 대기",
+      "partial": "{{total}}개 중 {{count}}개 · 일부 완료"
     },
     "itemCount_one": "{{count}}개",
     "itemCount_other": "{{count}}개",
     "itemCountAtLeast": "최소 {{count}}개 로드됨",
     "callout": {
-      "allSetTitle": "모두 준비됐습니다. 질문해 보세요.",
-      "allSetBody": "이 워크스페이스에는 소스, 지식 페이지, AI 규칙이 있습니다.",
-      "openAsk": "Ask 열기",
+      "allSetTitle": "워크스페이스가 준비됐습니다.",
+      "allSetBody": "이 워크스페이스에는 소스와 지식 페이지가 있습니다.",
+      "openContext": "컨텍스트 열기",
       "emptyTitle": "라이브러리가 비어 있습니다. 소스를 추가해 시작하세요.",
-      "emptyBody": "PDF나 페이지 하나만 있어도 첫 질문을 할 수 있습니다.",
+      "emptyBody": "PDF나 페이지를 추가해 워크스페이스 지식을 쌓아 보세요.",
       "addFirstSource": "첫 소스 추가",
       "partialTitle": "계속 진행하세요.",
       "partialFallback": "남은 설정 항목을 확인하세요."
@@ -1400,7 +1404,8 @@
     "reconciliationReminderMax": "조정 브랜치 알림 대기 시간은 30일 이하여야 합니다.",
     "reconciliationAttentionMin": "조정 브랜치 주의 기간은 최소 1일이어야 합니다.",
     "reconciliationAttentionMax": "조정 브랜치 주의 기간은 365일 이하여야 합니다.",
-    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다."
+    "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다.",
+    "slugFormat": "소문자·숫자와 단일 하이픈을 사용해 주세요."
   },
   "state": {
     "unsaved": "저장 안 됨 {{count}}개",
@@ -1891,5 +1896,12 @@
     "blocked": "사용 차단",
     "granted": "승인일",
     "expiry": "만료 정보"
+  },
+  "labs": {
+    "title": "실험 중인 메뉴",
+    "description": "아직 개발 중인 기능입니다. 사용해 보고 싶은 메뉴를 켜세요.",
+    "showAsk": "Ask 메뉴 표시",
+    "showAgent": "Agent 메뉴 표시",
+    "savedLocally": "변경 사항은 즉시 적용되며 이 브라우저에서 현재 계정에 저장됩니다."
   }
 }

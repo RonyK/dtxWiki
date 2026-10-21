@@ -36,7 +36,7 @@ MAX_LIBRARY_FORMAT_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
 _IDENTIFIER_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _CUSTOM_FORMAT_ID_PATTERN = re.compile(r"custom-[a-z0-9][a-z0-9_-]{0,55}")
 _EXTENSION_PATTERN = re.compile(r"\.[a-z0-9][a-z0-9_+-]{0,31}")
-_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\u2028\u2029]")
 _FORMAT_ID_ALIASES = {"md": "markdown", "txt": "text"}
 _UNSAFE_CUSTOM_EXTENSIONS = frozenset(
     {

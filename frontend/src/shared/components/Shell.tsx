@@ -13,7 +13,7 @@ import {
   SpellCheck,
   Menu,
   MessagesSquare,
-  MessageSquare,
+  MessageCircleQuestion,
   Plus,
   Search,
   Settings,
@@ -38,7 +38,9 @@ import {
 } from "../api/workspaceDirectory";
 import { useAuth } from "../auth/AuthContext";
 import { normalizeLocale, setLocale, syncLocaleFromWorkspace } from "../i18n";
+import { useLabsPreferences } from "../hooks/useLabsPreferences";
 import { domainLabel } from "../lib/domainLabel";
+import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { SEARCH_QUERY_MAX_LENGTH } from "../lib/searchLimits";
 import { searchResultHref } from "../lib/searchResultHref";
 import { trapTabFocus } from "../lib/trapTabFocus";
@@ -105,7 +107,6 @@ type ShellLabels = {
   createTitle: string;
   newContextPage: string;
   newFolder: string;
-  newAsk: string;
   addLibraryItem: string;
   sidebarAria: string;
   sidebarCollapse: string;
@@ -126,12 +127,12 @@ const SIDEBAR_NAV_GROUPS: Array<{ key: NavGroupKey; items: SidebarNavItem[] }> =
         { icon: FileText, key: "context", to: "/context" },
         { icon: Bot, key: "agent", preview: true, to: "/agent" },
         { icon: MessagesSquare, key: "chats", to: "/chats" },
+        { icon: MessageCircleQuestion, key: "ask", preview: true, to: "/ask" },
       ],
     },
     {
       key: "workflow",
       items: [
-        { icon: MessageSquare, key: "ask", preview: true, to: "/ask" },
         { icon: ListChecks, key: "review", preview: true, to: "/review" },
         // The lint queue is the other half of the review workflow, and used to be
         // reachable only from three levels inside Settings.
@@ -310,7 +311,6 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
       defaultValue: "New Context page",
     }),
     newFolder: t("create.newFolder", { defaultValue: "New folder" }),
-    newAsk: t("create.newAsk", { defaultValue: "New Ask session" }),
     addLibraryItem: t("create.addLibraryItem", {
       defaultValue: "Add first Library item",
     }),
@@ -416,6 +416,7 @@ export function Shell({ children }: ShellProps) {
     : "app-shell app-shell-public";
   const shellLabels = useMemo(() => shellLabelsFromT(t), [t]);
   const workspaceContext = useOptionalWorkspaceContext();
+  const { preferences: labsPreferences } = useLabsPreferences();
   const selectedRole = workspaceContext?.selectedWorkspace?.role;
   const canWriteSelectedWorkspace = isEditorRole(selectedRole);
   // /chats is editor-gated end to end (backend + RequireEditor). Keep this
@@ -430,14 +431,15 @@ export function Shell({ children }: ShellProps) {
   });
   const navGroups = useMemo(() => {
     const groups = navGroupsForLabels(shellLabels);
-    if (!hideChatsNav) {
-      return groups;
-    }
     return groups.map((group) => ({
       ...group,
-      items: group.items.filter((item) => item.key !== "chats"),
+      items: group.items.filter((item) =>
+        (item.key !== "chats" || !hideChatsNav) &&
+        (item.key !== "agent" || labsPreferences.agent) &&
+        (item.key !== "ask" || labsPreferences.ask),
+      ),
     }));
-  }, [hideChatsNav, shellLabels]);
+  }, [hideChatsNav, labsPreferences.agent, labsPreferences.ask, shellLabels]);
 
   function closeMobileNav() {
     restoreMobileNavFocusRef.current = true;
@@ -1255,7 +1257,6 @@ const CREATE_MENU_TRIGGER_ID = "shell-create-menu-trigger";
 const CREATE_MENU_ID = "shell-create-menu";
 
 function CreateMenu({ labels }: { labels: ShellLabels }) {
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -1320,11 +1321,6 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
-
-  function createAskSessionRoute() {
-    closeMenu();
-    navigate(`/ask?new=${Date.now()}`);
-  }
 
   function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "Tab" && open) {
@@ -1426,16 +1422,6 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             <FolderPlus size={15} aria-hidden="true" />
             <span>{labels.newFolder}</span>
           </Link>
-          <button
-            className="create-menu-item"
-            onClick={createAskSessionRoute}
-            role="menuitem"
-            tabIndex={-1}
-            type="button"
-          >
-            <MessageSquare size={15} aria-hidden="true" />
-            <span>{labels.newAsk}</span>
-          </button>
           <Link
             className="create-menu-item"
             onClick={() => closeMenu()}
@@ -1748,7 +1734,9 @@ function WorkspaceControls({
 
   function submitWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const title = newWorkspaceTitle.trim();
+    const title = trimShortText(newWorkspaceTitle);
+    const error = inputTextError(newWorkspaceTitle, 128);
+    if (error) { event.currentTarget.querySelector("input")?.reportValidity(); return; }
     if (!title) {
       return;
     }
@@ -2041,6 +2029,7 @@ function WorkspaceControls({
               <label className="field-stack">
                 {t("workspace.nameLabel", { defaultValue: "Workspace name" })}
                 <input
+                  {...textInputLimit(128)}
                   onChange={(event) => setNewWorkspaceTitle(event.target.value)}
                   placeholder={t("workspace.namePlaceholder", {
                     defaultValue: "Research workspace",

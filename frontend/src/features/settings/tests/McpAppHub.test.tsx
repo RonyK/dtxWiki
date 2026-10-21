@@ -197,6 +197,30 @@ describe("McpAppHub", () => {
     });
   });
 
+  it.each([160, 161])("validates %i code points in custom labels without truncating", async (length) => {
+    const user = userEvent.setup();
+    const onAccessKeySelected = vi.fn();
+    const loadPlan = vi.fn(async (owner, option) =>
+      plan(owner.id, option.auth, option.variant_id),
+    );
+    render(<McpAppHub catalog={catalog()} error={null} loading={false} locale="en" loadPlan={loadPlan} onAccessKeySelected={onAccessKeySelected} shell="bash" />);
+    await user.click(screen.getByRole("button", { name: /Browse all AI apps/ }));
+    await user.click(screen.getByRole("button", { name: /Other MCP client/ }));
+    const input = screen.getByRole("textbox", { name: "AI app display name" });
+    const value = "😀".repeat(length);
+    fireEvent.change(input, { target: { value } });
+    await user.click(screen.getByRole("button", { name: /Access Key/ }));
+    expect(input).toHaveValue(value);
+    if (length === 160) {
+      await waitFor(() => expect(onAccessKeySelected).toHaveBeenCalledOnce());
+      expect(onAccessKeySelected.mock.calls[0][0].customAppLabel).toBe(value);
+    } else {
+      expect(onAccessKeySelected).not.toHaveBeenCalled();
+      expect(loadPlan).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("160");
+    }
+  });
+
   it("loads an OAuth-first setup recipe as copy-only text", async () => {
     const user = userEvent.setup();
     const current = catalog();

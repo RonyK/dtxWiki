@@ -1,4 +1,5 @@
 import { clearPersistedWorkspaceId } from "./workspace";
+import { outgoingContentError } from "./inputPolicy";
 import { i18n } from "../i18n";
 
 export type ApiWarning = {
@@ -164,6 +165,12 @@ export async function apiRequest<T>(
   init: RequestInit = {},
 ): Promise<T> {
   assertRequestPath(path);
+  const inputError = outgoingContentError(path, init.body);
+  if (inputError) {
+    throw new ApiError(422, {
+      error_code: "validation_failed", message: inputError, request_id: "", warnings: [],
+    });
+  }
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   const apiToken = getApiToken();

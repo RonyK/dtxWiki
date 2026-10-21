@@ -1269,6 +1269,7 @@
         "additionalProperties": false,
         "properties": {
           "reason": {
+            "maxLength": 2000,
             "title": "Reason",
             "type": "string"
           },
@@ -1552,8 +1553,11 @@
             "title": "Base Version Id"
           },
           "body_markdown": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+            "maxLength": 1000000,
             "title": "Body Markdown",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "category": {
             "enum": [
@@ -1583,6 +1587,7 @@
             "title": "Parent Node Id"
           },
           "reason": {
+            "maxLength": 2000,
             "title": "Reason",
             "type": "string"
           },
@@ -1602,8 +1607,10 @@
             "type": "string"
           },
           "title": {
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "title": "Title",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 256
           }
         },
         "required": [
@@ -1834,9 +1841,15 @@
           "custom_app_label": {
             "anyOf": [
               {
-                "maxLength": 160,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "x-normalized-maxLength": 160
               },
               {
                 "type": "null"
@@ -1867,10 +1880,9 @@
             "title": "Mcp Client Type"
           },
           "name": {
-            "maxLength": 128,
-            "minLength": 1,
             "title": "Name",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 128
           },
           "scopes": {
             "items": {
@@ -1885,6 +1897,7 @@
             "items": {
               "$ref": "#/components/schemas/WorkspaceGrantInput"
             },
+            "maxItems": 256,
             "minItems": 1,
             "title": "Workspace Grants",
             "type": "array"
@@ -2214,9 +2227,8 @@
           "name": {
             "anyOf": [
               {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
+                "type": "string",
+                "x-normalized-maxLength": 128
               },
               {
                 "type": "null"
@@ -2230,6 +2242,7 @@
                 "items": {
                   "$ref": "#/components/schemas/WorkspaceGrantInput"
                 },
+                "maxItems": 256,
                 "minItems": 1,
                 "type": "array"
               },
@@ -2306,8 +2319,11 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 32,
             "title": "Default Topic Tags",
-            "type": "array"
+            "type": "array",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
           },
           "title": {
             "anyOf": [
@@ -2318,7 +2334,9 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
           }
         },
         "title": "AskSessionCreate",
@@ -2596,8 +2614,10 @@
             "title": "Ttl Override Seconds"
           },
           "user_message": {
+            "description": "Maximum 8000 Unicode code points after trimming surrounding whitespace.",
             "title": "User Message",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 8000
           }
         },
         "required": [
@@ -2831,7 +2851,10 @@
                 "type": "null"
               }
             ],
-            "title": "Body Markdown"
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+            "maxLength": 1000000,
+            "title": "Body Markdown",
+            "x-final-maxLength": 1000000
           },
           "page_type": {
             "enum": [
@@ -2881,7 +2904,9 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
           }
         },
         "required": [
@@ -3218,6 +3243,7 @@
               "format": "uuid",
               "type": "string"
             },
+            "maxItems": 128,
             "title": "Context Refs",
             "type": "array"
           },
@@ -3226,6 +3252,7 @@
               "format": "uuid",
               "type": "string"
             },
+            "maxItems": 128,
             "title": "Library Artifact Refs",
             "type": "array"
           },
@@ -3236,8 +3263,15 @@
           },
           "requested_categories": {
             "items": {
+              "enum": [
+                "agent_guide",
+                "persona",
+                "skill",
+                "memory"
+              ],
               "type": "string"
             },
+            "maxItems": 4,
             "title": "Requested Categories",
             "type": "array"
           },
@@ -3496,7 +3530,10 @@
                 "type": "null"
               }
             ],
-            "title": "Body Markdown"
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+            "maxLength": 1000000,
+            "title": "Body Markdown",
+            "x-final-maxLength": 1000000
           },
           "final_page_type": {
             "anyOf": [
@@ -3538,9 +3575,11 @@
             "type": "string"
           },
           "final_title": {
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "minLength": 1,
             "title": "Final Title",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 256
           },
           "review_required": {
             "anyOf": [
@@ -3921,6 +3960,7 @@
         "additionalProperties": false,
         "properties": {
           "reason": {
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
@@ -4650,13 +4690,18 @@
                 "type": "null"
               }
             ],
-            "title": "Aliases"
+            "maxItems": 32,
+            "title": "Aliases",
+            "x-normalized-item-maxLength": 80,
+            "x-normalized-item-minLength": 1
           },
           "body_md": {
             "default": "",
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "title": "Body Md",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "page_type": {
             "anyOf": [
@@ -4706,7 +4751,10 @@
                 "type": "null"
               }
             ],
-            "title": "Tags"
+            "maxItems": 32,
+            "title": "Tags",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
           },
           "title": {
             "anyOf": [
@@ -4718,7 +4766,9 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
           }
         },
         "title": "ContextPageCreateRequest",
@@ -9366,6 +9416,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 2000,
             "title": "Reason"
           }
         },
@@ -9413,6 +9464,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 2000,
             "title": "Reason"
           }
         },
@@ -10025,13 +10077,14 @@
         "additionalProperties": false,
         "properties": {
           "email": {
-            "maxLength": 320,
-            "minLength": 3,
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
             "title": "Email",
-            "type": "string"
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
           },
           "password": {
-            "maxLength": 1024,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Password",
             "type": "string"
@@ -12304,10 +12357,11 @@
         "additionalProperties": false,
         "properties": {
           "title": {
-            "maxLength": 120,
+            "description": "Maximum 120 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "minLength": 1,
             "title": "Title",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 120
           }
         },
         "required": [
@@ -13101,6 +13155,7 @@
                   "format": "uuid",
                   "type": "string"
                 },
+                "maxItems": 256,
                 "minItems": 1,
                 "type": "array"
               },
@@ -13243,7 +13298,10 @@
                 "type": "null"
               }
             ],
-            "title": "Aliases"
+            "maxItems": 32,
+            "title": "Aliases",
+            "x-normalized-item-maxLength": 80,
+            "x-normalized-item-minLength": 1
           },
           "base_content_hash": {
             "pattern": "^[a-f0-9]{64}$",
@@ -13256,10 +13314,12 @@
             "type": "string"
           },
           "body_md": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "minLength": 1,
             "title": "Body Md",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "destination_node_id": {
             "anyOf": [
@@ -13348,7 +13408,10 @@
                 "type": "null"
               }
             ],
-            "title": "Tags"
+            "maxItems": 32,
+            "title": "Tags",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
           },
           "title": {
             "anyOf": [
@@ -13360,7 +13423,9 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
           }
         },
         "required": [
@@ -13754,7 +13819,10 @@
                 "type": "null"
               }
             ],
-            "title": "Aliases"
+            "maxItems": 32,
+            "title": "Aliases",
+            "x-normalized-item-maxLength": 80,
+            "x-normalized-item-minLength": 1
           },
           "base_content_hash": {
             "pattern": "^[a-f0-9]{64}$",
@@ -13767,10 +13835,12 @@
             "type": "string"
           },
           "body_md": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "minLength": 1,
             "title": "Body Md",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "destination_node_id": {
             "anyOf": [
@@ -13853,7 +13923,10 @@
                 "type": "null"
               }
             ],
-            "title": "Tags"
+            "maxItems": 32,
+            "title": "Tags",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
           },
           "title": {
             "anyOf": [
@@ -13865,7 +13938,9 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
           }
         },
         "required": [
@@ -14186,14 +14261,14 @@
         "additionalProperties": false,
         "properties": {
           "current_password": {
-            "maxLength": 1024,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Current Password",
             "type": "string"
           },
           "new_password": {
-            "maxLength": 1024,
-            "minLength": 8,
+            "maxLength": 128,
+            "minLength": 15,
             "title": "New Password",
             "type": "string"
           }
@@ -14245,8 +14320,8 @@
         "additionalProperties": false,
         "properties": {
           "new_password": {
-            "maxLength": 1024,
-            "minLength": 8,
+            "maxLength": 128,
+            "minLength": 15,
             "title": "New Password",
             "type": "string"
           },
@@ -14286,10 +14361,11 @@
         "additionalProperties": false,
         "properties": {
           "email": {
-            "maxLength": 320,
-            "minLength": 3,
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
             "title": "Email",
-            "type": "string"
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
           }
         },
         "required": [
@@ -14790,6 +14866,7 @@
             "type": "boolean"
           },
           "reason": {
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
@@ -15318,7 +15395,7 @@
         "additionalProperties": false,
         "properties": {
           "current_password": {
-            "maxLength": 1024,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Current Password",
             "type": "string"
@@ -16067,6 +16144,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 2000,
             "title": "Decision Reason"
           },
           "decision_type": {
@@ -17456,25 +17534,26 @@
           "display_name": {
             "anyOf": [
               {
-                "maxLength": 128,
-                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Display Name"
+            "description": "Optional display name; at most 32 Unicode code points after surrounding spaces are removed. Empty values use an automatic name.",
+            "title": "Display Name",
+            "x-normalized-maxLength": 32
           },
           "email": {
-            "maxLength": 320,
-            "minLength": 3,
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
             "title": "Email",
-            "type": "string"
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
           },
           "password": {
-            "maxLength": 1024,
-            "minLength": 8,
+            "maxLength": 128,
+            "minLength": 15,
             "title": "Password",
             "type": "string"
           },
@@ -17509,6 +17588,7 @@
           },
           "reason": {
             "default": "author submitted for review",
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
@@ -17536,6 +17616,7 @@
         "additionalProperties": false,
         "properties": {
           "body": {
+            "maxLength": 10000,
             "minLength": 1,
             "title": "Body",
             "type": "string"
@@ -17560,6 +17641,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 2000,
             "title": "Suggested Action"
           },
           "target_id": {
@@ -17714,10 +17796,11 @@
             "title": "Slug"
           },
           "title": {
-            "maxLength": 80,
+            "description": "Maximum 80 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "minLength": 1,
             "title": "Title",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 80
           }
         },
         "required": [
@@ -17789,6 +17872,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 2000,
             "title": "Reason"
           },
           "sort_key": {
@@ -18051,9 +18135,11 @@
         "additionalProperties": false,
         "properties": {
           "display_name": {
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "minLength": 1,
             "title": "Display Name",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 256
           },
           "nav_summary": {
             "anyOf": [
@@ -18065,6 +18151,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 160,
             "title": "Nav Summary"
           }
         },
@@ -18826,6 +18913,7 @@
                 "type": "null"
               }
             ],
+            "maxLength": 512,
             "title": "Goal"
           },
           "slug": {
@@ -18842,10 +18930,11 @@
             "title": "Slug"
           },
           "title": {
-            "maxLength": 128,
+            "description": "Maximum 128 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "minLength": 1,
             "title": "Title",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 128
           },
           "visibility": {
             "anyOf": [
@@ -19577,10 +19666,11 @@
             "type": "boolean"
           },
           "email": {
-            "maxLength": 320,
-            "minLength": 3,
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
             "title": "Email",
-            "type": "string"
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
           },
           "role": {
             "default": "viewer",
@@ -22821,7 +22911,7 @@
             "name": "workspace_slug",
             "required": true,
             "schema": {
-              "maxLength": 64,
+              "maxLength": 80,
               "minLength": 1,
               "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
               "title": "Workspace Slug",
@@ -22877,7 +22967,7 @@
             "name": "workspace_slug",
             "required": true,
             "schema": {
-              "maxLength": 64,
+              "maxLength": 80,
               "minLength": 1,
               "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
               "title": "Workspace Slug",
@@ -22931,7 +23021,7 @@
             "name": "workspace_slug",
             "required": true,
             "schema": {
-              "maxLength": 64,
+              "maxLength": 80,
               "minLength": 1,
               "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
               "title": "Workspace Slug",
@@ -23009,7 +23099,7 @@
             "name": "workspace_slug",
             "required": true,
             "schema": {
-              "maxLength": 64,
+              "maxLength": 80,
               "minLength": 1,
               "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
               "title": "Workspace Slug",

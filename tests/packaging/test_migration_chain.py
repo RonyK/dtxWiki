@@ -31,7 +31,8 @@ INITIAL_REVISION = "bd62193d5cf6"
 CORE_REVISION = "efcbcf724889"
 TREE_RAIL_REVISION = "c7a4e91b2d60"
 RETENTION_REVISION = "d148b9746ff5"
-CURRENT_HEAD = "49d9c0776c5a"
+MERGE_REVISION = "49d9c0776c5a"
+CURRENT_HEAD = "19db79d3e622"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -76,7 +77,7 @@ def _revision_graph(script: ScriptDirectory) -> dict[str, object]:
 
 
 def test_graph_has_one_head_and_preserves_both_branches_and_released_boundaries():
-    """Join both new revisions without rewriting either applied upgrade path."""
+    """Preserve the published merge and append input restrictions after it."""
 
     script = _script_directory()
     graph = _revision_graph(script)
@@ -89,7 +90,8 @@ def test_graph_has_one_head_and_preserves_both_branches_and_released_boundaries(
         CORE_REVISION: INITIAL_REVISION,
         TREE_RAIL_REVISION: CORE_REVISION,
         RETENTION_REVISION: CORE_REVISION,
-        CURRENT_HEAD: (TREE_RAIL_REVISION, RETENTION_REVISION),
+        MERGE_REVISION: (TREE_RAIL_REVISION, RETENTION_REVISION),
+        CURRENT_HEAD: MERGE_REVISION,
     }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())

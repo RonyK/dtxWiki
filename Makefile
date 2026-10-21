@@ -17,7 +17,7 @@ SQLITE_MEDIA_PARALLEL_IGNORES := $(foreach test,$(SQLITE_MEDIA_SERIAL_TESTS),--i
 # `*_benchmark_*` test that skips unless DTXWIKI_TEST_BENCHMARKS=1 and refuses
 # to run under xdist; `test-backend-benchmarks` below is the only place that
 # opts in. A new benchmark's module belongs on this list.
-BENCHMARK_TESTS := backend/tests/integration/test_graph_service.py backend/tests/integration/test_graph_analytics_regressions.py
+BENCHMARK_TESTS := backend/tests/integration/test_graph_service.py backend/tests/integration/test_graph_analytics_regressions.py backend/tests/unit/test_mcp_chat_service.py
 VENV_PYTHON := $(VENV)/bin/python
 COMPOSE := docker compose --env-file infra/local/.env.example -f infra/local/docker-compose.yml
 DOCKER ?= docker

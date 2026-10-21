@@ -1302,23 +1302,19 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
         });
 
         const surfaces = [
-          {
-            path: `/context?target=${encodeURIComponent(decision.id)}`,
-            kind: "heading",
-            name: decisionTitle,
-          },
-          { path: "/library", kind: "heading", name: "Library" },
-          { path: "/agent", kind: "heading", name: "Agent pages" },
-          { path: "/ask", kind: "textbox", name: "Message" },
+          { path: `/context?target=${encodeURIComponent(decision.id)}`, name: decisionTitle },
+          { path: "/library", name: "Library" },
+          { path: "/agent", name: "Agent pages" },
+          { path: "/ask", name: "We couldn't find that page" },
           // The Review queue rail becomes a drawer on narrow screens and
           // intentionally loses its desktop complementary landmark. The main
           // operations heading is the route-level readiness signal in both
           // responsive layouts.
-          { path: "/review", kind: "heading", name: "Review operations" },
-          { path: "/search", kind: "heading", name: "Search" },
-          { path: "/lint", kind: "heading", name: "Lint queue" },
-          { path: "/activity", kind: "heading", name: "Activity" },
-          { path: "/chats", kind: "heading", name: "Chats" },
+          { path: "/review", name: "Review operations" },
+          { path: "/search", name: "Search" },
+          { path: "/lint", name: "Lint queue" },
+          { path: "/activity", name: "Activity" },
+          { path: "/chats", name: "Chats" },
         ] as const;
 
         await test.step("all contract Web routes render against the live stack", async () => {
@@ -1341,22 +1337,13 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               networkChangeRecoveries.push({ path: surface.path, recovered });
             }
             if (surface.path === "/ask") {
-              // The composer renders only after workspace, session, Context
-              // tree, and role hydration. Use the loaded route heading as the
-              // readiness signal before asserting the permission-gated input.
-              await expect(
-                page.getByRole("heading", { name: "Ask", exact: true }),
-              ).toBeVisible({ timeout: 15_000 });
+              await expect(page).toHaveURL(/\/ask$/);
+              await expect(page.locator(".ask-composer")).toHaveCount(0);
+              await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
             }
-            if (surface.kind === "heading") {
-              await expect(
-                page.getByRole("heading", { name: surface.name, exact: true }),
-              ).toBeVisible();
-            } else {
-              await expect(
-                page.getByRole("textbox", { name: surface.name, exact: true }),
-              ).toBeVisible();
-            }
+            await expect(
+              page.getByRole("heading", { name: surface.name, exact: true }),
+            ).toBeVisible();
             await expectViewportFits(page);
           }
         });

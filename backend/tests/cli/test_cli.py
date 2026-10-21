@@ -303,7 +303,7 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
             "add",
             "User@Example.COM",
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             database_url,
             "--json",
@@ -319,13 +319,13 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
     assert (
         session_service.login(
             email="user@example.com",
-            password="correct-pass",
+            password="correct-password",
         ).user.email
         == "user@example.com"
     )
     existing_session = session_service.login(
         email="user@example.com",
-        password="correct-pass",
+        password="correct-password",
     )
 
     reset = runner.invoke(
@@ -335,7 +335,7 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
             "reset-password",
             "user@example.com",
             "--password",
-            "changed-pass",
+            "changed-password",
             "--db",
             database_url,
             "--json",
@@ -347,11 +347,11 @@ def test_users_add_and_reset_password(tmp_path, monkeypatch):
     with pytest.raises(InvalidSessionError, match="session token has been revoked"):
         session_service.authenticate_session(existing_session.session_token)
     with pytest.raises(InvalidCredentialsError, match="email or password is invalid"):
-        session_service.login(email="user@example.com", password="correct-pass")
+        session_service.login(email="user@example.com", password="correct-password")
     assert (
         session_service.login(
             email="user@example.com",
-            password="changed-pass",
+            password="changed-password",
         ).user.email
         == "user@example.com"
     )
@@ -387,7 +387,7 @@ def test_users_add_reports_duplicate_email(tmp_path):
         "add",
         "dup@example.com",
         "--password",
-        "correct-pass",
+        "correct-password",
         "--db",
         database_url,
     ]
@@ -424,7 +424,7 @@ def test_workspace_members_add_list_and_remove(tmp_path):
             "add",
             "member@example.com",
             "--password",
-            "correct-pass",
+            "correct-password",
             "--db",
             database_url,
         ],

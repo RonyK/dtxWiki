@@ -26,7 +26,11 @@ from backend.models.user import User
 from backend.services import deployment, server_admin_service
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.ops import service_control
-from backend.services.session_service import DuplicateEmailError, normalize_email
+from backend.services.session_service import (
+    DuplicateEmailError,
+    EmailInputPolicyError,
+    normalize_email,
+)
 from backend.services.user_admin_service import UserAdminService
 from backend.utils.redact import redact_url
 
@@ -409,6 +413,11 @@ def setup_production(
     ] = None,
 ) -> None:
     """One command to stand up (or reconfigure) a production dtxWiki server."""
+    if do_admin and email is not None:
+        try:
+            email = normalize_email(email)
+        except EmailInputPolicyError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--email") from exc
     existing = prod_setup.read_env_file(env_file)
     if domain is None:
         domain = deployment.domain_of(existing.get("DTXWIKI_PUBLIC_BASE_URL"))

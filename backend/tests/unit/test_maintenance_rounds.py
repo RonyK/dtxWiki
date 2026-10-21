@@ -77,7 +77,7 @@ def _seed_folder_task(session, workspace_id, *, long_children=False):
     session.add(folder)
     session.flush()
     if long_children:
-        for index in range(20):
+        for index in range(200):
             session.add(
                 WorkspaceTreeNode(
                     workspace_id=workspace_id,
@@ -85,7 +85,7 @@ def _seed_folder_task(session, workspace_id, *, long_children=False):
                     node_kind="folder",
                     parent_id=folder.id,
                     sort_key=f"{index:02d}",
-                    title=f"Child {index} " + ("가나다라" * 300),
+                    title=f"Child {index} " + ("가나다라" * 17),
                     slug=f"child-{index}",
                     target_kind=None,
                     target_id=None,

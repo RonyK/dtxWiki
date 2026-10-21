@@ -341,7 +341,7 @@ if (( $# > 0 )); then
 fi
 
 case "$command" in
-    ""|serve|bootstrap|users|workspace|admin|context|reindex|eval|info|migrate-data)
+    ""|serve|bootstrap|users|workspace|admin|context|inputs|reindex|eval|info|migrate-data)
         exec setpriv --reuid="$SERVICE_USER" --regid="$SERVICE_USER" --init-groups \
             env HOME="$SERVICE_HOME" "$CLI" "$@"
         ;;

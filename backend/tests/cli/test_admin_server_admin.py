@@ -32,7 +32,7 @@ def _add_user(runner, db, monkeypatch, email) -> None:
     monkeypatch.setattr(cli_admin, "CredentialHasher", fast_hasher)
     result = runner.invoke(
         cli_main.app,
-        ["users", "add", email, "--password", "correct-pass", "--db", db],
+        ["users", "add", email, "--password", "correct-password", "--db", db],
     )
     assert result.exit_code == 0, result.output
 

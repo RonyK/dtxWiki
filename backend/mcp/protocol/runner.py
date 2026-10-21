@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from backend.api.metrics import inc_mcp_tool_call
 from backend.app.container import ToolCallContext
+from backend.domain.input_policy import InputPolicyError
 from backend.mcp.conversation import resolve_conversation_token
 from backend.mcp.envelope import (
     MCPErrorResponse,
@@ -580,7 +581,11 @@ async def call_tool_async(
             structuredContent=payload,
             isError=True,
         )
-    except (_ConversationTokenCarrierConflict, _WorkspaceTargetValidationError) as exc:
+    except (
+        _ConversationTokenCarrierConflict,
+        _WorkspaceTargetValidationError,
+        InputPolicyError,
+    ) as exc:
         # Do not pass transport carriers to trace storage or schema validation,
         # and never reflect their values in the validation response. A missing
         # workspace target also lands here before any directory or shard lookup.

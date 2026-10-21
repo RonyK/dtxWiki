@@ -12,6 +12,7 @@
           "format": "uuid",
           "type": "string"
         },
+        "maxItems": 128,
         "title": "Context Refs",
         "type": "array"
       },
@@ -35,6 +36,7 @@
           "format": "uuid",
           "type": "string"
         },
+        "maxItems": 128,
         "title": "Library Artifact Refs",
         "type": "array"
       },
@@ -45,8 +47,15 @@
       },
       "requested_categories": {
         "items": {
+          "enum": [
+            "agent_guide",
+            "persona",
+            "skill",
+            "memory"
+          ],
           "type": "string"
         },
+        "maxItems": 4,
         "title": "Requested Categories",
         "type": "array"
       },

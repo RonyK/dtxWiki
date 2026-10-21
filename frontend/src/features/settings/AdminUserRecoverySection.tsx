@@ -1,3 +1,5 @@
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
+import { validateAccountPassword, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import {
   CheckCircle2,
   Copy,
@@ -117,6 +119,8 @@ export function AdminUserRecoverySection() {
     if (!unlockPassword) {
       return;
     }
+    try { validateAccountPassword(unlockPassword); }
+    catch (caught) { setUnlockError(t((caught as Error).message, {ns: "auth"})); return; }
     setUnlocking(true);
     setUnlockError(null);
     try {
@@ -158,6 +162,8 @@ export function AdminUserRecoverySection() {
 
   async function onSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const error = inputTextError(query, 320);
+    if (error) { setSearchValidation(error); return; }
     const normalizedQuery = query.trim();
     if (!normalizedQuery) {
       setSearchValidation(
@@ -253,6 +259,8 @@ export function AdminUserRecoverySection() {
     if (!target || !currentPassword) {
       return;
     }
+    try { validateAccountPassword(currentPassword); }
+    catch (caught) { setIssueError(t((caught as Error).message, {ns: "auth"})); return; }
     setIssuing(true);
     setIssueError(null);
     try {
@@ -401,6 +409,7 @@ export function AdminUserRecoverySection() {
             </span>
             <input
               autoComplete="current-password"
+              onKeyDown={preventCompositionSubmit}
               disabled={unlocking}
               id="admin-user-directory-password"
               onChange={(event) => {
@@ -461,6 +470,7 @@ export function AdminUserRecoverySection() {
                 aria-invalid={Boolean(searchValidation)}
                 autoComplete="off"
                 id="admin-user-search-query"
+                {...textInputLimit(320)}
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setSearchValidation(null);
@@ -859,6 +869,7 @@ function RecoveryConfirmationDialog({
           </span>
           <input
             autoComplete="current-password"
+            onKeyDown={preventCompositionSubmit}
             disabled={busy}
             id="admin-recovery-current-password"
             onChange={(event) => onCurrentPasswordChange(event.target.value)}

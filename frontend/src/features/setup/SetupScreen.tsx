@@ -13,6 +13,7 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 
 type SetupMetric = {
   count: number;
@@ -27,6 +28,7 @@ type SetupState = {
 
 export function SetupScreen() {
   const { t } = useTranslation("settings");
+  const { preferences } = useLabsPreferences();
   const { data: state, error, reload } = useAsyncLoad<SetupState>(
     async () => {
       const workspaceId = await getCurrentWorkspaceId();
@@ -36,15 +38,17 @@ export function SetupScreen() {
       const [sources, contextPages, agentPages] = await Promise.all([
         listLibraryItems(workspaceId),
         listContextPages(workspaceId),
-        listAgentPages(workspaceId),
+        preferences.agent ? listAgentPages(workspaceId) : null,
       ]);
       return {
         sources: setupMetric(sources),
         contextPages: setupMetric(contextPages),
-        agentPages: setupMetric(agentPages),
+        agentPages: agentPages
+          ? setupMetric(agentPages)
+          : { count: 0, isLowerBound: false },
       };
     },
-    [],
+    [preferences.agent],
     {
       errorMessage: t("setupScreen.loadError", {
         defaultValue: "Failed to load Setup",
@@ -52,10 +56,13 @@ export function SetupScreen() {
     },
   );
 
-  const cards = useMemo(() => readinessCards(state, t), [state, t]);
+  const cards = useMemo(
+    () => readinessCards(state, t, preferences.agent),
+    [state, t, preferences.agent],
+  );
   const readyCount = cards.filter((card) => card.ready).length;
   const nextCard = cards.find((card) => !card.ready) ?? cards[0];
-  const readiness = readinessPill(readyCount, t);
+  const readiness = readinessPill(readyCount, cards.length, t);
 
   if (!state) {
     if (error) {
@@ -104,7 +111,7 @@ export function SetupScreen() {
             <p className="feature-subtitle">
               {t("setupScreen.description", {
                 defaultValue:
-                  "Add the sources, pages, and rules your AI will use to answer.",
+                  "Add source materials and organize your workspace knowledge.",
               })}
             </p>
           </div>
@@ -115,7 +122,12 @@ export function SetupScreen() {
           />
         </div>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        <SetupReadinessCallout readyCount={readyCount} nextCard={nextCard} t={t} />
+        <SetupReadinessCallout
+          readyCount={readyCount}
+          totalCount={cards.length}
+          nextCard={nextCard}
+          t={t}
+        />
         <section className="feature-section">
           <div className="metric-grid">
             {cards.map((card) => (
@@ -233,14 +245,16 @@ export function SetupScreen() {
 
 function SetupReadinessCallout({
   readyCount,
+  totalCount,
   nextCard,
   t,
 }: {
   readyCount: number;
+  totalCount: number;
   nextCard: ReturnType<typeof readinessCards>[number] | undefined;
   t: TFunction<"settings">;
 }) {
-  if (readyCount === 3) {
+  if (readyCount === totalCount) {
     return (
       <section className="feature-section">
         <div className="operations-row">
@@ -248,18 +262,18 @@ function SetupReadinessCallout({
           <div>
             <strong>
               {t("setupScreen.callout.allSetTitle", {
-                defaultValue: "All set. Try asking a question.",
+                defaultValue: "Your workspace is ready.",
               })}
             </strong>
             <p>
               {t("setupScreen.callout.allSetBody", {
                 defaultValue:
-                  "Your workspace has sources, knowledge pages, and AI rules.",
+                  "Your workspace has sources and knowledge pages.",
               })}
             </p>
           </div>
-          <Link className="icon-button primary" to="/ask">
-            {t("setupScreen.callout.openAsk", { defaultValue: "Open Ask" })}
+          <Link className="icon-button primary" to="/context">
+            {t("setupScreen.callout.openContext", { defaultValue: "Open Context" })}
           </Link>
         </div>
       </section>
@@ -280,7 +294,7 @@ function SetupReadinessCallout({
             <p>
               {t("setupScreen.callout.emptyBody", {
                 defaultValue:
-                  "Even one PDF or page is enough to ask your first question.",
+                  "Add a PDF or page to start building your workspace knowledge.",
               })}
             </p>
           </div>
@@ -322,11 +336,15 @@ function SetupReadinessCallout({
   );
 }
 
-function readinessCards(state: SetupState | null, t: TFunction<"settings">) {
+function readinessCards(
+  state: SetupState | null,
+  t: TFunction<"settings">,
+  showAgent: boolean,
+) {
   if (!state) {
     return [];
   }
-  return [
+  const cards = [
     {
       title: t("setupScreen.cards.library.title", { defaultValue: "Library" }),
       description: t("setupScreen.cards.library.description", {
@@ -392,7 +410,9 @@ function readinessCards(state: SetupState | null, t: TFunction<"settings">) {
       }),
       icon: <FileText size={16} aria-hidden="true" />,
     },
-    {
+  ];
+  if (showAgent) {
+    cards.push({
       title: t("setupScreen.cards.agent.title", { defaultValue: "AI rules" }),
       description: t("setupScreen.cards.agent.description", {
         defaultValue: "How the AI should answer",
@@ -422,16 +442,20 @@ function readinessCards(state: SetupState | null, t: TFunction<"settings">) {
         defaultValue: "Add an AI rule to control how answers are written.",
       }),
       icon: <Bot size={16} aria-hidden="true" />,
-    },
-  ];
+    });
+  }
+  return cards;
 }
 
-function readinessPill(readyCount: number, t: TFunction<"settings">) {
-  if (readyCount === 3) {
+function readinessPill(readyCount: number, total: number, t: TFunction<"settings">) {
+  if (readyCount === total) {
     return {
       status: "ready",
       tone: "ok",
-      label: t("setupScreen.status.ready", { defaultValue: "3 of 3 · Ready" }),
+      label: t("setupScreen.status.ready", {
+        total,
+        defaultValue: "{{total}} of {{total}} · Ready",
+      }),
     };
   }
   if (readyCount === 0) {
@@ -439,7 +463,8 @@ function readinessPill(readyCount: number, t: TFunction<"settings">) {
       status: "pending",
       tone: "warn",
       label: t("setupScreen.status.pending", {
-        defaultValue: "0 of 3 · Pending",
+        total,
+        defaultValue: "0 of {{total}} · Pending",
       }),
     };
   }
@@ -448,7 +473,8 @@ function readinessPill(readyCount: number, t: TFunction<"settings">) {
     tone: "warn",
     label: t("setupScreen.status.partial", {
       count: readyCount,
-      defaultValue: "{{count}} of 3 · Partial",
+      total,
+      defaultValue: "{{count}} of {{total}} · Partial",
     }),
   };
 }
