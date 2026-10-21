@@ -20,6 +20,7 @@ class HealthComponents(BaseModel):
     app_version: HealthComponentStatus
     mcp: HealthComponentStatus
     oauth_jwk: HealthComponentStatus
+    worker: HealthComponentStatus = "n/a"
 
     model_config = ConfigDict(extra="forbid")
 

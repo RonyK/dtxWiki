@@ -20,6 +20,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -129,6 +130,15 @@ def test_compose_uses_full_image_var_not_image_tag():
     text = COMPOSE.read_text(encoding="utf-8")
     assert "${DTXWIKI_IMAGE:-dtxwiki:local}" in text
     assert "DTXWIKI_IMAGE_TAG" not in text
+
+
+@pytest.mark.parametrize("service", DTXWIKI_SERVICES)
+def test_compose_worker_mode_does_not_break_0_1_2_image_rollback(service: str):
+    # 0.1.2 rejects this unknown DTXWIKI_ variable in production. The image
+    # owns the new default, so changing only DTXWIKI_IMAGE back removes it.
+    assert "DTXWIKI_WORKER_MODE" not in _service_env(
+        service, {"DTXWIKI_DOMAIN": "wiki.example.test"}
+    )
 
 
 @pytest.mark.parametrize("service", DTXWIKI_SERVICES)
@@ -352,6 +362,10 @@ def test_docker_image_actually_builds(built_image: str):
     )
     assert config["User"] == "dtxwiki"
     assert config["Entrypoint"] == ["/usr/local/bin/docker-entrypoint.sh"]
+    # An older/custom Compose file has no worker-mode override. The image
+    # itself must preserve its existing separate-worker topology.
+    image_env = dict(entry.split("=", 1) for entry in config["Env"])
+    assert image_env["DTXWIKI_WORKER_MODE"] == "external"
     assert (
         config["Labels"]["org.opencontainers.image.licenses"]
         == "AGPL-3.0-only OR Elastic-2.0"
@@ -394,6 +408,19 @@ for pid in os.listdir('/proc'):
 print(','.join(leaks))
 """
 
+_MANAGED_WORKER_PIDS = """
+from pathlib import Path
+pids = []
+for path in Path('/proc').glob('[0-9]*/cmdline'):
+    try:
+        args = path.read_bytes().split(b'\\0')
+    except OSError:
+        continue
+    if b'backend.worker.managed' in args:
+        pids.append(path.parent.name)
+print(','.join(pids))
+"""
+
 
 @DOCKER_SMOKE
 def test_docker_exec_cli_works_with_the_compose_environment(built_image: str):
@@ -429,6 +456,20 @@ def test_docker_exec_cli_works_with_the_compose_environment(built_image: str):
         )
         app = containers[0]
         _wait_until_live(app)
+
+        worker_component = _docker(
+            "exec", app, "python", "-c",
+            "import json, urllib.request; "
+            "print(json.load(urllib.request.urlopen("
+            "'http://127.0.0.1:21080/health/ready'))['components']['worker'])",
+        ).stdout.strip()
+        # No worker mode is supplied by Compose. This therefore exercises the
+        # image default used by existing deployments that only pull an image.
+        assert worker_component == "n/a", "app started a second, managed worker"
+        managed_pids = _docker(
+            "exec", app, "python", "-c", _MANAGED_WORKER_PIDS,
+        ).stdout.strip()
+        assert managed_pids == "", f"app spawned managed workers: {managed_pids}"
 
         password = secrets.token_urlsafe(18)
         added = _docker(
@@ -681,33 +722,82 @@ http.server.ThreadingHTTPServer(("0.0.0.0", 21080), Handler).serve_forever()
 _CLIENT = """
 import http.client, json, ssl, sys
 
-host, port = sys.argv[1], int(sys.argv[2])
-
-
 def call(method, path, body=None, headers=None):
     context = ssl._create_unverified_context()
     connection = http.client.HTTPSConnection(host, port, context=context, timeout=60)
+    send_error = None
     try:
-        connection.request(method, path, body=body, headers=headers or {})
+        try:
+            connection.request(method, path, body=body, headers=headers or {})
+        except OSError as exc:
+            # A proxy can send 413 and close while the body is still being sent.
+            # Read that response on this connection; never resend the request.
+            if connection.sock is None:
+                raise
+            send_error = repr(exc)
         response = connection.getresponse()
         response.read()
         return {"status": response.status, "headers": response.getheaders()}
     except OSError as exc:
-        return {"status": None, "error": repr(exc)}
+        result = {"status": None, "error": repr(exc)}
+        if send_error is not None:
+            result["send_error"] = send_error
+        return result
     finally:
         connection.close()
 
 
-print(json.dumps({
-    "app": call(
-        "GET", "/app-headers?token=SECRET-TOKEN&page=2",
-        headers={"Referer": "https://wiki/reset-password?token=SECRET-REFERER"},
-    ),
-    "plain": call("GET", "/plain"),
-    "small": call("POST", "/upload", body=b"x" * 1024),
-    "large": call("POST", "/upload", body=b"x" * 70_000_000),
-}))
+if __name__ == "__main__":
+    host, port = sys.argv[1], int(sys.argv[2])
+    print(json.dumps({
+        "app": call(
+            "GET", "/app-headers?token=SECRET-TOKEN&page=2",
+            headers={"Referer": "https://wiki/reset-password?token=SECRET-REFERER"},
+        ),
+        "plain": call("GET", "/plain"),
+        "small": call("POST", "/upload", body=b"x" * 1024),
+        "large": call("POST", "/upload", body=b"x" * 70_000_000),
+    }))
 """
+
+
+@pytest.mark.parametrize("failure", ["send", "send_and_response", "connect"])
+def test_proxy_client_reads_rejection_after_send_error(monkeypatch, failure: str):
+    connection = Mock()
+    send_error = ConnectionResetError(104, "Connection reset by peer")
+    response_error = ConnectionResetError(104, "No response available")
+    connection.request.side_effect = send_error
+    connection.getresponse.return_value.status = 413
+    connection.getresponse.return_value.getheaders.return_value = []
+    if failure == "send_and_response":
+        connection.getresponse.side_effect = response_error
+    elif failure == "connect":
+        connection.sock = None
+    monkeypatch.setattr("http.client.HTTPSConnection", Mock(return_value=connection))
+    namespace = {"__name__": "proxy_client_test", "host": "proxy", "port": 443}
+    exec(_CLIENT, namespace)
+
+    result = namespace["call"]("POST", "/upload", body=b"body")
+
+    if failure == "send":
+        assert result == {"status": 413, "headers": []}
+        connection.getresponse.return_value.read.assert_called_once_with()
+    elif failure == "send_and_response":
+        assert result == {
+            "status": None,
+            "error": repr(response_error),
+            "send_error": repr(send_error),
+        }
+    else:
+        assert result == {"status": None, "error": repr(send_error)}
+    if failure == "connect":
+        connection.getresponse.assert_not_called()
+    else:
+        connection.getresponse.assert_called_once_with()
+    connection.request.assert_called_once_with(
+        "POST", "/upload", body=b"body", headers={}
+    )
+    connection.close.assert_called_once_with()
 
 
 def _headers(response: dict) -> dict[str, list[str]]:
@@ -824,10 +914,10 @@ def test_caddy_keeps_app_headers_caps_bodies_and_logs_no_tokens(
     assert responses["small"]["status"] == 200
     assert responses["large"]["status"] != 200
     if image == "caddy:2":
-        assert responses["large"]["status"] == 413
+        assert responses["large"]["status"] == 413, responses["large"]
     sizes = _upload_sizes(upstream)
     assert 1024 in sizes
-    assert max(sizes) < LARGE_UPLOAD
+    assert max(sizes) <= 64_000_000
     # C6: the access log keeps neither the query token nor the Referer.
     logs = _docker("logs", proxy)
     access = [

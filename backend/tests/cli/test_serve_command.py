@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
+from backend.app import runtime
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.cli import main as cli_main
@@ -18,16 +21,24 @@ from backend.tests.utils.environment import clear_ambient_dtxwiki_env
 
 @pytest.fixture
 def serve(monkeypatch, tmp_path):
-    """Invoke `dtxwiki serve` with the server, bootstrap and browser stubbed."""
+    """Invoke `dtxwiki serve` with the runtime and browser stubbed."""
 
     clear_ambient_dtxwiki_env(monkeypatch)
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "data"))
     calls: dict = {}
     monkeypatch.setattr(cli_main, "create_app", lambda **_kwargs: object())
-    monkeypatch.setattr(cli_main, "bootstrap_app", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        cli_main.uvicorn, "run", lambda _app, **kwargs: calls.update(uvicorn=kwargs)
-    )
+
+    async def fake_runtime(
+        _app, _settings, *, application_factory, on_started, **kwargs
+    ):
+        calls.update(uvicorn=kwargs)
+        calls["loop"] = asyncio.get_running_loop()
+        assert _app is None
+        calls["application"] = application_factory(_settings)
+        if on_started is not None:
+            on_started()
+
+    monkeypatch.setattr(cli_main, "serve_runtime", fake_runtime)
     monkeypatch.setattr(
         cli_main.webbrowser, "open", lambda url: calls.update(browser=url)
     )
@@ -40,6 +51,52 @@ def serve(monkeypatch, tmp_path):
         return result, calls
 
     return invoke
+
+
+def test_serve_uses_uvicorn_selected_event_loop(serve, monkeypatch):
+    selected_loops = []
+
+    def loop_factory():
+        loop = asyncio.new_event_loop()
+        selected_loops.append(loop)
+        return loop
+
+    monkeypatch.setattr(
+        cli_main.uvicorn.Config,
+        "get_loop_factory",
+        lambda _config: loop_factory,
+        raising=False,
+    )
+
+    _, calls = serve("--no-open")
+
+    assert len(selected_loops) == 1
+    assert calls["loop"] is selected_loops[0]
+    assert selected_loops[0].is_closed()
+
+
+def test_serve_uses_uvloop_when_installed(serve):
+    uvloop = pytest.importorskip("uvloop")
+
+    _, calls = serve("--no-open")
+
+    assert isinstance(calls["loop"], uvloop.Loop)
+
+
+def test_serve_supports_uvicorn_with_policy_based_loop_setup(serve, monkeypatch):
+    configured = []
+    monkeypatch.setattr(
+        cli_main.uvicorn,
+        "Config",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            setup_event_loop=lambda: configured.append(True)
+        ),
+    )
+
+    _, calls = serve("--no-open")
+
+    assert configured == [True]
+    assert calls["loop"].is_closed()
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.20", "wiki-box"])
@@ -80,11 +137,27 @@ def test_remote_modes_do_not_get_the_solo_local_warning(serve, monkeypatch):
     assert "WARNING" not in result.stderr
 
 
-def test_uvicorn_access_log_is_disabled(serve):
-    _, calls = serve("--host", "127.0.0.1", "--no-open")
+def test_uvicorn_access_log_is_disabled(monkeypatch):
+    # Inspect the real runtime config: uvicorn's access log records the full
+    # request target, including password-reset and email-verification tokens.
+    class ConfigCaptured(Exception):
+        pass
 
-    # uvicorn's access log records the request target, query string and all.
-    assert calls["uvicorn"]["access_log"] is False
+    def capture_config(config):
+        assert config.access_log is False
+        raise ConfigCaptured
+
+    monkeypatch.setattr(runtime, "_RuntimeServer", capture_config)
+    with pytest.raises(ConfigCaptured):
+        asyncio.run(
+            runtime.serve_runtime(
+                SimpleNamespace(state=SimpleNamespace()),
+                Settings(),
+                host="127.0.0.1",
+                port=21999,
+                log_level="info",
+            )
+        )
 
 
 @pytest.mark.parametrize(

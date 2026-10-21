@@ -12,6 +12,42 @@
   temporary 0.1.1 recovery workflow is removed.
 - Desktop installers remain outside this release.
 
+### Runtime and upgrades
+
+- `dtxwiki` and `dtxwiki serve` now start and stop the required background
+  worker together. If another process manager already runs `dtxwiki-worker run`,
+  set `DTXWIKI_WORKER_MODE=external` or pass `--worker-mode external` before
+  starting the upgraded web server, so only one worker uses the database.
+- Production setup and systemd updates write `external` to the backed-up env
+  file, including custom `--env-file` paths. Finalization invoked by an older
+  updater recovers the env path from the installed systemd unit. Rolling back
+  restores that file, and the unit adds no setting that older versions cannot
+  read. Setup without installed systemd units, including Windows, defaults to a
+  managed worker; reconfiguration preserves an existing worker-mode selection.
+- Docker images default to `external`, preserving existing Compose deployments
+  with a separate worker service. Compose adds no new worker-mode variable, so
+  it remains usable when rolling back to an older image. For a single container
+  with a managed worker, explicitly set `DTXWIKI_WORKER_MODE=managed`.
+- Preserve Uvicorn's automatic event-loop selection, including uvloop when
+  available. Desktop reports unexpected engine/worker failures and gives
+  bootstrap, worker startup and HTTP startup separate bounded phases.
+- Run startup initialization in a temporary child so database waits can be
+  interrupted while the API parent remains responsive to stop requests. Keep
+  the API and bundled SPA in the parent and the worker in its own process.
+- Guard the data directory and physical SQLite database independently. URL
+  driver/query aliases and a different data directory cannot start a second
+  consumer or bypass maintenance checks. Managed mode requires a regular local
+  SQLite file; memory and SQLite URI databases require external mode.
+- Report worker readiness after the initial stale-job recovery pass. A control
+  database failure prevents readiness; an unavailable workspace is logged and
+  deferred without blocking healthy workspaces. Mail delivery runs after ready.
+- Persist local OAuth signing keys and session secrets across launches, retaining
+  explicitly configured values and existing local keys. Desktop shutdown now
+  confirms engine exit after graceful stop and force escalation.
+- Preserve maintenance lock handoff through Windows console and venv launchers.
+  Finalization verifies the updater's live data-directory and database guards
+  before migrating, while retaining compatibility with older updaters.
+
 ### Fixes
 
 - Select the Context publish replay audit by version and change-set identity.

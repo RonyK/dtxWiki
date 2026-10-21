@@ -147,7 +147,11 @@ def _page_orphan_statement(workspace_id: UUID):
 
 
 def list_orphans(
-    session: Session, *, workspace_id: UUID, now: datetime | None = None
+    session: Session,
+    *,
+    workspace_id: UUID,
+    now: datetime | None = None,
+    actor,
 ) -> tuple[OrphanCandidate, ...]:
     """All current orphans, regardless of age.
 
@@ -162,7 +166,24 @@ def list_orphans(
     """
 
     del now
-    page_assets = tuple(session.scalars(_page_orphan_statement(workspace_id)))
+    from backend.repositories.context_visibility import (
+        foreign_editing_version_exists,
+        visible_context_page_expression,
+    )
+
+    statement = (
+        _page_orphan_statement(workspace_id)
+        .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
+        .where(
+            ContextPage.workspace_id == workspace_id,
+            visible_context_page_expression(actor),
+            ~foreign_editing_version_exists(
+                ContextMediaAsset.created_for_version_id,
+                None if actor is None else (actor.actor_kind, actor.actor_id),
+            ),
+        )
+    )
+    page_assets = tuple(session.scalars(statement))
     page_titles = _page_titles(
         session,
         workspace_id=workspace_id,

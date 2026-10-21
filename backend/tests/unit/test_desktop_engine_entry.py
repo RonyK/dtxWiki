@@ -1,5 +1,8 @@
 import asyncio
+import io
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +18,138 @@ def test_desktop_engine_arguments_require_port(monkeypatch):
     arguments = engine_entry._serve_arguments(["--port", "23456"])
     assert arguments.host == "127.0.0.1"
     assert arguments.port == 23456
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_desktop_engine_manages_worker_and_watches_parent(
+    monkeypatch, tmp_path, frozen, capsys
+):
+    from backend.app import main, runtime
+
+    application = object()
+    calls = {}
+    threads = []
+    monkeypatch.setattr(engine_entry.sys, "frozen", frozen, raising=False)
+    # A shell configured for a split systemd deployment must not disable the
+    # local Desktop worker.
+    monkeypatch.setenv("DTXWIKI_WORKER_MODE", "external")
+    monkeypatch.setattr(main, "create_app", lambda **kwargs: application)
+
+    class Thread:
+        def __init__(self, **kwargs):
+            threads.append(kwargs)
+
+        def start(self):
+            calls["watcher_started"] = True
+
+    async def serve_runtime(app, settings, **kwargs):
+        calls.update(app=app, settings=settings, options=kwargs)
+        assert app is None
+        assert "bootstrap" not in kwargs
+        kwargs["on_server"](server)
+        calls["created_app"] = kwargs["application_factory"](settings)
+        kwargs["on_progress"]("worker-starting")
+        kwargs["on_progress"]("worker-ready")
+
+    server = SimpleNamespace(should_exit=False)
+    monkeypatch.setattr(engine_entry.threading, "Thread", Thread)
+    monkeypatch.setattr(runtime, "serve_runtime", serve_runtime)
+
+    asyncio.run(engine_entry._serve("127.0.0.1", 23456))
+
+    assert calls["created_app"] is application
+    assert calls["settings"].worker_mode == "managed"
+    assert calls["settings"].backend_port == 23456
+    assert calls["options"]["worker_command"] == (
+        [engine_entry.sys.executable, "worker"] if frozen else None
+    )
+    assert calls["options"]["init_command"] == (
+        [engine_entry.sys.executable, "init"] if frozen else None
+    )
+    assert calls["watcher_started"] is True
+    assert threads[0]["target"] is engine_entry._watch_parent
+    assert threads[0]["args"] == (server,)
+    assert [json.loads(line) for line in capsys.readouterr().out.splitlines()] == [
+        {"event": "dtxwiki-runtime", "phase": "worker-starting"},
+        {"event": "dtxwiki-runtime", "phase": "worker-ready"},
+    ]
+
+
+def test_desktop_runtime_failure_is_reported_to_shell_and_remains_a_failure(
+    monkeypatch, capsys
+):
+    from backend.app.runtime import RuntimeStartupError
+
+    async def failed_runtime(*_args):
+        raise RuntimeStartupError(
+            "dtxWiki background worker stopped unexpectedly (exit code 7)"
+        )
+
+    monkeypatch.setattr(engine_entry, "_serve", failed_runtime)
+    monkeypatch.setattr(engine_entry.sys, "argv", ["dtxwiki-engine", "--port", "23456"])
+
+    with pytest.raises(RuntimeStartupError, match="exit code 7"):
+        engine_entry.main()
+
+    assert json.loads(capsys.readouterr().out) == {
+        "event": "dtxwiki-runtime",
+        "error": "dtxWiki background worker stopped unexpectedly (exit code 7)",
+    }
+
+
+@pytest.mark.parametrize("parent_input", ["shutdown\n", ""])
+def test_desktop_parent_shutdown_requests_managed_runtime_exit(
+    monkeypatch, parent_input
+):
+    server = SimpleNamespace(should_exit=False)
+    monkeypatch.setattr(engine_entry.sys, "stdin", io.StringIO(parent_input))
+
+    engine_entry._watch_parent(server)
+
+    assert server.should_exit is True
+
+
+def test_frozen_worker_operation_does_not_start_another_server(monkeypatch):
+    from backend.worker import managed
+
+    calls = []
+    monkeypatch.setattr(engine_entry.sys, "argv", ["dtxwiki-engine", "worker"])
+    monkeypatch.setattr(managed, "main", lambda: calls.append("worker"))
+    monkeypatch.setattr(
+        engine_entry, "_serve_arguments", lambda args: pytest.fail("server started")
+    )
+
+    engine_entry.main()
+
+    assert calls == ["worker"]
+
+
+@pytest.mark.parametrize(
+    ("operation", "module_name", "argument"),
+    [
+        ("converter-host", "converter_host", "--converter"),
+        ("preview-host", "preview_host", "--provider"),
+    ],
+)
+def test_frozen_provider_operations_preserve_host_arguments(
+    monkeypatch, operation, module_name, argument
+):
+    import importlib
+
+    host = importlib.import_module(f"backend.worker.{module_name}")
+    seen = []
+    monkeypatch.setattr(host, "main", lambda argv: seen.append(argv) or 7)
+    monkeypatch.setattr(
+        engine_entry.sys,
+        "argv",
+        ["dtxwiki-engine", operation, argument, "allowlisted.id"],
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        engine_entry.main()
+
+    assert exited.value.code == 7
+    assert seen == [[argument, "allowlisted.id"]]
 
 
 def test_desktop_mcp_inventory_reports_capabilities(monkeypatch):

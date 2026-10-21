@@ -7,7 +7,7 @@ key must be the single ``id`` column. Workspace-plane composite identities and
 control- or mixed-plane tables need purpose-specific lookup APIs.
 """
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from uuid import UUID
 
 from sqlalchemy import Select, inspect, select
@@ -33,7 +33,7 @@ def get_in_workspace[Model](
     its real identity or placement.
     """
 
-    _validate_workspace_model(model)
+    _validate_workspace_model(model, operation="get_in_workspace")
 
     return session.scalar(
         select(model).where(
@@ -43,21 +43,32 @@ def get_in_workspace[Model](
     )
 
 
-def _validate_workspace_model(model: type) -> None:
+def select_in_workspace_by_ids[Model](
+    model: type[Model], *, workspace_id: UUID, resource_ids: Collection[UUID]
+) -> Select[tuple[Model]]:
+    """A scoped batch statement; callers may restrict the selected columns."""
+    _validate_workspace_model(model, operation="select_in_workspace_by_ids")
+    return select(model).where(
+        model.workspace_id == workspace_id,  # type: ignore[attr-defined]
+        model.id.in_(resource_ids),  # type: ignore[attr-defined]
+    )
+
+
+def _validate_workspace_model(model: type, *, operation: str) -> None:
     mapper = inspect(model)
     table = mapper.local_table
     if table.name not in WORKSPACE_PLANE_TABLES:
         raise TypeError(
-            "get_in_workspace requires a table classified in "
+            f"{operation} requires a table classified in "
             f"WORKSPACE_PLANE_TABLES; {table.name!r} is not workspace-plane"
         )
 
     if "workspace_id" not in table.c or table.c.workspace_id.nullable:
-        raise TypeError("get_in_workspace requires a non-null workspace_id column")
+        raise TypeError(f"{operation} requires a non-null workspace_id column")
 
     primary_key_names = tuple(column.name for column in mapper.primary_key)
     if primary_key_names != ("id",):
-        raise TypeError("get_in_workspace requires the exact primary key (id)")
+        raise TypeError(f"{operation} requires the exact primary key (id)")
 
 
 def select_in_workspace[Model](
@@ -71,7 +82,7 @@ def select_in_workspace[Model](
     Extra selectors only narrow the scope. Plane/PK validation is the same as
     the single-row lookup; global audit records need their own mixed-plane API.
     """
-    _validate_workspace_model(model)
+    _validate_workspace_model(model, operation="select_in_workspace")
     return select(model).where(model.workspace_id == workspace_id, *conditions)
 
 
@@ -104,7 +115,7 @@ def where_in_workspace[Model](
     Joined entities retain their existing caller-owned relation/visibility
     policy; this helper scopes the first model only.
     """
-    _validate_workspace_model(model)
+    _validate_workspace_model(model, operation="where_in_workspace")
     columns = statement.column_descriptions
     if (
         not columns

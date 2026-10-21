@@ -99,10 +99,11 @@ describe("MCP chat detail sizing styles", () => {
     );
   });
 
-  it("gives Client metadata two desktop columns and collapses it at the 640px grid boundary", () => {
+  it("keeps client sizing independent from the four-column facts group", () => {
     const clientItem = ruleBody(".mcp-chat-meta-item--client");
-    expect(clientItem).toContain("grid-column: span 2;");
-    expect(clientItem).toContain("min-width: 280px;");
+    expect(ruleBody(".mcp-chat-meta-strip")).toContain("grid-template-columns: minmax(0, 4fr) minmax(0, 3fr);");
+    expect(ruleBody(".mcp-chat-session-facts")).toContain("repeat(4, minmax(0, 1fr))");
+    expect(clientItem).toContain("min-width: 0;");
     expect(ruleBody(".mcp-client-identity > summary")).toContain("min-height: 44px;");
     expect(ruleBody(".mcp-client-identity-detail")).toContain(
       "grid-template-columns: repeat(2, minmax(0, 1fr));",
@@ -120,20 +121,13 @@ describe("MCP chat detail sizing styles", () => {
     );
   });
 
-  it("keeps client identifiers wrappable and the copy control touch-safe", () => {
+  it("keeps client identifiers wrappable and copy controls compact", () => {
     expect(ruleBody(".mcp-client-identifier > code")).toContain("min-width: 0;");
     expect(ruleBody(".mcp-client-identity-detail li > code,\n.mcp-client-identity-detail li > span"))
       .toContain("overflow-wrap: anywhere;");
 
-    const touchStart = chatStyles.indexOf(
-      "@media (max-width: 1024px), (any-pointer: coarse)",
-    );
-    const copyButton = ruleBody(
-      ".mcp-client-identifier > .compact-icon-button",
-      touchStart,
-    );
-    expect(copyButton).toContain("min-width: 44px;");
-    expect(copyButton).toContain("min-height: 44px;");
+    expect(chatStyles).not.toContain(".mcp-client-identifier > .compact-icon-button");
+
   });
 
   it("renders the transcript caveat as a persistent two-line banner body", () => {

@@ -12,6 +12,11 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    # Execute from the same checked-in/installed package as the dispatcher,
+    # independently of cwd, user site packages, and another editable worktree.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from backend.converters.external_protocol import conversion_result_to_payload
 from backend.spi.conversion import (
     CONVERSION_OUTPUT_SCHEMA_VERSION,
@@ -229,6 +234,9 @@ def _conversion_request(payload: dict[str, Any]) -> ConversionRequest:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from backend.app.process_tree import guard_managed_parent
+
+    guard_managed_parent()
     parser = argparse.ArgumentParser()
     parser.add_argument("--converter", required=True)
     args = parser.parse_args(argv)

@@ -39,6 +39,7 @@ from backend.services.context_media_orphan_sweep import (
     ContextMediaOrphanSweepService,
     list_orphans,
 )
+from backend.spi.types import ActorContext
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=UTC)
 
@@ -250,7 +251,14 @@ def test_page_bound_asset_with_no_surviving_usage_is_reclaimed(
             page_version_id=version.id,
             body_markdown=f"![pixel]({asset.logical_reference})",
         )
-        assert list_orphans(session, workspace_id=workspace_id) == ()
+        assert (
+            list_orphans(
+                session,
+                actor=ActorContext("system", "sweep-test"),
+                workspace_id=workspace_id,
+            )
+            == ()
+        )
 
         # The user edits the draft again and removes the image.
         SyncVersionUsage().execute(
@@ -264,7 +272,11 @@ def test_page_bound_asset_with_no_surviving_usage_is_reclaimed(
         _pin_created_at(session, workspace_id, asset_id, NOW)
 
     with session_factory.begin() as session:
-        orphans = list_orphans(session, workspace_id=workspace_id)
+        orphans = list_orphans(
+            session,
+            actor=ActorContext("system", "sweep-test"),
+            workspace_id=workspace_id,
+        )
         assert [item.asset_id for item in orphans] == [asset_id]
         assert orphans[0].page_id == page.id
         # The page title is resolved here (workspace-plane), not left as a
@@ -283,7 +295,12 @@ def test_page_bound_asset_with_no_surviving_usage_is_reclaimed(
     with session_factory.begin() as session:
         _assert_fully_drained(session, workspace_id, asset_id)
         assert asset_id not in {
-            item.asset_id for item in list_orphans(session, workspace_id=workspace_id)
+            item.asset_id
+            for item in list_orphans(
+                session,
+                actor=ActorContext("system", "sweep-test"),
+                workspace_id=workspace_id,
+            )
         }
 
 
@@ -312,7 +329,11 @@ def test_page_bound_orphan_with_a_blank_page_title_resolves_page_title_to_none(
         _pin_created_at(session, workspace_id, asset_id, NOW)
 
     with session_factory.begin() as session:
-        orphans = list_orphans(session, workspace_id=workspace_id)
+        orphans = list_orphans(
+            session,
+            actor=ActorContext("system", "sweep-test"),
+            workspace_id=workspace_id,
+        )
         assert [item.asset_id for item in orphans] == [asset_id]
         assert orphans[0].page_id == page.id
         assert orphans[0].page_id == page_id
@@ -378,7 +399,14 @@ def test_page_bound_asset_referenced_by_a_superseded_version_is_not_reclaimed(
         assert usage.latest_draft_reference_count == 0
         assert usage.historical_reference_count == 1
 
-        assert list_orphans(session, workspace_id=workspace_id) == ()
+        assert (
+            list_orphans(
+                session,
+                actor=ActorContext("system", "sweep-test"),
+                workspace_id=workspace_id,
+            )
+            == ()
+        )
 
         result = ContextMediaOrphanSweepService(SqlAlchemyContextMediaRepository).sweep(
             session,
@@ -410,18 +438,34 @@ def test_open_editing_upload_is_protected_without_age_limit(session_factory) -> 
         _pin_created_at(session, workspace_id, asset.asset_id, NOW)
         # A separate visible head does not remove protection of the upload's
         # own private row (the page-first pointer shape).
-        visible = ContextPageVersion(workspace_id=workspace_id, page_id=page.id,
-            version_no=2, body_md="visible", content_hash="1" * 64,
-            actor_type="human", created_by_actor_kind="human",
-            created_by_actor_id="other", version_status="draft")
+        visible = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=2,
+            body_md="visible",
+            content_hash="1" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="other",
+            version_status="draft",
+        )
         session.add(visible)
         session.flush()
         page.latest_draft_version_id = visible.id
         session.flush()
         future = NOW + timedelta(days=3650)
-        assert list_orphans(session, workspace_id=workspace_id, now=future) == ()
+        assert (
+            list_orphans(
+                session,
+                actor=ActorContext("system", "sweep-test"),
+                workspace_id=workspace_id,
+                now=future,
+            )
+            == ()
+        )
         result = ContextMediaOrphanSweepService(SqlAlchemyContextMediaRepository).sweep(
-            session, workspace_id=workspace_id, retention_hours=1, now=future)
+            session, workspace_id=workspace_id, retention_hours=1, now=future
+        )
         assert (
             result.inspected_count
             == result.reclaimed_count
@@ -435,11 +479,17 @@ def test_open_editing_upload_is_protected_without_age_limit(session_factory) -> 
         # Once submitted, ordinary asset-age retention applies immediately.
         version.version_status = "draft"
         session.flush()
-        orphans = list_orphans(session, workspace_id=workspace_id, now=future)
+        orphans = list_orphans(
+            session,
+            actor=ActorContext("system", "sweep-test"),
+            workspace_id=workspace_id,
+            now=future,
+        )
         assert [item.asset_id for item in orphans] == [asset.asset_id]
         assert orphans[0].orphaned_since == NOW
         result = ContextMediaOrphanSweepService(SqlAlchemyContextMediaRepository).sweep(
-            session, workspace_id=workspace_id, retention_hours=1, now=future)
+            session, workspace_id=workspace_id, retention_hours=1, now=future
+        )
         assert result.reclaimed_count == result.drained_count == 1
         _assert_fully_drained(session, workspace_id, asset.asset_id)
 
@@ -520,7 +570,15 @@ def test_autosave_via_service_keeps_editing_status_and_protects_unattached_uploa
 
     with session_factory.begin() as session:
         future = NOW + timedelta(days=3650)
-        assert list_orphans(session, workspace_id=workspace_id, now=future) == ()
+        assert (
+            list_orphans(
+                session,
+                actor=ActorContext("system", "sweep-test"),
+                workspace_id=workspace_id,
+                now=future,
+            )
+            == ()
+        )
         row = _asset_row(session, workspace_id, asset_id)
         assert row is not None and row.association_state == "active"
 
@@ -541,16 +599,28 @@ def test_submitted_uninserted_upload_is_reclaimed_exactly_once(session_factory) 
         _pin_created_at(session, workspace_id, asset.asset_id, NOW)
         version.version_status = "draft"
         session.flush()
-        orphans = list_orphans(session, workspace_id=workspace_id)
+        orphans = list_orphans(
+            session,
+            actor=ActorContext("system", "sweep-test"),
+            workspace_id=workspace_id,
+        )
         assert [(item.asset_id, item.page_id) for item in orphans] == [
             (asset.asset_id, page.id)
         ]
         service = ContextMediaOrphanSweepService(SqlAlchemyContextMediaRepository)
-        first = service.sweep(session, workspace_id=workspace_id, retention_hours=24,
-            now=NOW + timedelta(days=365))
+        first = service.sweep(
+            session,
+            workspace_id=workspace_id,
+            retention_hours=24,
+            now=NOW + timedelta(days=365),
+        )
         assert first.reclaimed_count == first.drained_count == 1
-        second = service.sweep(session, workspace_id=workspace_id, retention_hours=24,
-            now=NOW + timedelta(days=365))
+        second = service.sweep(
+            session,
+            workspace_id=workspace_id,
+            retention_hours=24,
+            now=NOW + timedelta(days=365),
+        )
         assert second.reclaimed_count == second.drained_count == 0
         _assert_fully_drained(session, workspace_id, asset.asset_id)
 
@@ -583,7 +653,11 @@ def test_zero_retention_disables_reclamation_but_not_visibility(
         assert result.reclaimed_count == 0
         assert result.drained_count == 0
 
-        orphans = list_orphans(session, workspace_id=workspace_id)
+        orphans = list_orphans(
+            session,
+            actor=ActorContext("system", "sweep-test"),
+            workspace_id=workspace_id,
+        )
         assert [item.asset_id for item in orphans] == [asset_id]
         row = _asset_row(session, workspace_id, asset_id)
         assert row.association_state == "active"
@@ -795,9 +869,14 @@ def test_reupload_with_the_same_marker_is_not_bricked_by_a_drained_asset(
         repository = SqlAlchemyContextMediaRepository(session)
         # A new upload must target a new, currently open version.
         editing = ContextPageVersion(
-            workspace_id=workspace_id, page_id=page.id, version_no=2,
-            body_md="", content_hash="2" * 64, actor_type="human",
-            created_by_actor_kind=actor.kind, created_by_actor_id=actor.id,
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=2,
+            body_md="",
+            content_hash="2" * 64,
+            actor_type="human",
+            created_by_actor_kind=actor.kind,
+            created_by_actor_id=actor.id,
             version_status="editing",
         )
         session.add(editing)

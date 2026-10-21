@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from uuid import uuid4
 
@@ -11,7 +12,6 @@ from alembic.operations import Operations
 from sqlalchemy import create_engine
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-from backend.models.workspace import Workspace
 from backend.services.library_formats import DEFAULT_FORMATS
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
@@ -266,13 +266,24 @@ def test_alembic_upgrade_sanitizes_an_existing_v3_workspace_row(tmp_path):
         workspaces = sa.Table("workspace", sa.MetaData(), autoload_with=engine)
         with engine.begin() as connection:
             connection.execute(
-                Workspace.__table__.insert().values(
-                    id=workspace_id,
-                    slug="policy-migration",
-                    title="Policy migration",
-                    name="Policy migration",
-                    library_policy=_v3_custom_policy(),
-                )
+                sa.text(
+                    "INSERT INTO workspace (id, slug, title, name, library_policy, "
+                    "directory_title_key, "
+                    "goal, default_language, write_policy, citation_policy, "
+                    "agent_injection_policy, review_policy, lint_policy, "
+                    "auto_fix_enabled, visibility, created_by_actor_id, "
+                    "owner_actor_id, "
+                    "created_at, updated_at) VALUES (:id, 'policy-migration', "
+                    "'Policy migration', 'Policy migration', :policy, "
+                    "'policy migration', '', 'en', "
+                    "'{}', '{}', '{}', '{}', '{}', 0, 'private', :actor, :actor, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {
+                    "id": workspace_id.hex,
+                    "policy": json.dumps(_v3_custom_policy()),
+                    "actor": "00000000000000000000000000000010",
+                },
             )
         _run_steps(engine, policy_migration.upgrade)
         with engine.connect() as connection:

@@ -104,7 +104,8 @@ def start_server(
     try:
         return subprocess.Popen(
             command,
-            cwd=ROOT,
+            # The worker must import the installed wheel, not this checkout.
+            cwd=log_path.parent,
             env=env,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -130,7 +131,7 @@ def wait_for_health(port: int) -> None:
 
 def run_packaged_browser_check(port: int) -> None:
     script = """
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 
 const port = process.env.DTXWIKI_SMOKE_PORT;
 const browser = await chromium.launch({ headless: true });
@@ -156,6 +157,38 @@ const signup = await page.request.post(`${baseUrl}/api/v1/auth/signup`, {
 if (!signup.ok()) {
   throw new Error(`signup failed: ${signup.status()} ${await signup.text()}`);
 }
+const health = await page.request.get(`${baseUrl}/health/ready`);
+expect((await health.json()).components.worker).toBe('ok');
+const workspaces = await page.request.get(`${baseUrl}/api/v1/workspaces`);
+expect(workspaces.ok()).toBeTruthy();
+const workspaceId = (await workspaces.json()).data.personal_workspace_id;
+expect(workspaceId).toBeTruthy();
+const libraryUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/library/items`;
+const marker = 'The packaged worker converted this uploaded document.';
+const upload = await page.request.post(libraryUrl, {
+  multipart: {
+    file: {
+      name: 'packaged-worker.md', mimeType: 'text/markdown',
+      buffer: Buffer.from(`# Packaged worker proof\\n\\n${marker}\\n`),
+    },
+  },
+});
+expect(upload.status(), await upload.text()).toBe(201);
+const uploaded = (await upload.json()).data;
+let converted;
+await expect.poll(async () => {
+  const response = await page.request.get(`${libraryUrl}/${uploaded.id}`);
+  expect(response.ok()).toBeTruthy();
+  converted = (await response.json()).data;
+  return converted.current_version.processing_status;
+}, { timeout: 30000, message: 'The default launch must process Library uploads' })
+  .toBe('ready');
+expect(converted.current_ready_version.id).toBe(uploaded.current_version.id);
+expect(converted.current_version.selected_conversion_attempt_id).toBeTruthy();
+expect(converted.artifacts.some((artifact) =>
+  artifact.stage === 'conversion' && artifact.role === 'markdown'
+  && artifact.index_text.includes(marker),
+)).toBeTruthy();
 await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
 await page
   .getByRole('heading', { name: 'Workspace Operations', exact: true })

@@ -152,6 +152,7 @@ button {
 }
 
 :root {
+  --control-size-small: 28px;
   /* Global overlay order: feature-local popovers/drawers/inspectors stay at or
      below 80, shell navigation covers them, and a portaled modal covers both. */
   --z-navigation-overlay: 90;
