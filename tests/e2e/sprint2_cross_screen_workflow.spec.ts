@@ -177,19 +177,22 @@ test("keeps a saved mobile approval after response loss and queue failure, then 
   await expect(mobileRows).toHaveCount(2);
   const touchTargets = [];
   for (const row of await mobileRows.all()) {
+    await row.locator(".review-row-select").scrollIntoViewIfNeeded();
     const target = await row.locator(".review-row-select").boundingBox();
     const title = await row.locator(".review-row-identity strong").boundingBox();
     expect(target).not.toBeNull();
     expect(title).not.toBeNull();
     expect(target!.width).toBeGreaterThanOrEqual(44);
     expect(target!.height).toBeGreaterThanOrEqual(44);
+    expect(target!.x).toBeGreaterThanOrEqual(0);
+    expect(target!.x + target!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     expect(target!.x + target!.width).toBeLessThanOrEqual(title!.x);
     touchTargets.push({ target, title });
   }
   await testInfo.attach("review-mobile-touch-targets", {
     body: JSON.stringify(touchTargets), contentType: "application/json",
   });
-  await page.getByRole("button", { name: "Close Review queue drawer", exact: true }).click();
+  await drawer.getByRole("button", { name: "Close Review queue", exact: true }).click();
   await expect(drawer).toBeHidden();
   await approve.click();
   await expect(detail.getByText(/Approved saved/)).toBeVisible();
