@@ -53,7 +53,7 @@
 - Apply shared input limits across browser, REST, MCP, CLI, services and storage:
   display names use 1–32 Unicode code points, email uses at most 254 UTF-8
   bytes (64 for the local part), and every password is capped at 128 code
-  points. New passwords require at least 15; older longer passwords require
+  points. New passwords require at least 8; older longer passwords require
   password recovery. Explicit input is rejected rather than shortened.
 - Bound content metadata, final edited bodies, OAuth metadata, credentials and
   submitted grant lists. Existing history and larger stored grant sets remain

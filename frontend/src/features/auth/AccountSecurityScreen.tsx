@@ -610,7 +610,7 @@ export function AccountPasswordScreen() {
                 />
               </label>
               <p className="field-hint field-hint--attached" id="new-password-rule">
-                {t("password.rule", { defaultValue: "15–128 characters." })}
+                {t("password.rule", { defaultValue: "8–128 characters." })}
               </p>
               <label className="field-stack">
                 {t("password.confirm", { defaultValue: "Confirm new password" })}
