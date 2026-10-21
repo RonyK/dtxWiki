@@ -361,7 +361,8 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
     from backend.scripts.seed_dev import seed_default_workspace
     from backend.services.page_service import PageService
 
-    url, _config = _database(tmp_path)
+    # Current ORM setup needs TreeRail columns, before the input CHECKs exist.
+    url, _config = _database(tmp_path, "49d9c0776c5a")
     factory = make_session_factory_from_settings(Settings(database_url=url))
     with factory.begin() as session:
         seed_default_workspace(session)
