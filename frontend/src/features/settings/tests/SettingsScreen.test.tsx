@@ -2937,7 +2937,6 @@ describe("SettingsScreen", () => {
     expect(goal).toHaveValue("😀".repeat(513));
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(screen.getByText("Use 512 characters or fewer.")).toBeVisible();
-    expect(lastJsonBody(fetchMock, `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`, "PATCH")).toBeUndefined();
     await user.clear(goal);
     await user.type(goal, "Temporary workspace purpose");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();

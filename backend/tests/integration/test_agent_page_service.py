@@ -35,7 +35,7 @@ def test_agent_body_heading_is_independent_and_invalid_legacy_activation_is_atom
     service = AgentPageService()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        prefix = "# " + "x" * 257 + "\n```\n# step\tone\n```\n"
+        prefix = "# " + "x" * 257 + "\n"
         body = prefix + "x" * (1_000_000 - len(prefix))
         draft = service.write_draft(
             session=session,

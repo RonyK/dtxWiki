@@ -20,6 +20,7 @@ describe("outgoing content limits", () => {
     expect(outgoingContentError("/api/v1/workspaces/w/reviews/r", JSON.stringify({ decision_reason: "x".repeat(2001) }))).not.toBe("");
     expect(outgoingContentError("/api/v1/workspaces/w/ask/sessions/s/turns", JSON.stringify({ user_message: ` ${"x".repeat(8000)} ` }))).toBe("");
     expect(outgoingContentError("/api/v1/workspaces/w/ask/sessions/s/turns", JSON.stringify({ user_message: `\u0000${"x".repeat(8000)}` }))).not.toBe("");
+    expect(outgoingContentError("/oauth/consents?client_id=c", JSON.stringify({ workspace_ids: Array(257).fill("w") }))).not.toBe("");
   });
   it("keeps the semantic editor's UTF-8 byte budget", () => {
     expect(outgoingContentError("/api/v1/workspaces/w/library/versions/v/semantic-markdown", JSON.stringify({ body_markdown: "가".repeat(333334) }))).not.toBe("");

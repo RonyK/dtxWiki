@@ -1,3 +1,4 @@
+from collections import Counter
 from logging.config import fileConfig
 
 from alembic import context
@@ -147,6 +148,31 @@ def _make_sqlite_ddl_transactional(engine) -> None:
         connection.exec_driver_sql("BEGIN IMMEDIATE")
 
 
+def _sqlite_foreign_key_violations(connection) -> Counter:
+    return Counter(
+        (row[0], row[2])
+        for row in connection.exec_driver_sql("PRAGMA foreign_key_check")
+    )
+
+
+def _reject_new_foreign_key_violations(connection, before: Counter) -> None:
+    """Refuse a run that orphaned rows; leave orphans it did not create.
+
+    Rows orphaned before the run (manual edits, historical bugs) are not the
+    run's doing. Refusing them would block every later upgrade, including the
+    no-op one at startup, with nothing for the operator to repair them with.
+    """
+    added = _sqlite_foreign_key_violations(connection) - before
+    if added:
+        details = ", ".join(
+            f"{table} -> {parent}: {count}"
+            for (table, parent), count in sorted(added.items())
+        )
+        raise RuntimeError(
+            f"SQLite migration refused: new foreign key violations ({details})"
+        )
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -183,13 +209,12 @@ def run_migrations_online() -> None:
         _reject_unidentifiable_upgrade_start(connection)
 
         with context.begin_transaction():
+            if sqlite:
+                orphans_before = _sqlite_foreign_key_violations(connection)
             context.run_migrations()
             _validate_resulting_revision_shape(connection)
-            if (
-                sqlite
-                and connection.exec_driver_sql("PRAGMA foreign_key_check").first()
-            ):
-                raise RuntimeError("SQLite migration refused: foreign key violations")
+            if sqlite:
+                _reject_new_foreign_key_violations(connection, orphans_before)
 
 
 if context.is_offline_mode():

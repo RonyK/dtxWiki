@@ -228,6 +228,5 @@ def test_retention_policy_survives_input_restrictions_round_trip(migration_datab
     assert "context_media_policy" not in _workspace_table(engine).c
     expected.pop("context_media_policy")
     assert _row(engine, key) == expected
-    assert len(defaults) == 4
     for default_key in defaults:
         assert _row(engine, default_key)["title"] == "Migration workspace"

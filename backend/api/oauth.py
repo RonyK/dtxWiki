@@ -177,7 +177,7 @@ async def register_client(request: Request, session_factory: SessionFactoryDep):
         "response_types": ["code"],
         "scope": client.scope,
         "client_name": client.client_name,
-        "application_type": "native",
+        "application_type": client.application_type,
     }
 
 
@@ -1096,7 +1096,10 @@ async def _parse_unique_json_body(request: Request) -> object:
             result[key] = value
         return result
 
-    return json.loads(await request.body(), object_pairs_hook=unique_object)
+    try:
+        return json.loads(await request.body(), object_pairs_hook=unique_object)
+    except RecursionError as exc:
+        raise ValueError("request body is too deeply nested") from exc
 
 
 def _validate_parsed_client_id(values: dict[str, object]) -> None:

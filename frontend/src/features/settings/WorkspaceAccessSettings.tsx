@@ -556,7 +556,8 @@ export function WorkspaceMembersSection() {
             </span>
             <input
               {...textInputLimit(320)}
-              aria-describedby="workspace-member-query-help"
+              aria-describedby="workspace-member-query-help workspace-member-add-status"
+              aria-invalid={invalidLoginEmail || undefined}
               aria-labelledby="workspace-member-query-label"
               autoComplete="off"
               autoCapitalize="none"
@@ -596,7 +597,7 @@ export function WorkspaceMembersSection() {
           <div className="workspace-member-add-action">
             <div>
               <strong>{t("workspaceMembers.add.fromSearchTitle")}</strong>
-              <span>
+              <span id="workspace-member-add-status">
                 {canAddExactLoginEmail
                   ? t("workspaceMembers.add.fromSearchReady", {
                       email: exactLoginEmail,

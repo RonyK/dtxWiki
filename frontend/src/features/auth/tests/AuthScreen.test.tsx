@@ -50,21 +50,18 @@ describe("AuthScreen", () => {
     });
   });
 
-  it.each([
-    ["name", "😀".repeat(33)],
-    ["email", "a".repeat(65) + "@example.com"],
-    ["password", "😀".repeat(129)],
-  ])("blocks invalid %s before the authentication request", async (field, value) => {
+  // Name and email wiring is proven by the normalized payload below; the
+  // password check is the only one that does not change the sent value.
+  it("blocks an invalid password before the authentication request", async () => {
     render(<MemoryRouter initialEntries={["/login?mode=signup"]}><AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider></MemoryRouter>);
     await screen.findByRole("heading", { name: "Sign up" });
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: field === "email" ? value : "new@example.com" } });
-    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: field === "name" ? value : "New User" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.com" } });
     const password = screen.getByLabelText("Password");
-    fireEvent.change(password, { target: { value: field === "password" ? value : "correct-password" } });
+    fireEvent.change(password, { target: { value: "😀".repeat(129) } });
     fireEvent.submit(password.closest("form")!);
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/auth/signup"))).toHaveLength(0);
-    expect(password).toHaveValue(field === "password" ? value : "correct-password");
+    expect(password).toHaveValue("😀".repeat(129));
   });
 
   it("accepts Unicode byte/code-point boundaries without native email or UTF-16 restrictions", async () => {
@@ -96,6 +93,7 @@ describe("AuthScreen", () => {
     expect(fireEvent.paste(name, { clipboardData: { getData: () => "Alice\nBob" } })).toBe(false);
     expect(name).toHaveValue("");
     expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(fireEvent.keyDown(name, { key: "Enter", isComposing: true })).toBe(false);
   });
 
   it("directs password recovery to the server operator, not a workspace admin", async () => {

@@ -33,18 +33,21 @@ def test_raw_storage_rejects_overflow_nul_and_blob():
         metadata.create_all(engine)
         for rule, table in probes:
             maximum = rule.maximum
-            valid = "x" * maximum
-            invalid = "x" * (maximum + 1)
+            # Astral characters: SQLite length() counts characters, not bytes.
+            valid = "😀" * maximum if rule.kind != "slug" else "x" * maximum
+            invalid = valid + "x"
+            extra = ()
             if rule.kind == "email":
-                valid = "a" * 64 + "@" + "b" * 189
-                invalid = "a" * 64 + "@" + "b" * 190
+                valid = "é" * 32 + "@" + "b" * 189  # 254 bytes, 64-byte local
+                invalid = valid + "b"
+                extra = ("é" * 32 + "a@" + "b" * 188,)  # 65-byte local part
             with engine.begin() as connection:
                 connection.execute(
                     table.insert().values(
                         {rule.field: valid, "node_kind": "saved_view"}
                     )
                 )
-            for value in (invalid, "x\x00" + "x" * maximum, b"blob"):
+            for value in (invalid, *extra, "x\x00" + "x" * maximum, b"blob"):
                 with (
                     pytest.raises(IntegrityError, match=rule.name),
                     engine.begin() as connection,

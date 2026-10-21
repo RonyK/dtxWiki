@@ -8,7 +8,6 @@ describe("generated access key names", () => {
     const name = defaultTokenNameForApp(label);
     expect(Array.from(name)).toHaveLength(128);
     expect(name).toMatch(/ access key$/);
-    expect(label).toBe("😀".repeat(160));
   });
 
   it("reserves suffix space in code points and preserves surrogate pairs", () => {

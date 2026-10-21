@@ -60,10 +60,14 @@ def validate_frontmatter_input(markdown: str) -> None:
             continue
         key, raw = pair
         if key == "title":
-            validate_title(_parse_scalar(raw))
+            # The reader treats an empty or null title as absent.
+            if _parse_scalar(raw):
+                validate_title(_parse_scalar(raw))
         elif key in {"tags", "aliases"}:
             values = []
-            if raw and raw != "[]":
+            flow = raw.startswith("[") and raw.endswith("]")
+            inner = raw[1:-1].strip() if flow else raw
+            if inner and raw != "null":
                 try:
                     decoded = json.loads(raw)
                 except json.JSONDecodeError:
@@ -75,6 +79,10 @@ def validate_frontmatter_input(markdown: str) -> None:
                 # Share the reader's lexical scalar extraction. str(True) or
                 # str(1e3) would change the stored labels to True or 1000.0.
                 values = _inline_metadata_values(raw)
+                # YAML allows one trailing comma in a flow sequence. Any other
+                # empty item is still rejected.
+                if flow and inner.endswith(","):
+                    values.pop()
             elif not raw:
                 for following in header[index + 1 :]:
                     if not following.strip():
@@ -82,7 +90,8 @@ def validate_frontmatter_input(markdown: str) -> None:
                     if not following.lstrip().startswith("- "):
                         break
                     values.append(_parse_scalar(following.lstrip()[2:]))
-            validate_labels(values, field=key, max_length=48 if key == "tags" else 80)
+            limit = 48 if key == "tags" else 80
+            validate_labels(values, field=key, max_length=limit)
 
 
 def validate_agent_markdown_input(markdown: str) -> None:

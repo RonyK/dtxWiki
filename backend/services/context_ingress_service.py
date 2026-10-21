@@ -13,7 +13,7 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
-from backend.domain.input_policy import validate_text
+from backend.domain.input_policy import fit_generated_title, validate_text
 from backend.models.ask import (
     AskSession,
     AskTurn,
@@ -961,8 +961,11 @@ def slugify(value: str) -> str:
 
 
 def inferred_title(ask_session: AskSession, turn: AskTurn) -> str:
-    message = (turn.user_message or ask_session.title).strip()
-    return message[:60] or f"{ask_session.title} turn {turn.turn_no}"
+    return fit_generated_title(
+        turn.user_message or ask_session.title,
+        max_length=60,
+        fallback=f"{ask_session.title} turn {turn.turn_no}",
+    )
 
 
 def review_required_reason(

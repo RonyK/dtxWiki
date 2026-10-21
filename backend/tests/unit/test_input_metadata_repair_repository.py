@@ -141,12 +141,9 @@ def test_context_title_updates_claim_headers_without_touching_history_or_tenants
     ]
 
 
-@pytest.mark.parametrize("title", ["Repaired title", "https://item.example/source"])
-def test_library_repair_updates_generated_body_and_related_header_only(
-    connection, title
-):
+def test_library_repair_updates_generated_body_and_related_header_only(connection):
     workspace, other_workspace, item, artifact = [uuid4() for _ in range(4)]
-    uri = "https://item.example/source"
+    uri, title = "https://item.example/source", "Repaired title"
     connection.execute(
         _table(connection, "library_item")
         .insert()

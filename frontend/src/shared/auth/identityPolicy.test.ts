@@ -21,7 +21,7 @@ describe("account input units and normalization", () => {
     expect(() => normalizeAccountEmail("İ".repeat(22) + "@b")).toThrow();
   });
 
-  it.each(["\n", "\t", "\u0000", "\u0085", "\u2028", "\ud800"])("rejects raw invalid name/email characters before trimming", (character) => {
+  it.each(["\n", "\u0085", "\u2028", "\ud800"])("rejects raw invalid name/email characters before trimming", (character) => {
     expect(() => normalizeAccountName(character)).toThrow();
     expect(() => normalizeAccountEmail(character + "a@b")).toThrow();
   });

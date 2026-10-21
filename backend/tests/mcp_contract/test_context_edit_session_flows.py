@@ -206,23 +206,14 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert _review_statuses_for_page(page_service, created.id) == ["pending"]
 
 
-@pytest.mark.parametrize(
-    "legacy_body",
-    [
-        "x" * 1_000_001,
-        "# " + "x" * 257,
-        "---\ntags: [" + ",".join(['"same"'] * 33) + "]\n---\nBody",
-        "invalid\x00body",
-    ],
-    ids=["body-budget", "heading-budget", "raw-tag-count", "nul"],
-)
-def test_resubmitting_invalid_legacy_edit_is_rejected_atomically(
-    page_service, actor, legacy_body
-):
+def test_resubmitting_invalid_legacy_edit_is_rejected_atomically(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create(page_service, actor, workspace_id, "# Valid\n\nOriginal body.")
     # Simulate an editing draft written before the policy existed. Historical
     # text stays stored and readable; submitting it is a new write boundary.
+    # The Context-only H1 rule proves the full stored-body validator runs; its
+    # body, tag-count and NUL rules are unit-tested in test_content_input_policy.
+    legacy_body = "# " + "x" * 257
     with page_service.session_factory.begin() as session:
         version = session.get(ContextPageVersion, created.version_id)
         version.body_md = legacy_body

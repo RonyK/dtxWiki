@@ -60,6 +60,7 @@ import {
   timeBucketFor,
 } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
+import { fitGeneratedTitle } from "../../shared/lib/inputPolicy";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
@@ -2016,8 +2017,9 @@ function PlacementPanel({
 
 function defaultTitle(turn: AskTurnDetail, copy: AskCopy) {
   return (
-    turn.user_message ?? `${copy.placement.defaultTitlePrefix} ${turn.turn_no}`
-  ).slice(0, 60);
+    fitGeneratedTitle(turn.user_message ?? "", 60) ||
+    `${copy.placement.defaultTitlePrefix} ${turn.turn_no}`
+  );
 }
 
 function AskWorkflowActions({

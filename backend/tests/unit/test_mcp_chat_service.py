@@ -1005,7 +1005,9 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
     assert listed_titles[page_visible_asset.id] == "diagram.png"
     assert listed_paths[page_visible_asset.id] == f"/context?target={visible_page.id}"
     assert listed_titles[owned_editing_asset.id] == "diagram.png"
-    assert listed_paths[owned_editing_asset.id] == f"/context?target={visible_page.id}"
+    assert (
+        listed_paths[owned_editing_asset.id] == f"/context?target={visible_page.id}"
+    )
 
 
 def test_media_asset_title_lookup_is_workspace_scoped_for_colliding_ids(
@@ -3936,7 +3938,6 @@ def test_actor_bound_detail_and_export_redact_unlinked_error_calls(
     gated_export_chat = next(item for item in gated_export.chats if item.id == gated.id)
     owned_export_chat = next(item for item in owned_export.chats if item.id == owned.id)
     markers = {spec[-1] for spec in specs}
-
     def assert_shape_only(entry, spec) -> None:
         status, _tool, id_field, _target, _marker = spec
         assert entry.result_status == status

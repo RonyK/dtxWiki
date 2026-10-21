@@ -193,10 +193,9 @@ def test_signup_disabled_rejects_new_signup(session_factory, session_service):
         )
 
     with session_factory() as session:
-        assert (
-            session.scalar(select(User).where(User.email == "blocked@example.com"))
-            is None
-        )
+        assert session.scalar(
+            select(User).where(User.email == "blocked@example.com")
+        ) is None
 
 
 def test_signup_enabled_defaults_to_false(session_factory):
@@ -235,10 +234,9 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
         )
 
     with session_factory() as session:
-        assert (
-            session.scalar(select(User).where(User.email == "rolled-back@example.com"))
-            is None
-        )
+        assert session.scalar(
+            select(User).where(User.email == "rolled-back@example.com")
+        ) is None
 
 
 def test_login_rejects_unknown_or_wrong_password(session_service):

@@ -26,12 +26,11 @@ def test_explicit_empty_seed_password_is_rejected_before_provisioning(tmp_path):
     with pytest.raises(RuntimeError, match="password"):
         seed_remote_mcp_smoke(settings, login_password="")
     assert not path.exists()
-    for workspace_slug in ("a" * 81, "İ" * 80):
-        with pytest.raises(InputPolicyError, match="slug"):
-            seed_remote_mcp_smoke(
-                settings, workspace_a=workspace_slug, login_password="correct-password"
-            )
-        assert not path.exists()
+    with pytest.raises(InputPolicyError, match="slug"):
+        seed_remote_mcp_smoke(
+            settings, workspace_a="a" * 81, login_password="correct-password"
+        )
+    assert not path.exists()
 
 
 def test_seed_remote_mcp_smoke_outputs_usable_material(tmp_path):

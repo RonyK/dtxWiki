@@ -2,3 +2,8 @@
 # Match only the two reviewed historical findings; keep all scanning rules.
 2489e818f096997e633cf7f84a7ed946ab253a04:backend/tests/integration/test_synthetic_corpus_profiles.py:generic-api-key:324
 2489e818f096997e633cf7f84a7ed946ab253a04:backend/tests/integration/test_synthetic_corpus_profiles.py:generic-api-key:339
+
+# Frontmatter label validation: the keyword argument after `field=key,` is not
+# a credential. The line was restructured in a later commit; this matches only
+# the historical finding in the original commit.
+1247ba2dae09ed956dd65300f66bd596974d318c:backend/utils/page_frontmatter.py:generic-api-key:77

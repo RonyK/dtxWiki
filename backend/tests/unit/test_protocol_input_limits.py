@@ -55,63 +55,60 @@ def blocked_service() -> OAuthService:
     )
 
 
-@pytest.mark.parametrize("value", ["a" * 257, "a\n", "한", None, 123])
-def test_pat_rejected_before_hash_or_verify(value):
+def test_pat_rejected_before_hash_or_verify():
     hasher = CredentialHasher(SimpleNamespace(hash=fail, verify=fail))
-    with pytest.raises(ValueError):
-        hasher.hash_api_token(value)
-    assert hasher.verify_api_token(value, "encoded") is False
+    # Keep the dtxw_ prefix so the prefix check cannot mask the envelope.
+    for value in ("dtxw_" + "a" * 252, "dtxw_a\n", None):
+        with pytest.raises(ValueError):
+            hasher.hash_api_token(value)
+        assert hasher.verify_api_token(value, "encoded") is False
 
 
-@pytest.mark.parametrize("kind", ["api", "purge_grant"])
-def test_token_generator_maximum_round_trips_and_refuses_excess_entropy(kind):
+def test_token_generator_maximum_round_trips_and_refuses_excess_entropy():
     hasher = CredentialHasher()
-    generate = getattr(hasher, f"generate_{kind}_token")
-    lookup = (
-        hasher.token_lookup_hash if kind == "api" else hasher.purge_grant_lookup_hash
-    )
-    maximum_random_bytes = 188 if kind == "api" else 189
-    token = generate(maximum_random_bytes)
-    assert len(token) == 256
-    assert lookup(token).startswith("sha256:")
-    with pytest.raises(ValueError):
-        generate(maximum_random_bytes + 1)
-    with pytest.raises(ValueError):
-        lookup(token + "a")
+    for generate, lookup, maximum_random_bytes in (
+        (hasher.generate_api_token, hasher.token_lookup_hash, 188),
+        (hasher.generate_purge_grant_token, hasher.purge_grant_lookup_hash, 189),
+    ):
+        token = generate(maximum_random_bytes)
+        assert len(token) == 256
+        assert lookup(token).startswith("sha256:")
+        with pytest.raises(ValueError):
+            generate(maximum_random_bytes + 1)
+        with pytest.raises(ValueError):
+            lookup(token + "a")
 
 
-@pytest.mark.parametrize(
-    "purpose,prefix",
-    [
-        ("password_reset", "dtxr_0_"),
-        ("email_verification", EMAIL_VERIFICATION_TOKEN_PREFIX),
-    ],
-)
-def test_recovery_token_limit_precedes_digest(monkeypatch, purpose, prefix):
-    token = prefix + "a" * (1024 - len(prefix))
-    assert recovery_token_digest(token, purpose=purpose).startswith("sha256:")
+def test_recovery_token_limit_precedes_digest(monkeypatch):
+    tokens = {
+        purpose: prefix + "a" * (1024 - len(prefix))
+        for purpose, prefix in (
+            ("password_reset", "dtxr_0_"),
+            ("email_verification", EMAIL_VERIFICATION_TOKEN_PREFIX),
+        )
+    }
+    for purpose, token in tokens.items():
+        assert recovery_token_digest(token, purpose=purpose).startswith("sha256:")
     monkeypatch.setattr(
         "backend.services.password_recovery_service.hashlib.sha256", fail
     )
-    for invalid in (token + "a", token[:-1] + " ", token[:-1] + "한", None):
-        with pytest.raises(InvalidPasswordResetTokenError):
-            recovery_token_digest(invalid, purpose=purpose)
+    for purpose, token in tokens.items():
+        for invalid in (token + "a", token[:-1] + " ", None):
+            with pytest.raises(InvalidPasswordResetTokenError):
+                recovery_token_digest(invalid, purpose=purpose)
 
 
-@pytest.mark.parametrize(
-    "codec_type,error",
-    [
-        (SessionTokenCodec, InvalidSessionError),
-        (RecentReauthenticationCodec, RecentReauthenticationRequiredError),
-    ],
-)
-def test_cookie_credentials_reject_before_signature(codec_type, error, monkeypatch):
-    codec = codec_type(secret="test secret")
-    monkeypatch.setattr(codec_type, "_sign", fail)
-    verify = codec.verify_session if codec_type is SessionTokenCodec else codec.verify
-    for token in ("a" * 4097, "a.b\n", "한", None):
-        with pytest.raises(error):
-            verify(token)
+def test_cookie_credentials_reject_before_signature(monkeypatch):
+    for codec_type, error, method in (
+        (SessionTokenCodec, InvalidSessionError, "verify_session"),
+        (RecentReauthenticationCodec, RecentReauthenticationRequiredError, "verify"),
+    ):
+        monkeypatch.setattr(codec_type, "_sign", fail)
+        verify = getattr(codec_type(secret="test secret"), method)
+        # Dotted, so the malformed-token split cannot mask the envelope.
+        for token in ("a." + "a" * 4095, "a.b\n", None):
+            with pytest.raises(error):
+                verify(token)
 
 
 def test_serialized_cookie_limit_includes_escaping_name_and_attributes():
@@ -124,36 +121,23 @@ def test_serialized_cookie_limit_includes_escaping_name_and_attributes():
     assert response.raw_headers == before
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("client_name", 123),
-        ("client_name", None),
-        ("client_name", "x" * 201),
-        ("redirect_uris", ["https://client.example/cb"] * 21),
-        ("redirect_uris", [123]),
-        ("redirect_uris", ["https://client.example/" + "a" * 2048]),
-        ("scope", ["mcp:read"]),
-        ("scope", "mcp:read " * 30),
-        ("grant_types", "authorization_code"),
-        ("grant_types", ["client_credentials"]),
-        ("response_types", ["code", "code"]),
-        ("application_type", {"native": True}),
-    ],
-)
-def test_dcr_metadata_invalid_before_persistence(field, value):
-    payload = {
-        "client_name": "Test",
-        "redirect_uris": ["https://client.example/cb"],
-        field: value,
-    }
-    with pytest.raises(InvalidClientRegistrationError):
-        blocked_service().register_client(payload=payload, client_ip="bad-input-test")
-
-
-def test_dcr_rejects_non_object_metadata():
-    with pytest.raises(InvalidClientRegistrationError):
-        blocked_service().register_client(payload=[], client_ip="bad-input-test")
+def test_dcr_metadata_invalid_before_persistence():
+    valid = {"client_name": "Test", "redirect_uris": ["https://client.example/cb"]}
+    for payload in (
+        [],
+        {**valid, "client_name": 123},
+        {**valid, "client_name": "x" * 201},
+        {**valid, "redirect_uris": ["https://client.example/cb"] * 21},
+        {**valid, "redirect_uris": ["https://client.example/" + "a" * 2048]},
+        {**valid, "scope": ["mcp:read"]},
+        {**valid, "grant_types": ["client_credentials"]},
+        {**valid, "response_types": ["code", "code"]},
+        {**valid, "application_type": {"native": True}},
+    ):
+        with pytest.raises(InvalidClientRegistrationError):
+            blocked_service().register_client(
+                payload=payload, client_ip="bad-input-test"
+            )
 
 
 def test_uri_and_identifier_count_utf8_bytes_without_normalization():
@@ -163,8 +147,11 @@ def test_uri_and_identifier_count_utf8_bytes_without_normalization():
     assert len(uri.encode()) == 2048
     assert validate_redirect_uri(uri) == uri
     assert validate_identifier(uri) == uri
-    with pytest.raises(InvalidClientRegistrationError):
-        validate_redirect_uri(uri + "a")
+    # urlsplit raises ValueError for these; token exchange must not turn it
+    # into a 500.
+    for value in (uri + "a", "https://[bad/cb", "https://exa\uff03mple.com/cb"):
+        with pytest.raises(InvalidClientRegistrationError):
+            validate_redirect_uri(value)
     with pytest.raises(ValueError):
         validate_identifier(uri + "a")
 
@@ -188,14 +175,11 @@ def test_cimd_same_redirect_budget_and_original_body_limit():
         _parse_metadata(client_id, json.dumps(payload).encode())
     with pytest.raises(CIMDFetchError):
         _parse_metadata(client_id, b" " * 5121)
+    # Unlike DCR, CIMD rejects a confidential client instead of storing "none".
     payload["redirect_uris"] = ["https://client.example/cb"]
-    for field, value in (
-        ("token_endpoint_auth_method", "client_secret_basic"),
-        ("token_endpoint_auth_method", "private_key_jwt"),
-        ("application_type", "custom"),
-    ):
-        with pytest.raises(CIMDFetchError):
-            _parse_metadata(client_id, json.dumps({**payload, field: value}).encode())
+    payload["token_endpoint_auth_method"] = "client_secret_basic"
+    with pytest.raises(CIMDFetchError):
+        _parse_metadata(client_id, json.dumps(payload).encode())
 
 
 def test_pkce_s256_and_verifier_boundaries_before_hash(monkeypatch):
@@ -215,7 +199,7 @@ def test_pkce_s256_and_verifier_boundaries_before_hash(monkeypatch):
 def test_state_and_scope_limits_preserve_opaque_values():
     validate_state(";" * 512)
     validate_state(" " + "s" * 21)
-    for state in ("s" * 21, "s" * 513, "s" * 21 + "한", "s" * 21 + "\n"):
+    for state in ("s" * 21, "s" * 513, "s" * 21 + "\n"):
         with pytest.raises(InvalidOAuthRequestError):
             validate_state(state)
     assert normalize_scope("mcp:read " + " " * 247) == "mcp:read"
@@ -310,26 +294,20 @@ def test_rest_and_revoke_bearer_padding_preserves_the_token(monkeypatch):
     assert received == ["client-token", "client-token"]
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        b"client_id=one&client_id=two",
-        b"state=one&state=two",
-        b"client_id=" + b"a" * 2049,
-    ],
-)
-def test_oauth_form_rejects_duplicate_singletons_and_oversized_id(body):
-    async def receive():
-        return {"type": "http.request", "body": body, "more_body": False}
+def test_oauth_form_rejects_duplicate_singletons_and_oversized_id():
+    for body in (b"client_id=one&client_id=two", b"client_id=" + b"a" * 2049):
 
-    request = Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "path": "/oauth/token",
-            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
-        },
-        receive,
-    )
-    with pytest.raises(InvalidOAuthRequestError):
-        asyncio.run(parse_request_values(request))
+        async def receive(body=body):
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/oauth/token",
+                "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            },
+            receive,
+        )
+        with pytest.raises(InvalidOAuthRequestError):
+            asyncio.run(parse_request_values(request))

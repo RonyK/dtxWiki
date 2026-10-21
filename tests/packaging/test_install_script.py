@@ -132,15 +132,8 @@ def test_install_script_leaves_bootstrap_ordering_and_ownership_to_setup():
 def test_install_script_value_flags_have_friendly_errors():
     content = INSTALL_SH.read_text(encoding="utf-8")
     for flag in (
-        "--domain",
-        "--email",
-        "--tls",
-        "--tls-cert",
-        "--tls-key",
-        "--forwarded-ip",
-        "--bind-host",
-        "--wheel",
-        "--index-url",
+        "--domain", "--email", "--tls", "--tls-cert", "--tls-key",
+        "--forwarded-ip", "--bind-host", "--wheel", "--index-url",
     ):
         assert f'="${{2:?{flag} requires ' in content
 
@@ -241,7 +234,7 @@ def test_ubuntu_2204_gets_caddy_from_the_official_repository(tmp_path: Path):
 
     result = _source_and_run(
         tmp_path,
-        "TLS=acme; install_system_packages",
+        'TLS=acme; install_system_packages',
         FAKE_CADDY_CANDIDATE="(none)",
         FAKE_HAS_PYTHON312="0",
     )
@@ -273,7 +266,7 @@ def test_ubuntu_2204_gets_caddy_from_the_official_repository(tmp_path: Path):
 def test_distribution_caddy_is_used_when_available(tmp_path: Path):
     result = _source_and_run(
         tmp_path,
-        "TLS=internal; install_system_packages",
+        'TLS=internal; install_system_packages',
         FAKE_CADDY_CANDIDATE="2.6.2-6ubuntu0.24.04.3",
         FAKE_HAS_PYTHON312="1",
     )
@@ -290,7 +283,7 @@ def test_distribution_caddy_is_used_when_available(tmp_path: Path):
 def test_external_tls_installs_no_caddy_at_all(tmp_path: Path):
     result = _source_and_run(
         tmp_path,
-        "TLS=external; install_system_packages",
+        'TLS=external; install_system_packages',
         FAKE_CADDY_CANDIDATE="(none)",
         FAKE_HAS_PYTHON312="1",
     )
@@ -313,18 +306,12 @@ def test_setup_arguments_carry_every_option(tmp_path: Path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "--domain",
-        "wiki.lan",
-        "--email",
-        "admin@example.com",
-        "--service-user",
-        "dtxwiki",
-        "--tls",
-        "external",
-        "--forwarded-ip",
-        "10.0.0.2",
-        "--bind-host",
-        "0.0.0.0",
+        "--domain", "wiki.lan",
+        "--email", "admin@example.com",
+        "--service-user", "dtxwiki",
+        "--tls", "external",
+        "--forwarded-ip", "10.0.0.2",
+        "--bind-host", "0.0.0.0",
     ]
 
 
@@ -352,7 +339,8 @@ def _run_wrapper(tmp_path: Path, name: str, *args: str) -> list[str]:
     for fake in ("setpriv", "cli", "worker"):
         script = bin_dir / fake
         script.write_text(
-            f'#!/bin/sh\necho "{fake} $* [APP_ENV=$DTXWIKI_APP_ENV]" >> "{out}"\n',
+            "#!/bin/sh\n"
+            f'echo "{fake} $* [APP_ENV=$DTXWIKI_APP_ENV]" >> "{out}"\n',
             encoding="utf-8",
         )
         script.chmod(0o755)
@@ -376,28 +364,12 @@ def _run_wrapper(tmp_path: Path, name: str, *args: str) -> list[str]:
 
 
 DB_COMMANDS = (
-    "serve",
-    "bootstrap",
-    "users",
-    "workspace",
-    "admin",
-    "context",
-    "inputs",
-    "reindex",
-    "eval",
-    "info",
-    "migrate-data",
+    "serve", "bootstrap", "users", "workspace", "admin", "context", "inputs",
+    "reindex", "eval", "info", "migrate-data",
 )
 # They write /etc, drive systemctl, or never open the database.
 ROOT_COMMANDS = (
-    "setup",
-    "config",
-    "keygen",
-    "update",
-    "rollback",
-    "mcp",
-    "db",
-    "embedding",
+    "setup", "config", "keygen", "update", "rollback", "mcp", "db", "embedding",
     "rerank",
 )
 

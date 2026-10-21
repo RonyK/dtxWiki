@@ -2,9 +2,10 @@ import { i18n } from "../i18n";
 import { inputTextError, markdownInputError, trimShortText } from "../lib/inputPolicy";
 
 /** Validate only known content/metadata writes, before fetch. Authentication
- * and OAuth credentials have separate policies and never pass through here. */
+ * and OAuth credentials have separate policies and never pass through here;
+ * OAuth consent settings carry only workspace ids and TTL fields. */
 export function outgoingContentError(path: string, body: BodyInit | null | undefined) {
-  if (typeof body !== "string" || !/^\/api\/v1\/(workspaces(?:\/|$)|auth\/tokens)/.test(path)) return "";
+  if (typeof body !== "string" || !/^\/(api\/v1\/(workspaces(?:\/|$)|auth\/tokens)|oauth\/consents(?:\?|$))/.test(path)) return "";
   let data: Record<string, unknown>;
   try {
     data = JSON.parse(body) as Record<string, unknown>;
@@ -48,7 +49,7 @@ export function outgoingContentError(path: string, body: BodyInit | null | undef
     const error = inputTextError(data.body, 10000, false);
     if (error) return error;
   }
-  for (const [key, maximum] of [["tags", 32], ["aliases", 32], ["default_topic_tags", 32], ["operations", 20], ["context_refs", 128], ["library_artifact_refs", 128], ["requested_categories", 4], ["workspace_grants", 256]] as const) {
+  for (const [key, maximum] of [["tags", 32], ["aliases", 32], ["default_topic_tags", 32], ["operations", 20], ["context_refs", 128], ["library_artifact_refs", 128], ["requested_categories", 4], ["workspace_grants", 256], ["workspace_ids", 256]] as const) {
     const value = data[key];
     if (!Array.isArray(value)) continue;
     if (value.length > maximum) return i18n.resolvedLanguage?.startsWith("ko") ? `최대 ${maximum}개까지 입력할 수 있습니다.` : `Use ${maximum} items or fewer.`;

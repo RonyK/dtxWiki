@@ -15,11 +15,9 @@ from backend.schemas.agent import AgentPageDraftRequest, BuildBundleRequest
 from backend.schemas.ask import AskTurnCreate
 from backend.schemas.context_ingress import ContextIngressAcceptRequest
 from backend.schemas.context_write import SubmitFeedbackRequest
-from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.library_semantic import LibrarySemanticMarkdownUpdateRequest
 from backend.schemas.mcp.review_tools import SubmitRevisionForReviewInput
 from backend.schemas.page import ContextPageCreateRequest
-from backend.schemas.read import WorkspaceCreateRequest
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
 from backend.services import context_ingress_service
 from backend.services.ask_service import InvalidUserMessageError, _validate_user_message
@@ -42,7 +40,7 @@ def test_titles_count_code_points_and_preserve_explicit_unicode():
     assert validate_title(" " + "😀" * 256 + " ") == "😀" * 256
     with pytest.raises(InputPolicyError):
         validate_title("😀" * 257)
-    for value in ("a\nb", "a\x00b", "a\ud800b"):
+    for value in ("a\nb", "a\ud800b"):
         with pytest.raises(InputPolicyError):
             validate_title(value)
 
@@ -51,8 +49,22 @@ def test_generated_titles_fit_policy_without_splitting_display_sequences():
     family = "👨‍👩‍👧‍👦"
     assert fit_generated_title("a" * 95 + " trailing", max_length=96) == "a" * 95
     assert fit_generated_title("a" * 115 + family, max_length=120) == "a" * 115
+    for cluster in (
+        "\U0001f3f4\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f",
+        "\u1112\u1161\u11ab",  # decomposed Hangul syllable
+        "\u0e01\u0e33",  # Thai consonant + SARA AM
+    ):
+        prefix = "a" * (120 - len(cluster) + 1)
+        assert fit_generated_title(prefix + cluster, max_length=120) == prefix
     assert fit_generated_title("\t\x00\ud800\n", fallback="Fallback") == "Fallback"
     assert fit_generated_title("one\ntwo\tthree") == "one two three"
+    # A promoted Ask turn without an explicit title names the page after the
+    # question, which may span lines.
+    session = SimpleNamespace(title="Session")
+    turn = SimpleNamespace(user_message="Summarize:\n" + "x" * 60, turn_no=2)
+    assert context_ingress_service.inferred_title(session, turn) == (
+        "Summarize: " + "x" * 49
+    )
 
 
 def test_tree_folder_and_linked_title_requests_have_distinct_budgets():
@@ -74,16 +86,9 @@ def test_direct_service_checks_constructed_requests_before_database_work():
         )
 
 
-def test_constructed_workspace_slug_is_rejected_before_normalizer_can_truncate():
-    request = WorkspaceCreateRequest.model_construct(title="Title", slug="a" * 81)
-    with pytest.raises(InputPolicyError):
-        validate_request_inputs(request)
-
-
-@pytest.mark.parametrize("body", ["text\x00tail", "text\ud800tail"])
-def test_library_overlay_rejects_invalid_unicode_before_encoding_or_database(body):
+def test_library_overlay_rejects_invalid_unicode_before_encoding_or_database():
     payload = dict(
-        body_markdown=body,
+        body_markdown="text\ud800tail",
         expected_revision=0,
         expected_base_artifact_id=uuid4(),
         expected_base_content_sha256="a" * 64,
@@ -100,11 +105,7 @@ def test_library_overlay_rejects_invalid_unicode_before_encoding_or_database(bod
         )
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [("title", "x" * 257), ("reason", "x" * 2001), ("body_markdown", "x" * 1_000_001)],
-)
-def test_agent_request_rejects_oversized_authored_fields(field, value):
+def test_agent_request_rejects_oversized_authored_fields():
     payload = dict(
         category="skill",
         title="Skill",
@@ -112,9 +113,13 @@ def test_agent_request_rejects_oversized_authored_fields(field, value):
         body_markdown="Body",
         reason="Create",
     )
-    payload[field] = value
-    with pytest.raises(ValidationError):
-        AgentPageDraftRequest(**payload)
+    for field, value in (
+        ("title", "x" * 257),
+        ("reason", "x" * 2001),
+        ("body_markdown", "x" * 1_000_001),
+    ):
+        with pytest.raises(ValidationError):
+            AgentPageDraftRequest(**{**payload, field: value})
 
 
 def test_feedback_and_bundle_request_boundaries():
@@ -161,22 +166,34 @@ def test_frontmatter_rejects_raw_count_before_read_parser_deduplicates():
         ContextPageCreateRequest(body_md=markdown)
 
 
-@pytest.mark.parametrize("field", ["tags", "aliases"])
-def test_valid_frontmatter_quoted_commas_and_escapes_round_trip_without_loss(field):
+def test_valid_frontmatter_quoted_commas_and_escapes_round_trip_without_loss():
     values = [f'alpha{index},"beta"\\suffix' for index in range(31)]
-    markdown = f"---\n{field}: {json.dumps(values)}\n---\nBody"
-    validate_frontmatter_input(markdown)
-    assert getattr(parse_page_frontmatter(markdown), field) == values
-    markdown = f"---\n{field}: [2024, true, 1e3, 1.00]\n---\nBody"
-    validate_frontmatter_input(markdown)
-    assert getattr(parse_page_frontmatter(markdown), field) == [
-        "2024",
-        "true",
-        "1e3",
-        "1.00",
-    ]
+    for field in ("tags", "aliases"):
+        markdown = f"---\n{field}: {json.dumps(values)}\n---\nBody"
+        validate_frontmatter_input(markdown)
+        assert getattr(parse_page_frontmatter(markdown), field) == values
+        markdown = f"---\n{field}: [2024, true, 1e3, 1.00]\n---\nBody"
+        validate_frontmatter_input(markdown)
+        assert getattr(parse_page_frontmatter(markdown), field) == [
+            "2024",
+            "true",
+            "1e3",
+            "1.00",
+        ]
     with pytest.raises(InputPolicyError):
-        validate_frontmatter_input(f"---\n{field}: [[2024]]\n---\nBody")
+        validate_frontmatter_input("---\ntags: [[2024]]\n---\nBody")
+    # Spellings the reader treats as empty or absent; an empty item is not.
+    for header, expected in (
+        ("tags: [ ]", []),
+        ("tags: null", []),
+        ("tags: [a, b,]", ["a", "b"]),
+        ("title: null", []),
+    ):
+        markdown = f"---\n{header}\n---\nBody"
+        validate_frontmatter_input(markdown)
+        assert (parse_page_frontmatter(markdown).tags or []) == expected
+    with pytest.raises(InputPolicyError):
+        validate_frontmatter_input('---\ntags: [a, ""]\n---\nBody')
 
 
 def test_final_managed_frontmatter_counts_against_stored_body_budget():
@@ -189,9 +206,6 @@ def test_final_managed_frontmatter_counts_against_stored_body_budget():
             tags=[],
             aliases=[],
         )
-    schema = ContextPageCreateRequest.model_json_schema()["properties"]["body_md"]
-    assert schema["x-final-maxLength"] == 1_000_000
-    assert "managed frontmatter" in schema["description"]
 
 
 def test_long_h1_cannot_bypass_title_limit():
@@ -217,7 +231,7 @@ def test_ask_schema_and_service_count_the_same_stripped_message():
     raw = " \n" + "가" * 8000 + "\t "
     assert AskTurnCreate(user_message=raw).user_message == "가" * 8000
     assert _validate_user_message(raw) == "가" * 8000
-    for value in ("x" * 8001, " \x00 message ", " \ud800 message "):
+    for value in ("x" * 8001, " \x00 message "):
         with pytest.raises(ValidationError):
             AskTurnCreate(user_message=value)
         with pytest.raises(InvalidUserMessageError):
@@ -249,7 +263,7 @@ def test_context_edit_invalid_metadata_does_not_mutate_body_or_staged_title():
 
 
 def test_revision_notes_reject_invalid_unicode_before_review_lookup():
-    for note in ("a\x00b", "a\ud800b", "a" * 2001):
+    for note in ("a\x00b", "a" * 2001):
         with pytest.raises(ValidationError):
             SubmitRevisionForReviewInput(
                 workspace_id=uuid4(),

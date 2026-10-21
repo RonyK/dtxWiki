@@ -22,23 +22,22 @@ from backend.services.session_service import (
 from backend.services.user_admin_service import UserAdminService
 
 
-@pytest.mark.parametrize("character", ["a", "한", "😀"])
-def test_display_name_code_point_boundary_and_explicit_trim(character):
-    assert (
-        normalize_display_name("\u3000" + character * 32 + " ", "a@b") == character * 32
-    )
+def test_display_name_code_point_boundary_and_explicit_trim():
+    # An astral character is 4 UTF-8 bytes and 2 UTF-16 units: one row catches
+    # either wrong unit.
+    assert normalize_display_name("\u3000" + "😀" * 32 + " ", "a@b") == "😀" * 32
     with pytest.raises(DisplayNamePolicyError):
-        normalize_display_name(character * 33, "a@b")
+        normalize_display_name("😀" * 33, "a@b")
     with pytest.raises(DisplayNamePolicyError):
-        validate_display_name(" " + character)
+        validate_display_name(" 😀")
 
 
-@pytest.mark.parametrize(
-    "bad", ["\t", "\n", "\x00", "\x85", "\u2028", "\u2029", "\ud800"]
-)
-def test_display_name_rejects_raw_control_before_fallback(bad):
-    with pytest.raises(DisplayNamePolicyError):
-        normalize_display_name(bad, "a@b")
+# One row per disjunct of the single-line predicate (C0, C1, line separator,
+# surrogate).
+def test_display_name_rejects_raw_control_before_fallback():
+    for bad in ("\n", "\x85", "\u2028", "\ud800"):
+        with pytest.raises(DisplayNamePolicyError):
+            normalize_display_name(bad, "a@b")
 
 
 def test_optional_name_fallback_never_truncates_email():
@@ -61,12 +60,10 @@ def test_email_counts_normalized_utf8_bytes_and_local_part_separately():
         normalize_email("İ" * 22 + "@b")
 
 
-@pytest.mark.parametrize(
-    "bad", ["a@@b", "a b@c", "a@b\n", "a@b\x00", "a@b\ud800", "Alice <a@b>", "a@b,c@d"]
-)
-def test_email_rejects_one_address_contract_violations(bad):
-    with pytest.raises(EmailPolicyError):
-        normalize_email(bad)
+def test_email_rejects_one_address_contract_violations():
+    for bad in ("a@@b", "a b@c", "a@b\n"):
+        with pytest.raises(EmailPolicyError):
+            normalize_email(bad)
 
 
 def test_password_preserves_exact_secret_and_rejects_maximum_without_exception():
@@ -75,7 +72,6 @@ def test_password_preserves_exact_secret_and_rejects_maximum_without_exception()
     assert validate_password("x") == "x"
     for value, is_new in [
         ("a" * 14, True),
-        ("a" * 129, True),
         ("a" * 129, False),
         ("\ud800", False),
     ]:
@@ -87,24 +83,9 @@ def _unexpected(*args, **kwargs):
     raise AssertionError("invalid input reached database or password hashing")
 
 
-@pytest.mark.parametrize(
-    "overrides,error",
-    [
-        ({"display_name": "a" * 33}, DisplayNameInputPolicyError),
-        ({"email": "a" * 65 + "@b"}, EmailInputPolicyError),
-        ({"password": "a" * 129}, PasswordPolicyError),
-        ({"password": "a" * 14}, PasswordPolicyError),
-    ],
-)
-def test_signup_and_cli_service_reject_before_database_or_kdf(overrides, error):
+def test_signup_and_cli_service_reject_before_database_or_kdf():
     factory = SimpleNamespace(begin=_unexpected)
     hasher = SimpleNamespace(hash_password=_unexpected, verify_password=_unexpected)
-    values = {
-        "email": "a@b",
-        "password": "a" * 15,
-        "display_name": "Alice",
-        **overrides,
-    }
     signup = SessionService(
         session_factory=factory,
         credential_hasher=hasher,
@@ -112,9 +93,15 @@ def test_signup_and_cli_service_reject_before_database_or_kdf(overrides, error):
         signup_enabled=True,
     )
     admin = UserAdminService(session_factory=factory, credential_hasher=hasher)
-    for service in (signup.signup, admin.add_user):
-        with pytest.raises(error):
-            service(**values)
+    valid = {"email": "a@b", "password": "a" * 15, "display_name": "Alice"}
+    for overrides, error in (
+        ({"display_name": "a" * 33}, DisplayNameInputPolicyError),
+        ({"email": "a" * 65 + "@b"}, EmailInputPolicyError),
+        ({"password": "a" * 14}, PasswordPolicyError),
+    ):
+        for service in (signup.signup, admin.add_user):
+            with pytest.raises(error):
+                service(**{**valid, **overrides})
 
 
 def test_password_specific_helpers_and_login_reject_before_verification():

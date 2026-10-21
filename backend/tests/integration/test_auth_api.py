@@ -368,17 +368,15 @@ def test_remembered_refresh_emits_a_renewal_audit_event(page_service):
         )
     assert event is not None
     assert event.workspace_id is None
-    assert (
-        event.payload["previous_expires_at"]
-        == (datetime(2030, 6, 1, tzinfo=UTC) + timedelta(seconds=100)).isoformat()
-    )
-    assert (
-        event.payload["expires_at"] == (clock[0] + timedelta(seconds=100)).isoformat()
-    )
-    assert (
-        event.payload["authenticated_at"]
-        == datetime(2030, 6, 1, tzinfo=UTC).isoformat()
-    )
+    assert event.payload["previous_expires_at"] == (
+        datetime(2030, 6, 1, tzinfo=UTC) + timedelta(seconds=100)
+    ).isoformat()
+    assert event.payload["expires_at"] == (
+        clock[0] + timedelta(seconds=100)
+    ).isoformat()
+    assert event.payload["authenticated_at"] == datetime(
+        2030, 6, 1, tzinfo=UTC
+    ).isoformat()
 
 
 def test_unrecordable_renewal_keeps_the_presented_cookie(page_service):
@@ -583,13 +581,10 @@ def test_signup_marks_session_cookie_secure_for_forwarded_https(page_service):
 def test_signup_rejects_duplicate_email(page_service):
     client = make_client(page_service)
 
-    assert (
-        client.post(
-            "/api/v1/auth/signup",
-            json={"email": "same@example.com", "password": "first-password-123"},
-        ).status_code
-        == 201
-    )
+    assert client.post(
+        "/api/v1/auth/signup",
+        json={"email": "same@example.com", "password": "first-password-123"},
+    ).status_code == 201
     duplicate = client.post(
         "/api/v1/auth/signup",
         json={"email": " SAME@example.com ", "password": "second-password-123"},
@@ -862,20 +857,14 @@ def test_password_reset_confirm_is_single_use_and_does_not_auto_login(page_servi
     assert "dtxwiki_session=" in confirmed.headers["set-cookie"]
     assert "Max-Age=0" in confirmed.headers["set-cookie"]
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert (
-        client.post(
-            "/api/v1/auth/login",
-            json={"email": "reset-web@example.com", "password": "original-password"},
-        ).status_code
-        == 401
-    )
-    assert (
-        client.post(
-            "/api/v1/auth/login",
-            json={"email": "reset-web@example.com", "password": "replacement-password"},
-        ).status_code
-        == 200
-    )
+    assert client.post(
+        "/api/v1/auth/login",
+        json={"email": "reset-web@example.com", "password": "original-password"},
+    ).status_code == 401
+    assert client.post(
+        "/api/v1/auth/login",
+        json={"email": "reset-web@example.com", "password": "replacement-password"},
+    ).status_code == 200
 
     reused = client.post(
         "/api/v1/auth/password-reset/confirm",
@@ -1186,7 +1175,9 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service, api_token_c
     # /record accepts an inactive token -- expired or revoked, matching the
     # deleted workspace-scoped delete_inactive_token's contract exactly. Only
     # a still-active token 422s.
-    active_delete = client.delete(f"{base_url}/{active[0]['api_token']['id']}/record")
+    active_delete = client.delete(
+        f"{base_url}/{active[0]['api_token']['id']}/record"
+    )
     assert active_delete.status_code == 422
     assert active_delete.json()["error_code"] == "invalid_api_token_request"
 
@@ -1257,7 +1248,9 @@ def test_user_tokens_cursor_traverses_more_than_one_default_page_exactly_once(
     assert signup.status_code == 201
     now = utc_now()
     with page_service.session_factory.begin() as session:
-        user = session.scalar(select(User).where(User.email == "many-keys@example.com"))
+        user = session.scalar(
+            select(User).where(User.email == "many-keys@example.com")
+        )
         assert user is not None
         assert user.personal_workspace_id is not None
         rows = []

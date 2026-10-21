@@ -65,7 +65,10 @@
 - Keep generated Ask, Library and Chats titles within storage limits, preserve
   scalar frontmatter labels, and apply the separate Agent body rules.
 - Preserve public-client DCR compatibility and idempotent token revocation, and
-  apply registration rate limits before parsing malformed metadata.
+  apply registration rate limits before parsing malformed metadata. DCR registers
+  `web` or `native` as the application type and returns the registered value.
+- Reject a workspace slug that another request claims concurrently instead of
+  adopting and re-owning that workspace.
 - Separate upgrade-blocking input findings from preserved history, support
   baseline audits and independent Library label repairs, and honor runtime
   activity locks during maintenance.

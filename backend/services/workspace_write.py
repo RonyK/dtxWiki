@@ -60,7 +60,7 @@ from backend.policy.rbac import (
     normalize_role,
 )
 from backend.repositories.audit_repo import insert_audit_event
-from backend.repositories.workspace_repo import get_workspace_by_slug
+from backend.repositories.workspace_repo import get_workspace_by_slug, insert_workspace
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.read import WorkspaceCreateRequest, WorkspaceSummary
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG, seed_default_workspace
@@ -162,6 +162,10 @@ class WorkspaceWriteService:
         if get_workspace_by_slug(session, slug) is not None:
             raise WorkspaceCreateConflictError("workspace slug already exists")
         try:
+            # Insert before seeding: seeding is get-or-create by slug, so a
+            # competitor that committed after the check above would otherwise
+            # be adopted and re-owned instead of failing the UNIQUE slug.
+            insert_workspace(session, slug=slug, title=request.title.strip())
             workspace = seed_default_workspace(
                 session,
                 slug=slug,

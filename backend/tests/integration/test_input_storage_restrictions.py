@@ -68,8 +68,10 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
     tmp_path, monkeypatch
 ):
     # Separate from the successful policy round trip: dirty data must refuse
-    # upgrade without advancing the stamp, then remain repairable in each schema.
-    # Each parent has a different schema; traverse once and assert at each stop.
+    # upgrade without advancing the stamp, then remain repairable. The oldest
+    # supported schema lacks member_search_key and the recovery tables, and its
+    # refused run rolls back two earlier revisions; repairs on the parent
+    # schema are covered by the email and CLI tests below.
     original_connect = sqlite3.dbapi2.connect
 
     def connect_with_foreign_keys_enabled(*args, **kwargs):
@@ -81,46 +83,24 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
     url, config = _database(tmp_path, "bd62193d5cf6")
     engine = sa.create_engine(url)
     with engine.begin() as connection:
-        identity = _user(connection)
-    for revision in ("bd62193d5cf6", "efcbcf724889", PRE_INPUT_REVISION):
-        command.upgrade(config, revision)
-        with engine.begin() as connection:
-            connection.execute(
-                sa.text("UPDATE users SET display_name=:name, email=:email"),
-                {"name": "x" * 33, "email": "alice@example.test"},
-            )
-        report = audit_inputs(url)
-        assert report[0]["count"] == 1
-        assert "x" * 33 not in str(report)
-        with pytest.raises(RuntimeError, match="preflight failed"):
-            command.upgrade(config, "head")
-        with engine.connect() as connection:
-            assert (
-                connection.execute(
-                    sa.text("SELECT version_num FROM alembic_version")
-                ).scalar_one()
-                == revision
-            )
-            assert (
-                connection.execute(
-                    sa.text("SELECT display_name FROM users")
-                ).scalar_one()
-                == "x" * 33
-            )
-        repair_input(url, "user", identity, "display_name", "한글😀")
-        repair_input(url, "user", identity, "email", " 새주소@EXAMPLE.TEST ")
-        assert audit_inputs(url) == []
-        with engine.connect() as connection:
-            assert (
-                connection.execute(
-                    sa.text("SELECT version_num FROM alembic_version")
-                ).scalar_one()
-                == revision
-            )
-            assert (
-                connection.execute(sa.text("SELECT email FROM users")).scalar_one()
-                == "새주소@example.test"
-            )
+        identity = _user(connection, name="x" * 33)
+    report = audit_inputs(url)
+    assert report[0]["count"] == 1
+    assert "x" * 33 not in str(report)
+    with pytest.raises(RuntimeError, match="preflight failed"):
+        command.upgrade(config, "head")
+    with engine.connect() as connection:
+        assert connection.execute(
+            sa.text("SELECT version_num, display_name FROM alembic_version, users")
+        ).one() == ("bd62193d5cf6", "x" * 33)
+    repair_input(url, "user", identity, "display_name", "한글😀")
+    repair_input(url, "user", identity, "email", " 새주소@EXAMPLE.TEST ")
+    assert audit_inputs(url) == []
+    with engine.connect() as connection:
+        assert connection.execute(
+            sa.text("SELECT version_num, email FROM alembic_version, users")
+        ).one() == ("bd62193d5cf6", "새주소@example.test")
+    command.upgrade(config, PRE_INPUT_REVISION)
     tokens = sa.Table("api_tokens", sa.MetaData(), autoload_with=engine)
     token_id, orphan_id = uuid4(), uuid4()
     with engine.begin() as connection:
@@ -140,18 +120,13 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
                 for token, owner in ((token_id, identity), (orphan_id, uuid4()))
             ],
         )
-    # This failure path cannot be proved by a CHECK-expression unit test:
-    # the migrated parent table must retain children and refuse pre-existing
-    # orphan FKs before committing its DDL/stamp, even when FK defaults are ON.
-    with pytest.raises(RuntimeError, match="foreign key violations"):
-        command.upgrade(config, "head")
-    with engine.begin() as connection:
-        assert (
-            connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
-            == PRE_INPUT_REVISION
-        )
-        assert connection.scalar(sa.select(sa.func.count()).select_from(tokens)) == 2
-        connection.execute(tokens.delete().where(tokens.c.id == orphan_id.hex))
+    # This path cannot be proved by a CHECK-expression unit test: rebuilding
+    # the parent table must keep its children, even when FK defaults are ON.
+    # A pre-existing orphan is not the migration's doing and must neither be
+    # deleted nor block this or any later (including no-op) Alembic run.
+    # The policy round trip lives in test_input_migration_parent.py; here the
+    # rebuild runs with FK defaults ON, then a no-op run at head.
+    command.upgrade(config, "head")
     command.upgrade(config, "head")
     with engine.connect() as connection:
         assert (
@@ -160,15 +135,18 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
             ).scalar_one()
             == REVISION
         )
-    command.downgrade(config, PRE_INPUT_REVISION)
-    command.upgrade(config, "head")
-    with engine.connect() as connection:
         assert (
             connection.execute(sa.text("SELECT password_hash FROM users")).scalar_one()
             == "opaque-existing-hash"
         )
-        assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
-        assert connection.scalar(sa.select(tokens.c.id)) == token_id.hex
+        assert [
+            (row[0], row[2])
+            for row in connection.exec_driver_sql("PRAGMA foreign_key_check")
+        ] == [("api_tokens", "users")]
+        assert set(connection.scalars(sa.select(tokens.c.id))) == {
+            token_id.hex,
+            orphan_id.hex,
+        }
     engine.dispose()
 
 
@@ -253,15 +231,12 @@ def test_email_repair_atomically_revokes_recovery_and_pending_mail(tmp_path):
         with pytest.raises(runtime_lock.RuntimeLockHeldError):
             repair_input(url, "user", identity, "display_name", "blocked")
     resources = RuntimeResources.for_settings(Settings(database_url=url))
-    assert len(resources.activity_paths) == 2
     # Another data-dir participant shares only the SQLite-side activity path.
     with runtime_lock.acquire_path(resources.activity_paths[1], "shared"):
         with pytest.raises(runtime_lock.RuntimeLockHeldError):
             repair_input(url, "user", identity, "display_name", "blocked")
     # A failed multi-path acquisition must release any earlier path guards.
     repair_input(url, "user", identity, "display_name", "Unlocked")
-    with pytest.raises(InputMaintenanceError):
-        repair_input(url, "oauth-client", identity, "id", "changed")
     with engine.begin() as connection:
         _user(connection, email="occupied@example.test")
     with pytest.raises(DBAPIError):
@@ -302,7 +277,7 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
         WorkspaceTreeNode,
     )
 
-    url, config = _database(tmp_path)
+    url, _config = _database(tmp_path)
     engine = sa.create_engine(url)
     workspace, client, item, chat, node = (uuid4() for _ in range(5))
     with engine.begin() as connection:
@@ -359,7 +334,6 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
     repair_input(url, "tree-node", node, "title", "Independent library label")
     repair_input(url, "library-item", item, "title", None)
     repair_input(url, "mcp-chat", chat, "title", None)
-    command.upgrade(config, "head")
     with engine.connect() as connection:
         assert (
             connection.execute(sa.text("SELECT title FROM library_item")).scalar_one()

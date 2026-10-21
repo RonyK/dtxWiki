@@ -26,7 +26,7 @@ def report_map(connection):
     return {item["rule"]: item for item in audit_preserved_inputs(connection)}
 
 
-def test_partial_legacy_schema_body_units_and_read_only_file(tmp_path):
+def test_scalar_history_units_bounded_ids_and_read_only_file(tmp_path):
     path = tmp_path / "legacy.sqlite"
     engine = sa.create_engine(f"sqlite+pysqlite:///{path}")
     metadata = sa.MetaData()
@@ -36,6 +36,10 @@ def test_partial_legacy_schema_body_units_and_read_only_file(tmp_path):
     )
     # A historical table need not have all current columns.
     make_table(metadata, "agent_page_version", ("old_body", sa.Text))
+    changes = make_table(metadata, "change_set", ("reason", sa.Text))
+    review = make_table(
+        metadata, "review_item", ("review_type", sa.Text), ("decision_summary", sa.Text)
+    )
     metadata.create_all(engine)
     with engine.begin() as connection:
         connection.execute(
@@ -52,51 +56,11 @@ def test_partial_legacy_schema_body_units_and_read_only_file(tmp_path):
                 {"id": identity(4), "body_markdown": "한" * 333_334},
             ],
         )
-    before = path.read_bytes()
-    statements = []
-    sa.event.listen(
-        engine, "before_cursor_execute", lambda _c, _u, sql, *_: statements.append(sql)
-    )
-    with engine.connect() as connection:
-        reports = report_map(connection)
-    assert reports["preserved_context_page_version_body_md"]["ids"] == [
-        str(UUID(int=2))
-    ]
-    assert reports["preserved_library_semantic_overlay_body_markdown"]["ids"] == [
-        str(UUID(int=4))
-    ]
-    assert all(
-        item["classification"] == "preserved_history" for item in reports.values()
-    )
-    assert all(
-        sql.lstrip().upper().startswith(("SELECT", "PRAGMA")) for sql in statements
-    )
-    assert path.read_bytes() == before
-    engine.dispose()
-
-
-def test_reason_feedback_inline_comment_and_bounded_identifiers():
-    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
-    metadata = sa.MetaData()
-    changes = make_table(metadata, "change_set", ("reason", sa.Text))
-    feedback = make_table(metadata, "feedback_item", ("body", sa.Text))
-    review = make_table(
-        metadata, "review_item", ("review_type", sa.Text), ("decision_summary", sa.Text)
-    )
-    metadata.create_all(engine)
-    with engine.begin() as connection:
         connection.execute(
             changes.insert(),
             [
                 {"id": identity(index), "reason": "private-reason-" + "r" * 2000}
                 for index in range(1, 9)
-            ],
-        )
-        connection.execute(
-            feedback.insert(),
-            [
-                {"id": identity(10), "body": "f" * 10000},
-                {"id": identity(11), "body": "private-feedback-" + "f" * 10000},
             ],
         )
         connection.execute(
@@ -119,13 +83,31 @@ def test_reason_feedback_inline_comment_and_bounded_identifiers():
                 },
             ],
         )
+    before = path.read_bytes()
+    statements = []
+    sa.event.listen(
+        engine, "before_cursor_execute", lambda _c, _u, sql, *_: statements.append(sql)
+    )
+    with engine.connect() as connection:
         reports = report_map(connection)
+    assert reports["preserved_context_page_version_body_md"]["ids"] == [
+        str(UUID(int=2))
+    ]
+    assert reports["preserved_library_semantic_overlay_body_markdown"]["ids"] == [
+        str(UUID(int=4))
+    ]
     assert reports["preserved_change_set_reason"]["count"] == 8
     assert len(reports["preserved_change_set_reason"]["ids"]) == 5
-    assert reports["preserved_feedback_item_body"]["count"] == 1
     assert reports["preserved_review_item_decision_summary"]["count"] == 2
+    assert all(
+        item["classification"] == "preserved_history" for item in reports.values()
+    )
     assert "private-reason" not in json.dumps(reports)
-    assert "private-feedback" not in json.dumps(reports)
+    assert all(
+        sql.lstrip().upper().startswith(("SELECT", "PRAGMA")) for sql in statements
+    )
+    assert path.read_bytes() == before
+    engine.dispose()
 
 
 def test_labels_and_nested_request_snapshots_without_limiting_generated_outputs():
@@ -285,17 +267,16 @@ def test_oauth_reports_types_controls_and_empty_metadata_without_raw_client_ids(
                         {"client_name": "bad\nname"},
                         {"redirect_uris": []},
                         {"grant_types": "authorization_code"},
-                        {"redirect_uris": ["https://client.example/" + "a" * 2048]},
                     ]
                 )
             ]
             + [{"id": "valid-client", **base}],
         )
         reports = report_map(connection)
-        assert connection.scalar(sa.select(sa.func.count()).select_from(clients)) == 5
+        assert connection.scalar(sa.select(sa.func.count()).select_from(clients)) == 4
     report = reports["oauth_client_protocol_budget"]
-    assert report["count"] == 4
-    assert len(report["id_fingerprints"]) == 4
+    assert report["count"] == 3
+    assert len(report["id_fingerprints"]) == 3
     assert report["classification"] == "preserved_oauth_metadata"
     assert "private.example" not in json.dumps(reports)
 

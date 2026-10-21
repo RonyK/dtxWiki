@@ -6,6 +6,25 @@ export const codePointLength = (value: string) => Array.from(value).length;
 const EDGE_SPACES = /^[ \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+|[ \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+$/g;
 export const trimShortText = (value: string) => value.replace(EDGE_SPACES, "");
 
+/** Fit a generated (never user-typed) label into one line of `maximum` code
+ * points without splitting a grapheme. Explicit input is rejected instead. */
+export function fitGeneratedTitle(value: string, maximum: number) {
+  const text = trimShortText(
+    value.replace(/[\s\u0000-\u001f\u007f-\u009f]+/gu, " ").replace(/[\ud800-\udfff]/gu, ""),
+  );
+  const segments = typeof Intl.Segmenter === "function"
+    ? Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), ({ segment }) => segment)
+    : Array.from(text);
+  let fitted = "";
+  let remaining = maximum;
+  for (const segment of segments) {
+    remaining -= codePointLength(segment);
+    if (remaining < 0) break;
+    fitted += segment;
+  }
+  return trimShortText(fitted);
+}
+
 export function inputListLimitMessage(maximum: number) {
   return i18n.resolvedLanguage?.startsWith("ko")
     ? `최대 ${maximum}개까지 입력할 수 있습니다.`

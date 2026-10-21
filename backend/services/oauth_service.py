@@ -371,6 +371,7 @@ class RegisteredClient:
     redirect_uris: list[str]
     scope: str
     issued_at: int
+    application_type: str
 
 
 @dataclass(frozen=True)
@@ -413,6 +414,7 @@ def _registered_client(client: OAuthClient) -> RegisteredClient:
         redirect_uris=list(client.redirect_uris),
         scope=client.scope,
         issued_at=int(client.created_at.timestamp()),
+        application_type=client.application_type,
     )
 
 
@@ -1280,7 +1282,7 @@ class OAuthService:
         # Sprint_5 Phase_3 Task 3.2: client_name length ∈ [1, 200]. Previously
         # silently truncated to 128 chars, which masked over-long submissions.
         raw_client_name = payload.get("client_name")
-        if "client_name" not in payload or raw_client_name == "":
+        if raw_client_name is None or raw_client_name == "":
             client_name = "Dynamic MCP Client"
         else:
             client_name = raw_client_name
@@ -1288,7 +1290,11 @@ class OAuthService:
             client_name = validate_client_name(client_name)
         except ValueError as exc:
             raise InvalidClientRegistrationError(str(exc)) from exc
-        application_type = payload.get("application_type") or "native"
+        # Like the auth method, register only a supported value (RFC 7591 lets
+        # the server replace metadata) instead of storing arbitrary text.
+        application_type = (
+            "web" if payload.get("application_type") == "web" else "native"
+        )
         registration_identity = _dcr_registration_identity(
             client_name=client_name,
             redirect_uris=normalized_redirects,
@@ -1420,13 +1426,7 @@ class OAuthService:
                 },
                 retention_class="sensitive",
             )
-            return RegisteredClient(
-                client_id=client.id,
-                client_name=client.client_name,
-                redirect_uris=list(client.redirect_uris),
-                scope=client.scope,
-                issued_at=int(client.created_at.timestamp()),
-            )
+            return _registered_client(client)
 
     def get_client(self, client_id: str) -> OAuthClient:
         _validate_client_id(client_id)
@@ -4259,7 +4259,12 @@ def validate_redirect_uri(uri: str) -> str:
             "redirect_uri must contain 1-2048 UTF-8 bytes "
             "without whitespace or controls"
         )
-    parsed = urlparse(uri)
+    try:
+        parsed = urlparse(uri)
+    except ValueError as exc:
+        # urlsplit rejects unbalanced or non-IP brackets and a netloc that
+        # NFKC-normalizes to a delimiter; callers expect an OAuth error.
+        raise InvalidClientRegistrationError("redirect_uri is malformed") from exc
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise InvalidClientRegistrationError("redirect_uri must be absolute http(s)")
     if parsed.fragment:
