@@ -3105,9 +3105,6 @@ button.history-card {
      .topbar-actions floors itself at max-content, so a bare 1fr let the topbar's
      intrinsic width push the shell column past the viewport — clipped, not
      scrollable. The desktop rules above already use minmax(0, 1fr). */
-  /* Match the persisted desktop collapsed-state selector's specificity, or
-     its 64px first column constrains both mobile grid areas after folding. */
-  .app-shell[data-sidebar-collapsed="true"],
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
@@ -3116,10 +3113,6 @@ button.history-card {
   }
 
   .topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .app-shell[data-sidebar-collapsed="true"] .topbar {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
@@ -3140,11 +3133,6 @@ button.history-card {
     border-right: 0;
   }
 
-  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
-    justify-content: flex-start;
-    padding: 0 16px;
-  }
-
   .brand-name {
     display: none;
   }
@@ -3153,24 +3141,6 @@ button.history-card {
      trigger competing for this space. Keep their service identity visible. */
   .app-shell-public .brand-name {
     display: inline;
-  }
-
-  .app-shell[data-sidebar-collapsed="true"] .workspace-controls {
-    display: inline-flex;
-  }
-
-  /* Undo the desktop collapsed compaction: mobile shows the full switcher.
-     Re-assert the viewport width cap at matching specificity, else the desktop
-     rule's `max-width: none` would leak in and let the switcher overflow. */
-  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
-    grid-template-columns: 22px minmax(0, 1fr) 14px;
-    width: 100%;
-    min-width: 0;
-    max-width: min(340px, 100%);
-  }
-
-  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-label {
-    display: block;
   }
 
   /* 340px, not the 210px this used to be. The old ceiling never lifted, so on
@@ -4242,12 +4212,7 @@ button.history-card {
     padding-inline: 8px;
   }
 
-  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
-    padding-inline: 8px;
-  }
-
-  .workspace-controls,
-  .app-shell[data-sidebar-collapsed="true"] .workspace-controls {
+  .workspace-controls {
     flex: 1 1 auto;
     min-width: 0;
     max-width: calc(100% - 50px);
@@ -4263,8 +4228,7 @@ button.history-card {
      while the name is right beside it -- so it yields its 22px track and its
      7px gap to the title, which is what the reader actually needs. Same
      reasoning as .prism-glyph directly above. */
-  .workspace-switcher-button,
-  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
+  .workspace-switcher-button {
     grid-template-columns: minmax(0, 1fr) 14px;
   }
 

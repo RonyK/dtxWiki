@@ -62,50 +62,56 @@ const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
 const CSS_GEOMETRY_EPSILON_PX = 0.001;
 
 test.describe("Overall UI responsive acceptance @cross-browser", () => {
-  test("persisted collapsed sidebar keeps full width after folding and reload", async ({
-    page,
-  }, testInfo) => {
-    await page.setViewportSize({ width: 1280, height: 850 });
-    await authenticatePage(page, testInfo, "fold-collapsed-sidebar");
-    await page.goto("/dashboard");
-    const shell = page.locator(".app-shell");
-    const toggle = page.locator(".desktop-sidebar-toggle");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await toggle.click();
-    await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+  test.describe("foldable viewport", () => {
+    test.use({ hasTouch: true });
 
-    // A wide desktop can save this preference before the same browser opens
-    // on a Fold. Both the inner and cover displays must ignore its 64px track.
-    for (const width of [850, 390, 344, 850, 390]) {
-      await page.setViewportSize({ width, height: 850 });
-      for (const reload of [false, true]) {
-        if (reload) await page.reload();
+    test("persisted collapsed sidebar keeps full width after folding and reload", async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width: 1280, height: 850 });
+      await authenticatePage(page, testInfo, "fold-collapsed-sidebar");
+      await page.goto("/dashboard");
+      const shell = page.locator(".app-shell");
+      const toggle = page.locator(".desktop-sidebar-toggle");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await toggle.click();
+      await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+      await expect.poll(() => page.locator(".main-surface").evaluate((element) =>
+        Math.round(element.getBoundingClientRect().left),
+      )).toBe(64);
+      expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches))
+        .toBe(true);
+
+      // A phone can inherit this preference from a previous wide viewport.
+      // Exercise one fold, then reload once with that preference still saved.
+      for (const width of [850, 344]) {
+        await page.setViewportSize({ width, height: 850 });
         await expect(page.locator(".feature-header h1")).toBeVisible();
-        await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
         await expect(page.locator(".sidebar")).toBeHidden();
-        for (const selector of [".topbar", ".main-surface"]) {
-          await expect.poll(() => page.locator(selector).evaluate((element) => {
-            const rect = element.getBoundingClientRect();
-            return { left: Math.round(rect.left), width: Math.round(rect.width) };
-          })).toEqual({ left: 0, width });
-        }
+        await expectNoHorizontalOverflow(page, `fold to ${width}px`);
+        const styles = await page.evaluate(() => ({
+          gap: getComputedStyle(document.querySelector(".topbar-brand")!).gap,
+          minimumWidth: getComputedStyle(
+            document.querySelector(".workspace-switcher-button")!,
+          ).minWidth,
+        }));
+        expect(styles.gap).toBe(width <= 480 ? "6px" : "10px");
+        expect(styles.minimumWidth).toBe("44px");
+        await expectMinimumTouchTarget(
+          page.locator(".workspace-switcher-button"), "workspace switcher",
+        );
+        await expect(page.locator(".workspace-switcher-label")).toBeVisible();
+        await evidenceScreenshot(page, testInfo, `fold-collapsed-${width}.png`);
       }
-      await evidenceScreenshot(page, testInfo, `fold-collapsed-${width}.png`);
-    }
 
-    // Returning to desktop still honors the saved collapsed preference.
-    await page.setViewportSize({ width: 1280, height: 850 });
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect.poll(() => page.locator(".main-surface").evaluate((element) =>
-      Math.round(element.getBoundingClientRect().left),
-    )).toBe(64);
-    await toggle.click();
-    await expect(shell).toHaveAttribute("data-sidebar-collapsed", "false");
-    await page.setViewportSize({ width: 390, height: 850 });
-    await expect.poll(() => page.locator(".main-surface").evaluate((element) =>
-      Math.round(element.getBoundingClientRect().width),
-    )).toBe(390);
+      await page.reload();
+      await expect(page.locator(".feature-header h1")).toBeVisible();
+      await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+      expect(await page.evaluate(() =>
+        localStorage.getItem("dtxwiki:sidebar-collapsed"),
+      )).toBe("true");
+      await expectNoHorizontalOverflow(page, "folded reload");
+    });
   });
 
   for (const viewport of VIEWPORTS) {
@@ -855,6 +861,20 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
 
     // Baseline: the real screen passes.
     await expectNoHorizontalOverflow(page, "overflow guard baseline");
+
+    // A 64px surface may not overflow. Prove the shared geometry check also
+    // rejects this separate failure, rather than relying on scrollWidth.
+    await page.locator(".main-surface").evaluate((element) => {
+      (element as HTMLElement).style.width = "64px";
+    });
+    try {
+      await expect(expectNoHorizontalOverflow(page, "squeezed surface"))
+        .rejects.toThrow("fills the mobile viewport");
+    } finally {
+      await page.locator(".main-surface").evaluate((element) => {
+        (element as HTMLElement).style.removeProperty("width");
+      });
+    }
 
     await page.evaluate(() => {
       const surface = document.querySelector(".main-surface");
@@ -2045,7 +2065,16 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
     const featureMain = document.querySelector(
       ".feature-main",
     ) as HTMLElement | null;
+    const fullWidthSurfaces = root.clientWidth <= 1024
+      ? [".app-shell", ".topbar", ".main-surface"].flatMap((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element?.getClientRects().length) return [];
+        const rect = element.getBoundingClientRect();
+        return [{ selector, left: rect.left, width: rect.width }];
+      })
+      : [];
     return {
+      fullWidthSurfaces,
       bodyScrollWidth: body.scrollWidth,
       documentScrollWidth: root.scrollWidth,
       shellClientWidth: shell?.clientWidth ?? -1,
@@ -2062,6 +2091,15 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
     Math.max(metrics.bodyScrollWidth, metrics.documentScrollWidth),
     `${label} document width`,
   ).toBeLessThanOrEqual(metrics.viewportClientWidth + 1);
+  // A squeezed grid can have no overflow at all. Check its painted width too.
+  for (const surface of metrics.fullWidthSurfaces) {
+    expect(Math.abs(surface.left), `${label} ${surface.selector} left edge`)
+      .toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(surface.width - metrics.viewportClientWidth),
+      `${label} ${surface.selector} fills the mobile viewport`,
+    ).toBeLessThanOrEqual(1);
+  }
   // The document check alone can never fail for the failure this suite exists
   // to catch: `.app-shell` is `height:100vh` and clips its overflow, so it —
   // not the document — is what the layout is measured against. (It takes

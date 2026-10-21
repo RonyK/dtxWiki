@@ -1,14 +1,16 @@
 /* Keep a compact initials-only workspace switcher in collapsed desktop mode so
    PC users can still see and switch the active workspace (it used to be hidden
-   entirely). Mobile keeps the full switcher via the max-width:1024px block. */
-.app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
-  grid-template-columns: 22px 14px;
-  min-width: 0;
-  max-width: none;
-}
+   entirely). The saved desktop preference does not compact narrow layouts. */
+@media (min-width: 1025px) {
+  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button {
+    grid-template-columns: 22px 14px;
+    min-width: 0;
+    max-width: none;
+  }
 
-.app-shell[data-sidebar-collapsed="true"] .workspace-switcher-label {
-  display: none;
+  .app-shell[data-sidebar-collapsed="true"] .workspace-switcher-label {
+    display: none;
+  }
 }
 
 .topbar-brand,
@@ -677,26 +679,28 @@
   padding: 12px;
 }
 
-.sidebar[data-collapsed="true"] {
-  align-items: center;
-  padding: 12px 8px;
-}
+@media (min-width: 1025px) {
+  .sidebar[data-collapsed="true"] {
+    align-items: center;
+    padding: 12px 8px;
+  }
 
-.sidebar[data-collapsed="true"] .sidebar-nav {
-  width: 100%;
-  gap: 12px;
-}
+  .sidebar[data-collapsed="true"] .sidebar-nav {
+    width: 100%;
+    gap: 12px;
+  }
 
-.sidebar[data-collapsed="true"] .nav-group-label,
-.sidebar[data-collapsed="true"] .nav-item-label,
-.sidebar[data-collapsed="true"] .nav-preview-badge,
-.sidebar[data-collapsed="true"] .sidebar-toggle-label {
-  display: none;
-}
+  .sidebar[data-collapsed="true"] .nav-group-label,
+  .sidebar[data-collapsed="true"] .nav-item-label,
+  .sidebar[data-collapsed="true"] .nav-preview-badge,
+  .sidebar[data-collapsed="true"] .sidebar-toggle-label {
+    display: none;
+  }
 
-.sidebar[data-collapsed="true"] .nav-item {
-  justify-content: center;
-  padding: 8px;
+  .sidebar[data-collapsed="true"] .nav-item {
+    justify-content: center;
+    padding: 8px;
+  }
 }
 
 /* M-3 (260908 UI audit): this mobile override used to live in
@@ -823,8 +827,10 @@
   justify-content: flex-start;
 }
 
-.sidebar[data-collapsed="true"] .sidebar-footer .desktop-sidebar-toggle {
-  justify-content: center;
+@media (min-width: 1025px) {
+  .sidebar[data-collapsed="true"] .sidebar-footer .desktop-sidebar-toggle {
+    justify-content: center;
+  }
 }
 
 .main-surface {
