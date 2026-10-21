@@ -26,6 +26,7 @@ test("reads exact evidence, approves a document group, and records the decision 
   const detail = page.locator(".review-detail-card");
   await expect(detail.locator("#review-detail-title")).toHaveText(first.title);
   await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+  await expect(detail.locator(".review-detail-header .review-publication-notice")).toHaveText("Approving publishes review version v1.");
   await expect(detail.getByRole("tab", { name: "Compare changes" })).toHaveAttribute("aria-selected", "true");
   await expect(detail.locator(".diff-viewer")).toContainText("Exact reviewed body");
   await detail.getByRole("tab", { name: "Review version content", exact: true }).click();
@@ -169,7 +170,28 @@ test("keeps a saved mobile approval after response loss and queue failure, then 
   const detail = page.locator(".review-detail-card");
   const approve = detail.getByRole("button", { name: "Approve", exact: true });
   await expect(approve).toBeEnabled();
+  await expect(detail.locator(".review-detail-header .review-publication-notice")).toHaveText("Approving publishes review version v1.");
   await expectNoDocumentOverflow(page);
+  const comparison = detail.getByRole("tab", { name: "Compare changes", exact: true });
+  await detail.getByRole("link", { name: /Open current document:/ }).focus();
+  await comparison.evaluate((element) => {
+    const main = element.closest<HTMLElement>(".review-main")!;
+    const header = main.querySelector<HTMLElement>(".review-detail-header")!;
+    const stickyTop = Number.parseFloat(getComputedStyle(header).top) || 0;
+    const coveredTop = main.getBoundingClientRect().top + stickyTop + header.getBoundingClientRect().height - 8;
+    main.scrollTop += element.getBoundingClientRect().top - coveredTop;
+  });
+  const covered = await reviewTabGeometry(comparison);
+  expect(covered.tabTop).toBeLessThan(covered.headerBottom);
+  await page.keyboard.press("Tab");
+  await expect(comparison).toBeFocused();
+  await expect.poll(async () => {
+    const geometry = await reviewTabGeometry(comparison);
+    return geometry.tabTop - geometry.headerBottom;
+  }).toBeGreaterThanOrEqual(0);
+  await testInfo.attach("review-sticky-focus-visibility", {
+    body: JSON.stringify({ covered, focused: await reviewTabGeometry(comparison) }), contentType: "application/json",
+  });
   await page.getByRole("button", { name: "Open Review queue drawer", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "Review queue drawer", exact: true });
   await expect(drawer).toBeVisible();
@@ -253,6 +275,15 @@ async function expectNoDocumentOverflow(page: Page) {
   }));
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
   expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.height + 1);
+}
+
+async function reviewTabGeometry(tab: Locator) {
+  return tab.evaluate((element) => {
+    const main = element.closest<HTMLElement>(".review-main")!;
+    const header = main.querySelector<HTMLElement>(".review-detail-header")!;
+    return { tabTop: element.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom,
+      headerHeight: header.getBoundingClientRect().height, scrollPaddingTop: getComputedStyle(main).scrollPaddingTop };
+  });
 }
 
 test("reviews a retained Ask API proposal and records activity", async ({ page }, testInfo) => {

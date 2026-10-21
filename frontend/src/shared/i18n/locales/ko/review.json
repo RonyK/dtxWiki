@@ -317,6 +317,7 @@
     }
   },
   "workflow": {
+    "publicationNotice": "승인 시 검토 버전 v{{version}}가 게시됩니다.",
     "reviewOrdinal": "리뷰 {{number}}번",
     "decisionSaved": "결정이 저장되었습니다",
     "nextReview": "다음 리뷰 보기",

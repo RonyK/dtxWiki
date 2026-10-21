@@ -2434,6 +2434,32 @@ function ReviewDetail({
   const isResolved = lifecycleTabForStatus(review.status) === "resolved";
   const isReadOnly = isResolved || decisionSaved;
   const [contentState, setContentState] = useState<"loading" | "ready" | "unavailable">("loading");
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    const main = header?.closest<HTMLElement>(".review-main");
+    if (!header || !main) return;
+    const updateClearance = () => {
+      const headerStyle = getComputedStyle(header);
+      const mainStyle = getComputedStyle(main);
+      const clearance = headerStyle.position === "sticky"
+        ? Math.max(0, header.getBoundingClientRect().height
+          + (Number.parseFloat(headerStyle.top) || 0)
+          + (Number.parseFloat(mainStyle.paddingTop) || 0) + main.clientTop) + 8
+        : 0;
+      main.style.setProperty("--review-sticky-clearance", `${clearance}px`);
+    };
+    updateClearance();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateClearance);
+    observer?.observe(header);
+    observer?.observe(main);
+    window.addEventListener("resize", updateClearance);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateClearance);
+      main.style.removeProperty("--review-sticky-clearance");
+    };
+  }, []);
   const isReconciliation = review.review_type === "context_reconciliation";
   const reconciliationHref =
     review.reconciliation_available === true
@@ -2459,7 +2485,10 @@ function ReviewDetail({
       (operation.document?.document_kind === "context" || ["context_page", "context_page_version"].includes(operation.target_type))
       && operation.content?.mode !== "metadata_only") ?? false);
   const actionBusy = busy || decisionsBlocked;
-  const canApprove = !isReadOnly && (review.actions?.approve.allowed ?? review.can_decide) && !actionBusy && (!requiresExactBody || contentState === "ready");
+  const approveAllowed = review.actions?.approve.allowed ?? review.can_decide;
+  const canApprove = !isReadOnly && approveAllowed && !actionBusy && (!requiresExactBody || contentState === "ready");
+  const publicationVersion = !isReadOnly && !isReconciliation && approveAllowed
+    ? reviewPublicationVersionNo(review) : null;
   const canRequestChanges = !isReadOnly && (review.actions?.request_changes.allowed ?? review.can_decide) && !actionBusy;
   const canReject = !isReadOnly && (review.actions?.reject.allowed ?? review.can_decide) && !actionBusy;
   const canEditDirectlyAction =
@@ -2569,7 +2598,7 @@ function ReviewDetail({
       aria-labelledby="review-detail-title"
       className="feature-section review-detail-card"
     >
-      <header className="review-detail-header">
+      <header className="review-detail-header" ref={headerRef}>
         <div className="review-detail-heading">
           <p className="eyebrow">
             {t("detail.eyebrow", { defaultValue: "Review detail" })} /{" "}
@@ -2591,6 +2620,11 @@ function ReviewDetail({
           <div className="review-detail-meta">
             {reviewTargetVersionNo(review) != null ? <span>v{reviewTargetVersionNo(review)}</span> : null}
             <time dateTime={review.updated_at}>{formatVersionTimestamp(review.updated_at)}</time>
+            {publicationVersion != null ? (
+              <span className="review-publication-notice">
+                {t("workflow.publicationNotice", { version: publicationVersion })}
+              </span>
+            ) : null}
           </div>
         </div>
         {/* One page-level action cluster in the heading, like every other
@@ -3180,6 +3214,33 @@ function reviewTargetTitle(review: ReviewItem, t: TFunction) {
 
 function reviewTargetVersionNo(review: ReviewItem) {
   return reviewPrimaryOperation(review)?.target_version_no ?? null;
+}
+
+function reviewPublicationVersionNo(review: ReviewItem): number | null {
+  if (review.review_type !== "context_update") return null;
+  const operations = review.evidence?.operations ?? [];
+  const candidate = operations.find((operation) =>
+    operation.document?.document_kind === "context"
+    && operation.document.document_id
+    && operation.content?.mode === "context_version"
+    && operation.content.can_read
+    && operation.content.is_current_candidate === true
+    && operation.content.candidate_version_id
+    && operation.content.candidate_version_no != null,
+  );
+  if (!candidate) return null;
+  // A server-associated metadata companion may describe the same candidate.
+  // Any other target, version, or unsupported operation makes publication
+  // effects ambiguous, so retain the operation-specific evidence instead.
+  const singleCandidate = operations.every((operation) =>
+    operation.document?.document_kind === "context"
+    && operation.document.document_id === candidate.document!.document_id
+    && ["context_version", "metadata_only"].includes(operation.content?.mode ?? "")
+    && operation.content?.candidate_version_id === candidate.content!.candidate_version_id
+    && operation.content?.candidate_version_no === candidate.content!.candidate_version_no
+    && operation.content?.is_current_candidate === true,
+  );
+  return singleCandidate ? candidate.content!.candidate_version_no! : null;
 }
 
 function reviewPrimaryOperation(review: ReviewItem): ReviewEvidenceOperation | null {

@@ -317,6 +317,7 @@
     }
   },
   "workflow": {
+    "publicationNotice": "Approving publishes review version v{{version}}.",
     "reviewOrdinal": "Review {{number}}",
     "decisionSaved": "Decision saved",
     "nextReview": "Next review",

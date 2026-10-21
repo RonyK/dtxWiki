@@ -2903,6 +2903,7 @@ describe("ReviewScreen", () => {
     mockReviewQueue([current, metadata]);
     render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Exact candidate", level: 2 });
+    expect(screen.getByText("Approving publishes review version v3.")).toBeVisible();
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
@@ -2925,6 +2926,20 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(approve).toBeEnabled());
     expect(await screen.findByText("Exact candidate body")).toBeVisible();
     expect(pagesApi.readPage).toHaveBeenCalledTimes(2); // failed exact read plus explicit retry
+    current.review_type = "inline_comment";
+    await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
+    await waitFor(() => expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    current.review_type = "context_update";
+    current.actions!.approve = { allowed: false, reason_code: "claim_conflict" };
+    await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled());
+    expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+    current.actions!.approve = { allowed: true };
+    await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
+    expect(await screen.findByText("Approving publishes review version v3.")).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     const otherCandidate: ReviewEvidenceOperation = {
       ...placement, operation_id: "other-candidate-placement", diff_summary: "Metadata for a different candidate.",
       content: { ...placement.content!, candidate_version_id: "version-2", candidate_version_no: 2 },
@@ -2932,6 +2947,7 @@ describe("ReviewScreen", () => {
     current.evidence!.operations.push(otherCandidate);
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(document.querySelectorAll(".review-evidence-document")).toHaveLength(2));
+    expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument();
     const evidenceCards = document.querySelectorAll<HTMLElement>(".review-evidence-document");
     expect(within(evidenceCards[0]).getByText(placement.diff_summary!)).toBeVisible();
     expect(within(evidenceCards[0]).queryByText(otherCandidate.diff_summary!)).not.toBeInTheDocument();
@@ -2957,6 +2973,7 @@ describe("ReviewScreen", () => {
     expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
     expect(screen.getByText(i18n.t("review:workflow.reasons.claim_conflict"))).toBeVisible();
+    expect(document.querySelector(".review-publication-notice")).toBeNull();
     expect(pagesApi.readPage).toHaveBeenCalledTimes(reads);
   });
 
@@ -2989,6 +3006,7 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(await screen.findByText(i18n.t("review:workflow.savedRefreshFailed"))).toBeVisible();
     expect(screen.getByText(savedDecisionLabel())).toBeVisible();
+    expect(document.querySelector(".review-publication-notice")).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next review" })).toBeDisabled();
     expect(screen.getByRole("tab", { name: "Pending" })).toBeVisible();

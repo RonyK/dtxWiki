@@ -4,7 +4,7 @@
   flex-direction: column;
   align-items: stretch;
   min-block-size: 0;
-  scroll-padding-top: 156px;
+  scroll-padding-top: var(--review-sticky-clearance, 0px);
   container-type: inline-size;
 }
 
@@ -24,6 +24,7 @@
 
 .review-detail-heading h2 { font-weight: 600; }
 .review-detail-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); }
+.review-publication-notice { flex-basis: 100%; }
 .review-detail-badges { margin-block: 8px; }
 .review-action-bar { align-items: center; }
 .review-detail-heading > .eyebrow { margin-bottom: 4px; }
@@ -142,7 +143,6 @@
 }
 .review-next-action { display: grid; gap: 4px; max-width: 100%; }
 .review-next-action > span { color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
-.review-history { scroll-margin-top: 180px; }
 .review-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .review-detail-heading { min-width: 0; }
 .review-detail-heading h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
