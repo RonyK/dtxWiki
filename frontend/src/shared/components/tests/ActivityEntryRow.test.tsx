@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -72,6 +72,59 @@ describe("shared activity entry", () => {
     expect(actor).toHaveFocus();
     expect(actor).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it.each(["Escape", "close button"])("stays dismissed through pointer entry and deferred focus after %s", async (dismissal) => {
+    const user = userEvent.setup();
+    show(entry());
+    const actor = screen.getByRole("button", { name: /^Show full names/ });
+    await user.tab();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    if (dismissal === "close button") {
+      await user.tab();
+      expect(screen.getByRole("button", { name: "Close names" })).toHaveFocus();
+    }
+
+    // Deliver focus restoration after dismissal, without depending on a timer
+    // or the browser's native focus-event ordering.
+    const nativeFocus = actor.focus.bind(actor);
+    let deferredFocus: (() => void) | undefined;
+    const focusSpy = vi.spyOn(actor, "focus").mockImplementationOnce(() => {
+      deferredFocus = nativeFocus;
+    });
+    await user.keyboard(dismissal === "Escape" ? "{Escape}" : " ");
+    expect(actor).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(focusSpy).toHaveBeenCalledOnce();
+
+    // Focus restoration can scroll the chip under a stationary pointer.
+    fireEvent.pointerEnter(actor, { pointerType: "mouse" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    act(() => deferredFocus?.());
+    focusSpy.mockRestore();
+    expect(actor).toHaveFocus();
+    expect(actor).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Leaving by keyboard also restores hover previews, even when the pointer
+    // never left the trigger after dismissal.
+    await user.tab();
+    fireEvent.pointerEnter(actor, { pointerType: "mouse" });
+    expect(screen.getByRole("dialog")).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    expect(actor).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.pointerEnter(actor, { pointerType: "mouse" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.pointerLeave(actor, { pointerType: "mouse" });
+    fireEvent.pointerEnter(actor, { pointerType: "mouse" });
+    expect(screen.getByRole("dialog")).toBeVisible();
+
+    await user.tab();
+    await user.tab({ shift: true });
+    expect(actor).toHaveFocus();
+    expect(screen.getByRole("dialog")).toBeVisible();
   });
   it("supports touch activation and outside dismissal of the combined name disclosure", async () => {
     const user = userEvent.setup();

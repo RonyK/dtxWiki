@@ -93,14 +93,25 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   await expect(page.locator("#review-detail-title")).toBeVisible();
   await page.goBack();
   const group = recent.locator('[data-entry-type="read_group"]');
-  await group.locator(".activity-actor-disclosure").focus();
+  const actor = group.locator(".activity-actor-disclosure");
+  await actor.focus();
   await page.keyboard.press("ArrowDown");
   const names = page.getByRole("dialog");
   await expect(names).toContainText(seed.user_name);
   await expect(names).toContainText(seed.mcp_name);
+  await expect(names).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(names).toHaveCount(0);
-  await expect(group.locator(".activity-actor-disclosure")).toBeFocused();
+  await expect(actor).toBeFocused();
+  // WebKit may retarget a stationary pointer when focus restoration scrolls
+  // the chip into view. Replaying that entry must preserve Escape dismissal.
+  await actor.dispatchEvent("pointerover", { pointerType: "mouse" });
+  // Pointer previews render at continuous-event priority; inspect the committed
+  // result after a paint rather than winning the assertion before React runs.
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await expect(names).toHaveCount(0);
   await group.locator(".activity-read-group__toggle").click();
   await expect(group.locator(".activity-read-group__list > li")).toHaveCount(4);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");

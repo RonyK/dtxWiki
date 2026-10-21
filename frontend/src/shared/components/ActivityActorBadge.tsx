@@ -1,6 +1,6 @@
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +13,7 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
   const trigger = useRef<HTMLButtonElement>(null);
   const popover = useRef<HTMLDivElement>(null);
   const suppressFocusPreview = useRef(false);
+  const suppressPointerPreview = useRef(false);
   const focusPopoverOnOpen = useRef(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mode, setMode] = useState<"closed" | "preview" | "pinned">("closed");
@@ -27,6 +28,15 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
     ? actor.credential_owner_display_name
     : null;
   const fullName = owner ? `${owner} · ${name}` : name;
+  const closeAndReturnFocus = useCallback(() => {
+    // WebKit can deliver focus and pointer entry after focus() returns and
+    // scrolls this chip under a stationary pointer. Keep both previews
+    // dismissed until focus or the pointer actually leaves the trigger.
+    suppressFocusPreview.current = true;
+    suppressPointerPreview.current = true;
+    setMode("closed");
+    trigger.current?.focus();
+  }, []);
 
   useLayoutEffect(() => {
     if (!open || !trigger.current || !popover.current) return;
@@ -61,10 +71,7 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      setMode("closed");
-      suppressFocusPreview.current = true;
-      trigger.current?.focus();
-      suppressFocusPreview.current = false;
+      closeAndReturnFocus();
     };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", escape);
@@ -72,7 +79,7 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
       document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("keydown", escape);
     };
-  }, [open]);
+  }, [open, closeAndReturnFocus]);
 
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
   const keepOpen = () => { if (closeTimer.current) clearTimeout(closeTimer.current); };
@@ -84,16 +91,12 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
       }
     }, 160);
   };
-  const closeAndReturnFocus = () => {
-    setMode("closed");
-    suppressFocusPreview.current = true;
-    trigger.current?.focus();
-    suppressFocusPreview.current = false;
-  };
   if (!actor) return null;
   const blur = (relatedTarget: EventTarget | null) => {
     if (!(relatedTarget instanceof Node)
       || (!trigger.current?.contains(relatedTarget) && !popover.current?.contains(relatedTarget))) {
+      suppressFocusPreview.current = false;
+      suppressPointerPreview.current = false;
       setMode("closed");
     }
   };
@@ -114,6 +117,8 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
         onKeyDown={(event) => {
           if (event.key !== "ArrowDown") return;
           event.preventDefault();
+          suppressFocusPreview.current = false;
+          suppressPointerPreview.current = false;
           setMode("pinned");
           if (popover.current) popover.current.focus();
           else focusPopoverOnOpen.current = true;
@@ -121,10 +126,20 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
         onBlur={(event) => blur(event.relatedTarget)}
         onPointerEnter={(event) => {
           keepOpen();
-          if (event.pointerType !== "touch") setMode((current) => current === "closed" ? "preview" : current);
+          if (!suppressPointerPreview.current && event.pointerType !== "touch") setMode((current) => current === "closed" ? "preview" : current);
         }}
-        onPointerLeave={leave}
-        onClick={() => setMode((current) => current === "pinned" ? "closed" : "pinned")}
+        onPointerLeave={() => {
+          suppressPointerPreview.current = false;
+          leave();
+        }}
+        onClick={() => {
+          if (mode === "pinned") closeAndReturnFocus();
+          else {
+            suppressFocusPreview.current = false;
+            suppressPointerPreview.current = false;
+            setMode("pinned");
+          }
+        }}
       >
         {actor.actor_kind === "mcp_client" ? (
           <span className="activity-actor-split">
