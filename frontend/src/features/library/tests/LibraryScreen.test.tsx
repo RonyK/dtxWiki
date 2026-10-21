@@ -1,3 +1,4 @@
+import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -1229,8 +1230,17 @@ describe("LibraryScreen", () => {
     expect(screen.getByRole("tab", { name: "Split" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /review/i })).toBeNull();
 
-    await userEvent.click(editor);
-    await userEvent.keyboard("{Control>}a{/Control}# Edited note{Enter}{Enter}Saved directly");
+    const editorView = EditorView.findFromDOM(editor);
+    if (!editorView) throw new Error("Shared Markdown editor was not mounted");
+    expect(editorView.state.doc.toString()).toBe(semanticMarkdownPayload().body_markdown);
+    const editedMarkdown = "# Edited note\n\nSaved directly";
+    // This test covers persistence, so deliver its fixture edit in one real
+    // CodeMirror transaction instead of rerendering the Library per character.
+    act(() => {
+      editorView.dispatch({
+        changes: { from: 0, to: editorView.state.doc.length, insert: editedMarkdown },
+      });
+    });
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1246,9 +1256,7 @@ describe("LibraryScreen", () => {
       },
     });
     expect((requests[1].body as { body_markdown: string }).body_markdown)
-      .toContain("# Edited note");
-    expect((requests[1].body as { body_markdown: string }).body_markdown)
-      .toContain("Saved directly");
+      .toBe(editedMarkdown);
     expect(screen.queryByText(/submit.*review/i)).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));

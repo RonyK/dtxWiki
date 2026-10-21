@@ -692,12 +692,18 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
           );
         });
 
-        await test.step("Ask composer input keeps a mobile touch target", async () => {
+        await test.step("Ask direct access has a usable mobile recovery action", async () => {
           await page.goto("/ask");
+          await expect(
+            page.getByRole("heading", { name: "We couldn't find that page" }),
+          ).toBeVisible();
+          await expect(page.locator(".ask-composer")).toHaveCount(0);
+          await expect(page.locator('a[href^="/ask"]')).toHaveCount(0);
           await expectMinimumTouchTarget(
-            page.locator(".ask-composer input").first(),
-            "Ask composer input",
+            page.getByRole("link", { name: "Back to dashboard", exact: true }),
+            "Unavailable Ask recovery link",
           );
+          await expectNoHorizontalOverflow(page, "Unavailable Ask route");
         });
 
         await test.step("Settings form controls keep mobile touch targets", async () => {

@@ -778,7 +778,18 @@ for (const language of ["en", "ko"] as const) {
           },
         }),
       );
+      // Ask is opt-in per account/browser. Enable it through the mounted Labs
+      // UI so this inventory exercises the save form rather than Not Found.
+      await page.goto("/settings?section=labs");
+      const askMenu = page.getByRole("checkbox", {
+        name: language === "en" ? "Show Ask menu" : "Ask 메뉴 표시",
+        exact: true,
+      });
+      await expect(askMenu).not.toBeChecked();
+      await askMenu.check();
+      await expect(askMenu).toBeChecked();
       await page.goto("/ask");
+      await expect(page.locator(".ask-main")).toBeVisible();
       await page
         .getByRole("button", {
           name: language === "en" ? "Save answer" : "답변 저장",

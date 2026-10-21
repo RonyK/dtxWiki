@@ -93,9 +93,9 @@ describe("DashboardScreen", () => {
     expect(screen.getByText("Restored")).toBeInTheDocument();
     // Each Spaces tile opens a content area, so its subtitle describes that
     // area rather than the policy card that shares its name.
-    expect(screen.getByText("Instructions, skills, and memory")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Agent Instructions, skills, and memory/ }))
-      .toHaveAttribute("href", "/agent");
+    expect(screen.queryByText("Instructions, skills, and memory")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Agent Instructions, skills, and memory/ }))
+      .not.toBeInTheDocument();
     const spacesHeader = screen.getByText("Spaces").parentElement;
     expect(spacesHeader).not.toHaveTextContent("3");
     // The recent count rides in the shared title+count group (ListPanelHeader),
@@ -588,6 +588,10 @@ describe("DashboardScreen", () => {
         "Browse discoverable workspaces without changing your current selection.",
       ),
     ).toBeInTheDocument();
+    expect(screen.getAllByRole("link").some((link) => link.getAttribute("href")?.startsWith("/ask")))
+      .toBe(false);
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([input]) => String(input).includes("/ask/")))
+      .toBe(false);
   });
 
   it("moves the welcome next action when Library already has material", async () => {
@@ -623,7 +627,7 @@ describe("DashboardScreen", () => {
     expect(setup).toHaveTextContent("Next: Write Context page");
     expect(
       screen.getByRole("progressbar", { name: "Workspace setup progress" }),
-    ).toHaveAttribute("aria-valuenow", "25");
+    ).toHaveAttribute("aria-valuenow", "33");
     expect(screen.queryByLabelText("Workspace setup sequence")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Write first Context page" }))
       .toHaveAttribute("href", "/context/new?from=context");
@@ -661,12 +665,12 @@ describe("DashboardScreen", () => {
     );
 
     // Deciding every pending review must not regress the review step: the
-    // decision history keeps it done, so library + review = 2 of 4 complete.
+    // decision history keeps it done, so library + review = 2 of 3 complete.
     const setup = await screen.findByLabelText("Workspace setup");
     expect(setup).toHaveTextContent("Next: Write Context page");
     expect(
       screen.getByRole("progressbar", { name: "Workspace setup progress" }),
-    ).toHaveAttribute("aria-valuenow", "50");
+    ).toHaveAttribute("aria-valuenow", "67");
   });
 
   it("shows an empty dashboard with a warning when live data load fails", async () => {
@@ -924,9 +928,6 @@ function defaultDashboardResponse(url: string) {
   }
   if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
     return { data: [] };
-  }
-  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
-    return { data: { items: [], date_buckets: [], next_cursor: null } };
   }
   if (
     url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?`) &&

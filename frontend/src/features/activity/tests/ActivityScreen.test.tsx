@@ -12,11 +12,21 @@ import { ActivityLanePage, ActivityScreen } from "../ActivityScreen";
 
 const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "workspace-1";
+const activityPreferences = vi.hoisted(() => ({
+  role: "editor",
+}));
+
+vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
+  useOptionalWorkspaceContext: () => ({
+    selectedWorkspace: { role: activityPreferences.role },
+  }),
+}));
 
 describe("ActivityScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    activityPreferences.role = "editor";
   });
 
   it("renders three activity lanes and review deeplinks", async () => {
@@ -740,6 +750,27 @@ describe("ActivityScreen", () => {
     expect(screen.queryByText("change set")).toBeNull();
   });
 
+  it.each([
+    { role: "editor", visible: true },
+    { role: "viewer", visible: false },
+  ])("shows empty MCP Chats actions only for editors ($role)", async ({ role, visible }) => {
+    activityPreferences.role = role;
+    renderWithActivity({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=all&sub_tab=traces&limit=50`]: {
+        data: { items: [], next_cursor: null, unread_count: 0 },
+      },
+    }, "/activity?kind=mcp");
+
+    await screen.findByRole("heading", { name: "Activity" });
+    expect(screen.getAllByRole("link", { name: "Open MCP setup" })).toHaveLength(3);
+    const links = screen.queryAllByRole("link", { name: "Open Chats" });
+    expect(links).toHaveLength(visible ? 3 : 0);
+    for (const link of links) expect(link).toHaveAttribute("href", "/chats");
+  });
+
   it("does not offer Context creation actions for empty system activity", async () => {
     renderWithActivity({
       [`${BASE}/api/v1/workspaces`]: {
@@ -776,6 +807,7 @@ function renderWithActivity(responses: Record<string, unknown>, initialEntry = "
 describe("ActivityLanePage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    activityPreferences.role = "editor";
   });
 
   it("appends the next cursor page when Load more is clicked", async () => {

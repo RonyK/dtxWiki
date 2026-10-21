@@ -788,10 +788,7 @@ describe("ChatsListScreen", () => {
     expect(
       screen.getByRole("link", { name: "Open MCP setup" }),
     ).toHaveAttribute("href", "/settings/integrations");
-    expect(screen.getByRole("link", { name: "Open Ask" })).toHaveAttribute(
-      "href",
-      "/ask",
-    );
+    expect(screen.queryByRole("link", { name: "Open Ask" })).not.toBeInTheDocument();
   });
 
   it("keeps the empty state hidden while the initial chat list is loading", async () => {

@@ -81,8 +81,7 @@ describe("SettingsScreen", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it("renders labelled policy groups and MCP clients behind section navigation", async () => {
-    const user = userEvent.setup();
+  function mockPolicyNavigationAndMcpClients() {
     let mcpStatus: "active" | "disabled" = "active";
     const mcpPage = (status: "active" | "disabled" | "all") => {
       const row = {
@@ -199,6 +198,17 @@ describe("SettingsScreen", () => {
         data: [],
       },
     });
+    return {
+      fetchMock,
+      setMcpStatus(status: "active" | "disabled") {
+        mcpStatus = status;
+      },
+    };
+  }
+
+  it("renders labelled workspace and content policies behind section navigation", async () => {
+    const user = userEvent.setup();
+    const { fetchMock } = mockPolicyNavigationAndMcpClients();
 
     render(
       <MemoryRouter>
@@ -290,7 +300,17 @@ describe("SettingsScreen", () => {
     expect(
       screen.queryByRole("button", { name: /Audit & diagnostics/i }),
     ).not.toBeInTheDocument();
+  });
 
+  it("confirms MCP client disabling and updates the status projection", async () => {
+    const user = userEvent.setup();
+    const { fetchMock, setMcpStatus } = mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
     await user.click(screen.getByRole("button", { name: /MCP access/i }));
     expect(screen.getByText("Access key setup")).toBeInTheDocument();
     expect(await screen.findByText("Local MCP")).toBeInTheDocument();
@@ -325,7 +345,7 @@ describe("SettingsScreen", () => {
     );
     // Reopen and confirm: the default Active projection removes the row.
     await user.click(screen.getByRole("button", { name: /^Disable / }));
-    mcpStatus = "disabled";
+    setMcpStatus("disabled");
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
@@ -346,6 +366,17 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients/mcp-1`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it("shows MCP client and access-key metadata from a direct account link", async () => {
+    const user = userEvent.setup();
+    mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter initialEntries={["/settings?section=mcp"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Local MCP");
     await user.click(screen.getByText("View details"));
     expect(screen.getByText("Client ID")).toBeInTheDocument();
     expect(screen.getByText("mcp-1")).toBeInTheDocument();
@@ -8817,6 +8848,35 @@ describe("SettingsScreen", () => {
       },
     };
   }
+
+  it("opens Labs from a shared link and through the searchable account navigation", async () => {
+    const user = userEvent.setup();
+    mockFetch(navFixture(false));
+    render(
+      <MemoryRouter initialEntries={["/settings?section=labs"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show Ask menu" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show Agent menu" })).not.toBeChecked();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const labs = within(nav).getByRole("button", { name: "Labs" });
+    expect(labs).toHaveAttribute("aria-current", "page");
+    expect(labs.closest(".settings-subnav-group")).toHaveTextContent("Your account");
+
+    await user.click(within(nav).getByRole("button", { name: "Workspace" }));
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
+    await user.type(
+      within(nav).getByRole("searchbox", { name: "Filter settings sections" }),
+      "experimental",
+    );
+    expect(within(nav).queryByRole("button", { name: "Workspace" })).not.toBeInTheDocument();
+    await user.click(within(nav).getByRole("button", { name: "Labs" }));
+    expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
+  });
 
   it("groups Settings sections and marks the server-wide ones for an admin", async () => {
     mockFetch(navFixture(true));

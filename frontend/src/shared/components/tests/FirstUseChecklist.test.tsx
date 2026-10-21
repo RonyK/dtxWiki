@@ -25,24 +25,24 @@ describe("firstIncompleteStep", () => {
 
   it("skips completed steps and returns the next pending one", () => {
     expect(firstIncompleteStep({ library: true })).toBe("context");
-    expect(firstIncompleteStep({ library: true, context: true })).toBe("ask");
+    expect(firstIncompleteStep({ library: true, context: true })).toBe("review");
   });
 
   it("returns null when every step is completed", () => {
     expect(
-      firstIncompleteStep({ library: true, context: true, ask: true, review: true }),
+      firstIncompleteStep({ library: true, context: true, review: true }),
     ).toBeNull();
   });
 });
 
 describe("firstUseStepByKey", () => {
   it("looks up a step by its key", () => {
-    expect(firstUseStepByKey("ask").label).toBe("Ask a question");
+    expect(firstUseStepByKey("review").label).toBe("Save or review");
   });
 });
 
 describe("FirstUseChecklist", () => {
-  it("renders all four steps with default labels and an accessible label", () => {
+  it("renders all three available steps with default labels and an accessible label", () => {
     renderChecklist();
 
     const section = screen.getByRole("region", { name: "Workspace setup sequence" });
@@ -51,6 +51,8 @@ describe("FirstUseChecklist", () => {
     for (const step of FIRST_USE_STEPS) {
       expect(within(section).getByText(step.label)).toBeInTheDocument();
     }
+    expect(within(section).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.queryByText("Ask a question")).not.toBeInTheDocument();
   });
 
   it("marks completed steps as Done and the next pending step as Next", () => {
@@ -67,27 +69,32 @@ describe("FirstUseChecklist", () => {
     expect(within(items[1]).getByText("Next")).toBeInTheDocument();
     expect(items[1].className).toContain("next");
 
-    // Ask and review are later
+    // Review is later
     expect(within(items[2]).getByText("Later")).toBeInTheDocument();
-    expect(within(items[3]).getByText("Later")).toBeInTheDocument();
   });
 
   it("respects an explicit nextStep override and marks earlier non-done steps as Prep", () => {
-    renderChecklist({ nextStep: "ask" });
+    renderChecklist({ nextStep: "review" });
 
     const items = screen.getAllByRole("listitem");
-    // library and context come before ask and are not done -> Prep
+    // Library and Context come before Review and are not done -> Prep
     expect(within(items[0]).getByText("Prep")).toBeInTheDocument();
     expect(within(items[1]).getByText("Prep")).toBeInTheDocument();
     expect(within(items[2]).getByText("Next")).toBeInTheDocument();
-    expect(within(items[3]).getByText("Later")).toBeInTheDocument();
   });
 
-  it("renders a primary action link to the next step when requested", () => {
-    renderChecklist({ showPrimaryAction: true });
+  it.each([
+    { completed: {}, action: "Add first source", href: "/setup" },
+    {
+      completed: { library: true, context: true },
+      action: "Open Review queue",
+      href: "/review",
+    },
+  ])("renders the available next action $action", ({ completed, action, href }) => {
+    renderChecklist({ completed, showPrimaryAction: true });
 
-    const primary = screen.getByRole("link", { name: "Add first source" });
-    expect(primary).toHaveAttribute("href", "/setup");
+    const primary = screen.getByRole("link", { name: action });
+    expect(primary).toHaveAttribute("href", href);
   });
 
   it("omits the primary action when showPrimaryAction is false", () => {
@@ -115,7 +122,7 @@ describe("FirstUseChecklist", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("완료")).toBeInTheDocument();
     expect(screen.getByText("다음")).toBeInTheDocument();
-    expect(screen.getAllByText("나중에")).toHaveLength(2);
+    expect(screen.getAllByText("나중에")).toHaveLength(1);
     expect(
       screen.getByRole("link", { name: "첫 컨텍스트 페이지 작성" }),
     ).toHaveAttribute("href", "/context/new?from=context");

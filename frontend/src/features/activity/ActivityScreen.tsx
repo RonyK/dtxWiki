@@ -20,6 +20,8 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
+import { isEditorRole } from "../../shared/workspace/permissions";
 import {
   ACTIVITY_SUBTYPES,
   activitySubtype,
@@ -530,6 +532,8 @@ function ActivityLaneEmpty({
   filtered?: boolean;
 }) {
   const { t } = useTranslation("activity");
+  const workspace = useOptionalWorkspaceContext();
+  const showChats = isEditorRole(workspace?.selectedWorkspace?.role);
   const message =
     kind === "system"
       ? t("empty.system", { defaultValue: "No system events for this period." })
@@ -575,9 +579,11 @@ function ActivityLaneEmpty({
           <Link className="icon-button text-button" to="/settings/integrations">
             {t("actions.openMcpSetup", { defaultValue: "Open MCP setup" })}
           </Link>
-          <Link className="icon-button text-button" to="/chats">
-            {t("actions.openChats", { defaultValue: "Open Chats" })}
-          </Link>
+          {showChats ? (
+            <Link className="icon-button text-button" to="/chats">
+              {t("actions.openChats", { defaultValue: "Open Chats" })}
+            </Link>
+          ) : null}
         </div>
       ) : (
         <div className="empty-state-actions">

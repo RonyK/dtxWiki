@@ -998,9 +998,6 @@ function ChatsEmptyState({
         <Link className="icon-button text-button" to="/settings/integrations">
           {t("empty.openMcpSetup")}
         </Link>
-        <Link className="icon-button text-button" to="/ask">
-          {t("empty.openAsk")}
-        </Link>
       </div>
     </div>
   );
