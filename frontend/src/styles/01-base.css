@@ -474,24 +474,28 @@ h3 {
   border-bottom: 1px solid var(--border);
 }
 
-.app-shell[data-sidebar-collapsed="true"] {
-  grid-template-columns: var(--sidebar-collapsed-w) minmax(0, 1fr);
-}
+/* The saved preference belongs to desktop navigation. Narrow layouts must
+   ignore it, including after a fold or a reload with the preference set. */
+@media (min-width: 1025px) {
+  .app-shell[data-sidebar-collapsed="true"] {
+    grid-template-columns: var(--sidebar-collapsed-w) minmax(0, 1fr);
+  }
 
-.app-shell[data-sidebar-collapsed="true"] .topbar {
-  grid-template-columns:
-    minmax(var(--sidebar-collapsed-w), max-content) minmax(240px, 620px)
-    minmax(0, 1fr);
-}
+  .app-shell[data-sidebar-collapsed="true"] .topbar {
+    grid-template-columns:
+      minmax(var(--sidebar-collapsed-w), max-content) minmax(240px, 620px)
+      minmax(0, 1fr);
+  }
 
-.app-shell[data-sidebar-collapsed="true"] .topbar-brand {
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 12px;
-}
+  .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 0 12px;
+  }
 
-.app-shell[data-sidebar-collapsed="true"] .brand-name {
-  display: none;
+  .app-shell[data-sidebar-collapsed="true"] .brand-name {
+    display: none;
+  }
 }
 
 /* Visible boxes share one geometry; labels and rows own the hit target. */
