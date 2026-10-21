@@ -137,6 +137,9 @@ class Settings(BaseSettings):
     frontend_dev_port: int = DEFAULT_FRONTEND_DEV_PORT
     cors_origins: str | None = None
     auto_bootstrap: bool = True
+    # Ordinary launches own their worker. Service-managed deployments select
+    # external when their service manager starts the worker separately.
+    worker_mode: Literal["managed", "external"] = "managed"
     # SPA asset directory override (R7′ assembly contract): lets an overlay
     # ship its own built frontend without patching every create_app call.
     static_root: str | None = None

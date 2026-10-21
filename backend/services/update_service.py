@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from sqlalchemy.engine import make_url
@@ -32,6 +32,7 @@ from sqlalchemy.exc import ArgumentError
 
 from backend.app import bootstrap, versioning
 from backend.app import data_dir as data_dir_paths
+from backend.app.runtime_resources import LockSet, RuntimeResources
 from backend.app.settings import Settings
 from backend.services import backup_service, update_check_service
 from backend.services.ops import (
@@ -42,6 +43,11 @@ from backend.services.ops import (
     runtime_lock,
 )
 from backend.services.ops import service_control as svc
+from backend.services.ops.maintenance_handoff import (
+    HANDOFF_ENV,
+    HandoffError,
+    finalizer_handoff,
+)
 from backend.utils.redact import redact_url
 
 # Documented production env file (systemd tier). Kept here to avoid a
@@ -201,8 +207,10 @@ def run_update(
         backup_note = "A secrets-only backup will be taken first (DB NOT included)."
     else:
         backup_note = "A backup will be taken first."
-    if not yes and confirm is not None and not confirm(
-        f"Update dtxWiki ({install.kind}) now? {backup_note}"
+    if (
+        not yes
+        and confirm is not None
+        and not confirm(f"Update dtxWiki ({install.kind}) now? {backup_note}")
     ):
         return UpdateResult(False, 2, current, None, None, "aborted by operator")
 
@@ -218,7 +226,9 @@ def run_update(
     # 1b. no dtxWiki runtime may run from here until the services restart. The
     #     systemd units are stopped by now; on the pipx/venv tiers a server or
     #     worker the operator left running makes the update refuse here.
-    held, refused = _take_runtime_lock(data_dir, install, echo, current, "update")
+    held, refused = _take_runtime_lock(
+        data_dir, install, echo, current, "update", settings=settings
+    )
     if refused is not None:
         return refused
     assert held is not None
@@ -292,25 +302,36 @@ def run_update(
             # half-migrated failure (the _STEP_TIMEOUT_SEC cap stays on the
             # index/install step only). The subprocess takes no runtime lock
             # of its own, so the exclusive one held here does not stop it.
-            _run_argv(
-                [
-                    str(install.dtxwiki_bin),
-                    "update",
-                    "--finalize-bootstrap",
-                    "--method",
-                    install.kind,
-                ],
-                echo=echo,
-                timeout=None,
-            )
-        except UpdateStepError as exc:
+            finalize_argv = [
+                str(install.dtxwiki_bin),
+                "update",
+                "--finalize-bootstrap",
+                "--method",
+                install.kind,
+            ]
+            # Inheriting the values is insufficient: finalization also updates
+            # the env file (for example, to retain an existing worker unit).
+            # Use the same path that was backed up and that the services read.
+            effective_env = _effective_env_file(install, env_file)
+            if effective_env is not None:
+                finalize_argv.extend(["--env-file", str(effective_env)])
+            # Confirm the actual guards through a private invocation-scoped
+            # challenge. Windows console/venv launchers introduce intermediate
+            # PIDs, so direct parent identity cannot establish this handoff.
+            with finalizer_handoff(held) as handoff:
+                _run_argv(
+                    finalize_argv,
+                    echo=echo,
+                    timeout=None,
+                    env={**os.environ, HANDOFF_ENV: handoff},
+                )
+        except (UpdateStepError, HandoffError) as exc:
             # Post-migration failure: the DB may be partially migrated. Leave
             # services stopped (notify-only) rather than serve a half-migrated
             # DB, and say so.
             if install.services:
                 echo(
-                    "NOTE: services remain STOPPED to avoid serving a "
-                    "half-migrated DB."
+                    "NOTE: services remain STOPPED to avoid serving a half-migrated DB."
                 )
             return _fail(
                 3,
@@ -335,9 +356,7 @@ def run_update(
                 1, "post-update healthcheck failed", backup_dir, current, echo, None
             )
 
-    backup_service.prune_backups(
-        data_dir=data_dir, keep=settings.update_keep_backups
-    )
+    backup_service.prune_backups(data_dir=data_dir, keep=settings.update_keep_backups)
     new_version = _installed_version(install) or version
     echo(f"updated: {current} -> {new_version or '(installed)'}")
     return UpdateResult(True, 0, current, new_version, backup_dir, "updated")
@@ -379,9 +398,7 @@ def run_rollback(
         try:
             backup_dir = backup_service.resolve_backup_dir(Path(to_backup))
         except FileNotFoundError as exc:
-            return _fail(
-                2, str(exc), None, current, echo, exc, operation="rollback"
-            )
+            return _fail(2, str(exc), None, current, echo, exc, operation="rollback")
     else:
         infos = backup_service.list_backups(data_dir)
         if not infos:
@@ -417,9 +434,7 @@ def run_rollback(
     try:
         backup_service.verify_backup_integrity(backup_dir)
     except backup_service.BackupIntegrityError as exc:
-        return _fail(
-            2, str(exc), backup_dir, current, echo, exc, operation="rollback"
-        )
+        return _fail(2, str(exc), backup_dir, current, echo, exc, operation="rollback")
 
     # Pre-includes_db manifests fall back to the snapshot file's presence; a
     # snapshot only restores onto a SQLite database_url (restore_backup no-ops
@@ -473,8 +488,12 @@ def run_rollback(
             "WARNING: no database snapshot will be restored from this backup — "
             "restore the database yourself if needed (e.g. pg_restore)."
         )
-    if not yes and confirm is not None and not confirm(
-        f"Roll back dtxWiki to {target_version} from {backup_dir.name}?"
+    if (
+        not yes
+        and confirm is not None
+        and not confirm(
+            f"Roll back dtxWiki to {target_version} from {backup_dir.name}?"
+        )
     ):
         return UpdateResult(False, 2, current, None, backup_dir, "aborted by operator")
 
@@ -494,7 +513,9 @@ def run_rollback(
 
     # Restoring a database under a live server or worker is exactly what this
     # lock exists to prevent; see the module docstring.
-    held, refused = _take_runtime_lock(data_dir, install, echo, current, "rollback")
+    held, refused = _take_runtime_lock(
+        data_dir, install, echo, current, "rollback", settings=settings
+    )
     if refused is not None:
         return refused
     assert held is not None
@@ -594,7 +615,9 @@ def _take_runtime_lock(
     echo,
     current: str,
     operation: str,
-) -> tuple[runtime_lock.RuntimeLock | None, UpdateResult | None]:
+    *,
+    settings: Settings,
+) -> tuple[LockSet | None, UpdateResult | None]:
     """Hold the runtime lock exclusively, or restart and report the refusal.
 
     Nothing has changed yet when this refuses, so services stopped for the
@@ -603,11 +626,14 @@ def _take_runtime_lock(
     """
 
     try:
-        return runtime_lock.acquire_exclusive(data_dir), None
+        resources = RuntimeResources.for_settings(settings)
+        if data_dir is not None:
+            resources = replace(resources, root=Path(data_dir).resolve())
+        return resources.acquire_activity("exclusive"), None
     except runtime_lock.RuntimeLockHeldError as exc:
         _start_services(install, echo)
         return None, _fail(2, str(exc), None, current, echo, None, operation=operation)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         _start_services(install, echo)
         return None, _fail(
             2,
@@ -675,11 +701,18 @@ def _redacted_argv(argv: list[str]) -> str:
     return " ".join(redact_url(arg) for arg in argv)
 
 
-def _run_argv(argv: list[str], *, echo, timeout: float = _STEP_TIMEOUT_SEC) -> None:
+def _run_argv(
+    argv: list[str],
+    *,
+    echo,
+    timeout: float = _STEP_TIMEOUT_SEC,
+    env: dict[str, str] | None = None,
+) -> None:
     echo("$ " + _redacted_argv(argv))
     try:
+        kwargs = {"env": env} if env is not None else {}
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout
+            argv, capture_output=True, text=True, timeout=timeout, **kwargs
         )
     except subprocess.TimeoutExpired as exc:
         raise UpdateStepError(
@@ -877,8 +910,7 @@ def _fail(
             )
         else:
             echo(
-                "  the system may be in a partially-updated state. To revert "
-                "code + DB:"
+                "  the system may be in a partially-updated state. To revert code + DB:"
             )
         echo(f"    dtxwiki rollback --to-backup {backup_dir}")
     else:

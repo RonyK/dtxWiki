@@ -1,13 +1,19 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
+const { spawn } = require("node:child_process");
 const path = require("node:path");
+const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const {
+  createStartupProgress,
   engineExecutableName,
   findAvailablePort,
+  observeEngine,
   resolveEngineExecutable,
+  stopLocalEngine,
   waitUntilReady,
 } = require("../src/engine.cjs");
 
@@ -44,4 +50,177 @@ test("readiness fails immediately when the child exits by signal", async () => {
     waitUntilReady("http://127.0.0.1:1", { exitCode: null, signalCode: "SIGTERM" }, 10),
     /signal SIGTERM/,
   );
+});
+
+test("startup gives bootstrap, worker startup and HTTP readiness separate bounded budgets", () => {
+  let now = 0;
+  const progress = createStartupProgress(() => now);
+  assert.equal(progress.deadline, 60_000);
+  progress.advance("worker-ready");
+  assert.equal(progress.phase, "bootstrap");
+  now = 59_000;
+  progress.advance("worker-starting");
+  assert.equal(progress.deadline, 144_000);
+  now = 118_000;
+  progress.advance("worker-ready");
+  assert.equal(progress.deadline, 178_000);
+  now = 177_000;
+  progress.advance("worker-ready");
+  progress.advance("worker-starting");
+  assert.equal(progress.deadline, 178_000);
+});
+
+test("a late progress message cannot revive an expired startup phase", () => {
+  let now = 0;
+  const progress = createStartupProgress(() => now);
+  now = 60_000;
+  progress.advance("worker-starting");
+  assert.equal(progress.phase, "bootstrap");
+  assert.equal(progress.deadline, 60_000);
+});
+
+function observedEngine({ ready = true } = {}) {
+  const failures = [];
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.exitCode = null;
+  child.signalCode = null;
+  const engine = { child, ready, startup: createStartupProgress() };
+  observeEngine(engine, (failed, error) => failures.push({ engine: failed, error }));
+  return { engine, child, failures };
+}
+
+test("a runtime worker failure reports its structured reason once after stderr drains", () => {
+  const { engine, child, failures } = observedEngine();
+  const event = JSON.stringify({
+    event: "dtxwiki-runtime",
+    error: "dtxWiki background worker stopped unexpectedly (exit code 7); dtxWiki has stopped",
+  });
+  child.stdout.write("ordinary engine output\n" + event.slice(0, 30));
+  child.stdout.write(event.slice(30) + "\n");
+  child.emit("exit", 1, null);
+  assert.equal(failures.length, 0);
+  child.emit("close", 1, null);
+  child.emit("close", 1, null);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].engine, engine);
+  assert.match(failures[0].error.message, /worker stopped unexpectedly \(exit code 7\)/);
+});
+
+test("an engine killed without a runtime event reports the exit signal", () => {
+  const { child, failures } = observedEngine();
+  child.emit("close", null, "SIGKILL");
+  assert.match(failures[0].error.message, /signal SIGKILL/);
+});
+
+test("readiness polling uses engine progress across slow bootstrap and worker startup", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { engine, child } = observedEngine();
+  let healthCalls = 0;
+  t.mock.method(global, "fetch", async () => ({ ok: ++healthCalls === 3, status: 503 }));
+  const ready = waitUntilReady("http://127.0.0.1:21080", child, 60_000, engine);
+  await Promise.resolve();
+  t.mock.timers.tick(59_000);
+  child.stdout.write(JSON.stringify({ event: "dtxwiki-runtime", phase: "worker-starting" }) + "\n");
+  await Promise.resolve();
+  await Promise.resolve();
+  t.mock.timers.tick(59_000);
+  child.stdout.write(JSON.stringify({ event: "dtxwiki-runtime", phase: "worker-ready" }) + "\n");
+  await ready;
+  assert.equal(healthCalls, 3);
+  assert.equal(engine.startup.phase, "worker-ready");
+});
+
+test("startup failures remain in the startup error path", async () => {
+  const { engine, child, failures } = observedEngine({ ready: false });
+  child.stdout.write(JSON.stringify({ event: "dtxwiki-runtime", error: "worker failed to start" }) + "\n");
+  child.exitCode = 1;
+  child.emit("close", 1, null);
+  assert.equal(failures.length, 0);
+  await assert.rejects(waitUntilReady("http://127.0.0.1:1", child, 10, engine), /worker failed to start/);
+});
+
+test("intentional shutdown is marked before sending the shutdown message", async () => {
+  const { engine, child, failures } = observedEngine();
+  child.stdin = {
+    end(message) {
+      assert.equal(message, "shutdown\n");
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+      child.emit("close", 0, null);
+    },
+  };
+  await stopLocalEngine(engine);
+  assert.equal(failures.length, 0);
+  assert.equal(engine.stopping, true);
+});
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("concurrent stops share graceful, TERM and KILL and wait for actual exit", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { engine, child } = observedEngine();
+  let requests = 0;
+  const signals = [];
+  child.stdin = { end: () => { requests += 1; } };
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const stopping = stopLocalEngine(engine);
+  assert.equal(stopLocalEngine(engine), stopping);
+  let completed = false;
+  void stopping.then(() => { completed = true; });
+  t.mock.timers.tick(25_000);
+  await settle();
+  assert.deepEqual(signals, ["SIGTERM"]);
+  t.mock.timers.tick(2_000);
+  await settle();
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(completed, false);
+  child.signalCode = "SIGKILL";
+  child.emit("exit", null, "SIGKILL");
+  await stopping;
+  assert.equal(requests, 1);
+  assert.equal(completed, true);
+  assert.equal(stopLocalEngine(engine), stopping);
+});
+
+test("unconfirmed hard kill fails with the process and log still owned and allows retry", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { engine, child } = observedEngine();
+  child.pid = 1234;
+  child.stdin = { end: () => {} };
+  child.kill = () => true;
+  engine.logPath = "/logs/engine.log";
+  engine.logStream = { end: () => assert.fail("closed log for a live engine") };
+  const stopping = stopLocalEngine(engine);
+  const rejected = assert.rejects(stopping, /PID 1234.*engine\.log/);
+  t.mock.timers.tick(25_000);
+  await settle();
+  t.mock.timers.tick(2_000);
+  await settle();
+  t.mock.timers.tick(2_000);
+  await rejected;
+  assert.equal(engine.child, child);
+  assert.equal(engine.stopPromise, null);
+  child.exitCode = 0;
+  engine.logStream = null;
+  await stopLocalEngine(engine);
+});
+
+test("hard stop reaps a real engine that ignores stdin and TERM", { skip: process.platform === "win32" }, async (t) => {
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume(); process.on('SIGTERM', () => {}); process.stdout.write('armed\\n');"], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.stdout.once("data", resolve);
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const engine = { child, logPath: "/logs/fake-engine.log" };
+  const stopping = stopLocalEngine(engine);
+  t.mock.timers.tick(25_000);
+  await settle();
+  t.mock.timers.tick(2_000);
+  await stopping;
+  assert.equal(child.signalCode, "SIGKILL");
+  assert.throws(() => process.kill(child.pid, 0), /ESRCH/);
 });

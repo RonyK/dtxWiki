@@ -8,7 +8,7 @@ before copying and is not copied as user data.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -18,6 +18,8 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.app.db import make_engine
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
+from backend.app.settings import Settings
 from backend.models import Base
 from backend.services.ops import runtime_lock
 from backend.services.ops.db_lock import SqliteLockedError, probe_sqlite_writable
@@ -120,10 +122,29 @@ def migrate_data(
         raise MigrationPrecheckError("source_url and target_url must differ")
 
     try:
-        held = runtime_lock.acquire_exclusive(data_dir)
+        source_resources = RuntimeResources.for_settings(
+            Settings(database_url=source_url)
+        )
+        target_resources = RuntimeResources.for_settings(
+            Settings(database_url=target_url)
+        )
+        if data_dir is not None:
+            source_resources = replace(source_resources, root=Path(data_dir).resolve())
+            target_resources = replace(target_resources, root=Path(data_dir).resolve())
+        if (
+            source_resources.database is not None
+            and source_resources.database == target_resources.database
+        ):
+            raise MigrationPrecheckError(
+                "source_url and target_url resolve to the same SQLite database"
+            )
+        held = acquire_paths(
+            (*source_resources.activity_paths, *target_resources.activity_paths),
+            "exclusive",
+        )
     except runtime_lock.RuntimeLockHeldError as exc:
         raise MigrationPrecheckError(str(exc)) from exc
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise MigrationPrecheckError(
             f"could not take the dtxWiki runtime lock: {exc}"
         ) from exc

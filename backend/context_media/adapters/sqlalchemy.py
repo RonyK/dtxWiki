@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from backend.context_media.domain import (
     ActorIdentity,
@@ -44,14 +44,20 @@ from backend.models.media import (
     WorkspaceMediaWriteIntent,
 )
 from backend.models.workspace import Workspace
+from backend.policy.auth import ActorContext
 from backend.repositories.context_media_orphans import (
     context_media_orphan_clause,
 )
-from backend.repositories.context_visibility import foreign_editing_version_exists
+from backend.repositories.context_visibility import (
+    explicit_context_version_visible_expression,
+    foreign_editing_version_exists,
+    visible_context_page_expression,
+)
 from backend.repositories.media_blob_reference import (
     BlobReferenceOwnerKind,
     SqlAlchemyBlobReferenceLedger,
 )
+from backend.services.actor_visible_read import context_version_is_visible
 from backend.services.db_write_intent import acquire_write_intent
 
 DEFAULT_CONTEXT_LOGICAL_QUOTA_BYTES = 10_000_000_000
@@ -259,9 +265,7 @@ class SqlAlchemyContextMediaRepository:
         ):
             raise ContextMediaNotFoundError("Context Page version was not found")
         if editing_version.version_status != "editing":
-            raise ContextMediaEditingNotOpenError(
-                "editing version is not open"
-            )
+            raise ContextMediaEditingNotOpenError("editing version is not open")
         self._logical_quota.reserve(
             asset.workspace_id,
             asset_id=asset.asset_id,
@@ -418,7 +422,8 @@ class SqlAlchemyContextMediaRepository:
             # DISCARDED origin specifically, not `version_status` in general
             # -- it cannot be "fixed" by widening a draft/published gate.
             first_use_candidates = [
-                asset for asset in owned_assets
+                asset
+                for asset in owned_assets
                 if asset.created_for_version_id != page_version_id
             ]
             if first_use_candidates:
@@ -435,7 +440,8 @@ class SqlAlchemyContextMediaRepository:
                     ).all()
                 )
                 never_used = [
-                    asset for asset in first_use_candidates
+                    asset
+                    for asset in first_use_candidates
                     if asset.id not in already_used_ids
                 ]
                 if never_used:
@@ -444,8 +450,7 @@ class SqlAlchemyContextMediaRepository:
                             select(ContextPageVersion.id).where(
                                 ContextPageVersion.workspace_id == workspace_id,
                                 ContextPageVersion.id.in_(
-                                    asset.created_for_version_id
-                                    for asset in never_used
+                                    asset.created_for_version_id for asset in never_used
                                 ),
                                 ContextPageVersion.version_status == "discarded",
                             )
@@ -536,6 +541,7 @@ class SqlAlchemyContextMediaRepository:
         workspace_id: UUID,
         *,
         viewer: ActorIdentity | None = None,
+        viewer_role: str | None = None,
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,
@@ -545,16 +551,43 @@ class SqlAlchemyContextMediaRepository:
     ) -> WorkspaceUsagePage:
         """One page of a workspace's attachments, newest first.
 
-        Four queries regardless of page size: the asset page (fetched at
-        `limit + 1` to populate `WorkspaceUsagePage.has_more`/`next_after`
-        with no extra round trip), then the pages, the creating versions, and
-        the usage rows for exactly the `limit` assets actually projected. The
-        version batch exists purely to warm the identity map so
-        ``_usage_snapshot``'s ``session.get(ContextPageVersion, ...)`` issues
-        no SQL of its own -- without it this method is O(rows) round trips.
+        The SQL asset window includes page visibility before limit + 1.
+        Pages, usage rows and preview versions are then read in batches for
+        the returned window. Preview authorization does not replace parent
+        page visibility, and never changes pagination after the SQL fetch.
         """
 
+        actor = (
+            ActorContext(
+                actor_kind=viewer.kind,
+                actor_id=str(viewer.id),
+                workspace_id=workspace_id,
+                workspace_role=viewer_role or "viewer",
+                role=viewer_role,
+            )
+            if viewer is not None
+            else None
+        )
+        referenced_version = aliased(ContextPageVersion)
+        readable_reference = (
+            select(ContextMediaUsage.asset_id)
+            .join(
+                referenced_version,
+                referenced_version.id == ContextMediaUsage.page_version_id,
+            )
+            .where(
+                ContextMediaUsage.workspace_id == workspace_id,
+                ContextMediaUsage.page_id == ContextMediaAsset.page_id,
+                ContextMediaUsage.asset_id == ContextMediaAsset.id,
+                referenced_version.workspace_id == workspace_id,
+                referenced_version.page_id == ContextMediaAsset.page_id,
+                explicit_context_version_visible_expression(referenced_version, actor),
+            )
+            .exists()
+        )
         conditions = [
+            ContextPage.workspace_id == workspace_id,
+            visible_context_page_expression(actor),
             ContextMediaAsset.workspace_id == workspace_id,
             ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
             # P8.4, and the reason this method needs the most care in the file:
@@ -566,9 +599,12 @@ class SqlAlchemyContextMediaRepository:
             # on. Masked in the query, for every caller including an owner --
             # the row is private by identity, not by role -- and a `None`
             # viewer hides every editing-staged asset rather than none.
-            ~foreign_editing_version_exists(
-                ContextMediaAsset.created_for_version_id,
-                None if viewer is None else (viewer.kind, viewer.id),
+            or_(
+                ~foreign_editing_version_exists(
+                    ContextMediaAsset.created_for_version_id,
+                    None if viewer is None else (viewer.kind, viewer.id),
+                ),
+                readable_reference,
             ),
         ]
         if created_by is not None:
@@ -591,9 +627,7 @@ class SqlAlchemyContextMediaRepository:
                 .replace("_", "\\_")
             )
             conditions.append(
-                ContextMediaAsset.original_filename.ilike(
-                    f"%{pattern}%", escape="\\"
-                )
+                ContextMediaAsset.original_filename.ilike(f"%{pattern}%", escape="\\")
             )
         if after is not None:
             cursor_created_at, cursor_asset_id = after
@@ -622,6 +656,7 @@ class SqlAlchemyContextMediaRepository:
                     ContextMediaAsset,
                     context_media_orphan_clause().label("is_orphan"),
                 )
+                .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
                 .where(*conditions)
                 .order_by(
                     ContextMediaAsset.created_at.desc(),
@@ -679,6 +714,18 @@ class SqlAlchemyContextMediaRepository:
         ).all():
             grouped[usage.asset_id].append(usage)
 
+        preview_versions = {
+            version.id: version
+            for version in self._session.scalars(
+                select(ContextPageVersion).where(
+                    ContextPageVersion.workspace_id == workspace_id,
+                    ContextPageVersion.id.in_(
+                        version_ids
+                        | {u.page_version_id for uses in grouped.values() for u in uses}
+                    ),
+                )
+            ).all()
+        }
         snapshots = []
         for asset, is_orphan in rows:
             page = pages.get(asset.page_id)
@@ -694,6 +741,24 @@ class SqlAlchemyContextMediaRepository:
                 # `has_more`/`next_after`, which were already fixed above from
                 # the raw SQL fetch (`WorkspaceUsagePage`'s docstring).
                 continue
+            # A reference in a readable version permits preview even when
+            # the upload originated in another author's private edit. An
+            # uninserted upload permits preview only to its own uploader.
+            candidates = [u.page_version_id for u in grouped.get(asset.id, ())]
+            if (asset.created_by_actor_kind, asset.created_by_actor_id) == (
+                None if viewer is None else viewer.kind,
+                None if viewer is None else str(viewer.id),
+            ):
+                candidates.append(asset.created_for_version_id)
+            preview_version_id = next(
+                (
+                    version_id
+                    for version_id in candidates
+                    if version_id in preview_versions
+                    and context_version_is_visible(preview_versions[version_id], actor)
+                ),
+                None,
+            )
             snapshots.append(
                 ContextMediaAttachmentSnapshot(
                     usage=_usage_snapshot(
@@ -707,6 +772,7 @@ class SqlAlchemyContextMediaRepository:
                     kind=asset.kind,
                     created_at=asset.created_at,
                     is_orphan=bool(is_orphan),
+                    preview_version_id=preview_version_id,
                 )
             )
         return WorkspaceUsagePage(
@@ -1190,9 +1256,7 @@ def _usage_snapshot(
     # otherwise. Not a hot path (page-level media listing/delete), so this is
     # not batched across the whole page the way list_page_usage's own asset
     # query is.
-    created_for_version = session.get(
-        ContextPageVersion, asset.created_for_version_id
-    )
+    created_for_version = session.get(ContextPageVersion, asset.created_for_version_id)
     return AssetUsageSnapshot(
         asset=_asset_record(asset),
         latest_draft_version_id=page.latest_draft_version_id,

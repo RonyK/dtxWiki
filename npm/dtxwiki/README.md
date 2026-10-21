@@ -25,6 +25,8 @@ This starts dtxWiki on `http://127.0.0.1:21080/` and opens the browser. The
 SQLite database is created in `~/.dtxwiki`. Every argument is passed to the
 `dtxwiki` command, for example `npx @dtxsuite/dtxwiki --help` or
 `npx @dtxsuite/dtxwiki serve --no-open`.
+File processing and other background tasks start automatically. Keep the command
+running while using dtxWiki; press `Ctrl+C` to stop everything together.
 
 To keep the `dtxwiki` command on your `PATH`:
 

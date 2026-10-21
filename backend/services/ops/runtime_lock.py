@@ -117,12 +117,23 @@ def acquire_exclusive(data_dir: Path | None = None) -> RuntimeLock:
     return _acquire(lock_path(data_dir), "exclusive")
 
 
-def _acquire(path: Path, mode: LockMode) -> RuntimeLock:
+def acquire_path(path: Path, mode: LockMode, *, strict: bool = True) -> RuntimeLock:
+    """Acquire a resource guard, failing closed on platform/I/O errors."""
+    if mode not in {"shared", "exclusive"}:
+        raise ValueError("invalid runtime lock mode")
+    return _acquire(Path(path), mode, strict=strict)
+
+
+def _acquire(path: Path, mode: LockMode, *, strict: bool = False) -> RuntimeLock:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = _open_lock_file(path)
     try:
         if sys.platform == "win32":
-            acquired = _lock_windows(descriptor, mode)
+            acquired = (
+                _lock_windows(descriptor, mode, strict=True)
+                if strict
+                else _lock_windows(descriptor, mode)
+            )
         else:
             acquired = _lock_posix(descriptor, mode)
     except BaseException:
@@ -191,7 +202,7 @@ def _lock_posix(descriptor: int, mode: LockMode) -> bool:
 _ERROR_LOCK_VIOLATION = 33
 
 
-def _lock_windows(descriptor: int, mode: LockMode) -> bool:
+def _lock_windows(descriptor: int, mode: LockMode, *, strict: bool = False) -> bool:
     """Best-effort ``LockFileEx`` on byte zero.
 
     Only ``ERROR_LOCK_VIOLATION`` is reported as a held lock. Every other
@@ -236,12 +247,16 @@ def _lock_windows(descriptor: int, mode: LockMode) -> bool:
             return True
         if ctypes.get_last_error() == _ERROR_LOCK_VIOLATION:
             return False
+        if strict:
+            raise ctypes.WinError(ctypes.get_last_error())
         logger.warning(
             "runtime lock: LockFileEx failed with error %s; continuing unguarded",
             ctypes.get_last_error(),
         )
         return True
     except Exception as exc:  # pragma: no cover - exercised on Windows only
+        if strict:
+            raise OSError("Windows runtime lock could not be acquired") from exc
         logger.warning("runtime lock unavailable on this platform (%s)", exc)
         return True
 
@@ -252,5 +267,6 @@ __all__ = [
     "RuntimeLockHeldError",
     "acquire_exclusive",
     "acquire_shared",
+    "acquire_path",
     "lock_path",
 ]

@@ -84,6 +84,7 @@ function copyThroughTransientNode(text: string): boolean {
 export function selectText(target?: HTMLElement | null) {
   if (
     !target ||
+    !target.isConnected ||
     typeof window === "undefined" ||
     typeof document === "undefined" ||
     !document.createRange

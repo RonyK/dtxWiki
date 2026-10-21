@@ -387,6 +387,7 @@ class ContextMediaAttachmentSnapshot:
     kind: str
     created_at: datetime
     is_orphan: bool
+    preview_version_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +444,7 @@ class ContextMediaAttachmentProjection:
     kind: str
     created_at: datetime
     is_orphan: bool
+    preview_version_id: UUID | None = None
 
     @classmethod
     def from_snapshot(
@@ -454,6 +456,7 @@ class ContextMediaAttachmentProjection:
             kind=snapshot.kind,
             created_at=snapshot.created_at,
             is_orphan=snapshot.is_orphan,
+            preview_version_id=snapshot.preview_version_id,
         )
 
 

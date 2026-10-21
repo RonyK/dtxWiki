@@ -1,5 +1,6 @@
 """Tests for the update/rollback orchestration (notify-only, anti-brick)."""
 
+import os
 import sqlite3
 import subprocess
 import sys
@@ -7,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from backend.app.runtime_resources import RuntimeResources, acquire_paths
 from backend.app.settings import Settings
 from backend.services import backup_service
 from backend.services import update_service as us
+from backend.services.ops.maintenance_handoff import verify_finalizer_handoff
 from backend.services.update_check_service import UpdateInfo
 
 
@@ -69,6 +72,81 @@ def test_run_update_venv_happy(monkeypatch):
     assert result.to_version == "0.2.0"
     assert any("install" in argv for argv in calls)  # pip install ran
     assert any("--finalize-bootstrap" in argv for argv in calls)  # migrations ran
+
+
+def test_update_refuses_db_activity_from_another_data_root(monkeypatch, tmp_path):
+    calls = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append(argv))
+    settings = _settings(database_url=f"sqlite:///{tmp_path / 'db.sqlite'}")
+    resources = RuntimeResources.for_settings(settings)
+    with acquire_paths([resources.activity_paths[1]], "shared"):
+        result = us.run_update(
+            settings,
+            method="venv",
+            yes=True,
+            data_dir=tmp_path / "other",
+            echo=lambda *a: None,
+        )
+    assert result.exit_code == 2
+    assert "dtxwiki-activity.lock" in result.message
+    assert calls == []
+
+
+def test_finalize_private_guard_handoff_is_subprocess_only(monkeypatch):
+    calls = []
+    settings = _settings()
+    expected = RuntimeResources.for_settings(settings).activity_paths
+    monkeypatch.delenv(us.HANDOFF_ENV, raising=False)
+
+    def run(argv, echo, **kw):
+        assert us.HANDOFF_ENV not in os.environ
+        calls.append((argv, kw))
+        if "--finalize-bootstrap" in argv:
+            with monkeypatch.context() as child_environment:
+                child_environment.setenv(us.HANDOFF_ENV, kw["env"][us.HANDOFF_ENV])
+                assert verify_finalizer_handoff(expected)
+
+    _patch_common(monkeypatch, run=run)
+    result = us.run_update(settings, method="venv", yes=True, echo=lambda *a: None)
+    assert result.ok
+    install = next(kw for argv, kw in calls if "install" in argv)
+    finalize = next(kw for argv, kw in calls if "--finalize-bootstrap" in argv)
+    assert "env" not in install
+    assert us.HANDOFF_ENV in finalize["env"]
+    assert us.HANDOFF_ENV not in os.environ
+
+
+def test_handoff_setup_failure_after_install_keeps_services_stopped(
+    monkeypatch, tmp_path
+):
+    calls = []
+    services = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append(argv))
+    monkeypatch.setattr(
+        us.svc, "run_systemctl", lambda action, names: services.append(action)
+    )
+    monkeypatch.setattr(
+        us,
+        "finalizer_handoff",
+        _raise(us.HandoffError("handoff listener unavailable")),
+    )
+
+    result = us.run_update(
+        _settings(),
+        method="systemd",
+        yes=True,
+        data_dir=tmp_path,
+        echo=lambda *a: None,
+    )
+
+    assert result.exit_code == 3
+    assert any("install" in argv for argv in calls)
+    assert not any("--finalize-bootstrap" in argv for argv in calls)
+    assert services == ["stop"]
+    with us.runtime_lock.acquire_path(
+        tmp_path / ".runtime.lock", "shared", strict=True
+    ):
+        pass
 
 
 def test_run_update_dry_run_executes_nothing(monkeypatch):
@@ -137,15 +215,11 @@ def _npm_run(monkeypatch, operation, **kwargs):
     monkeypatch.setattr(us, "_take_runtime_lock", forbidden)
     monkeypatch.setenv("DTXWIKI_DATA_DIR", "/srv/dtxwiki-data")
     lines = []
-    result = operation(
-        _settings(), method="npm", yes=True, echo=lines.append, **kwargs
-    )
+    result = operation(_settings(), method="npm", yes=True, echo=lines.append, **kwargs)
     return result, "\n".join(lines)
 
 
-@pytest.mark.parametrize(
-    ("version", "target"), [("0.2.0", "0.2.0"), (None, "latest")]
-)
+@pytest.mark.parametrize(("version", "target"), [("0.2.0", "0.2.0"), (None, "latest")])
 def test_run_update_npm_points_at_the_launcher(monkeypatch, version, target):
     result, text = _npm_run(monkeypatch, us.run_update, version=version)
 
@@ -441,9 +515,7 @@ def test_run_update_finalize_step_runs_without_timeout(monkeypatch):
     # #7: the migration (finalize-bootstrap) step must NOT inherit the bounded
     # install timeout, so a long real migration is not killed mid-flight.
     calls = []
-    _patch_common(
-        monkeypatch, run=lambda argv, echo, **kw: calls.append((argv, kw))
-    )
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append((argv, kw)))
     us.run_update(_settings(), method="venv", yes=True, echo=lambda *a: None)
     finalize = next(c for c in calls if "--finalize-bootstrap" in c[0])
     assert finalize[1].get("timeout", "MISSING") is None
@@ -462,9 +534,21 @@ def test_effective_env_file_prefers_explicit_on_any_tier():
     )
 
 
-def test_run_update_threads_custom_env_file_to_backup(monkeypatch):
+@pytest.mark.parametrize(
+    ("method", "env_file", "expected"),
+    [
+        ("systemd", "/etc/dtxwiki/custom.env", Path("/etc/dtxwiki/custom.env")),
+        ("venv", "/srv/custom.env", Path("/srv/custom.env")),
+        ("systemd", None, us.PROD_ENV_FILE),
+        ("venv", None, None),
+    ],
+)
+def test_run_update_uses_the_same_env_file_for_backup_and_finalization(
+    monkeypatch, method, env_file, expected
+):
     captured = {}
-    _patch_common(monkeypatch)
+    calls = []
+    _patch_common(monkeypatch, run=lambda argv, echo, **kw: calls.append(argv))
 
     def fake_create_backup(*a, **k):
         captured.update(k)
@@ -473,14 +557,20 @@ def test_run_update_threads_custom_env_file_to_backup(monkeypatch):
     monkeypatch.setattr(us.backup_service, "create_backup", fake_create_backup)
     monkeypatch.setattr(us.svc, "run_systemctl", lambda action, services: None)
     monkeypatch.setattr(us.healthcheck, "poll_health_ready", lambda base, **k: True)
-    us.run_update(
+    result = us.run_update(
         _settings(),
-        method="systemd",
-        env_file="/etc/dtxwiki/custom.env",
+        method=method,
+        env_file=env_file,
         yes=True,
         echo=lambda *a: None,
     )
-    assert captured["env_file"] == Path("/etc/dtxwiki/custom.env")
+    assert result.ok
+    assert captured["env_file"] == expected
+    finalize = next(argv for argv in calls if "--finalize-bootstrap" in argv)
+    if expected is None:
+        assert "--env-file" not in finalize
+    else:
+        assert finalize[finalize.index("--env-file") + 1] == str(expected)
 
 
 # --- Group G: --channel normalization (#15) ------------------------------
@@ -877,8 +967,7 @@ def test_docker_instructions_redact_index_url():
     )
     assert not result.ok and result.exit_code == 2
     assert any(
-        "PIP_INDEX_URL=https://user:****@pypi.internal/simple" in line
-        for line in lines
+        "PIP_INDEX_URL=https://user:****@pypi.internal/simple" in line for line in lines
     )
     assert not any("t0ken" in line for line in lines)
 

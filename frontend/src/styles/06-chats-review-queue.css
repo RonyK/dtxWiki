@@ -234,7 +234,8 @@
 
 .mcp-chat-meta-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: minmax(0, 4fr) minmax(0, 3fr);
+  align-items: start;
   gap: 8px;
   min-width: 0;
   max-width: 100%;
@@ -252,8 +253,7 @@
 }
 
 .mcp-chat-meta-item--client {
-  grid-column: span 2;
-  min-width: 280px;
+  min-width: 0;
 }
 
 .mcp-chat-meta-item > span {
@@ -484,12 +484,6 @@
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
-  .mcp-client-identifier > .compact-icon-button {
-    width: 44px;
-    min-width: 44px;
-    min-height: 44px;
-  }
-
   .mcp-chat-dl-link {
     min-height: 44px;
   }
@@ -1896,4 +1890,197 @@
    stretching to a sibling's height and leaving a blank lower half. */
 .review-queue-grid > .review-queue-card {
   align-self: start;
+}
+
+/* Session facts remain independent of the expanded client card. */
+.mcp-chat-session-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.mcp-chat-meta-item--time {
+  grid-column: span 2;
+}
+.mcp-chat-type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--context);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  background: var(--surface-subtle);
+}
+.mcp-chat-identifier {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-chat-identifier-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mcp-chat-id-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 3px 0;
+  cursor: pointer;
+  min-width: 0;
+  text-align: start;
+}
+.mcp-chat-id-toggle code {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.mcp-chat-id-toggle:hover {
+  color: var(--context);
+  text-decoration: underline;
+}
+.mcp-chat-id-toggle:focus-visible {
+  outline: 2px solid var(--context);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.mcp-chat-identifier-row > .icon-button {
+  flex: 0 0 auto;
+}
+.mcp-chat-full-id {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mcp-chat-identifier > [role="status"] {
+  display: block;
+  font-size: 12px;
+}
+.mcp-chat-metadata-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mcp-chat-call-headline {
+  grid-column: span 2;
+}
+.mcp-chat-metadata-grid dd,
+.mcp-tool-technical-inputs .mcp-tool-result-meta dd {
+  max-height: none;
+  overflow: visible;
+}
+.mcp-chat-call-headline dd {
+  white-space: pre-wrap;
+}
+/* Input facts use the available width; raw references are a disclosure,
+   rather than occupying a reserved column beside or below the content. */
+.mcp-tool-technical-inputs {
+  container-type: inline-size;
+}
+.mcp-chat-input-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px 18px;
+  align-items: start;
+  min-width: 0;
+}
+.mcp-chat-input-grid > .mcp-tool-result-meta {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  align-content: start;
+}
+.mcp-chat-input-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px 18px;
+}
+.mcp-chat-input-grid > .mcp-tool-longvalue {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.mcp-chat-input-identifiers {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.mcp-chat-workspace-input > span {
+  display: block;
+}
+.mcp-chat-input-reference-details {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.mcp-chat-input-reference-details > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 4px 0;
+}
+.mcp-chat-input-reference-details dt {
+  text-transform: none;
+}
+.mcp-chat-conflict-check-help {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.mcp-chat-input-reference-details > .mcp-chat-input-identifiers {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 0;
+  padding: 8px 0 0;
+  background: transparent;
+}
+.mcp-chat-workspace-input > .mcp-chat-identifier {
+  margin-top: 4px;
+  color: var(--ink-muted);
+}
+@container (max-width: 540px) {
+  .mcp-chat-input-grid,
+  .mcp-chat-input-fields,
+  .mcp-chat-input-reference-details > .mcp-chat-input-identifiers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 1024px) {
+  .mcp-chat-meta-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcp-chat-metadata-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mcp-chat-call-headline {
+    grid-column: 1 / -1;
+  }
+  .mcp-chat-id-toggle {
+    min-height: 44px;
+  }
+}
+@media (max-width: 640px) {
+  .mcp-chat-session-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mcp-chat-meta-item--time {
+    grid-column: auto;
+  }
+  .mcp-chat-metadata-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcp-chat-call-headline {
+    grid-column: auto;
+  }
+}
+
+.mcp-chat-metadata-grid > div,
+.mcp-tool-technical-inputs .mcp-tool-result-meta > div {
+  align-content: start;
+}
+
+.mcp-chat-identifier-row button[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.55;
 }

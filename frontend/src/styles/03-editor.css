@@ -1103,6 +1103,18 @@ body[data-focus-mode="true"] .main-surface {
   justify-content: center;
 }
 
+/* Opt-in size for inline secondary actions such as copying an identifier.
+   Keep the same footprint on narrow and coarse-pointer layouts. */
+.icon-button.icon-button--small {
+  width: var(--control-size-small);
+  height: var(--control-size-small);
+  min-width: var(--control-size-small);
+  min-height: var(--control-size-small);
+  padding: 6px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
 .compact-button {
   min-height: 30px;
   padding: 6px 8px;

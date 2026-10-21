@@ -119,7 +119,7 @@ import { AdminUserRecoverySection } from "./AdminUserRecoverySection";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 
-import { AttachmentsSection } from "./AttachmentsSection";
+import { AttachmentManager } from "./AttachmentManager";
 import {
   SettingsDirtyProvider,
   useGuardedSettingsChange,
@@ -162,7 +162,6 @@ import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { humanizeEnum } from "../../shared/lib/domainLabel";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import {
-  isEditorRole,
   workspaceDeleteDisabledReason,
 } from "../../shared/workspace/permissions";
 import {
@@ -912,11 +911,9 @@ function SettingsScreenBody() {
   const selectedWorkspaceRole =
     workspaceContext?.selectedWorkspace?.role ?? fallbackSettingsRole ?? "";
   const canEditPolicies = selectedWorkspaceRole.toLowerCase() === "owner";
-  // Attachments is editor-and-above, not owner-only: a viewer cannot upload,
-  // so "Mine" would always be empty for them and the entry would be a dead
-  // end. Owners additionally get the whole-workspace "All" filter, which is
-  // the only part the endpoint refuses below owner.
-  const canManageAttachments = isEditorRole(selectedWorkspaceRole);
+  // All members can inspect the effective policy and their readable uploads.
+  // Only owners edit retention; each row's server capability gates deletion.
+  const canViewAttachments = isServerAdmin || ["owner", "editor", "viewer"].includes(selectedWorkspaceRole.toLowerCase());
 
   // Every allowed-workspace picker on this screen reads the same membership
   // list the shell switcher does. No second endpoint (section 3.2).
@@ -3531,7 +3528,7 @@ function SettingsScreenBody() {
               activeSection={activeSection}
               consentCount={consents.length}
               onSelect={selectSection}
-              showAttachments={isServerAdmin || canManageAttachments}
+              showAttachments={canViewAttachments}
               showDeployment={isServerAdmin}
               showUsers={isServerAdmin}
               tokenCount={activeTokenCount}
@@ -3546,11 +3543,8 @@ function SettingsScreenBody() {
             // to any non-admin who followed a shared link, while `showUsers`
             // right below refused the same request. One rule for both.
             showDeployment={isServerAdmin}
-            // Attachments is editor-and-above. A server admin who is not a
-            // member of this workspace still gets the entry, but lands on the
-            // reduced orphan-only fallback (the attachment endpoint requires
-            // membership).
-            showAttachments={isServerAdmin || canManageAttachments}
+            // Listing attachments requires membership in the selected workspace.
+            showAttachments={canViewAttachments}
             showUsers={isServerAdmin}
             tokenCount={activeTokenCount}
           />
@@ -3617,21 +3611,11 @@ function SettingsScreenBody() {
               />
             ) : null}
             {activeSection === "attachments" ? (
-              canManageAttachments ? (
-                <AttachmentsSection
+              canViewAttachments ? (
+                <AttachmentManager
+                  key={selectedWorkspaceApiId}
+                  isServerAdmin={isServerAdmin}
                   canViewEveryUpload={canEditPolicies}
-                  scope="workspace"
-                  workspaceId={selectedWorkspaceApiId}
-                />
-              ) : isServerAdmin ? (
-                // The reduced fallback, and it belongs to exactly one reader:
-                // a server admin with no editor membership here. The
-                // attachment endpoint is membership-gated, so that reader
-                // keeps the orphan-only admin endpoint rather than losing the
-                // screen entirely.
-                <AttachmentsSection
-                  canViewEveryUpload={false}
-                  scope="server"
                   workspaceId={selectedWorkspaceApiId}
                 />
               ) : (
@@ -3644,7 +3628,7 @@ function SettingsScreenBody() {
                   <StatusBanner tone="info">
                     {t("attachments.editorOnlyNotice", {
                       defaultValue:
-                        "Attachments are managed by editors and owners. You can still see the files on each page you can read.",
+                        "Attachments are available to members of this workspace.",
                     })}
                   </StatusBanner>
                 </section>

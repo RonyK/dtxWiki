@@ -21,7 +21,7 @@ export async function copyTextWithFallback(
 
 export async function copyTextWithReason(
   text: string,
-  fallbackTarget?: HTMLElement | null,
+  fallbackTarget?: HTMLElement | null | (() => HTMLElement | null),
 ): Promise<CopyTextDetailedResult> {
   const clipboardAvailable = canWriteToClipboard();
   let reason: CopyTextReason =
@@ -30,7 +30,9 @@ export async function copyTextWithReason(
       : "unsupported";
   if (await writeTextToClipboard(text)) return { status: "copied" };
   if (clipboardAvailable) reason = "permission";
-  if (selectText(fallbackTarget)) {
+  const target =
+    typeof fallbackTarget === "function" ? fallbackTarget() : fallbackTarget;
+  if (selectText(target)) {
     return { status: "selected", reason };
   }
   // A caller without visible fallback text (for example a tree context menu)
@@ -39,6 +41,6 @@ export async function copyTextWithReason(
   // failure instead.
   return {
     status: "unavailable",
-    reason: fallbackTarget ? "selection" : reason,
+    reason: target ? "selection" : reason,
   };
 }

@@ -1237,6 +1237,7 @@ def _postgres_url() -> str | None:
     _postgres_url() is None,
     reason="requires the dedicated PostgreSQL migration test database",
 )
+@pytest.mark.xdist_group("postgres")
 def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
     """Execute the rewritten pushdown against PostgreSQL, not just SQLite.
 

@@ -8821,14 +8821,17 @@ describe("SettingsScreen", () => {
     expect(nav.querySelector(".nav-admin-badge")).toBeNull();
   });
 
-  it("tells a viewer why Attachments is closed instead of calling a server-admin endpoint", async () => {
-    // Shipped bug: the pane had no gate and picked its scope with
-    // `canManageAttachments ? "workspace" : "server"`, which lumps a viewer in
-    // with a server admin who is not a member. The viewer got the admin
-    // orphan endpoint (refused) and a banner claiming they were not a member
-    // of a workspace they belong to.
+  it("shows a viewer read-only attachments without calling a server-admin endpoint", async () => {
+    // Viewer membership permits policy reads but never owner edits or admin fallback.
     const fetchMock = mockFetch({
       ...navFixture(false),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/media/attachments?scope=mine&limit=24`]: {
+        data: { items: [], next_cursor: null, scope: "mine", retention_policy: {
+          orphan_retention_hours: null, effective_orphan_retention_hours: 168,
+          default_orphan_retention_hours: 168, max_orphan_retention_hours: 876000,
+          source: "server", revision: "a".repeat(64),
+        } },
+      },
       [`${BASE}/api/v1/workspaces`]: {
         data: {
           current_workspace_id: WORKSPACE_ID,
@@ -8845,8 +8848,10 @@ describe("SettingsScreen", () => {
     );
 
     expect(
-      await screen.findByText(/Attachments are managed by editors and owners/),
+      await screen.findByRole("heading", { name: "Attachments", level: 2 }),
     ).toBeInTheDocument();
+    expect(await screen.findByText("Unused file retention: 7 days")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save policy" })).not.toBeInTheDocument();
     expect(
       screen.queryByText(/not a member of this workspace/),
     ).not.toBeInTheDocument();

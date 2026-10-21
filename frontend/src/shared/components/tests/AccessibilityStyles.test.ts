@@ -203,6 +203,18 @@ describe("cross-route accessibility styles", () => {
     expect(menuRule).toContain("overflow-y: auto;");
   });
 
+  it("allows an explicit small secondary icon button without the mobile size floor", () => {
+    expect(styles("01-base.css")).toContain("--control-size-small: 28px;");
+    const editor = styles("03-editor.css");
+    const rule = editor.match(/\.icon-button\.icon-button--small\s*\{([^}]+)\}/)?.[1];
+    for (const property of ["width", "height", "min-width", "min-height"]) {
+      expect(rule).toContain(`${property}: var(--control-size-small);`);
+    }
+    expect(styles("07-settings-policy.css")).toContain(
+      ".icon-button:not(.icon-button--small),",
+    );
+  });
+
   it("restores a 44px floor for compact mobile and tablet controls", () => {
     const policy = styles("07-settings-policy.css");
     const tabletMobileBlocks = atRuleBlocks(

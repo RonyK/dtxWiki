@@ -56,6 +56,7 @@ class ContextMediaRepository(Protocol):
         workspace_id: UUID,
         *,
         viewer: ActorIdentity | None = None,
+        viewer_role: str | None = None,
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,

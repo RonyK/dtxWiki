@@ -1245,9 +1245,7 @@ button.history-card {
    into a ~504px list that pushed all content past the fold. The trigger costs
    one row and always names where you are. */
 .settings-section-picker {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  position: static;
   background: var(--surface-page, var(--surface));
   padding-block: 4px;
 }
@@ -3455,8 +3453,8 @@ button.history-card {
     border-bottom: 0;
   }
 
-  .icon-button,
-  .compact-icon-button,
+  .icon-button:not(.icon-button--small),
+  .compact-icon-button:not(.icon-button--small),
   .compact-button,
   .filter-chip,
   .segmented-control button,
