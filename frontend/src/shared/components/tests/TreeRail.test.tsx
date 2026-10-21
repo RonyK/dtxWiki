@@ -1474,6 +1474,8 @@ describe("TreeRail", () => {
 
   it("renders the full row title and lets CSS clip it at the rail width", () => {
     const longTitle = "Codex API Markdown 1779209673276 Long Context Draft";
+    const getRect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 100, 280, 36));
 
     render(
       <TreeRail
@@ -1500,6 +1502,7 @@ describe("TreeRail", () => {
     // so .tree-row-title can ellipsize responsively at the actual rail width.
     expect(title).toHaveTextContent(longTitle);
     expect(title?.textContent).not.toContain("...");
+    getRect.mockRestore();
   });
 
   it("orders duplicate-sort-key siblings by codepoint to match backend reorder order", () => {

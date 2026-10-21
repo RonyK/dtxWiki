@@ -10,10 +10,16 @@ from backend.app.settings import Settings
 from backend.models.job import Job
 from backend.models.workspace import Workspace
 from backend.services.bundle_expiration import BundleExpirationService
+from backend.services.context_media_policy import (
+    ContextMediaPolicy,
+    resolve_context_media_policy,
+)
 from backend.services.job_queue import JobQueueService
 
 
-def tick_schedules(settings: Settings) -> tuple[tuple[str, int], ...]:
+def tick_schedules(
+    settings: Settings, policy: ContextMediaPolicy | None = None
+) -> tuple[tuple[str, int], ...]:
     """The (job_type, interval_hours) schedule seed_jobs_for_workspace walks
     for its interval-bucketed jobs, pulled out of seed_due_jobs so
     entry.py's per-workspace fan-out (Epic-2 Phase 6a) can compute it once
@@ -33,15 +39,16 @@ def tick_schedules(settings: Settings) -> tuple[tuple[str, int], ...]:
     to the grace period -- bounded to [1h, 24h]: never coarser than daily
     even for a very long retention window (no benefit to checking less
     often), and never coarser than the window itself for a short one (so a
-    short retention setting is not silently rounded up to a day of slop). 0
-    continues to disable seeding entirely via the existing
-    `interval_hours <= 0: continue` in seed_jobs_for_workspace, not a
-    separate skip.
+    short retention setting is not silently rounded up to a day of slop).
+    Disabled automatic reclamation retains hourly drain-only maintenance.
     """
+    hours = (
+        policy.effective_hours
+        if policy is not None
+        else settings.context_media_orphan_retention_hours
+    )
     context_media_orphan_sweep_interval_hours = (
-        max(1, min(24, settings.context_media_orphan_retention_hours))
-        if settings.context_media_orphan_retention_hours > 0
-        else 0
+        max(1, min(24, hours)) if hours > 0 else 1
     )
     return (
         ("lint_tick", settings.lint_tick_interval_hours),
@@ -66,6 +73,7 @@ def seed_jobs_for_workspace(
     job_queue: JobQueueService,
     bundle_expiration: BundleExpirationService,
     schedules: tuple[tuple[str, int], ...],
+    context_media_policy_revision: str | None = None,
 ) -> list[Job]:
     """Seed one workspace's periodic jobs on ``session`` (already scoped to
     that workspace's plane).
@@ -136,6 +144,11 @@ def seed_jobs_for_workspace(
         bucket = int(now.timestamp()) // interval_seconds
         idempotency_key = f"{job_type}:{interval_hours}h:{bucket}"
         if (
+            job_type == "context_media_orphan_sweep"
+            and context_media_policy_revision is not None
+        ):
+            idempotency_key += f":{context_media_policy_revision}"
+        if (
             job_queue.get_by_idempotency_key(
                 session=session,
                 workspace_id=workspace_id,
@@ -179,11 +192,14 @@ def seed_due_jobs(
     """
     now = now or datetime.now(UTC)
     queue = job_queue or JobQueueService()
-    schedules = tick_schedules(settings)
     bundle_expiration = BundleExpirationService(job_queue=queue)
-    workspace_ids = session.scalars(select(Workspace.id).order_by(Workspace.id)).all()
+    workspaces = session.scalars(select(Workspace).order_by(Workspace.id)).all()
     seeded: list[Job] = []
-    for workspace_id in workspace_ids:
+    for workspace in workspaces:
+        workspace_id = workspace.id
+        policy = resolve_context_media_policy(
+            workspace, settings.context_media_orphan_retention_hours
+        )
         seeded.extend(
             seed_jobs_for_workspace(
                 session,
@@ -191,7 +207,8 @@ def seed_due_jobs(
                 now=now,
                 job_queue=queue,
                 bundle_expiration=bundle_expiration,
-                schedules=schedules,
+                schedules=tick_schedules(settings, policy),
+                context_media_policy_revision=policy.revision,
             )
         )
     return seeded

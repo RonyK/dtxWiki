@@ -1948,10 +1948,6 @@
 .tree-row-tooltip {
   position: fixed;
   z-index: 80;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
@@ -1960,10 +1956,36 @@
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
-  pointer-events: none;
+  max-width: min(320px, calc(100vw - 16px));
+  pointer-events: auto;
 }
 
-body:has(.tree-node-menu, .dialog-backdrop) .tree-row-tooltip {
+.tree-row-tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  max-height: calc(100dvh - 18px);
+  overflow-y: auto;
+}
+
+/* The transparent hit area joins the row and popup without a hover timeout.
+ * Keep it outside the scrolling surface so the six-pixel gap is enterable. */
+.tree-row-tooltip::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: 100%;
+  height: 7px;
+}
+
+.tree-row-tooltip[data-placement^="top"]::before {
+  top: 100%;
+  bottom: auto;
+}
+
+body:has(.tree-node-menu) .tree-row-tooltip {
   display: none;
 }
 

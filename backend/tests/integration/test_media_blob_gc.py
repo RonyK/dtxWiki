@@ -163,14 +163,17 @@ def _register_then_remove_last_owner(fixture: _InstalledFixture) -> None:
                 owner_id=owner_id,
                 blob=fixture.blob,
             )
-            assert session.get(
-                MediaBlobGcCandidate,
-                {
-                    "workspace_id": fixture.workspace_id,
-                    "blob_id": fixture.blob.blob_id,
-                    "blob_epoch": fixture.blob.epoch.value,
-                },
-            ) is None
+            assert (
+                session.get(
+                    MediaBlobGcCandidate,
+                    {
+                        "workspace_id": fixture.workspace_id,
+                        "blob_id": fixture.blob.blob_id,
+                        "blob_epoch": fixture.blob.epoch.value,
+                    },
+                )
+                is None
+            )
 
     owner_kind, owner_id = owners[-1]
     with fixture.factory.begin() as session:
@@ -179,14 +182,17 @@ def _register_then_remove_last_owner(fixture: _InstalledFixture) -> None:
             owner_id=owner_id,
             blob=fixture.blob,
         )
-        assert session.get(
-            MediaBlobGcCandidate,
-            {
-                "workspace_id": fixture.workspace_id,
-                "blob_id": fixture.blob.blob_id,
-                "blob_epoch": fixture.blob.epoch.value,
-            },
-        ) is not None
+        assert (
+            session.get(
+                MediaBlobGcCandidate,
+                {
+                    "workspace_id": fixture.workspace_id,
+                    "blob_id": fixture.blob.blob_id,
+                    "blob_epoch": fixture.blob.epoch.value,
+                },
+            )
+            is not None
+        )
 
 
 def test_available_install_is_collectable_until_first_owner_commits(
@@ -210,23 +216,29 @@ def test_available_install_is_collectable_until_first_owner_commits(
             owner_id=owner_id,
             blob=installed_blob.blob,
         )
-        assert session.get(
-            MediaBlobGcCandidate,
-            {
-                "workspace_id": installed_blob.workspace_id,
-                "blob_id": installed_blob.blob.blob_id,
-                "blob_epoch": installed_blob.blob.epoch.value,
-            },
-        ) is None
-        assert session.scalar(
-            select(func.count())
-            .select_from(MediaBlobGcHold)
-            .where(
-                MediaBlobGcHold.workspace_id == installed_blob.workspace_id,
-                MediaBlobGcHold.blob_id == installed_blob.blob.blob_id,
-                MediaBlobGcHold.blob_epoch == installed_blob.blob.epoch.value,
+        assert (
+            session.get(
+                MediaBlobGcCandidate,
+                {
+                    "workspace_id": installed_blob.workspace_id,
+                    "blob_id": installed_blob.blob.blob_id,
+                    "blob_epoch": installed_blob.blob.epoch.value,
+                },
             )
-        ) == 0
+            is None
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(MediaBlobGcHold)
+                .where(
+                    MediaBlobGcHold.workspace_id == installed_blob.workspace_id,
+                    MediaBlobGcHold.blob_id == installed_blob.blob.blob_id,
+                    MediaBlobGcHold.blob_epoch == installed_blob.blob.epoch.value,
+                )
+            )
+            == 0
+        )
 
 
 def test_expired_context_hold_loses_to_gc_and_late_association_fails_closed(
@@ -342,9 +354,12 @@ def test_purged_digest_reinstalls_as_a_new_fenced_incarnation(
     installed_blob: _InstalledFixture,
 ) -> None:
     first = installed_blob.blob
-    assert _gc_service(installed_blob).sweep(
-        workspace_id=installed_blob.workspace_id
-    ).purged_count == 1
+    assert (
+        _gc_service(installed_blob)
+        .sweep(workspace_id=installed_blob.workspace_id)
+        .purged_count
+        == 1
+    )
 
     installer = InstallValidatedBlob(
         stager=installed_blob.store,
@@ -397,16 +412,19 @@ def test_purged_digest_reinstalls_as_a_new_fenced_incarnation(
         )
         assert old_incarnation is not None and old_incarnation.state == "purged"
         assert new_incarnation is not None and new_incarnation.state == "available"
-        assert session.scalar(
-            select(func.count())
-            .select_from(MediaPhysicalCharge)
-            .where(
-                MediaPhysicalCharge.workspace_id == installed_blob.workspace_id,
-                MediaPhysicalCharge.target_kind
-                == PhysicalObjectKind.BLOB_INCARNATION.value,
-                MediaPhysicalCharge.state == "charged",
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(MediaPhysicalCharge)
+                .where(
+                    MediaPhysicalCharge.workspace_id == installed_blob.workspace_id,
+                    MediaPhysicalCharge.target_kind
+                    == PhysicalObjectKind.BLOB_INCARNATION.value,
+                    MediaPhysicalCharge.state == "charged",
+                )
             )
-        ) == 1
+            == 1
+        )
 
 
 def test_context_association_hold_fences_gc_until_owner_registration(
@@ -462,23 +480,29 @@ def test_context_association_hold_fences_gc_until_owner_registration(
             owner_id=owner_id,
             blob=available.reference,
         )
-        assert session.get(
-            MediaBlobGcCandidate,
-            {
-                "workspace_id": installed_blob.workspace_id,
-                "blob_id": available.reference.blob_id,
-                "blob_epoch": available.reference.epoch.value,
-            },
-        ) is None
-        assert session.scalar(
-            select(func.count())
-            .select_from(MediaBlobGcHold)
-            .where(
-                MediaBlobGcHold.workspace_id == installed_blob.workspace_id,
-                MediaBlobGcHold.blob_id == available.reference.blob_id,
-                MediaBlobGcHold.blob_epoch == available.reference.epoch.value,
+        assert (
+            session.get(
+                MediaBlobGcCandidate,
+                {
+                    "workspace_id": installed_blob.workspace_id,
+                    "blob_id": available.reference.blob_id,
+                    "blob_epoch": available.reference.epoch.value,
+                },
             )
-        ) == 0
+            is None
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(MediaBlobGcHold)
+                .where(
+                    MediaBlobGcHold.workspace_id == installed_blob.workspace_id,
+                    MediaBlobGcHold.blob_id == available.reference.blob_id,
+                    MediaBlobGcHold.blob_epoch == available.reference.epoch.value,
+                )
+            )
+            == 0
+        )
 
 
 def test_running_conversion_generation_fences_gc_without_a_time_guess(
@@ -659,11 +683,14 @@ def test_purge_finalize_crash_stays_fail_closed_and_replay_releases_exact_quota(
         )
         # The install's staging deletion receipt exists; physical blob release
         # has not been recorded yet.
-        assert session.scalar(
-            select(func.count())
-            .select_from(MediaDeletionReceipt)
-            .where(MediaDeletionReceipt.physical_charge_id == charge.id)
-        ) == 0
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(MediaDeletionReceipt)
+                .where(MediaDeletionReceipt.physical_charge_id == charge.id)
+            )
+            == 0
+        )
 
     with pytest.raises(BlobReferenceUnavailableError, match="not available"):
         with installed_blob.factory.begin() as session:
@@ -673,9 +700,7 @@ def test_purge_finalize_crash_stays_fail_closed_and_replay_releases_exact_quota(
                 blob=installed_blob.blob,
             )
 
-    replay = _gc_service(installed_blob).sweep(
-        workspace_id=installed_blob.workspace_id
-    )
+    replay = _gc_service(installed_blob).sweep(workspace_id=installed_blob.workspace_id)
     assert replay.purged_count == 1
 
     with installed_blob.factory() as session:
@@ -704,13 +729,16 @@ def test_purge_finalize_crash_stays_fail_closed_and_replay_releases_exact_quota(
         assert charge is not None and charge.state == "released"
         assert receipt is not None and receipt.disposition == "already_missing"
         assert quota is not None and quota.charged_bytes == 0
-        assert session.get(
-            StoredBlobActiveIncarnationRow,
-            {
-                "workspace_id": installed_blob.workspace_id,
-                "blob_id": installed_blob.blob.blob_id,
-            },
-        ) is None
+        assert (
+            session.get(
+                StoredBlobActiveIncarnationRow,
+                {
+                    "workspace_id": installed_blob.workspace_id,
+                    "blob_id": installed_blob.blob.blob_id,
+                },
+            )
+            is None
+        )
         assert (
             session.scalar(select(func.count()).select_from(MediaBlobGcCandidate)) == 0
         )
@@ -1049,11 +1077,14 @@ def _assert_owned_and_readable(fixture: _InstalledFixture) -> None:
         incarnation = session.get(BlobIncarnationRow, _incarnation_key(fixture))
         assert incarnation is not None and incarnation.state == "available"
         assert incarnation.trashed_at is None
-        assert session.scalar(
-            select(func.count())
-            .select_from(MediaBlobReference)
-            .where(MediaBlobReference.blob_id == fixture.blob.blob_id)
-        ) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(MediaBlobReference)
+                .where(MediaBlobReference.blob_id == fixture.blob.blob_id)
+            )
+            == 1
+        )
         assert session.get(MediaBlobGcCandidate, _incarnation_key(fixture)) is None
     handle = fixture.store.open(fixture.storage_key)
     try:
@@ -1177,9 +1208,7 @@ def test_sweep_restores_an_owned_blob_stranded_mid_collection(
 
     _strand_owned_blob(installed_blob, state=state)
 
-    result = _gc_service(installed_blob).sweep(
-        workspace_id=installed_blob.workspace_id
-    )
+    result = _gc_service(installed_blob).sweep(workspace_id=installed_blob.workspace_id)
 
     assert result.repaired_count == 1
     assert result.purged_count == 0
@@ -1243,9 +1272,7 @@ def test_an_owner_appearing_after_the_trash_step_gets_its_bytes_back(
 
     monkeypatch.setattr(store, "trash", trash_then_register)
 
-    result = _gc_service(installed_blob).sweep(
-        workspace_id=installed_blob.workspace_id
-    )
+    result = _gc_service(installed_blob).sweep(workspace_id=installed_blob.workspace_id)
 
     assert result.repaired_count == 1
     assert result.purged_count == 0
@@ -1269,9 +1296,7 @@ def test_an_owner_appearing_after_the_purge_marks_the_blob_missing(
         return deletion
 
     monkeypatch.setattr(store, "purge", purge_then_register)
-    result = _gc_service(installed_blob).sweep(
-        workspace_id=installed_blob.workspace_id
-    )
+    result = _gc_service(installed_blob).sweep(workspace_id=installed_blob.workspace_id)
     monkeypatch.setattr(store, "purge", real_purge)
 
     assert result.purged_count == 0
@@ -1288,9 +1313,7 @@ def test_an_owner_appearing_after_the_purge_marks_the_blob_missing(
             blob=installed_blob.blob,
         )
 
-    replay = _gc_service(installed_blob).sweep(
-        workspace_id=installed_blob.workspace_id
-    )
+    replay = _gc_service(installed_blob).sweep(workspace_id=installed_blob.workspace_id)
 
     assert replay.purged_count == 1
     with installed_blob.factory() as session:
@@ -1298,3 +1321,129 @@ def test_an_owner_appearing_after_the_purge_marks_the_blob_missing(
         quota = session.get(WorkspaceMediaQuotaUsage, installed_blob.workspace_id)
         assert incarnation is not None and incarnation.state == "purged"
         assert quota is not None and quota.charged_bytes == 0
+
+
+def test_disabled_retention_schedules_drain_for_new_manual_deletion(installed_blob):
+    """No leftover jobs: manual deletion still releases Context ownership and bytes."""
+    from backend.context_media.adapters.sqlalchemy import (
+        SqlAlchemyContextMediaRepository,
+    )
+    from backend.context_media.application import DeleteUnusedMedia, RegisterMediaAsset
+    from backend.context_media.domain import ActorIdentity, RegisterContextMediaAsset
+    from backend.models.context_media import ContextMediaAsset, ContextMediaGcCandidate
+    from backend.models.media import StoredBlobInspectionRow
+    from backend.models.workspace import Workspace
+    from backend.services.context_media_orphan_sweep import (
+        ContextMediaOrphanSweepService,
+    )
+    from backend.tests.integration.test_context_media_orphan_sweep import (
+        _seed_page,
+        _seed_shared_image,
+    )
+    from backend.worker.tick import seed_due_jobs
+
+    fixture = installed_blob
+    actor = ActorIdentity("human", str(uuid4()))
+    now = datetime.now(UTC)
+    deleted_id, retained_id = uuid4(), uuid4()
+    with fixture.factory.begin() as session:
+        workspace = session.get(Workspace, fixture.workspace_id)
+        workspace.context_media_policy = {"orphan_retention_hours": 0}
+        page, version = _seed_page(session, fixture.workspace_id, actor)
+        other_blob, other_inspection = _seed_shared_image(session, fixture.workspace_id)
+        inspection = session.scalar(
+            select(StoredBlobInspectionRow).where(
+                StoredBlobInspectionRow.workspace_id == fixture.workspace_id,
+                StoredBlobInspectionRow.blob_id == fixture.blob.blob_id,
+            )
+        )
+        repository = SqlAlchemyContextMediaRepository(session)
+        for asset_id, blob, inspection_id in (
+            (deleted_id, fixture.blob, inspection.id),
+            (retained_id, other_blob, other_inspection),
+        ):
+            RegisterMediaAsset().execute(
+                repository,
+                RegisterContextMediaAsset(
+                    workspace_id=fixture.workspace_id,
+                    asset_id=asset_id,
+                    page_id=page.id,
+                    created_for_version_id=version.id,
+                    blob=blob,
+                    inspection_id=inspection_id,
+                    original_filename="unused.png",
+                    canonical_media_type="image/png",
+                    logical_bytes=68
+                    if asset_id == retained_id
+                    else len(fixture.content),
+                    policy_revision="test",
+                    actor=actor,
+                ),
+                now=now - timedelta(days=30),
+            )
+        version.version_status = "draft"
+        page_id = page.id
+    with fixture.factory.begin() as session:
+        repository = SqlAlchemyContextMediaRepository(session)
+        snapshot = repository.get_page_asset_usage(
+            fixture.workspace_id, page_id, deleted_id
+        )
+        DeleteUnusedMedia().execute(
+            repository,
+            workspace_id=fixture.workspace_id,
+            page_id=page_id,
+            asset_id=deleted_id,
+            usage_token=snapshot.usage_token,
+            actor=actor,
+        )
+        assert (
+            session.scalar(
+                select(ContextMediaGcCandidate).where(
+                    ContextMediaGcCandidate.asset_id == deleted_id
+                )
+            )
+            is not None
+        )
+    settings = Settings(context_media_orphan_retention_hours=0)
+    with fixture.factory.begin() as session:
+        seeded = seed_due_jobs(session, settings, now=now)
+        assert any(job.job_type == "context_media_orphan_sweep" for job in seeded)
+    worker = OneShotWorker(
+        settings=settings,
+        context_media_orphan_sweep_service=ContextMediaOrphanSweepService(
+            SqlAlchemyContextMediaRepository
+        ),
+    )
+    result = worker.dispatch_once_with_session_factory(
+        fixture.factory,
+        workspace_id=fixture.workspace_id,
+        job_types={"context_media_orphan_sweep"},
+    )
+    assert result.status == "completed"
+    assert result.detail == {
+        "inspected_count": 0,
+        "reclaimed_count": 0,
+        "drained_count": 1,
+    }
+    with fixture.factory() as session:
+        assert (
+            session.get(ContextMediaAsset, (fixture.workspace_id, deleted_id)) is None
+        )
+        assert (
+            session.get(ContextMediaAsset, (fixture.workspace_id, retained_id))
+            is not None
+        )
+        candidate = session.get(
+            MediaBlobGcCandidate,
+            (fixture.workspace_id, fixture.blob.blob_id, fixture.blob.epoch.value),
+        )
+        assert candidate is not None
+        eligible_at = candidate.eligible_at
+    gc = SqlAlchemyBlobGcService(
+        session_for=lambda _: fixture.factory,
+        store_for=lambda _: fixture.store,
+        hold_is_active=media_blob_gc_hold_is_active,
+        clock=lambda: eligible_at,
+    )
+    assert gc.sweep(workspace_id=fixture.workspace_id).purged_count == 1
+    assert not fixture.store.path_for_key(fixture.storage_key.value).exists()

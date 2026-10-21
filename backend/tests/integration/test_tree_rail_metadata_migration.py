@@ -1,7 +1,12 @@
+import importlib
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
+import sqlalchemy as sa
 from alembic import command
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy import create_engine, event, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -194,7 +199,8 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
         " where " in statement and " limit " in statement for statement in history_reads
     ), history_reads
     assert audit_plans and all(
-        "ix_tree_rail_backfill_audit_target" in str(plan) for plan in audit_plans
+        "ix_tree_rail_backfill_audit_target" in str(plan) and "<expr>=?" in str(plan)
+        for plan in audit_plans
     ), audit_plans
     assert all(
         private_id not in str(version_read_parameters)
@@ -218,6 +224,272 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
         assert set(
             inspector.get_pk_constraint("user_favorite")["constrained_columns"]
         ) == {"workspace_id", "user_id", "target_kind", "target_id"}
+    finally:
+        engine.dispose()
+
+
+def _minimal_backfill_tables():
+    """Only legacy columns the real upgrade needs, with real UUID/JSON types."""
+    metadata = sa.MetaData()
+    pages = sa.Table(
+        "context_page",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("workspace_id", sa.Uuid()),
+        sa.Column("current_published_version_id", sa.Uuid()),
+    )
+    versions = sa.Table(
+        "context_page_version",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("workspace_id", sa.Uuid()),
+        sa.Column("page_id", sa.Uuid()),
+        sa.Column("body_md", sa.Text()),
+        sa.Column("rendering_profile", sa.Text()),
+    )
+    sa.Table("library_item", metadata, sa.Column("id", sa.Uuid(), primary_key=True))
+    sa.Table(
+        "agent_page",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("workspace_id", sa.Uuid()),
+        sa.Column("current_active_version_id", sa.Uuid()),
+    )
+    sa.Table(
+        "agent_page_version", metadata, sa.Column("id", sa.Uuid(), primary_key=True)
+    )
+    audits = sa.Table(
+        "audit_event",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("workspace_id", sa.Uuid()),
+        sa.Column("target_kind", sa.Text()),
+        sa.Column("target_id", sa.Uuid()),
+        sa.Column("action", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+        sa.Column("payload", sa.JSON()),
+    )
+    return metadata, pages, versions, audits
+
+
+def _seed_unchanged_chain(connection, pages, versions, audits, count):
+    page_id, workspace_id = UUID(int=10**12), UUID(int=10**13)
+    version_ids = [UUID(int=number + 1) for number in range(count)]
+    connection.execute(
+        pages.insert(),
+        {
+            "id": page_id,
+            "workspace_id": workspace_id,
+            "current_published_version_id": version_ids[-1],
+        },
+    )
+    connection.execute(
+        versions.insert(),
+        [
+            {
+                "id": version_id,
+                "workspace_id": workspace_id,
+                "page_id": page_id,
+                "body_md": "Unchanged visible content.",
+                "rendering_profile": "gfm_mermaid",
+            }
+            for version_id in version_ids
+        ],
+    )
+    connection.execute(
+        audits.insert(),
+        [
+            {
+                "id": version_id,
+                "workspace_id": workspace_id,
+                "target_kind": "context_page",
+                "target_id": page_id,
+                "action": "context_page.draft.publish",
+                "created_at": FIRST_EVENT + timedelta(seconds=number),
+                "payload": {
+                    # Both accepted UUID spellings must be seekable.
+                    "version_id": str(version_id) if number % 2 else version_id.hex,
+                    "previous_published_version_id": (
+                        str(version_ids[number - 1]) if number else None
+                    ),
+                },
+            }
+            for number, version_id in enumerate(version_ids)
+        ],
+    )
+    return page_id, workspace_id, version_ids
+
+
+def test_upgrade_publication_chain_work_grows_linearly():
+    migration = importlib.import_module(
+        "backend.migrations.versions.v0_1.c7a4e91b2d60_tree_rail_metadata"
+    )
+    measurements = []
+    for count in (256, 1024):
+        engine = create_engine("sqlite:///:memory:")
+        metadata, pages, versions, audits = _minimal_backfill_tables()
+        metadata.create_all(engine)
+        try:
+            with engine.begin() as connection:
+                _seed_unchanged_chain(connection, pages, versions, audits, count)
+                ticks = [0]
+
+                def progress(ticks=ticks):
+                    ticks[0] += 1
+
+                raw = connection.connection.driver_connection
+                raw.set_progress_handler(progress, 100)
+                try:
+                    # Execute the actual upgrade: it must create the index
+                    # used by the actual lookup, then remove it afterwards.
+                    with Operations.context(MigrationContext.configure(connection)):
+                        migration.upgrade()
+                finally:
+                    raw.set_progress_handler(None, 0)
+                measurements.append(ticks[0] * 100)
+                assert (
+                    connection.exec_driver_sql(
+                        "SELECT content_changed_at FROM context_page"
+                    ).scalar_one()
+                    == "2026-01-03 04:00:00.000000"
+                )
+                assert "ix_tree_rail_backfill_audit_target" not in {
+                    index["name"]
+                    for index in inspect(connection).get_indexes("audit_event")
+                }
+        finally:
+            engine.dispose()
+    # Four times the valid predecessor chain may do modest index-building
+    # overhead, but must not repeat the quadratic audit scan (~16x work).
+    assert 0 < measurements[0] and measurements[1] < measurements[0] * 6, measurements
+
+
+@pytest.mark.parametrize(
+    "broken_proof",
+    [
+        "missing_previous",
+        "invalid_previous",
+        "missing_version",
+        "version_workspace",
+        "version_target",
+        "audit_workspace",
+        "audit_target",
+        "audit_kind",
+        "audit_action",
+        "cycle",
+    ],
+)
+def test_upgrade_keeps_unproven_publication_times_unknown(broken_proof):
+    migration = importlib.import_module(
+        "backend.migrations.versions.v0_1.c7a4e91b2d60_tree_rail_metadata"
+    )
+    engine = create_engine("sqlite:///:memory:")
+    metadata, pages, versions, audits = _minimal_backfill_tables()
+    metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            _, _, version_ids = _seed_unchanged_chain(
+                connection, pages, versions, audits, 2
+            )
+            previous_key = "previous_published_version_id"
+            if broken_proof in {"missing_previous", "invalid_previous", "cycle"}:
+                payload = {"version_id": str(version_ids[-1])}
+                if broken_proof == "invalid_previous":
+                    payload[previous_key] = "invalid-uuid"
+                elif broken_proof == "cycle":
+                    payload[previous_key] = str(version_ids[-1])
+                connection.execute(
+                    audits.update()
+                    .where(audits.c.id == version_ids[-1])
+                    .values(payload=payload)
+                )
+            elif broken_proof == "missing_version":
+                connection.execute(
+                    versions.delete().where(versions.c.id == version_ids[0])
+                )
+            elif broken_proof.startswith("version_"):
+                column = (
+                    "workspace_id" if broken_proof.endswith("workspace") else "page_id"
+                )
+                connection.execute(
+                    versions.update()
+                    .where(versions.c.id == version_ids[0])
+                    .values({column: UUID(int=999)})
+                )
+            else:
+                column, value = {
+                    "audit_workspace": ("workspace_id", UUID(int=999)),
+                    "audit_target": ("target_id", UUID(int=999)),
+                    "audit_kind": ("target_kind", "agent_page"),
+                    "audit_action": ("action", "context_page.draft.save"),
+                }[broken_proof]
+                connection.execute(
+                    audits.update()
+                    .where(audits.c.id == version_ids[-1])
+                    .values({column: value})
+                )
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+            assert (
+                connection.exec_driver_sql(
+                    "SELECT content_changed_at FROM context_page"
+                ).scalar_one()
+                is None
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("same_timestamp", [False, True])
+def test_upgrade_uses_newest_exact_version_event_across_uuid_spellings(same_timestamp):
+    migration = importlib.import_module(
+        "backend.migrations.versions.v0_1.c7a4e91b2d60_tree_rail_metadata"
+    )
+    engine = create_engine("sqlite:///:memory:")
+    metadata, pages, versions, audits = _minimal_backfill_tables()
+    metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            page_id, workspace_id, version_ids = _seed_unchanged_chain(
+                connection, pages, versions, audits, 2
+            )
+            timestamp = FIRST_EVENT + timedelta(seconds=1 if same_timestamp else 2)
+            connection.execute(
+                audits.insert(),
+                {
+                    "id": UUID(int=999),
+                    "workspace_id": workspace_id,
+                    "target_kind": "context_page",
+                    "target_id": page_id,
+                    "action": "context_page.draft.publish",
+                    "created_at": timestamp,
+                    "payload": {
+                        "version_id": version_ids[-1].hex,
+                        "previous_published_version_id": None,
+                    },
+                },
+            )
+            # A malformed, arbitrarily large key cannot match either UUID
+            # form and must remain safe to index on PostgreSQL as well.
+            connection.execute(
+                audits.insert(),
+                {
+                    "id": UUID(int=1000),
+                    "workspace_id": workspace_id,
+                    "target_kind": "context_page",
+                    "target_id": page_id,
+                    "action": "context_page.draft.publish",
+                    "created_at": SECOND_EVENT,
+                    "payload": {"version_id": str(version_ids[-1]) + "x" * 8192},
+                },
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+            assert connection.exec_driver_sql(
+                "SELECT content_changed_at FROM context_page"
+            ).scalar_one() == timestamp.replace(tzinfo=None).isoformat(
+                sep=" ", timespec="microseconds"
+            )
     finally:
         engine.dispose()
 

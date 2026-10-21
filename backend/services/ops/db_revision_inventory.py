@@ -12,7 +12,7 @@ from typing import Literal, Protocol, get_args
 _REVISION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 #: Canonical IDs for the two historical schema release boundaries (see
 #: backend/migrations/frozen_revisions.json); every later revision descends
-#: from ``efcbcf724889`` in one linear chain.
+#: from ``efcbcf724889`` in a graph with one current head.
 RELEASED_BASE_REVISION = "bd62193d5cf6"
 RELEASED_EPIC1_REVISION = "efcbcf724889"
 #: Identifiers of the pre-rebaseline chain. A database stamped with one of

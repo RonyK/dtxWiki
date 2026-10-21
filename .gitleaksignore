@@ -1,0 +1,4 @@
+# Synthetic corpus labels passed to plan_synthetic_corpus, not credentials.
+# Match only the two reviewed historical findings; keep all scanning rules.
+2489e818f096997e633cf7f84a7ed946ab253a04:backend/tests/integration/test_synthetic_corpus_profiles.py:generic-api-key:324
+2489e818f096997e633cf7f84a7ed946ab253a04:backend/tests/integration/test_synthetic_corpus_profiles.py:generic-api-key:339

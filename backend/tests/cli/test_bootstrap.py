@@ -29,7 +29,7 @@ def test_bootstrap_creates_sqlite_db_without_a_global_workspace(tmp_path, monkey
     assert workspaces() == []
 
 
-def test_bootstrap_disabled_verifies_instead_of_creating_anything(
+def test_bootstrap_core_disabled_verifies_instead_of_creating_anything(
     tmp_path, monkeypatch
 ):
     """auto_bootstrap=false never migrates: an absent database is refused."""
@@ -39,7 +39,7 @@ def test_bootstrap_disabled_verifies_instead_of_creating_anything(
     with pytest.raises(
         bootstrap_module.DatabaseNotCurrentError, match="'dtxwiki bootstrap'"
     ):
-        bootstrap(settings)
+        bootstrap_module.bootstrap_core(settings)
 
     assert not (tmp_path / "dtxwiki").exists()
 
@@ -184,7 +184,7 @@ def test_a_refused_bootstrap_gives_the_runtime_lock_back(tmp_path, monkeypatch):
     runtime_lock.acquire_exclusive(data_dir).release()
 
 
-def test_bootstrap_without_an_app_takes_no_runtime_lock(tmp_path, monkeypatch):
+def test_bootstrap_core_takes_no_runtime_lock(tmp_path, monkeypatch):
     """`dtxwiki update --finalize-bootstrap` migrates under update's own lock."""
     from backend.services.ops import runtime_lock
 
@@ -202,7 +202,38 @@ def test_bootstrap_without_an_app_takes_no_runtime_lock(tmp_path, monkeypatch):
         bootstrap_module, "ensure_data_dirs", lambda: dirs_ensured.append(True)
     )
     with runtime_lock.acquire_exclusive(data_dir):
-        bootstrap(settings)
+        bootstrap_module.bootstrap_core(settings)
 
     assert dirs_ensured == [True]
     assert synced == [(settings, None)]
+
+
+def test_verify_only_commands_coexist_with_api_and_worker(tmp_path, monkeypatch):
+    from backend.app.runtime_resources import RuntimeResources
+
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
+    database = tmp_path / "db.sqlite"
+    copy_migrated_sqlite(database)
+    settings = Settings(database_url=f"sqlite:///{database}", auto_bootstrap=False)
+    resources = RuntimeResources.for_settings(settings)
+    with resources.acquire_parent(managed=False), resources.acquire_consumer():
+        bootstrap(settings)
+
+
+def test_migration_capable_command_refuses_live_worker_before_core(
+    tmp_path, monkeypatch
+):
+    from backend.app.runtime_resources import RuntimeResources
+    from backend.services.ops import runtime_lock
+
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "root"))
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'db.sqlite'}")
+    resources = RuntimeResources.for_settings(settings)
+    monkeypatch.setattr(
+        bootstrap_module,
+        "bootstrap_core",
+        lambda settings: pytest.fail("must not mutate"),
+    )
+    with resources.acquire_activity("shared"), resources.acquire_consumer():
+        with pytest.raises(runtime_lock.RuntimeLockHeldError):
+            bootstrap(settings)

@@ -9,6 +9,7 @@ User=dtxwiki
 Group=dtxwiki
 WorkingDirectory=/opt/dtxwiki
 EnvironmentFile=/etc/dtxwiki/dtxwiki.env
+# Worker mode comes from the backed-up env file so rollback restores it too.
 # `dtxwiki setup production --bind-host <addr>` rewrites the --host value for a
 # TLS proxy or load balancer on another machine; keep 127.0.0.1 otherwise.
 ExecStart=/opt/dtxwiki/.venv/bin/dtxwiki serve --no-open --host 127.0.0.1 --port 21080

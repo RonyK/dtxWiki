@@ -14,7 +14,10 @@ from backend.models.context_media import ContextMediaAsset
 from backend.models.library import LibraryItem
 from backend.models.user import User
 from backend.models.workspace_join import WorkspaceJoinRequest
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.scripts.seed_dev import seed_default_workspace
 
 
@@ -84,6 +87,49 @@ def test_get_in_workspace_returns_none_for_a_nonexistent_id():
             )
             is None
         )
+
+
+def test_scoped_batch_excludes_other_workspaces_and_handles_empty_ids():
+    factory = _session_factory()
+    with factory() as session:
+        home = seed_default_workspace(session, slug="batch-home")
+        other = seed_default_workspace(session, slug="batch-other")
+        items = [
+            LibraryItem(
+                workspace_id=workspace.id,
+                connector_type="manual",
+                format_hint="unknown",
+                uri=f"file:///{index}",
+                metadata_json={},
+                trust_level="unknown",
+                lifecycle_status="registered",
+            )
+            for index, workspace in enumerate([home, other])
+        ]
+        session.add_all(items)
+        session.flush()
+        statement = select_in_workspace_by_ids(
+            LibraryItem, workspace_id=home.id, resource_ids=[item.id for item in items]
+        )
+        assert list(session.scalars(statement)) == [items[0]]
+        assert (
+            list(
+                session.scalars(
+                    select_in_workspace_by_ids(
+                        LibraryItem, workspace_id=home.id, resource_ids=[]
+                    )
+                )
+            )
+            == []
+        )
+
+
+@pytest.mark.parametrize(
+    "model", [ApiToken, WorkspaceJoinRequest, AuditEvent, User, ContextMediaAsset]
+)
+def test_scoped_batch_rejects_unsupported_model_shapes(model):
+    with pytest.raises(TypeError):
+        select_in_workspace_by_ids(model, workspace_id=uuid4(), resource_ids=[uuid4()])
 
 
 def test_get_in_workspace_rejects_workspace_plane_composite_identity():

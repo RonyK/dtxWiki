@@ -19,7 +19,6 @@ import type {
   ReactNode,
 } from "react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import type { TreeNodePayload } from "../api/workspace";
@@ -39,6 +38,7 @@ import { collectHiddenSystemRootNodeIds } from "./treeSectionRoot";
 import { WorkspacePanelChrome } from "./WorkspacePanelChrome";
 import { useNowTick } from "./RelativeTime";
 import { contentChangedAt, TREE_RECENT_CHANGE_MS, treeNodeStatus, treeNodeStatusDescription } from "./treeNodeStatus";
+import { useTreeRowTooltip, type TreeRowTooltip } from "./useTreeRowTooltip";
 
 type TreeRowStyle = CSSProperties & {
   "--tree-level": number;
@@ -213,6 +213,12 @@ export function TreeRail({
     () => new Map(orderedNodes.map((node) => [node.id, node])),
     [orderedNodes],
   );
+  const tooltip = useTreeRowTooltip({
+    nodes: nodeById,
+    now,
+    disabled: Boolean(contextMenu || dragState),
+    scopeKey: favoriteScopeKey,
+  });
   const hiddenRootNodeIds = useMemo(
     () =>
       hideSystemRootNodes
@@ -275,16 +281,34 @@ export function TreeRail({
     onCreateItem &&
     (canCreatePage === true || canCreateFolder === true || canUpload === true),
   );
-  const nodeActionEnabled = Boolean(
-    onRenameNode ||
-    onMoveNode ||
-    onReorderNodeAt ||
-    onDeleteNode ||
-    onCopyNodeLink ||
-    favoriteScope ||
-    createItemEnabled || createFolderEnabled,
-  );
   const anchoredReorderEnabled = Boolean(onReorderNodeAt);
+  const reorderableNodeIds = useMemo(() => {
+    const available = new Set<string>();
+    if (!anchoredReorderEnabled || filterQuery.trim()) return available;
+    const previousByParent = new Map<string | null, TreeNodePayload>();
+    for (const node of orderedNodes) {
+      const previous = previousByParent.get(node.parent_id);
+      if (previous && !previous.is_system_node && !node.is_system_node) {
+        available.add(previous.id);
+        available.add(node.id);
+      }
+      previousByParent.set(node.parent_id, node);
+    }
+    return available;
+  }, [anchoredReorderEnabled, filterQuery, orderedNodes]);
+
+  function canOpenNodeContextMenu(node: TreeNodePayload) {
+    return Boolean(
+      onCopyNodeLink || onRenameNode ||
+      (!node.is_system_node && (onDeleteNode || onMoveNode)) ||
+      reorderableNodeIds.has(node.id) ||
+      (node.can_have_children && (
+        ((onCreateItem || onCreateFolder) && canCreateFolder === true) ||
+        (onCreateItem && canCreatePage === true)
+      )) ||
+      (favoriteScope && favoriteTargetKind(node)),
+    );
+  }
   const resolvedExpandWidthLabel =
     expandWidthLabel ??
     (expandWidthAtMax ? t("resetWidth", { title }) : t("widen", { title }));
@@ -558,7 +582,7 @@ export function TreeRail({
     position: { left: number; top: number },
     invoker: HTMLElement | null,
   ) {
-    if (!nodeActionEnabled) {
+    if (!canOpenNodeContextMenu(node)) {
       return;
     }
     contextMenuInvokerRef.current = invoker;
@@ -701,7 +725,7 @@ export function TreeRail({
       invokePrimaryAction(node);
       return;
     }
-    if (event.shiftKey && event.key === "F10" && nodeActionEnabled) {
+    if (event.shiftKey && event.key === "F10" && canOpenNodeContextMenu(node)) {
       event.preventDefault();
       const target = event.currentTarget.getBoundingClientRect();
       openContextMenu(
@@ -885,10 +909,7 @@ export function TreeRail({
                 canCreateFolder={createFolderEnabled}
                 canCreateItem={createItemEnabled}
                 canCreatePage={canCreatePage === true}
-                canOpenContextMenu={nodeActionEnabled && Boolean(
-                  onCopyNodeLink || onDeleteNode || onRenameNode || onMoveNode || anchoredReorderEnabled ||
-                  createItemEnabled || createFolderEnabled || (favoriteScope && favoriteTargetKind(node))
-                )}
+                canOpenContextMenu={canOpenNodeContextMenu(node)}
                 canToggleExpanded={Boolean(onExpandedNodeIdsChange)}
                 draggable={draggableNode(node)}
                 dragState={dragState}
@@ -908,11 +929,13 @@ export function TreeRail({
                 onToggleExpanded={toggleExpanded}
                 onSelectTarget={onSelectTarget}
                 visualLevel={visualTreeLevel(node, nodeById, hiddenRootNodeIds)}
+                tooltip={tooltip}
               />
             ))}
           </div>
         )}
       </div>
+      {tooltip.popup}
       {contextMenu ? (
         <TreeNodeContextMenu
           canCreateFolder={Boolean(
@@ -987,6 +1010,7 @@ function TreeRow({
   tabIndex,
   onSelectTarget,
   visualLevel,
+  tooltip,
 }: {
   node: TreeNodePayload;
   now: number;
@@ -1042,6 +1066,7 @@ function TreeRow({
   tabIndex: number;
   onSelectTarget?: (node: TreeNodePayload) => void;
   visualLevel: number;
+  tooltip: TreeRowTooltip;
 }) {
   const { t, i18n } = useTranslation("tree");
   const longPressTimerRef = useRef<number | null>(null);
@@ -1050,25 +1075,6 @@ function TreeRow({
   const [isLongPressing, setIsLongPressing] = useState(false);
   const titleId = useId();
   const statusId = useId();
-  const tooltipId = useId();
-  const [tooltipRect, setTooltipRect] = useState<DOMRect | null>(null);
-  const tooltipOwnerRef = useRef<HTMLElement | null>(null);
-  const pointerOverRef = useRef(false);
-  const focusWithinRef = useRef(false);
-  useEffect(() => {
-    if (!tooltipRect) return;
-    const handlePointerMove = (event: Event) => {
-      const owner = tooltipOwnerRef.current;
-      if (!owner) return;
-      // WebKit can miss mouseleave when expanding a row replaces its hovered
-      // chevron SVG. Reconcile against the next real pointer target instead.
-      const pointerWithin = event.target instanceof Node && owner.contains(event.target);
-      pointerOverRef.current = pointerWithin;
-      if (!pointerWithin && !owner.contains(document.activeElement)) setTooltipRect(null);
-    };
-    document.addEventListener("pointermove", handlePointerMove, true);
-    return () => document.removeEventListener("pointermove", handlePointerMove, true);
-  }, [tooltipRect]);
   const status = treeNodeStatus(node, now);
   const statusDescription = treeNodeStatusDescription(node, now, i18n.resolvedLanguage ?? i18n.language, t);
   const level = visualLevel;
@@ -1259,18 +1265,6 @@ function TreeRow({
         ) : null}
       </span>
       {statusDescription ? <span className="visually-hidden tree-row-description" id={statusId}>{statusDescription}</span> : null}
-      {tooltipRect && !actionsOpen ? createPortal(
-        <div id={tooltipId} role="tooltip" className="tree-row-tooltip" style={{
-          left: Math.max(8, Math.min(tooltipRect.left, window.innerWidth - Math.min(320, window.innerWidth - 16) - 8)),
-          ...(tooltipRect.bottom + 100 > window.innerHeight
-            ? { bottom: Math.max(8, window.innerHeight - tooltipRect.top + 6) }
-            : { top: tooltipRect.bottom + 6 }),
-          maxWidth: Math.min(320, window.innerWidth - 16),
-        }}>
-          <strong>{node.title}</strong>
-          {statusDescription ? <span>{statusDescription}</span> : null}
-        </div>, document.body,
-      ) : null}
       {(canCreateItem && onCreateItem && node.can_have_children) ||
       (canCreateFolder && onCreateFolder && node.can_have_children) ||
       canOpenContextMenu ? (
@@ -1369,36 +1363,22 @@ function TreeRow({
         );
       }}
       onFocus={(event) => {
-        tooltipOwnerRef.current = event.currentTarget;
-        focusWithinRef.current = true;
-        setTooltipRect(event.currentTarget.getBoundingClientRect());
+        tooltip.focus(node.id, event.currentTarget);
         onFocusNode(node.id);
       }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          focusWithinRef.current = false;
-          if (!pointerOverRef.current) setTooltipRect(null);
-        }
+        tooltip.blur(event.relatedTarget);
       }}
       onMouseEnter={(event) => {
-        tooltipOwnerRef.current = event.currentTarget;
-        pointerOverRef.current = true;
-        setTooltipRect(event.currentTarget.getBoundingClientRect());
+        tooltip.enter(node.id, event.currentTarget, event);
       }}
-      onMouseLeave={() => {
-        pointerOverRef.current = false;
-        if (!focusWithinRef.current) setTooltipRect(null);
-      }}
+      onMouseLeave={tooltip.leave}
       onDragEnd={onDragEnd}
       onDragLeave={(event) => onDragLeave(node, event)}
       onDragOver={(event) => onDragOver(node, event)}
       onDragStart={(event) => onDragStart(node, event)}
       onDrop={(event) => onDrop(node, event)}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && tooltipRect) {
-          setTooltipRect(null);
-          return;
-        }
         onKeyDown(node, event);
       }}
       onPointerCancel={clearLongPressTimer}

@@ -13,6 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
+CURRENT_HEAD = "49d9c0776c5a"
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"
@@ -24,7 +25,6 @@ REVISION_MODULES = len(
 )
 WHEEL_NAME = "dtxwiki-0.0.0-py3-none-any.whl"
 SDIST_NAME = "dtxwiki-0.0.0.tar.gz"
-TREE_RAIL_REVISION = "c7a4e91b2d60"
 INDEX_HTML = (
     "<!doctype html><html><head>"
     '<link rel="stylesheet" href="/assets/index-abc123.css">'
@@ -164,7 +164,7 @@ def _write_revision(stage, revision, down_revision):
 
 
 def _write_stray_revision(stage):
-    _write_revision(stage, "0003_stray", TREE_RAIL_REVISION)
+    _write_revision(stage, "0003_stray", CURRENT_HEAD)
 
 
 def _write_branch_revision(stage):
@@ -174,9 +174,27 @@ def _write_branch_revision(stage):
 
 
 def _write_merge_revision(stage):
-    _write_revision(stage, "0003_one", TREE_RAIL_REVISION)
-    _write_revision(stage, "0003_two", TREE_RAIL_REVISION)
+    _write_revision(stage, "0003_one", CURRENT_HEAD)
+    _write_revision(stage, "0003_two", CURRENT_HEAD)
     _write_revision(stage, "0004_merge", ("0003_one", "0003_two"))
+
+
+def _write_merge_bypassing_core(stage):
+    _write_branch_revision(stage)
+    _write_revision(stage, "0004_merge", (CURRENT_HEAD, "0003_branch"))
+
+
+def _write_dangling_revision(stage):
+    _write_revision(stage, "0003_dangling", "missing_parent")
+
+
+def _write_cyclic_revisions(stage):
+    _write_revision(stage, "0003_cycle_one", "0003_cycle_two")
+    _write_revision(stage, "0003_cycle_two", "0003_cycle_one")
+
+
+def _write_duplicate_revision(stage):
+    _write_revision(stage, CURRENT_HEAD, ("c7a4e91b2d60", "d148b9746ff5"))
 
 
 def _detach_core_schema_from_the_baseline(stage):
@@ -270,7 +288,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
     assert REVISION_MODULES == 10
     for name in (WHEEL_NAME, SDIST_NAME):
         assert (
-            f"{name}: alembic head {TREE_RAIL_REVISION}, "
+            f"{name}: alembic head {CURRENT_HEAD}, "
             f"{REVISION_MODULES} packaged core revision modules, "
             "15 frozen migration files intact, "
             "frontend bundle intact"
@@ -340,7 +358,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     assert probe.returncode == 0, probe.stdout + probe.stderr
     resolved = json.loads(probe.stdout)
-    assert resolved["heads"] == [TREE_RAIL_REVISION], "cwd bought no isolation at all"
+    assert resolved["heads"] == [CURRENT_HEAD], "cwd bought no isolation at all"
     leaked = {
         name: origin
         for name, origin in resolved["foreign"].items()
@@ -357,12 +375,13 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
     [
         (
             _write_branch_revision,
-            "packaged Alembic heads are ['0003_branch', 'c7a4e91b2d60'], expected "
+            f"packaged Alembic heads are ['0003_branch', '{CURRENT_HEAD}'], expected "
             "exactly one",
         ),
         (
-            _write_merge_revision,
-            "packaged revision 0004_merge descends from ['0003_one', '0003_two']",
+            _write_merge_bypassing_core,
+            "every ancestry path of packaged revision 0004_merge "
+            "must descend from released core efcbcf724889",
         ),
         (
             lambda stage: (
@@ -374,11 +393,28 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
             ).unlink(),
             "backend/migrations/versions/v0_1/efcbcf724889_core_schema.py is missing",
         ),
-        (_detach_core_schema_from_the_baseline, "it must start with"),
+        (
+            _detach_core_schema_from_the_baseline,
+            "packaged revision graph must preserve released boundaries",
+        ),
+        (_write_dangling_revision, "missing_parent"),
+        (_write_cyclic_revisions, "Cycle is detected in revisions"),
+        (
+            _write_duplicate_revision,
+            f"Revision {CURRENT_HEAD} is present more than once",
+        ),
     ],
-    ids=["second-head", "merge", "missing-core-schema", "detached-baseline"],
+    ids=[
+        "second-head",
+        "merge-bypassing-core",
+        "missing-core-schema",
+        "detached-baseline",
+        "dangling-parent",
+        "cycle",
+        "duplicate",
+    ],
 )
-def test_verifier_rejects_an_artifact_whose_chain_is_not_linear_from_core_schema(
+def test_verifier_rejects_an_artifact_whose_graph_violates_release_boundaries(
     tmp_path, mutate, expected
 ):
     # Each expectation is one check's own wording: the frozen-file check, the
@@ -397,6 +433,68 @@ def test_verifier_accepts_a_linear_revision_after_the_released_chain(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"{WHEEL_NAME}: alembic head 0003_stray, " in result.stdout
+
+
+def test_verifier_accepts_a_merge_of_revisions_descending_from_released_core(tmp_path):
+    result = _run_verifier(_dist(tmp_path, mutate=_write_merge_revision))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    for name in (WHEEL_NAME, SDIST_NAME):
+        assert f"{name}: alembic head 0004_merge, " in result.stdout
+
+
+@pytest.mark.parametrize(
+    "extra_edges, heads, expected",
+    [
+        (
+            [["later", "absent"]],
+            ["later"],
+            "packaged revision later has missing parent absent",
+        ),
+        (
+            [["later", "later"]],
+            [],
+            "packaged revision graph contains a cycle at later",
+        ),
+        (
+            [["later", "efcbcf724889"], ["later", "efcbcf724889"]],
+            ["later"],
+            "packaged revision later is present more than once",
+        ),
+        (
+            [["later", ["efcbcf724889", "efcbcf724889"]]],
+            ["later"],
+            "packaged revision later repeats a parent",
+        ),
+        (
+            [["later", None]],
+            ["later", "efcbcf724889"],
+            "every ancestry path of packaged revision later "
+            "must descend from released core efcbcf724889",
+        ),
+        (
+            [["later", "efcbcf724889"]],
+            ["phantom"],
+            "packaged Alembic heads ['phantom'] do not match graph heads ['later']",
+        ),
+    ],
+    ids=[
+        "missing-parent",
+        "cycle",
+        "duplicate",
+        "repeated-parent",
+        "new-base",
+        "heads",
+    ],
+)
+def test_graph_validation_rejects_corrupt_edges(extra_edges, heads, expected):
+    verifier = _verifier_module()
+
+    failures = verifier._chain_failures(
+        heads, [*verifier.RELEASED_CHAIN_BASE, *extra_edges]
+    )
+
+    assert expected in failures
 
 
 def _append_to(relative):

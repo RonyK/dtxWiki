@@ -391,14 +391,27 @@ def test_the_usage_token_this_listing_serves_is_accepted_by_delete(page_service)
 def test_a_viewer_may_list_their_own_but_is_never_offered_delete(page_service):
     viewer = make_client(page_service, "attach-viewer@example.com", role="viewer")
     workspace_id = _workspace_id(viewer)
-    _seed_asset(
+    seeded = _seed_asset(
         page_service,
         UUID(workspace_id),
         created_by_actor_id=_user_id(page_service, "attach-viewer@example.com"),
     )
 
+    with page_service.session_factory.begin() as session:
+        page = session.get(ContextPage, UUID(seeded["page_id"]))
+        version = session.get(ContextPageVersion, UUID(seeded["version_id"]))
+        version.version_status = "published_snapshot"
+        page.current_published_version_id = version.id
+        page.lifecycle_status = "published"
+
     payload = _list(viewer, workspace_id, scope="mine")
 
+    assert (
+        viewer.get(
+            f"/api/v1/workspaces/{workspace_id}/context/pages/{seeded['page_id']}"
+        ).status_code
+        == 200
+    )
     assert payload.status_code == 200
     items = payload.json()["data"]["items"]
     assert len(items) == 1
@@ -507,3 +520,159 @@ def test_workspace_scope_never_names_another_workspaces_attachment(page_service)
     names = {item["original_filename"] for item in response.json()["data"]["items"]}
     assert names == {"workspace-a-only.png"}
     assert "workspace-b-only.png" not in response.text
+
+
+def _publish_seeded(page_service, seeded):
+    with page_service.session_factory.begin() as session:
+        page = session.get(ContextPage, UUID(seeded["page_id"]))
+        version = session.get(ContextPageVersion, UUID(seeded["version_id"]))
+        version.version_status = "published_snapshot"
+        page.current_published_version_id = version.id
+        page.lifecycle_status = "published"
+        page.is_public = False
+
+
+def test_viewer_cannot_list_own_upload_on_unreadable_page(page_service):
+    viewer = make_client(page_service, "attach-draft-viewer@example.com", role="viewer")
+    workspace_id = _workspace_id(viewer)
+    seeded = _seed_asset(
+        page_service,
+        UUID(workspace_id),
+        created_by_actor_id=_user_id(page_service, "attach-draft-viewer@example.com"),
+        filename="private-unreadable.png",
+        title="Hidden draft title",
+    )
+    for params in (
+        {},
+        {"orphan_only": True},
+        {"q": "private"},
+        {"page_id": seeded["page_id"]},
+    ):
+        response = _list(viewer, workspace_id, **params)
+        assert response.status_code == 200
+        assert response.json()["data"]["items"] == []
+        assert response.json()["data"]["next_cursor"] is None
+        assert "Hidden draft title" not in response.text
+        assert seeded["asset_id"] not in response.text
+    page = viewer.get(
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{seeded['page_id']}"
+    )
+    assert page.status_code == 404
+
+
+def test_visible_only_pagination_across_24_row_boundary(page_service):
+    viewer = make_client(page_service, "attach-pages-viewer@example.com", role="viewer")
+    workspace_id = _workspace_id(viewer)
+    actor_id = _user_id(page_service, "attach-pages-viewer@example.com")
+    visible = set()
+    hidden = []
+    for index in range(41):
+        seeded = _seed_asset(
+            page_service,
+            UUID(workspace_id),
+            created_by_actor_id=actor_id,
+            filename=f"mixed-{index}.png",
+        )
+        if index % 3:
+            _publish_seeded(page_service, seeded)
+            visible.add(seeded["asset_id"])
+        else:
+            hidden.append(seeded)
+    for limit in (2, 24):
+        seen = []
+        cursor = None
+        while True:
+            payload = _list(
+                viewer, workspace_id, limit=limit, cursor=cursor, q="mixed"
+            ).json()["data"]
+            ids = [item["asset_id"] for item in payload["items"]]
+            assert len(ids) == min(limit, len(visible) - len(seen))
+            seen.extend(ids)
+            cursor = payload["next_cursor"]
+            assert bool(cursor) == (len(seen) < len(visible))
+            if not cursor:
+                break
+        assert len(seen) == len(set(seen))
+        assert set(seen) == visible
+    with page_service.session_factory.begin() as session:
+        session.get(
+            ContextPage, UUID(hidden[0]["page_id"])
+        ).lifecycle_status = "archived"
+    # Archived uploads stay hidden even for their owner with draft-read access.
+    owner = make_client(page_service, "attach-pages-owner@example.com", role="owner")
+    response = _list(
+        owner, workspace_id, scope="workspace", page_id=hidden[0]["page_id"]
+    )
+    assert response.json()["data"]["items"] == []
+
+
+def test_foreign_uninserted_upload_has_metadata_without_preview(page_service):
+    owner = make_client(page_service, "attach-preview-owner@example.com", role="owner")
+    author = make_client(
+        page_service, "attach-preview-author@example.com", role="editor"
+    )
+    workspace_id = _workspace_id(owner)
+    seeded = _seed_asset(
+        page_service,
+        UUID(workspace_id),
+        created_by_actor_id=_user_id(page_service, "attach-preview-author@example.com"),
+    )
+    row = _list(owner, workspace_id, scope="workspace").json()["data"]["items"][0]
+    assert row["asset_id"] == seeded["asset_id"]
+    assert row["content_url"] is None
+    url = (
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{seeded['page_id']}"
+        f"/versions/{seeded['version_id']}/media/{seeded['asset_id']}/content"
+    )
+    assert owner.get(url).status_code == 404
+    assert _list(author, workspace_id).json()["data"]["items"][0]["content_url"] == url
+
+
+def test_published_reference_keeps_asset_from_foreign_private_origin(page_service):
+    from backend.models.context_media import ContextMediaUsage
+
+    owner = make_client(page_service, "attach-ref-owner@example.com", role="owner")
+    make_client(page_service, "attach-ref-author@example.com", role="editor")
+    workspace_id = _workspace_id(owner)
+    seeded = _seed_asset(
+        page_service,
+        UUID(workspace_id),
+        created_by_actor_id=_user_id(page_service, "attach-ref-author@example.com"),
+        editing=True,
+    )
+    author_id = _user_id(page_service, "attach-ref-author@example.com")
+    with page_service.session_factory.begin() as session:
+        published = ContextPageVersion(
+            id=uuid4(),
+            workspace_id=UUID(workspace_id),
+            page_id=UUID(seeded["page_id"]),
+            version_no=2,
+            body_md=f"![shot](dtx-media://asset/{seeded['asset_id']})",
+            content_hash="1" * 64,
+            actor_type="human",
+            actor_id=None,
+            version_status="published_snapshot",
+            created_by_actor_kind="human",
+            created_by_actor_id=author_id,
+        )
+        session.add(published)
+        session.flush()
+        page = session.get(ContextPage, UUID(seeded["page_id"]))
+        page.current_published_version_id = published.id
+        page.lifecycle_status = "published"
+        session.add(
+            ContextMediaUsage(
+                workspace_id=UUID(workspace_id),
+                page_id=page.id,
+                asset_id=UUID(seeded["asset_id"]),
+                page_version_id=published.id,
+                reference_count=1,
+            )
+        )
+        published_id = str(published.id)
+    row = _list(owner, workspace_id, scope="workspace").json()["data"]["items"][0]
+    assert row["asset_id"] == seeded["asset_id"]
+    assert f"/versions/{published_id}/" in row["content_url"]
+    # Direct private-version reads remain denied despite the published reference.
+    private_url = row["content_url"].replace(published_id, seeded["version_id"])
+    assert owner.get(private_url).status_code == 404

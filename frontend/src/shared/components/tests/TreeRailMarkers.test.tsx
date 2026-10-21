@@ -22,8 +22,11 @@ function node(overrides: Partial<TreeNodePayload> = {}): TreeNodePayload {
 }
 
 describe("TreeRail document status and personal favorites", () => {
-  beforeEach(() => { clearTreeFavoriteCache(); setTreeFavoriteActor(scope.actorId); });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  beforeEach(() => {
+    clearTreeFavoriteCache(); setTreeFavoriteActor(scope.actorId);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 280, 36));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it.each(["context", "library", "agent"] as const)("renders all six status/favorite combinations in %s without an extra control", (section) => {
     vi.useFakeTimers();
@@ -231,5 +234,29 @@ describe("TreeRail document status and personal favorites", () => {
     unmount();
     render(<TreeRail title="Library" favoriteScope={scope} nodes={[node({ section: "library", target_kind: "library_item", is_favorite: true })]} />);
     expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
+  });
+
+  it("keeps favorite-only folders and artifacts free of empty keyboard and pointer menus", () => {
+    const folder = node({ id: "folder", node_kind: "folder", title: "Folder", target_kind: null, target_id: null,
+      can_have_children: true, children_count: 1 });
+    const onExpandedNodeIdsChange = vi.fn();
+    render(<TreeRail title="Context" favoriteScope={scope} nodes={[
+      folder, node({ id: "artifact", title: "Artifact", target_kind: "library_artifact" }), node(),
+    ]} expandedNodeIds={[]} onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
+    for (const title of ["Folder", "Artifact"]) {
+      const row = screen.getByRole("treeitem", { name: title });
+      act(() => { row.focus(); });
+      expect(within(row).queryByRole("button", { name: /Open actions/ })).not.toBeInTheDocument();
+      fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(row).toHaveFocus();
+      expect(fireEvent.contextMenu(row)).toBe(true);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Expand Folder" }));
+    expect(onExpandedNodeIdsChange).toHaveBeenCalledWith([folder.id]);
+    const page = screen.getByRole("treeitem", { name: "A page" });
+    fireEvent.keyDown(page, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "Add to my favorites" })).toHaveFocus();
   });
 });

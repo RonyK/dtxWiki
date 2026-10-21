@@ -10,6 +10,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.sql.expression import Grouping
 
 revision = "c7a4e91b2d60"
 down_revision = "efcbcf724889"
@@ -33,19 +34,52 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("user_id", "workspace_id", "target_kind", "target_id"),
     )
-    # Current-head lookups must seek one target's events rather than repeatedly
-    # scanning the workspace's entire audit history. This migration-owned index
-    # is temporary; it adds no ongoing write cost to the product schema.
-    index_name = "ix_tree_rail_backfill_audit_target"
-    op.create_index(
-        index_name,
-        "audit_event",
-        ["workspace_id", "target_kind", "target_id", "action", "created_at", "id"],
-    )
+    # Seek each exact version, including when a long chain has unchanged
+    # content. A target/time index alone rescans all newer target events at
+    # every predecessor. This index adds no ongoing product write cost.
+    connection = op.get_bind()
+    audits = sa.Table("audit_event", sa.MetaData(), autoload_with=connection)
+    lookup_index = _publication_lookup_index(audits)
+    lookup_index.create(connection)
     try:
-        _backfill_proven_publications()
+        _backfill_proven_publications(audits)
     finally:
-        op.drop_index(index_name, table_name="audit_event")
+        lookup_index.drop(connection)
+
+
+def _audit_version_id(audits):
+    # SQLite expression indexes require the query expression to have exactly
+    # the same constant JSON path as the index. A normal JSON key bind would
+    # leave JSON_EXTRACT(payload, ?) unseekable. literal_execute renders this
+    # migration-owned constant portably on SQLite and PostgreSQL.
+    key = sa.literal("version_id", type_=sa.JSON.JSONStrIndexType, literal_execute=True)
+    version_id = audits.c.payload[key].as_string()
+    # Only these two canonical UUID forms can match a proven pointer. Bound
+    # index keys also tolerate malformed historical payloads with huge values
+    # that would exceed PostgreSQL's btree entry limit.
+    return Grouping(
+        sa.case(
+            (
+                sa.func.length(version_id).in_(
+                    [sa.literal(length, literal_execute=True) for length in (32, 36)]
+                ),
+                version_id,
+            )
+        )
+    )
+
+
+def _publication_lookup_index(audits):
+    return sa.Index(
+        "ix_tree_rail_backfill_audit_target",
+        audits.c.workspace_id,
+        audits.c.target_kind,
+        audits.c.target_id,
+        audits.c.action,
+        _audit_version_id(audits),
+        audits.c.created_at,
+        audits.c.id,
+    )
 
 
 def _id(value):
@@ -110,9 +144,9 @@ def _publication_time(
                     audits.c.target_kind == kind,
                     audits.c.target_id == page["id"],
                     audits.c.action == action,
-                    audits.c.payload["version_id"]
-                    .as_string()
-                    .in_((candidate_id, str(UUID(candidate_id)))),
+                    _audit_version_id(audits).in_(
+                        (candidate_id, str(UUID(candidate_id)))
+                    ),
                 )
                 .order_by(audits.c.created_at.desc(), audits.c.id.desc())
                 .limit(1)
@@ -173,10 +207,9 @@ def _publication_time(
     return None
 
 
-def _backfill_proven_publications():
+def _backfill_proven_publications(audits):
     connection = op.get_bind()
-    metadata = sa.MetaData()
-    audits = sa.Table("audit_event", metadata, autoload_with=connection)
+    metadata = audits.metadata
     for kind, pointer, owner, action, previous_key in (
         (
             "context_page",

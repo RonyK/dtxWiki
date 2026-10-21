@@ -53,6 +53,125 @@ const GEOMETRY_EPSILON = 0.001;
 
 test.describe("TreeRail document states and personal favorites @cross-browser", () => {
   for (const viewport of VIEWPORTS) {
+    test(`${viewport.key}: status tooltip survives pointer handoff, dismisses with Escape, and follows native scrolling`, async ({ page }, testInfo) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize(viewport);
+      await authenticatePage(page, testInfo, `tree-tooltip-${viewport.key}`);
+      const workspace = await currentWorkspace(page.request);
+      const published: ContextVersion[] = [];
+      for (let index = 0; index < 32; index++) {
+        published.push(await publishContext(page.request, workspace.id,
+          `Tooltip review fixture ${String(index).padStart(2, "0")} — a long document title with readable status details${". Extended title content must remain readable in a short viewport".repeat(12)}`));
+      }
+      const nodes = await treeNodes(page.request, workspace.id, "context");
+      await page.goto("/context");
+      const rail = await openRail(page, viewport.width);
+      await expandAncestors(rail, nodes, published[0].id);
+      const row = rail.locator(".tree-row").filter({ hasText: "Tooltip review fixture" }).first();
+      await row.scrollIntoViewIfNeeded();
+      const title = await row.locator(".tree-row-title").innerText();
+      const tooltip = page.getByRole("tooltip");
+      const filter = rail.locator(".tree-filter input");
+      await filter.focus();
+      await page.mouse.move(viewport.width - 1, 1);
+      await row.hover();
+      await expect(tooltip).toHaveCount(1);
+      await expect(tooltip).toContainText(title);
+      await expect(filter).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(tooltip).toHaveCount(0);
+      await expect(rail).toBeVisible();
+      if (viewport.width <= 1024) await expect(rail).toHaveAttribute("data-mobile-open", "true");
+
+      await page.mouse.move(viewport.width - 1, 1);
+      await row.hover();
+      await expect(tooltip).toBeVisible();
+      const ownerBox = (await row.boundingBox())!;
+      const popupBox = (await tooltip.boundingBox())!;
+      const below = popupBox.y >= ownerBox.y + ownerBox.height;
+      const gapStart = below ? ownerBox.y + ownerBox.height : ownerBox.y;
+      const gapEnd = below ? popupBox.y : popupBox.y + popupBox.height;
+      const handoffX = Math.max(ownerBox.x, popupBox.x) + 16;
+      await page.mouse.move(handoffX, below ? gapStart - 1 : gapStart + 1);
+      await page.mouse.move(handoffX, (gapStart + gapEnd) / 2);
+      await expect(tooltip).toHaveCount(1);
+      await expect(tooltip).toContainText(title);
+      await page.mouse.move(handoffX, popupBox.y + popupBox.height / 2);
+      await expect(tooltip).toContainText(title);
+      await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-pointer-handoff`, { animations: "disabled" });
+      await page.keyboard.press("Escape");
+      await expect(tooltip).toHaveCount(0);
+
+      // Native PageDown scrolls the focused row out of the rail without any
+      // pointer movement. A tooltip belonging to that clipped row must close.
+      await page.mouse.move(viewport.width - 1, 1);
+      await row.focus();
+      await expect(row).toBeFocused();
+      await expect(tooltip).toBeVisible();
+      const body = rail.locator(".tree-rail-body");
+      expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+      await page.keyboard.press("PageDown");
+      await expect.poll(() => row.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const clip = element.closest(".tree-rail-body")!.getBoundingClientRect();
+        return bounds.bottom <= clip.top;
+      })).toBe(true);
+      await expect(row).toBeFocused();
+      await expect(tooltip).toHaveCount(0);
+
+      // A viewport resize must keep a visible owner's popup inside the new
+      // viewport, or dismiss it if the row itself becomes fully clipped.
+      await row.scrollIntoViewIfNeeded();
+      await filter.focus();
+      await row.focus();
+      await expect(tooltip).toBeVisible();
+      const ownerNodeId = await row.getAttribute("data-node-id");
+      await page.setViewportSize({ width: viewport.width, height: 280 });
+      await expect.poll(() => page.evaluate((nodeId) => {
+        const owner = document.querySelector(`.tree-row[data-node-id="${nodeId}"]`)!;
+        const ownerBounds = owner.getBoundingClientRect();
+        const clip = owner.closest(".tree-rail-body")!.getBoundingClientRect();
+        const visibleOwner = ownerBounds.width > 0 && ownerBounds.height > 0 &&
+          ownerBounds.bottom > Math.max(0, clip.top) && ownerBounds.top < Math.min(innerHeight, clip.bottom) &&
+          ownerBounds.right > Math.max(0, clip.left) && ownerBounds.left < Math.min(innerWidth, clip.right);
+        const popup = document.querySelector('[role="tooltip"]');
+        if (!popup) return !visibleOwner;
+        const bounds = popup.getBoundingClientRect();
+        return visibleOwner && bounds.top >= 7 && bounds.left >= 7 && bounds.bottom <= innerHeight - 7 && bounds.right <= innerWidth - 7;
+      }, ownerNodeId)).toBe(true);
+      await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-after-native-scroll-and-resize`, { animations: "disabled" });
+    });
+
+    test(`${viewport.key}: favorite-only editor folders keep keyboard focus and never open an empty menu`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await authenticatePage(page, testInfo, `tree-folder-menu-${viewport.key}`);
+      const workspace = await currentWorkspace(page.request);
+      const folder = await responseData<{ id: string }>(await page.request.post(endpoint(workspace.id, "/tree/nodes"), {
+        data: { node_kind: "folder", parent_id: null, section: "context", slug: `keyboard-folder-${randomUUID()}`, title: "Keyboard folder without actions" },
+      }));
+      const document = await publishContext(page.request, workspace.id, "Editor document with a favorite action");
+      const nodes = await treeNodes(page.request, workspace.id, "context");
+      await page.goto(`/workspaces/${workspace.id}/context/pages/${document.id}/edit`);
+      const rail = await openRail(page, viewport.width);
+      await expandAncestors(rail, nodes, document.id);
+      const folderRow = rail.locator(`.tree-row[data-node-id="${folder.id}"]`);
+      await expect(folderRow).toBeVisible();
+      await expect(folderRow.locator(".tree-row-menu-button")).toHaveCount(0);
+      await folderRow.focus();
+      await page.keyboard.press("Shift+F10");
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      await expect(folderRow).toBeFocused();
+      await evidenceScreenshot(page, testInfo, `${viewport.key}-editor-folder-without-empty-menu`, { animations: "disabled" });
+
+      const documentRow = treeRow(rail, document.id);
+      await documentRow.focus();
+      await page.keyboard.press("Shift+F10");
+      await expect(page.getByRole("menuitem", { name: "Add to my favorites", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      await expect(documentRow).toBeFocused();
+    });
+
     test(`${viewport.key}: six real Context state/favorite combinations preserve title space`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
