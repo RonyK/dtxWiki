@@ -81,8 +81,7 @@ describe("SettingsScreen", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it("renders labelled policy groups and MCP clients behind section navigation", async () => {
-    const user = userEvent.setup();
+  function mockPolicyNavigationAndMcpClients() {
     let mcpStatus: "active" | "disabled" = "active";
     const mcpPage = (status: "active" | "disabled" | "all") => {
       const row = {
@@ -199,6 +198,17 @@ describe("SettingsScreen", () => {
         data: [],
       },
     });
+    return {
+      fetchMock,
+      setMcpStatus(status: "active" | "disabled") {
+        mcpStatus = status;
+      },
+    };
+  }
+
+  it("renders labelled workspace and content policies behind section navigation", async () => {
+    const user = userEvent.setup();
+    const { fetchMock } = mockPolicyNavigationAndMcpClients();
 
     render(
       <MemoryRouter>
@@ -290,7 +300,17 @@ describe("SettingsScreen", () => {
     expect(
       screen.queryByRole("button", { name: /Audit & diagnostics/i }),
     ).not.toBeInTheDocument();
+  });
 
+  it("confirms MCP client disabling and updates the status projection", async () => {
+    const user = userEvent.setup();
+    const { fetchMock, setMcpStatus } = mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "Workspace", level: 1 });
     await user.click(screen.getByRole("button", { name: /MCP access/i }));
     expect(screen.getByText("Access key setup")).toBeInTheDocument();
     expect(await screen.findByText("Local MCP")).toBeInTheDocument();
@@ -325,7 +345,7 @@ describe("SettingsScreen", () => {
     );
     // Reopen and confirm: the default Active projection removes the row.
     await user.click(screen.getByRole("button", { name: /^Disable / }));
-    mcpStatus = "disabled";
+    setMcpStatus("disabled");
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
@@ -346,6 +366,17 @@ describe("SettingsScreen", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients/mcp-1`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it("shows MCP client and access-key metadata from a direct account link", async () => {
+    const user = userEvent.setup();
+    mockPolicyNavigationAndMcpClients();
+    render(
+      <MemoryRouter initialEntries={["/settings?section=mcp"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Local MCP");
     await user.click(screen.getByText("View details"));
     expect(screen.getByText("Client ID")).toBeInTheDocument();
     expect(screen.getByText("mcp-1")).toBeInTheDocument();
