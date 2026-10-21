@@ -3,8 +3,29 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
+from backend.schemas.common import RESTResponseBase
 from backend.schemas.input_policy import InputRequest
 from backend.schemas.page import PAGE_SLUG_PATTERN
+
+FavoriteTargetKind = Literal["context_page", "library_item", "agent_page"]
+
+
+class FavoriteUpdateRequest(BaseModel):
+    is_favorite: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FavoritePayload(BaseModel):
+    target_kind: FavoriteTargetKind
+    target_id: UUID
+    is_favorite: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FavoriteResponse(RESTResponseBase):
+    data: FavoritePayload
 
 
 class TreeFolderCreateRequest(InputRequest):

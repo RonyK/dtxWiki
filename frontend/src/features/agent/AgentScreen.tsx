@@ -61,6 +61,7 @@ import type {
   TreeSectionPolicy,
 } from "../../shared/api/workspace";
 import { isEditorRole } from "../../shared/workspace/permissions";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { AvatarWithTimestamp } from "../../shared/components/Avatar";
@@ -154,6 +155,7 @@ export function AgentScreen() {
   // the ?edit= modal) so a viewer is never dropped into an editor that only
   // fails on save (mirrors ContextScreen). This hook MUST run before the early
   // `if (!state) return` below (Rules of Hooks). Backend RBAC still re-enforces.
+  const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
   const workspaceRole = workspaceContext?.selectedWorkspace?.role ?? null;
   const canEdit = isEditorRole(workspaceRole);
@@ -1233,6 +1235,7 @@ export function AgentScreen() {
           onExpandWidth,
         }) => (
           <TreeRail
+            favoriteScope={auth?.user && state.workspaceId ? { actorId: auth.user.user_id, workspaceId: state.workspaceId } : undefined}
             title={t("title", { defaultValue: "Agent" })}
             accent="agent"
             nodes={treeNodes}

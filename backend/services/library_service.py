@@ -974,6 +974,7 @@ class LibraryService:
             session.add(existing_version)
             session.flush()
             item.current_version_id = existing_version.id
+            item.content_changed_at = utc_now()
             item.lifecycle_status = "extract_pending"
             session.add(item)
             session.flush()

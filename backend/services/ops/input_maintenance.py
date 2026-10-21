@@ -31,7 +31,16 @@ from backend.services.ops.migration_preflight import (
     make_non_mutating_engine,
 )
 
-SUPPORTED = frozenset({"bd62193d5cf6", "efcbcf724889", "d148b9746ff5", REVISION})
+SUPPORTED = frozenset(
+    {
+        "bd62193d5cf6",
+        "efcbcf724889",
+        "d148b9746ff5",
+        "c7a4e91b2d60",
+        "49d9c0776c5a",
+        REVISION,
+    }
+)
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),

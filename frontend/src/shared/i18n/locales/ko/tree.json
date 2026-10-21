@@ -143,5 +143,21 @@
     "previewTitle": "인덱스 미리보기 (에이전트에게 보이는 모습)",
     "previewLoading": "불러오는 중…",
     "previewError": "인덱스 미리보기를 불러오지 못했습니다."
+  },
+  "favorite": {
+    "add": "내 즐겨찾기에 추가",
+    "remove": "내 즐겨찾기에서 해제",
+    "mine": "내 즐겨찾기",
+    "failed": "{{title}} 즐겨찾기를 변경하지 못했습니다."
+  },
+  "status": {
+    "normal": "일반",
+    "recent": "최근 변경",
+    "pending": "리뷰 대기",
+    "changesRequested": "수정 요청",
+    "noReviewTime": "리뷰 요청 시각 없음",
+    "noContentTime": "내용 변경 시각 없음",
+    "reviewTime": "리뷰 요청 {{time}}",
+    "contentTime": "마지막 내용 변경 {{time}}"
   }
 }

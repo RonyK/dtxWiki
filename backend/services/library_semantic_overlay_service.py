@@ -255,6 +255,7 @@ class LibrarySemanticOverlayService:
             overlay.updated_by_actor_id = str(actor.actor_id)
             overlay.updated_at = now
         item.updated_at = now
+        item.content_changed_at = now
         session.flush()
 
         # Lexical search changes in the same transaction. Existing semantic

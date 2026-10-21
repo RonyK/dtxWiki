@@ -81,8 +81,35 @@ and uv or pipx; with pipx, Python 3.12 or newer must also be installed.
 Start with one Context page about your current project. Link the background,
 then connect an AI tool through **Settings > Integrations** when you want help.
 
+Account display names accept 1–32 Unicode code points. Email addresses allow up
+to 254 UTF-8 bytes in total, including at most 64 bytes before `@`. New passwords
+must contain 15–128 Unicode code points. These limits apply to the web app, API,
+and CLI; explicit values over the limit are rejected rather than shortened.
+
 **[Open the documentation →](http://docs.dtxwiki.com/)** for installation details,
 AI connections, team setup, updates, and everyday workflows.
+
+## Upgrading an existing database
+
+Back up your database before upgrading. Before starting the upgraded server,
+run the input audit with the same configuration and database as your server:
+
+```bash
+dtxwiki inputs audit
+```
+
+The audit exits with code 1 when current metadata violates a new database
+constraint. Repair those values explicitly by UUID using
+`dtxwiki users set-display-name`, `dtxwiki users set-email`, or
+`dtxwiki inputs repair-metadata`; each command provides `--help` and a `--db`
+option. The audit does not change data or upgrade the schema. Historical findings
+remain preserved and do not block the upgrade. An exit code of 2 means the audit
+could not inspect the database.
+
+Existing passwords longer than 128 Unicode code points can no longer be used
+to log in or reauthenticate. Set a new password through password recovery or
+administrator recovery. See [DEPLOYMENT.md](DEPLOYMENT.md) for backup and upgrade
+procedures.
 
 ## Get involved
 

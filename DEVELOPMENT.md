@@ -448,6 +448,12 @@ revision 파일만 둡니다. 릴리스의 DB head 매핑은 `release_manifest.j
 패키지 검증기의 해시 목록에 함께 고정합니다. 기존에 배포된 migration은 수정하거나
 다시 합치지 않습니다.
 
+여러 브랜치에서 같은 head 뒤에 migration을 추가한 경우에는 기존 revision을
+유지하고, 두 revision을 부모로 지정한 병합 revision을 추가합니다. 최종 그래프는
+head가 하나여야 하며, 모든 신규 경로가 고정된 core revision
+`efcbcf724889`를 거쳐야 합니다. 패키지 검증기는 이 그래프와 고정 파일의 해시를
+함께 확인합니다.
+
 ### Migration 테스트 수 제한
 
 새 migration의 기본 예산은 DB별 upgrade → downgrade → re-upgrade 시나리오

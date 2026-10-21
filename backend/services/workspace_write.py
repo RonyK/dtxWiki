@@ -41,6 +41,7 @@ from backend.models import (
     StoredBlobRow,
     TreePolicy,
     User,
+    UserFavorite,
     Workspace,
     WorkspaceCredentialGrant,
     WorkspaceMediaQuotaUsage,
@@ -548,6 +549,9 @@ class WorkspaceWriteService:
         )
         session.execute(
             delete(TreePolicy).where(TreePolicy.workspace_id == workspace_id)
+        )
+        session.execute(
+            delete(UserFavorite).where(UserFavorite.workspace_id == workspace_id)
         )
         session.execute(
             delete(WorkspaceTreeNode).where(

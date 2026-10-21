@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -45,6 +45,51 @@ from backend.services.read_errors import ReadValidationError, StaleBaseVersionEr
 from backend.tests.conftest import authenticate_test_client_in_workspace
 
 pytestmark = pytest.mark.integration
+
+
+def test_overlay_content_time_changes_only_when_visible_markdown_changes(
+    session_factory,
+    monkeypatch,
+):
+    import backend.services.library_semantic_overlay_service as module
+
+    first_time = datetime(2026, 10, 1, tzinfo=UTC)
+    clock = {"now": first_time}
+    monkeypatch.setattr(module, "utc_now", lambda: clock["now"])
+    service = LibrarySemanticOverlayService()
+    with session_factory.begin() as session:
+        workspace_id, item, version, artifact = _seed_editable(session)
+        item.content_changed_at = first_time - timedelta(days=5)
+        original_time = item.content_changed_at
+
+        def update(body, revision):
+            return service.update_current(
+                session=session,
+                workspace_id=workspace_id,
+                version_id=version.id,
+                actor=_actor(),
+                body_markdown=body,
+                expected_revision=revision,
+                expected_base_artifact_id=artifact.id,
+                expected_base_content_sha256=artifact.content_sha256,
+            )
+
+        original_body = artifact.conversion_detail.index_text
+        unchanged = update(original_body, 0)
+        assert unchanged.revision == 0
+        assert item.content_changed_at == original_time
+        changed = update(original_body + "\n\nUser-authored edit.", 0)
+        assert changed.revision == 1
+        assert item.content_changed_at == first_time
+
+        clock["now"] += timedelta(days=1)
+        duplicate = update(changed.body_markdown, 1)
+        assert duplicate.revision == 1
+        assert item.content_changed_at == first_time
+        # Returning to the converter's original text is also a visible change.
+        restored = update(original_body, 1)
+        assert restored.body_markdown == original_body
+        assert item.content_changed_at == clock["now"]
 
 
 def _actor(actor_id: str = "semantic-editor") -> ActorContext:
@@ -254,8 +299,7 @@ def test_overlay_save_is_immediate_cas_and_preserves_converter_artifact(
         assert session.scalars(select(ContentChunk)).all() == []
         fts_bodies = session.scalars(
             text(
-                "SELECT body FROM search_doc_fts "
-                "WHERE source_kind = 'library_artifact'"
+                "SELECT body FROM search_doc_fts WHERE source_kind = 'library_artifact'"
             )
         ).all()
         assert edited_body in fts_bodies

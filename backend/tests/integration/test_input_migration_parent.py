@@ -5,6 +5,7 @@ one traversal. Chain structure is already checked by test_migration_chain.py;
 scalar expressions belong in unit tests. Do not add per-column/stage cases.
 """
 
+import json
 import os
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -15,12 +16,17 @@ from alembic import command
 from alembic.config import Config
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.models.agent import AgentPage
+from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.favorite import UserFavorite
+from backend.models.library import LibraryItem
 from backend.services.ops.input_maintenance import audit_inputs, repair_input
 
 pytestmark = pytest.mark.xdist_group("postgres")
 
 CORE = "efcbcf724889"
 RETENTION = "d148b9746ff5"
+MERGED = "49d9c0776c5a"
 INPUTS = "19db79d3e622"
 
 
@@ -174,6 +180,103 @@ def _assert_policy_column_and_server_default(engine, stage):
     return key
 
 
+def _seed_tree_rail(engine, workspace_id):
+    """The merge has every current column; 19db adds only input checks."""
+    changed_at = datetime(2026, 10, 20, 12, 34, 56, tzinfo=UTC)
+    context_id, version_id, agent_id, library_id = (uuid4() for _ in range(4))
+    with engine.begin() as connection:
+        connection.execute(
+            ContextPage.__table__.insert().values(
+                id=context_id,
+                workspace_id=workspace_id,
+                title="Preserved context",
+                slug="preserved-context",
+                content_changed_at=changed_at,
+            )
+        )
+        connection.execute(
+            ContextPageVersion.__table__.insert().values(
+                id=version_id,
+                workspace_id=workspace_id,
+                page_id=context_id,
+                body_md="# Preserved context\n\nExisting draft body.",
+                content_hash="preserved",
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id="migration-test",
+            )
+        )
+        connection.execute(
+            ContextPage.__table__.update()
+            .where(ContextPage.id == context_id)
+            .values(latest_draft_version_id=version_id)
+        )
+        connection.execute(
+            AgentPage.__table__.insert().values(
+                id=agent_id,
+                workspace_id=workspace_id,
+                title="Preserved agent",
+                slug="preserved-agent",
+                category="skill",
+                content_changed_at=changed_at,
+            )
+        )
+        connection.execute(
+            LibraryItem.__table__.insert().values(
+                id=library_id,
+                workspace_id=workspace_id,
+                connector_type="web",
+                uri="https://example.com/preserved",
+                title="Preserved library item",
+                content_changed_at=changed_at,
+            )
+        )
+        connection.execute(
+            UserFavorite.__table__.insert().values(
+                workspace_id=workspace_id,
+                user_id=uuid4(),
+                target_kind="context_page",
+                target_id=context_id,
+                created_at=changed_at,
+            )
+        )
+
+
+def _tree_rail_snapshot(engine):
+    rows = {}
+    with engine.connect() as connection:
+        for name in (
+            "context_page",
+            "context_page_version",
+            "agent_page",
+            "library_item",
+            "user_favorite",
+        ):
+            table = sa.Table(name, sa.MetaData(), autoload_with=connection)
+            rows[name] = [
+                dict(row) for row in connection.execute(sa.select(table)).mappings()
+            ]
+    inspector = sa.inspect(engine)
+    schema = {
+        name: {
+            # Rebuilding a table may reorder catalog entries without changing
+            # their meaning. Keep every reflected property, sorted by identity.
+            "indexes": sorted(
+                inspector.get_indexes(name), key=lambda item: item["name"]
+            ),
+            "foreign_keys": sorted(
+                inspector.get_foreign_keys(name), key=lambda item: item["name"]
+            ),
+            "unique_constraints": sorted(
+                inspector.get_unique_constraints(name), key=lambda item: item["name"]
+            ),
+            "primary_key": inspector.get_pk_constraint(name),
+        }
+        for name in ("context_page", "agent_page", "library_item", "user_favorite")
+    }
+    return rows, json.dumps(schema, sort_keys=True, default=str)
+
+
 def test_retention_policy_survives_input_restrictions_round_trip(migration_database):
     url, engine, config = migration_database
     command.upgrade(config, "bd62193d5cf6")
@@ -206,14 +309,23 @@ def test_retention_policy_survives_input_restrictions_round_trip(migration_datab
     assert expected["context_media_policy"] == policy
     defaults = [_assert_policy_column_and_server_default(engine, "retention")]
 
+    command.upgrade(config, MERGED)
+    assert _stamp(engine) == MERGED
+    assert audit_inputs(url) == []
+    _seed_tree_rail(engine, identity)
+    tree_rail = _tree_rail_snapshot(engine)
+
     for destination, direction, stage in (
         ("head", command.upgrade, "inputs"),
-        (RETENTION, command.downgrade, "parent-again"),
+        (MERGED, command.downgrade, "parent-again"),
         ("head", command.upgrade, "inputs-again"),
     ):
         direction(config, destination)
-        assert _stamp(engine) == (RETENTION if destination == RETENTION else INPUTS)
+        assert _stamp(engine) == (MERGED if destination == MERGED else INPUTS)
         assert _row(engine, key) == expected
+        # The SQLite input-check batch rebuild must retain new TreeRail columns,
+        # reciprocal version FKs, existing indexes and shard-local favorites.
+        assert _tree_rail_snapshot(engine) == tree_rail
         for default_key in defaults:
             assert _row(engine, default_key)["context_media_policy"] == {}
         defaults.append(_assert_policy_column_and_server_default(engine, stage))

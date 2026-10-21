@@ -16,6 +16,7 @@ from backend.library_media.ports import (
     LibraryLogicalQuotaFactory,
 )
 from backend.media.domain import BlobReference
+from backend.models.base import utc_now
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.workspace import Workspace
 from backend.repositories.media_blob_reference import (
@@ -376,6 +377,8 @@ class LibraryBinaryRegistrationService:
         # of which branch produced it, otherwise re-uploading bytes matching an
         # older version leaves current_version_id pointing at a version that
         # is no longer the one this operation just registered.
+        if item.current_version_id != version.id:
+            item.content_changed_at = utc_now()
         item.current_version_id = version.id
 
         self.logical_quota_factory(session).reserve(
