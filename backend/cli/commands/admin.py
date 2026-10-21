@@ -27,6 +27,7 @@ from backend.services.api_token_service import (
     ApiTokenServiceError,
     InvalidApiTokenRequestError,
     WorkspaceGrantRequest,
+    normalize_token_name,
 )
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.mail_delivery import EmailDeliveryService, MailDeliveryError
@@ -169,6 +170,7 @@ def users_issue_password_reset(
 ) -> None:
     """Issue a one-time reset link without choosing the user's password."""
 
+    email = _cli_normalize_email(email)
     try:
         settings, session_factory = password_recovery_context(db)
         effective_delivery = resolve_cli_password_reset_delivery(
@@ -282,13 +284,18 @@ def users_issue_pat(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Issue a personal API token directly from the local database."""
+    normalized_email = _cli_normalize_email(user)
+    try:
+        name = normalize_token_name(name)
+        scopes = parse_pat_scopes(scope)
+        parsed_expires_at = parse_pat_expires_at(expires_at)
+    except (ApiTokenServiceError, ValueError) as exc:
+        typer.echo(f"issue-pat failed: {exc}", err=True)
+        raise typer.Exit(2) from exc
     settings = Settings(database_url=db) if db else Settings()
     bootstrap_app(settings)
     session_factory = make_session_factory_from_settings(settings)
     try:
-        normalized_email = _cli_normalize_email(user)
-        scopes = parse_pat_scopes(scope)
-        parsed_expires_at = parse_pat_expires_at(expires_at)
         with session_factory() as session:
             model = session.scalar(select(User).where(User.email == normalized_email))
             if model is None:
@@ -576,6 +583,7 @@ def workspace_members_add(
     """Add or update a user's workspace membership."""
     if role not in USER_ROLES:
         raise typer.BadParameter("--role must be one of: owner, editor, viewer")
+    email = _cli_normalize_email(email)
     service = make_workspace_membership_service(db)
     try:
         member = service.add_member(
@@ -604,6 +612,7 @@ def workspace_members_remove(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Remove a user's workspace membership."""
+    email = _cli_normalize_email(email)
     service = make_workspace_membership_service(db)
     try:
         removed = service.remove_member(workspace_slug=workspace, email=email)

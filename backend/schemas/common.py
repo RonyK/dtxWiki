@@ -135,7 +135,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  12 -- Shared write-input limits: normalized titles and labels, final body
 #        budgets, human explanations, feedback and submitted reference lists.
 #        Refresh tools/list; oversized explicit input now fails validation.
-MCP_TOOL_CONTRACT_REVISION = 12
+#  13 -- Bundle categories now expose the supported enum, review notes reject
+#        invalid Unicode, and body budgets describe the final stored Markdown.
+#        Refresh tools/list before submitting content and bundle requests.
+MCP_TOOL_CONTRACT_REVISION = 13
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

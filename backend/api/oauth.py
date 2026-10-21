@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.routing import APIRoute
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from backend.api.auth import (
@@ -35,7 +36,6 @@ from backend.app.errors import build_rest_error_response
 from backend.app.state import get_container_from_app
 from backend.audit.emitter import emit_oauth_event
 from backend.domain.credential_input import (
-    OAUTH_JWT_MAX_BYTES,
     OAUTH_OPAQUE_TOKEN_MAX_BYTES,
     OAUTH_QUERY_MAX_BYTES,
     WORKSPACE_GRANTS_MAX_COUNT,
@@ -70,6 +70,7 @@ from backend.services.oauth_service import (
     OAuthRateLimitError,
     OAuthService,
     UnsupportedGrantTypeError,
+    _consume_dcr_slot,
     classify_oauth_csrf_failure,
     consume_oauth_csrf_state,
     consume_token_slot,
@@ -78,7 +79,44 @@ from backend.services.oauth_service import (
 )
 from backend.services.session_service import AuthenticatedUser, SessionServiceError
 
-router = APIRouter(tags=["oauth"])
+
+class OAuthRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+        if self.path != "/oauth/authorize" or "GET" not in self.methods:
+            return handler
+
+        async def bounded_authorize(request: Request) -> Response:
+            # APIRoute calls this before dependency resolution reads query_params.
+            if len(request.scope.get("query_string", b"")) > OAUTH_QUERY_MAX_BYTES:
+                return oauth_error_response(
+                    InvalidOAuthRequestError("authorization query exceeds 16KiB"), 400
+                )
+            return await handler(request)
+
+        return bounded_authorize
+
+
+router = APIRouter(tags=["oauth"], route_class=OAuthRoute)
+
+OAUTH_SINGLETON_PARAMETERS = frozenset(
+    {
+        "client_id",
+        "redirect_uri",
+        "response_type",
+        "state",
+        "scope",
+        "code_challenge",
+        "code_challenge_method",
+        "code",
+        "code_verifier",
+        "refresh_token",
+        "grant_type",
+        "token",
+        "token_type_hint",
+        "decision",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -113,10 +151,15 @@ def jwks(request: Request, session_factory: SessionFactoryDep):
 @router.post("/oauth/register", status_code=201)
 async def register_client(request: Request, session_factory: SessionFactoryDep):
     try:
+        client_ip = oauth_client_ip(request)
+        if not request.app.state.settings.oauth_allow_dcr:
+            raise InvalidClientRegistrationError("dynamic client registration disabled")
+        _consume_dcr_slot(client_ip)
         payload = await _parse_unique_json_body(request)
         client = oauth_service(request, session_factory).register_client(
             payload=payload,
-            client_ip=oauth_client_ip(request),
+            client_ip=client_ip,
+            _rate_limit_consumed=True,
         )
     except InvalidClientRegistrationError as exc:
         return oauth_error_response(exc, 400)
@@ -140,19 +183,7 @@ async def register_client(request: Request, session_factory: SessionFactoryDep):
 
 @router.get("/oauth/authorize", response_class=HTMLResponse)
 def authorize_form(request: Request, session_factory: SessionFactoryDep):
-    if len(request.scope.get("query_string", b"")) > OAUTH_QUERY_MAX_BYTES:
-        return oauth_error_response(
-            InvalidOAuthRequestError("authorization query exceeds 16KiB"), 400
-        )
-    for name in (
-        "client_id",
-        "redirect_uri",
-        "response_type",
-        "state",
-        "scope",
-        "code_challenge",
-        "code_challenge_method",
-    ):
+    for name in OAUTH_SINGLETON_PARAMETERS:
         if len(request.query_params.getlist(name)) > 1:
             return oauth_error_response(
                 InvalidOAuthRequestError("duplicate OAuth parameter"), 400
@@ -937,7 +968,7 @@ def _try_bearer_revoker(
     if not authorization_header_is_valid(authorization):
         return None
     if authorization.lower().startswith("bearer "):
-        bearer = authorization.removeprefix("Bearer ").removeprefix("bearer ")
+        bearer = authorization[7:].strip(" \t")
         if bearer.startswith("dtxw_"):
             try:
                 actor = ApiTokenService(
@@ -1044,13 +1075,14 @@ async def parse_request_values(request: Request) -> dict[str, object]:
         return parsed
     try:
         body = (await request.body()).decode("utf-8")
+        fields = parse_qs(body, keep_blank_values=True, errors="strict")
     except UnicodeError as exc:
         raise InvalidOAuthRequestError("request body must be UTF-8") from exc
     parsed = {}
-    for key, values in parse_qs(body, keep_blank_values=True).items():
-        if key != "workspace_ids" and len(values) > 1:
+    for key, values in fields.items():
+        if key in OAUTH_SINGLETON_PARAMETERS and len(values) > 1:
             raise InvalidOAuthRequestError("duplicate OAuth parameter")
-        parsed[key] = values[-1] if values else ""
+        parsed[key] = values if key == "resource" else values[-1] if values else ""
     _validate_parsed_client_id(parsed)
     return parsed
 
@@ -1076,7 +1108,6 @@ def _validate_parsed_client_id(values: dict[str, object]) -> None:
     for name, maximum in (
         ("code", OAUTH_OPAQUE_TOKEN_MAX_BYTES),
         ("refresh_token", OAUTH_OPAQUE_TOKEN_MAX_BYTES),
-        ("token", OAUTH_JWT_MAX_BYTES),
     ):
         if values.get(name) not in (None, "") and not ascii_token_is_valid(
             values[name], maximum
@@ -1084,6 +1115,8 @@ def _validate_parsed_client_id(values: dict[str, object]) -> None:
             raise InvalidOAuthRequestError(
                 f"{name} exceeds its credential input envelope"
             )
+    # Revocation's `token` is checked by the service before hashing/decoding;
+    # an authenticated unknown or oversized token remains a successful no-op.
     if "scope" in values:
         try:
             validate_scope_input(values["scope"])

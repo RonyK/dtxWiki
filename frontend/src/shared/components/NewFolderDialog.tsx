@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, apiErrorMessage } from "../api/client";
+import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { normalizeSlugInput, slugify } from "../text/slug";
 import { AdvancedSection } from "./AdvancedSection";
 import { Dialog, DialogCloseButton } from "./Dialog";
@@ -26,7 +27,8 @@ export function NewFolderDialog({
   const [error, setError] = useState<string | null>(null);
   const derivedSlug = useMemo(() => slugify(title), [title]);
   const slug = showAdvanced ? normalizeSlugInput(customSlug) : derivedSlug;
-  const invalidTitle = title.trim().length === 0 || title.trim().length > 80;
+  const invalidTitle = !trimShortText(title) || Boolean(inputTextError(title, 80));
+  const invalidSlug = showAdvanced && Boolean(inputTextError(customSlug, 64));
 
   function requestClose() {
     if (!submitting) {
@@ -36,14 +38,14 @@ export function NewFolderDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (invalidTitle || submitting) {
+    if (invalidTitle || invalidSlug || submitting) {
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       await onSubmit({
-        title: title.trim(),
+        title: trimShortText(title),
         slug: showAdvanced ? slug : undefined,
       });
       onClose();
@@ -88,13 +90,13 @@ export function NewFolderDialog({
           <span>{t("newItem.folderName")}</span>
           <input
             autoFocus
-            maxLength={80}
+            {...textInputLimit(80)}
             onChange={(event) => setTitle(event.currentTarget.value)}
             value={title}
           />
           <small className="field-hint">
             {invalidTitle
-              ? t("newItem.titleLength")
+              ? t("newItem.titleLength", { maximum: 80 })
               : t("newItem.slugPreview", { slug })}
           </small>
         </label>
@@ -106,7 +108,7 @@ export function NewFolderDialog({
           <label className="form-field">
             <span>{t("newItem.slug")}</span>
             <input
-              maxLength={64}
+              {...textInputLimit(64)}
               onChange={(event) => setCustomSlug(event.currentTarget.value)}
               placeholder={derivedSlug}
               value={customSlug}
@@ -123,7 +125,7 @@ export function NewFolderDialog({
           >
             {t("newItem.cancel")}
           </button>
-          <button className="icon-button primary" disabled={invalidTitle || submitting} type="submit">
+          <button className="icon-button primary" disabled={invalidTitle || invalidSlug || submitting} type="submit">
             {submitting ? t("newItem.creating") : t("newItem.createFolder")}
           </button>
         </div>

@@ -39,6 +39,70 @@ from backend.services.mcp_trace_capture import derive_artifact_links
 from backend.services.read_errors import ReadNotFoundError
 
 
+def test_chat_auto_title_fits_multicodepoint_subject_without_trailing_space(
+    session_factory,
+):
+    service = McpChatService()
+    with session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        client = session.scalar(
+            select(MCPClient).where(MCPClient.workspace_id == workspace.id)
+        )
+        subject = " ".join(["न्ते"] * 50)
+        page = ContextPage(
+            workspace_id=workspace.id,
+            slug="multicodepoint-subject",
+            title=subject,
+            page_type="overview",
+            lifecycle_status="published",
+        )
+        session.add(page)
+        session.flush()
+        version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=1,
+            body_md="Body",
+            content_hash="published-subject",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=str(uuid4()),
+            version_status="published_snapshot",
+        )
+        session.add(version)
+        session.flush()
+        page.current_version_id = page.current_published_version_id = version.id
+        call = _tool_call(
+            client_id=client.id,
+            workspace_id=workspace.id,
+            mcp_session_id=uuid4(),
+            tool_name="cite",
+            request_id=uuid4(),
+        )
+        session.add(call)
+        session.flush()
+        chat = service.upsert_session_from_tool_call(
+            session=session,
+            workspace_id=workspace.id,
+            client_id=client.id,
+            mcp_session_id=str(call.mcp_session_id),
+            tool_call=call,
+        )
+        service.link_artifact(
+            session=session,
+            chat_session=chat,
+            tool_call=call,
+            resource_kind=McpChatArtifactKind.CONTEXT_PAGE,
+            resource_id=page.id,
+            verb=McpChatArtifactVerb.CREATED,
+        )
+        session.flush()
+        assert 1 <= len(chat.title) <= 120
+        assert chat.title == chat.title.strip()
+        assert subject.startswith(chat.title)
+        assert chat.title.startswith("न्ते न्ते")
+
+
 def test_mcp_chat_service_upserts_and_rolls_up_artifact_links(session_factory):
     service = McpChatService()
     with session_factory.begin() as session:

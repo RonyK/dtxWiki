@@ -54,7 +54,7 @@ def get_rest_actor(
     session_factory = _session_factory(request)
     if credentials is not None:
         actor = _authenticate_api_token(
-            token=credentials.credentials,
+            token=credentials.credentials.strip(" \t"),
             session_factory=session_factory,
             settings=settings,
             public_base_url=public_base_url_from_request(request),

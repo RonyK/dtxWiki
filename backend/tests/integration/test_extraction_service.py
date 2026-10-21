@@ -18,6 +18,7 @@ from backend.models.library import (
     LibraryRun,
     LibraryRunConversionDetail,
 )
+from backend.models.tree import WorkspaceTreeNode
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.extraction_service import ExtractionError, ExtractionService
 from backend.services.job_queue import JobQueueService
@@ -28,6 +29,53 @@ def make_session_factory():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def test_untitled_long_uri_survives_registration_and_worker_tree_recreation(
+    media_installer_factory,
+):
+    session_factory = make_session_factory()
+    long_uri = "https://example.com/" + "a" * 300
+    with session_factory.begin() as session:
+        workspace = seed_default_workspace(session)
+        result = LibraryService().register_library_item(
+            session=session,
+            workspace_id=workspace.id,
+            canonical_uri=long_uri,
+            title=None,
+            format_hint="markdown",
+            raw_text="Body",
+        )
+        node = session.scalar(
+            select(WorkspaceTreeNode).where(
+                WorkspaceTreeNode.target_kind == "library_item",
+                WorkspaceTreeNode.target_id == result.library_item.id,
+            )
+        )
+        assert node.title == long_uri[:256]
+        # A legacy source may have no placement; the worker has its own
+        # recreation path and cannot rely on registration already fixing it.
+        session.delete(node)
+        session.flush()
+        artifact = ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
+            session=session,
+            library_item_version_id=result.version.id,
+        )
+        session.flush()
+        nodes = session.scalars(
+            select(WorkspaceTreeNode).where(
+                WorkspaceTreeNode.target_id.in_([result.library_item.id, artifact.id]),
+            )
+        ).all()
+        assert len(nodes) == 2
+        assert all(
+            1 <= len(item.title) <= 256 and item.title == item.title.strip()
+            for item in nodes
+        )
+        assert result.library_item.title is None
+        assert result.library_item.uri == long_uri
 
 
 def test_extraction_creates_text_artifact_and_completes_job(media_installer_factory):
@@ -75,9 +123,10 @@ def test_extraction_creates_text_artifact_and_completes_job(media_installer_fact
     assert stored_artifact.role == "markdown"
     assert stored_artifact.attempt_id is not None
     assert stored_artifact.blob_id is not None
-    assert stored_artifact.content_sha256 == hashlib.sha256(
-        b"# Extract\n\nBody"
-    ).hexdigest()
+    assert (
+        stored_artifact.content_sha256
+        == hashlib.sha256(b"# Extract\n\nBody").hexdigest()
+    )
     assert extraction_method == "text/markdown"
     assert index_text == "# Extract\n\nBody"
     assert location_model == {

@@ -27,7 +27,9 @@ export function outgoingContentError(path: string, body: BodyInit | null | undef
   };
   for (const [key, [maximum, singleLine]] of Object.entries(limits)) {
     if (typeof data[key] === "string") {
-      const error = inputTextError(data[key], maximum, singleLine);
+      const raw = data[key];
+      const value = key === "user_message" ? raw.trim() : raw;
+      const error = inputTextError(raw, Number.MAX_SAFE_INTEGER, singleLine) || inputTextError(value, maximum, singleLine);
       if (error) return error;
     }
   }

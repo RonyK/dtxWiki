@@ -1,25 +1,40 @@
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
-from backend.domain.input_policy import InputPolicyError, validate_title
+from backend.domain.input_policy import (
+    InputPolicyError,
+    fit_generated_title,
+    validate_title,
+)
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.schemas.agent import AgentPageDraftRequest, BuildBundleRequest
+from backend.schemas.ask import AskTurnCreate
+from backend.schemas.context_ingress import ContextIngressAcceptRequest
 from backend.schemas.context_write import SubmitFeedbackRequest
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.library_semantic import LibrarySemanticMarkdownUpdateRequest
+from backend.schemas.mcp.review_tools import SubmitRevisionForReviewInput
 from backend.schemas.page import ContextPageCreateRequest
 from backend.schemas.read import WorkspaceCreateRequest
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
+from backend.services import context_ingress_service
+from backend.services.ask_service import InvalidUserMessageError, _validate_user_message
+from backend.services.bundle_service import AgentInputBundleService
+from backend.services.context_write_service import ContextWriteService
 from backend.services.library_semantic_overlay_service import (
     LibrarySemanticOverlayService,
 )
-from backend.services.page_service import prepare_page_write
+from backend.services.page_service import PageService, prepare_page_write
+from backend.services.review_service import ReviewService
 from backend.services.tree_service import TreeService
 from backend.utils.page_frontmatter import (
     parse_page_frontmatter,
     validate_frontmatter_input,
+    validate_page_markdown_input,
 )
 
 
@@ -30,6 +45,14 @@ def test_titles_count_code_points_and_preserve_explicit_unicode():
     for value in ("a\nb", "a\x00b", "a\ud800b"):
         with pytest.raises(InputPolicyError):
             validate_title(value)
+
+
+def test_generated_titles_fit_policy_without_splitting_display_sequences():
+    family = "👨‍👩‍👧‍👦"
+    assert fit_generated_title("a" * 95 + " trailing", max_length=96) == "a" * 95
+    assert fit_generated_title("a" * 115 + family, max_length=120) == "a" * 115
+    assert fit_generated_title("\t\x00\ud800\n", fallback="Fallback") == "Fallback"
+    assert fit_generated_title("one\ntwo\tthree") == "one two three"
 
 
 def test_tree_folder_and_linked_title_requests_have_distinct_budgets():
@@ -112,6 +135,22 @@ def test_feedback_and_bundle_request_boundaries():
     payload["context_refs"].append(uuid4())
     with pytest.raises(ValidationError):
         BuildBundleRequest(**payload)
+    payload["context_refs"].pop()
+    payload["requested_categories"] = ["agent_guide", "persona", "skill", "memory"]
+    BuildBundleRequest(**payload)
+    payload["requested_categories"].append("persona")
+    with pytest.raises(ValidationError):
+        BuildBundleRequest(**payload)
+    payload["requested_categories"] = ["skills"]
+    with pytest.raises(ValidationError):
+        BuildBundleRequest(**payload)
+    with pytest.raises(InputPolicyError):
+        AgentInputBundleService().build(
+            session=None,
+            workspace_id=uuid4(),
+            request=BuildBundleRequest.model_construct(**payload),
+            actor=None,
+        )
 
 
 def test_frontmatter_rejects_raw_count_before_read_parser_deduplicates():
@@ -128,6 +167,16 @@ def test_valid_frontmatter_quoted_commas_and_escapes_round_trip_without_loss(fie
     markdown = f"---\n{field}: {json.dumps(values)}\n---\nBody"
     validate_frontmatter_input(markdown)
     assert getattr(parse_page_frontmatter(markdown), field) == values
+    markdown = f"---\n{field}: [2024, true, 1e3, 1.00]\n---\nBody"
+    validate_frontmatter_input(markdown)
+    assert getattr(parse_page_frontmatter(markdown), field) == [
+        "2024",
+        "true",
+        "1e3",
+        "1.00",
+    ]
+    with pytest.raises(InputPolicyError):
+        validate_frontmatter_input(f"---\n{field}: [[2024]]\n---\nBody")
 
 
 def test_final_managed_frontmatter_counts_against_stored_body_budget():
@@ -140,6 +189,9 @@ def test_final_managed_frontmatter_counts_against_stored_body_budget():
             tags=[],
             aliases=[],
         )
+    schema = ContextPageCreateRequest.model_json_schema()["properties"]["body_md"]
+    assert schema["x-final-maxLength"] == 1_000_000
+    assert "managed frontmatter" in schema["description"]
 
 
 def test_long_h1_cannot_bypass_title_limit():
@@ -152,3 +204,106 @@ def test_long_h1_cannot_bypass_title_limit():
             tags=[],
             aliases=[],
         )
+    # A longer closing fence, tildes and indented fences all keep code out of
+    # the derived title. Prose after the fence still receives title validation.
+    for opener, closer in (("```python", "````"), ("~~~", "~~~~"), ("   ```", "```")):
+        body = f"{opener}\n# code\t{'x' * 257}\n{closer}\n# Prose title"
+        validate_page_markdown_input(body)
+        with pytest.raises(InputPolicyError):
+            validate_page_markdown_input(body + "x" * 257)
+
+
+def test_ask_schema_and_service_count_the_same_stripped_message():
+    raw = " \n" + "가" * 8000 + "\t "
+    assert AskTurnCreate(user_message=raw).user_message == "가" * 8000
+    assert _validate_user_message(raw) == "가" * 8000
+    for value in ("x" * 8001, " \x00 message ", " \ud800 message "):
+        with pytest.raises(ValidationError):
+            AskTurnCreate(user_message=value)
+        with pytest.raises(InvalidUserMessageError):
+            _validate_user_message(value)
+    empty_request = AskTurnCreate(user_message=" \n\t")
+    assert empty_request.user_message == ""
+    with pytest.raises(InvalidUserMessageError, match="must not be empty"):
+        _validate_user_message(empty_request.user_message)
+
+
+def test_context_edit_invalid_metadata_does_not_mutate_body_or_staged_title():
+    version = ContextPageVersion(
+        id=uuid4(), body_md="# Original", content_hash="original", block_map=[]
+    )
+    for body in ("# " + "x" * 257, "---\ntags: [" + "a" * 49 + "]\n---\nBody"):
+        with pytest.raises(InputPolicyError):
+            PageService._rewrite_body_in_place(version, body, "changed")
+        assert (version.body_md, version.content_hash, version.block_map) == (
+            "# Original",
+            "original",
+            [],
+        )
+    page = ContextPage(title="Original", tags=[])
+    with pytest.raises(InputPolicyError):
+        ContextWriteService._apply_metadata_patch(
+            page, {"title": "x" * 257, "tags": ["changed"]}
+        )
+    assert page.title == "Original" and page.tags == []
+
+
+def test_revision_notes_reject_invalid_unicode_before_review_lookup():
+    for note in ("a\x00b", "a\ud800b", "a" * 2001):
+        with pytest.raises(ValidationError):
+            SubmitRevisionForReviewInput(
+                workspace_id=uuid4(),
+                review_item_id=uuid4(),
+                note=note,
+                create={
+                    "title": "Title",
+                    "page_type": "overview",
+                    "body_markdown": "Body",
+                    "reason": "Revise",
+                },
+            )
+        with pytest.raises(InputPolicyError):
+            ReviewService().submit_revision_for_review(
+                session=None,
+                workspace_id=uuid4(),
+                review_item_id=uuid4(),
+                principal=None,
+                actor_kind="human",
+                actor_id=str(uuid4()),
+                context_write_service=None,
+                note=note,
+            )
+
+
+def test_feedback_only_rejects_oversized_selected_body_before_any_changes(monkeypatch):
+    proposal = SimpleNamespace(
+        status="proposed",
+        source_kind="manual",
+        source_ask_turn_id=None,
+        alternatives=[{"body_markdown": "x" * 10001}],
+    )
+    monkeypatch.setattr(context_ingress_service, "acquire_write_intent", lambda _: None)
+    monkeypatch.setattr(
+        context_ingress_service, "require_proposal_for_update", lambda *args: proposal
+    )
+    monkeypatch.setattr(
+        context_ingress_service, "require_context_parent", lambda **kwargs: None
+    )
+    service = context_ingress_service.ContextIngressService()
+    monkeypatch.setattr(service, "_source_turn", lambda *args: None)
+    for explicit_body in ("x" * 10001, None):
+        with pytest.raises(InputPolicyError):
+            service.accept_proposal(
+                session=None,
+                workspace_id=uuid4(),
+                proposal_id=uuid4(),
+                request=ContextIngressAcceptRequest(
+                    final_save_mode="feedback_only",
+                    final_parent_node_id=uuid4(),
+                    final_title="Feedback",
+                    body_markdown=explicit_body,
+                ),
+                actor_kind="human",
+                actor_id=str(uuid4()),
+            )
+    assert proposal.status == "proposed"

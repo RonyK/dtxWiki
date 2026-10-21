@@ -44,5 +44,5 @@ def authorization_header_is_valid(value: object) -> bool:
     return (
         isinstance(value, str)
         and len(value) <= AUTHORIZATION_HEADER_MAX_BYTES
-        and all(" " <= character <= "~" for character in value)
+        and all(character == "\t" or " " <= character <= "~" for character in value)
     )

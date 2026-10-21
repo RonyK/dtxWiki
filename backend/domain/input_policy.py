@@ -6,6 +6,8 @@ Historical read payloads deliberately do not use these write policies.
 
 import re
 
+from backend.utils.graphemes import grapheme_clusters
+
 SHORT_TEXT_SPACES = (
     " \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
     "\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
@@ -65,6 +67,44 @@ def validate_title(
 
 def validate_body(value: str, *, max_length: int = BODY_MAX) -> str:
     return validate_text(value, field="body", max_length=max_length)
+
+
+def fit_generated_title(
+    value: str, *, max_length: int = CONTENT_TITLE_MAX, fallback: str = "Untitled"
+) -> str:
+    """Fit a generated display label; explicit authored titles must be rejected.
+
+    Grapheme boundaries protect display sequences, while the code-point budget
+    matches stored CHECKs. The source value itself is never changed.
+    """
+    if max_length < 1:
+        raise ValueError("generated title budget must be positive")
+    for candidate in (value, fallback, "Untitled"):
+        safe = "".join(
+            " " if ord(ch) < 32 or 127 <= ord(ch) <= 159 or ch.isspace() else ch
+            for ch in candidate
+            if not 0xD800 <= ord(ch) <= 0xDFFF
+        )
+        safe = " ".join(safe.split())
+        parts = []
+        remaining = max_length
+        for cluster in grapheme_clusters(safe):
+            if len(cluster) > remaining:
+                break
+            parts.append(cluster)
+            remaining -= len(cluster)
+        fitted = "".join(parts).strip(SHORT_TEXT_SPACES)
+        if fitted:
+            return validate_title(fitted, max_length=max_length)
+    raise ValueError("generated title fallback must fit its budget")
+
+
+def normalize_ask_user_message(value: str) -> str:
+    if not isinstance(value, str) or _INVALID_TEXT.search(value):
+        raise InputPolicyError("user_message contains invalid characters")
+    # Empty messages retain the Ask service's invalid_user_message response;
+    # this shared schema boundary only aligns normalization and the upper limit.
+    return validate_text(value.strip(), field="user_message", max_length=8000)
 
 
 def validate_list_count(value, *, field: str, max_items: int):

@@ -1,4 +1,4 @@
-import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
+import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import type { TFunction } from "i18next";
 import {
   Bot,
@@ -1876,7 +1876,7 @@ function AgentCreationModal({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const bodyError = markdownInputError(body);
+    const bodyError = inputTextError(body, 1_000_000, false);
     if (bodyError) {
       setError(bodyError);
       return;

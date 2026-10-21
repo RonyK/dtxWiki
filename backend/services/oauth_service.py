@@ -1245,9 +1245,14 @@ class OAuthService:
         *,
         payload: dict[str, Any],
         client_ip: str,
+        _rate_limit_consumed: bool = False,
     ) -> RegisteredClient:
         if not self.settings.oauth_allow_dcr:
             raise InvalidClientRegistrationError("dynamic client registration disabled")
+        # HTTP callers consume before JSON parsing; direct callers still count
+        # invalid metadata, exactly once per registration attempt.
+        if not _rate_limit_consumed:
+            _consume_dcr_slot(client_ip)
         if not isinstance(payload, dict):
             raise InvalidClientRegistrationError(
                 "client metadata must be a JSON object"
@@ -1257,7 +1262,6 @@ class OAuthService:
             redirects = validate_redirect_list(payload.get("redirect_uris"))
         except ValueError as exc:
             raise InvalidClientRegistrationError(str(exc)) from exc
-        _consume_dcr_slot(client_ip)
         normalized_redirects = [validate_redirect_uri(uri) for uri in redirects]
         # Sprint_5 Phase_3 Task 3.2: scope subset of ALLOWED_OAUTH_SCOPES.
         # ``normalize_scope`` raises ``InvalidOAuthRequestError`` for unknown
@@ -1270,9 +1274,7 @@ class OAuthService:
         # explicitly (and the user still approves it at /oauth/authorize consent).
         default_scope = "mcp:read"
         try:
-            scope = normalize_scope(
-                default_scope if "scope" not in payload else raw_scope
-            )
+            scope = normalize_scope(default_scope if raw_scope is None else raw_scope)
         except InvalidOAuthRequestError as exc:
             raise InvalidClientRegistrationError(f"scope is invalid: {exc}") from exc
         # Sprint_5 Phase_3 Task 3.2: client_name length ∈ [1, 200]. Previously
@@ -1286,7 +1288,7 @@ class OAuthService:
             client_name = validate_client_name(client_name)
         except ValueError as exc:
             raise InvalidClientRegistrationError(str(exc)) from exc
-        application_type = payload.get("application_type", "native")
+        application_type = payload.get("application_type") or "native"
         registration_identity = _dcr_registration_identity(
             client_name=client_name,
             redirect_uris=normalized_redirects,
@@ -1809,7 +1811,6 @@ class OAuthService:
         replica-fan-out step to wait for.
         """
 
-        _validate_client_id(client_id)
         _validate_workspace_ids(workspace_ids)
         if workspace_ids is not None and not workspace_ids:
             raise InvalidOAuthRequestError("workspace_ids must not be empty")
@@ -2150,7 +2151,8 @@ class OAuthService:
         outstanding credential: refresh tokens, live access JWTs (via the
         jti denylist), and unconsumed authorization codes."""
 
-        _validate_client_id(client_id)
+        # Management addresses an existing, user-owned registration verbatim.
+        # Legacy CIMD IDs used a code-point limit and may exceed today's bytes.
         with self.session_factory.begin() as session:
             consents = session.scalars(
                 select(OAuthConsent).where(
@@ -4415,7 +4417,7 @@ def validate_state(state: str) -> None:
         )
     if (
         not isinstance(state, str)
-        or not MIN_STATE_LENGTH <= len(state) <= 512
+        or len(state) > 512
         or any(not " " <= character <= "~" for character in state)
     ):
         raise InvalidOAuthRequestError(

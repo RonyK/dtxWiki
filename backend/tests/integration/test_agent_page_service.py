@@ -1,6 +1,7 @@
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
+from backend.domain.input_policy import InputPolicyError
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
@@ -26,6 +27,93 @@ ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 
 def _workspace_id(session):
     return session.scalar(select(Workspace).where(Workspace.slug == "default")).id
+
+
+def test_agent_body_heading_is_independent_and_invalid_legacy_activation_is_atomic(
+    session_factory,
+):
+    service = AgentPageService()
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        prefix = "# " + "x" * 257 + "\n```\n# step\tone\n```\n"
+        body = prefix + "x" * (1_000_000 - len(prefix))
+        draft = service.write_draft(
+            session=session,
+            workspace_id=workspace_id,
+            request=AgentPageDraftRequest(
+                category="persona",
+                title="Explicit title",
+                slug="independent-heading",
+                body_markdown=body,
+                reason="Create independent Agent title",
+            ),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+            actor_provenance="browser_session",
+        )
+        activation = service.activate(
+            session=session,
+            workspace_id=workspace_id,
+            agent_page_id=draft.agent_page_id,
+            version_id=draft.draft_version_id,
+            reason="Activate valid Agent body",
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+            actor_role="owner",
+        )
+        page = session.get(AgentPage, draft.agent_page_id)
+        assert page.title == "Explicit title"
+        assert (
+            len(
+                session.get(
+                    AgentPageVersion, activation.active_version_id
+                ).body_markdown
+            )
+            == 1_000_000
+        )
+
+        # Historical bodies have no new CHECK. Restore must report a policy
+        # error before constructing a Pydantic request or a new change set.
+        session.execute(
+            update(AgentPageVersion.__table__)
+            .where(AgentPageVersion.id == activation.active_version_id)
+            .values(body_markdown=body + "x")
+        )
+        session.expire_all()
+        before = session.scalar(select(func.count()).select_from(ChangeSet))
+        with pytest.raises(InputPolicyError):
+            service.restore_version(
+                session=session,
+                workspace_id=workspace_id,
+                agent_page_id=draft.agent_page_id,
+                version_id=activation.active_version_id,
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+                actor_provenance="browser_session",
+            )
+        session.execute(
+            update(AgentPageVersion.__table__)
+            .where(AgentPageVersion.id == activation.active_version_id)
+            .values(
+                body_markdown="Body",
+                version_status="draft",
+                frontmatter={PROPOSED_PAGE_META_KEY: {"title": "x" * 257}},
+            )
+        )
+        session.expire_all()
+        with pytest.raises(InputPolicyError):
+            service.activate(
+                session=session,
+                workspace_id=workspace_id,
+                agent_page_id=draft.agent_page_id,
+                version_id=activation.active_version_id,
+                reason="Reject invalid stored title",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+                actor_role="owner",
+            )
+        assert session.scalar(select(func.count()).select_from(ChangeSet)) == before
+        assert session.get(AgentPage, draft.agent_page_id).title == "Explicit title"
 
 
 def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):

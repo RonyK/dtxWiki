@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import validate_text
 from backend.models import (
     AgentInputBundle,
     AgentPage,
@@ -68,6 +69,7 @@ from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyErro
 from backend.services.tree_service import ensure_context_inbox_node
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_read import WorkspaceReadService
+from backend.utils.database_errors import is_single_column_unique_violation
 
 SUPPORTED_WORKSPACE_LANGUAGES = {"en", "ko"}
 
@@ -153,7 +155,10 @@ class WorkspaceWriteService:
                 "human session is required",
                 error_code="workspace_user_required",
             )
-        slug = normalize_workspace_slug(request.slug or request.title)
+        slug = normalize_workspace_slug(
+            request.slug if request.slug is not None else request.title,
+            generated=request.slug is None,
+        )
         if get_workspace_by_slug(session, slug) is not None:
             raise WorkspaceCreateConflictError("workspace slug already exists")
         try:
@@ -185,6 +190,10 @@ class WorkspaceWriteService:
             )
             session.flush()
         except IntegrityError as exc:
+            if not is_single_column_unique_violation(
+                exc, table="workspace", column="slug"
+            ):
+                raise
             raise WorkspaceCreateConflictError("workspace slug already exists") from exc
         return WorkspaceReadService._summary(workspace, role="owner")
 
@@ -584,11 +593,17 @@ class WorkspaceWriteService:
         session.flush()
 
 
-def normalize_workspace_slug(value: str) -> str:
+def normalize_workspace_slug(value: str, *, generated: bool = False) -> str:
+    if not generated:
+        validate_text(value, field="slug", max_length=80, min_length=1)
     slug = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)[:80].strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    if generated:
+        slug = slug[:80].strip("-")
     if not slug:
         raise WorkspaceCreateConflictError("workspace slug is required")
+    if not generated:
+        validate_text(slug, field="slug", max_length=80, min_length=1)
     return slug
 
 

@@ -176,6 +176,8 @@ def _assert_policy_column_and_server_default(engine, stage):
 
 def test_retention_policy_survives_input_restrictions_round_trip(migration_database):
     url, engine, config = migration_database
+    command.upgrade(config, "bd62193d5cf6")
+    assert audit_inputs(url) == []
     command.upgrade(config, CORE)
     assert "context_media_policy" not in _workspace_table(engine).c
     identity, key = _insert_workspace(engine, "retained-workspace", title="x" * 129)

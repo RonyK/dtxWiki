@@ -14,5 +14,6 @@ describe("content input policy", () => {
     expect(inputTextError("Alice\n\tBob", 256, false)).toBe("");
     expect(inputTextError("a\ud800", 256, false)).not.toBe("");
     expect(markdownInputError(`# ${"x".repeat(257)}`)).not.toBe("");
+    expect(markdownInputError(`---\ntitle: Fine\n---\n\`\`\`bash\n# ${"x".repeat(257)}\n\`\`\`\n# Fine`)).toBe("");
   });
 });

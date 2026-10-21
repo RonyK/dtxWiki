@@ -351,6 +351,24 @@ def test_release_head_matches_current_model_schema(head_engine):
     assert "selected_semantic_overlay_id" in version_columns
     assert "library_semantic_overlay_version_base_uq" in semantic_overlay_uniques
 
+    # compare_metadata does not compare CHECK expressions. Compare real fresh
+    # DDL with the upgraded database here, without another Alembic traversal.
+    fresh = create_engine("sqlite://")
+    try:
+        Base.metadata.create_all(fresh)
+
+        def input_checks(database, table_name):
+            return {
+                check["name"]: " ".join(check["sqltext"].split())
+                for check in inspect(database).get_check_constraints(table_name)
+                if (check["name"] or "").endswith("_input_v1")
+            }
+
+        for table in Base.metadata.tables.values():
+            assert input_checks(engine, table.name) == input_checks(fresh, table.name)
+    finally:
+        fresh.dispose()
+
 
 def test_tenancy_owns_the_library_item_version_multiformat_drop():
     """tenancy_schema must remain the one place these columns are removed.

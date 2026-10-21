@@ -44,8 +44,12 @@ def audit_command(db: str | None = typer.Option(None, help="Override database UR
             "input audit refused: unsupported or inconsistent database", err=True
         )
         raise typer.Exit(2) from exc
-    typer.echo(json.dumps({"violations": report}, ensure_ascii=True))
-    if report:
+    blocking = [item for item in report if item["classification"] == "blocking_scalar"]
+    preserved = [item for item in report if item["classification"] != "blocking_scalar"]
+    typer.echo(
+        json.dumps({"blocking": blocking, "preserved": preserved}, ensure_ascii=True)
+    )
+    if blocking:
         raise typer.Exit(1)
 
 

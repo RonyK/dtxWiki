@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -106,9 +106,14 @@ describe("FolderSummaryCard", () => {
     await user.type(input, "Routing summary for payments.");
     // 160-char counter is visible and live
     expect(screen.getByText(/29\/160/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "😀".repeat(161) } });
+    expect(input).toHaveValue("😀".repeat(161));
+    expect(screen.getByRole("button", { name: /^Save$|^저장$/ })).toBeDisabled();
+    fireEvent.change(input, { target: { value: "😀".repeat(160) } });
+    expect(screen.getByText("160/160")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Save$|^저장$/ }));
     await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith("Routing summary for payments."),
+      expect(onSave).toHaveBeenCalledWith("😀".repeat(160)),
     );
   });
 

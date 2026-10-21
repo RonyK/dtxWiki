@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from urllib.parse import urlencode
 from uuid import uuid4
 
 import pytest
@@ -11,7 +13,7 @@ from backend.api import mcp_http
 from backend.app.container import DatabaseProvider
 from backend.app.main import create_app
 from backend.app.settings import Settings
-from backend.models.oauth import OAuthConsent
+from backend.models.oauth import OAuthClient, OAuthConsent
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.auth import authenticate_bearer_token
@@ -44,10 +46,28 @@ def test_dcr_20_callbacks_and_2048_byte_uri_round_trip(page_service):
     uri = prefix + "a" * (2048 - len(prefix))
     redirects = [uri] + [f"https://callback.example/{index}" for index in range(19)]
     registered = client.post(
-        "/oauth/register", json={"client_name": "a" * 200, "redirect_uris": redirects}
+        "/oauth/register",
+        json={
+            "client_name": "a" * 200,
+            "redirect_uris": redirects,
+            "token_endpoint_auth_method": "client_secret_basic",
+            "application_type": None,
+            "scope": None,
+        },
     )
     assert registered.status_code == 201, registered.text
     assert registered.json()["redirect_uris"] == redirects
+    assert registered.json()["token_endpoint_auth_method"] == "none"
+    assert registered.json()["scope"] == "mcp:read"
+    with page_service.session_factory() as session:
+        row = session.get(OAuthClient, registered.json()["client_id"])
+        assert row.application_type == "native"
+        assert row.token_endpoint_auth_method == "none"
+    custom = client.post(
+        "/oauth/register",
+        json={"redirect_uris": redirects, "application_type": "custom"},
+    )
+    assert custom.status_code == 201, custom.text
     for invalid in (redirects + ["https://callback.example/extra"], [uri + "a"]):
         response = client.post("/oauth/register", json={"redirect_uris": invalid})
         assert response.status_code == 400
@@ -95,9 +115,10 @@ def test_token_input_limit_precedes_rate_limit_and_jwt_parsing(
     assert response.json()["error"] == "invalid_request"
 
 
-def test_authorize_query_limit_before_login_next(page_service):
+def test_authorize_query_limit_before_login_next(page_service, monkeypatch):
     client = make_client(page_service)
     client.cookies.clear()
+    monkeypatch.setattr("starlette.requests.QueryParams", fail)
     response = client.get(
         "/oauth/authorize?padding=" + "a" * 16385, follow_redirects=False
     )
@@ -113,8 +134,149 @@ def test_unknown_revoke_response_preserved_and_oversized_jwt_not_decoded(
     response = client.post("/oauth/revoke", data={"token": "unknown-token"})
     assert response.status_code == 200
     monkeypatch.setattr(oauth_service.jwt, "decode", fail)
+    for token in ("a" * 16385, "abc def", "tést"):
+        response = client.post("/oauth/revoke", data={"token": token})
+        assert response.status_code == 200, response.text
+    for body in ("token=one&token=two", "token=", "token=%FF"):
+        response = client.post(
+            "/oauth/revoke",
+            content=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 400
+    client.cookies.clear()
     response = client.post("/oauth/revoke", data={"token": "a" * 16385})
-    assert response.status_code == 400
+    assert response.status_code == 401
+
+
+def test_dcr_invalid_json_and_metadata_consume_one_slot_before_parsing(
+    page_service, monkeypatch
+):
+    client = make_client(page_service)
+    for body in (b'{"redirect_uris":[],"redirect_uris":[]}', b'{"redirect_uris":[]}'):
+        oauth_service._DCR_BUCKET["testclient"] = [time.monotonic()] * 19
+        response = client.post(
+            "/oauth/register",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 400
+        with monkeypatch.context() as patch:
+            patch.setattr("backend.api.oauth._parse_unique_json_body", fail)
+            limited = client.post("/oauth/register", content=b"{}")
+        assert limited.status_code == 400
+        assert "rate limit" in limited.json()["message"]
+
+
+def test_legacy_cimd_id_can_be_managed_without_relaxing_protocol_inputs(page_service):
+    client = make_client(page_service)
+    client_id = "https://client.example/" + "한" * 700
+    with page_service.session_factory.begin() as session:
+        user = session.scalar(select(User).where(User.email == "test@example.com"))
+        session.add(
+            OAuthClient(
+                id=client_id,
+                client_name="Legacy client",
+                redirect_uris=["https://client.example/cb"],
+                scope="mcp:read",
+                created_via="cimd",
+            )
+        )
+        session.flush()
+        session.add(
+            OAuthConsent(
+                user_id=user.id,
+                client_id=client_id,
+                workspace_id=user.personal_workspace_id,
+                scope="mcp:read",
+            )
+        )
+    updated = client.patch(
+        "/oauth/consents",
+        params={"client_id": client_id},
+        json={"refresh_ttl_seconds": 3600},
+    )
+    assert updated.status_code == 200, updated.text
+    refused = client.post(
+        "/oauth/token",
+        data={
+            "client_id": client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": "x",
+        },
+    )
+    assert refused.status_code == 400
+    revoked = client.delete("/oauth/consents", params={"client_id": client_id})
+    assert revoked.status_code == 200, revoked.text
+    with page_service.session_factory() as session:
+        assert session.get(OAuthClient, client_id).revoked_at is not None
+
+
+def test_repeated_resources_survive_consent_and_singletons_fail_on_get_and_post(
+    page_service,
+):
+    client = make_client(page_service)
+    registered = client.post(
+        "/oauth/register", json={"redirect_uris": ["https://client.example/cb"]}
+    )
+    params = [
+        ("client_id", registered.json()["client_id"]),
+        ("response_type", "code"),
+        ("redirect_uri", "https://client.example/cb"),
+        ("state", "resource-consent-state-0123456789"),
+        ("scope", "mcp:read"),
+        ("code_challenge", oauth_service.challenge_s256("v" * 43)),
+        ("code_challenge_method", "S256"),
+        ("resource", "https://resource.example/one"),
+        ("resource", "https://resource.example/two"),
+    ]
+    duplicate = params + [("state", "another-state-0123456789")]
+    assert client.get("/oauth/authorize", params=duplicate).status_code == 400
+    assert (
+        client.post(
+            "/oauth/authorize",
+            content=urlencode(duplicate),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        ).status_code
+        == 400
+    )
+    consent = client.get("/oauth/authorize", params=params)
+    assert consent.status_code == 200, consent.text
+    assert consent.text.count('name="resource"') == 2
+    with page_service.session_factory() as session:
+        user = session.scalar(select(User).where(User.email == "test@example.com"))
+        workspace_id = str(user.personal_workspace_id)
+    submitted = client.post(
+        "/oauth/authorize",
+        content=urlencode(
+            params + [("decision", "allow"), ("workspace_ids", workspace_id)]
+        ),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+    assert submitted.status_code == 303, submitted.text
+    assert "code=" in submitted.headers["location"]
+
+
+def test_mcp_bearer_whitespace_compatibility_on_every_transport_method(
+    page_service, monkeypatch
+):
+    from fastapi.responses import JSONResponse
+
+    client = make_client(page_service)
+    received = []
+
+    def authenticate(request, token):
+        received.append(token)
+        return JSONResponse({"authenticated": True})
+
+    monkeypatch.setattr(mcp_http, "_authenticate_mcp_actor", authenticate)
+    for method in ("POST", "GET", "DELETE"):
+        response = client.request(
+            method, "/mcp", headers={"Authorization": "bEaReR  \tclient-token\t "}
+        )
+        assert response.status_code == 200
+    assert received == ["client-token"] * 3
 
 
 @pytest.mark.parametrize(

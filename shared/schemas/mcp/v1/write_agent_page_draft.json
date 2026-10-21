@@ -16,9 +16,11 @@
         "title": "Base Version Id"
       },
       "body_markdown": {
+        "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
         "maxLength": 1000000,
         "title": "Body Markdown",
-        "type": "string"
+        "type": "string",
+        "x-final-maxLength": 1000000
       },
       "category": {
         "enum": [

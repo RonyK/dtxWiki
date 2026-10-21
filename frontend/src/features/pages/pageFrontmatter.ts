@@ -306,7 +306,7 @@ function collectIndentedBlock(lines: string[], startIndex: number) {
   return block;
 }
 
-function normalizeTags(tags: string[]) {
+export function normalizeTags(tags: string[]) {
   const normalized: string[] = [];
   const seen = new Set<string>();
   for (const tag of tags) {
@@ -321,7 +321,7 @@ function normalizeTags(tags: string[]) {
   return normalized;
 }
 
-function normalizeAliases(aliases: string[]) {
+export function normalizeAliases(aliases: string[]) {
   const normalized: string[] = [];
   const seen = new Set<string>();
   for (const alias of aliases) {

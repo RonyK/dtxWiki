@@ -6,6 +6,7 @@ scenarios below cover distinct CLI, revocation and projection side effects.
 """
 
 import os
+import sqlite3
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -16,6 +17,8 @@ from alembic.config import Config
 from sqlalchemy.exc import DBAPIError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.app.runtime_resources import RuntimeResources
+from backend.app.settings import Settings
 from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
     REVISION,
     RULES,
@@ -61,10 +64,20 @@ def _user(connection, *, name="Alice", email="alice@example.test"):
     return identity
 
 
-def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(tmp_path):
+def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
+    tmp_path, monkeypatch
+):
     # Separate from the successful policy round trip: dirty data must refuse
     # upgrade without advancing the stamp, then remain repairable in each schema.
     # Each parent has a different schema; traverse once and assert at each stop.
+    original_connect = sqlite3.dbapi2.connect
+
+    def connect_with_foreign_keys_enabled(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.execute("PRAGMA foreign_keys=ON")
+        return connection
+
+    monkeypatch.setattr(sqlite3.dbapi2, "connect", connect_with_foreign_keys_enabled)
     url, config = _database(tmp_path, "bd62193d5cf6")
     engine = sa.create_engine(url)
     with engine.begin() as connection:
@@ -108,6 +121,37 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(tmp_path):
                 connection.execute(sa.text("SELECT email FROM users")).scalar_one()
                 == "새주소@example.test"
             )
+    tokens = sa.Table("api_tokens", sa.MetaData(), autoload_with=engine)
+    token_id, orphan_id = uuid4(), uuid4()
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            tokens.insert(),
+            [
+                dict(
+                    id=token.hex,
+                    user_id=owner.hex,
+                    name="Preserved token",
+                    token_lookup_hash=token.hex,
+                    hashed_token="existing hash",
+                    scopes=["mcp:read"],
+                    created_at=datetime.now(UTC),
+                )
+                for token, owner in ((token_id, identity), (orphan_id, uuid4()))
+            ],
+        )
+    # This failure path cannot be proved by a CHECK-expression unit test:
+    # the migrated parent table must retain children and refuse pre-existing
+    # orphan FKs before committing its DDL/stamp, even when FK defaults are ON.
+    with pytest.raises(RuntimeError, match="foreign key violations"):
+        command.upgrade(config, "head")
+    with engine.begin() as connection:
+        assert (
+            connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+            == PRE_INPUT_REVISION
+        )
+        assert connection.scalar(sa.select(sa.func.count()).select_from(tokens)) == 2
+        connection.execute(tokens.delete().where(tokens.c.id == orphan_id.hex))
     command.upgrade(config, "head")
     with engine.connect() as connection:
         assert (
@@ -124,6 +168,7 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(tmp_path):
             == "opaque-existing-hash"
         )
         assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+        assert connection.scalar(sa.select(tokens.c.id)) == token_id.hex
     engine.dispose()
 
 
@@ -207,6 +252,14 @@ def test_email_repair_atomically_revokes_recovery_and_pending_mail(tmp_path):
     with runtime_lock.acquire_shared():
         with pytest.raises(runtime_lock.RuntimeLockHeldError):
             repair_input(url, "user", identity, "display_name", "blocked")
+    resources = RuntimeResources.for_settings(Settings(database_url=url))
+    assert len(resources.activity_paths) == 2
+    # Another data-dir participant shares only the SQLite-side activity path.
+    with runtime_lock.acquire_path(resources.activity_paths[1], "shared"):
+        with pytest.raises(runtime_lock.RuntimeLockHeldError):
+            repair_input(url, "user", identity, "display_name", "blocked")
+    # A failed multi-path acquisition must release any earlier path guards.
+    repair_input(url, "user", identity, "display_name", "Unlocked")
     with pytest.raises(InputMaintenanceError):
         repair_input(url, "oauth-client", identity, "id", "changed")
     with engine.begin() as connection:
@@ -241,11 +294,17 @@ def test_metadata_refuses_utf16_sqlite_before_creating_tables(tmp_path):
 
 
 def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_path):
-    from backend.models import LibraryItem, McpChatSession, MCPClient, Workspace
+    from backend.models import (
+        LibraryItem,
+        McpChatSession,
+        MCPClient,
+        Workspace,
+        WorkspaceTreeNode,
+    )
 
     url, config = _database(tmp_path)
     engine = sa.create_engine(url)
-    workspace, client, item, chat = (uuid4() for _ in range(4))
+    workspace, client, item, chat, node = (uuid4() for _ in range(5))
     with engine.begin() as connection:
         connection.execute(
             Workspace.__table__.insert().values(
@@ -281,6 +340,23 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
                 title_user_edited=True,
             )
         )
+        connection.execute(
+            WorkspaceTreeNode.__table__.insert().values(
+                id=node,
+                workspace_id=workspace,
+                section="library",
+                node_kind="library_item_ref",
+                target_kind="library_item",
+                target_id=item,
+                title="x" * 320,
+                sort_key="0001",
+                primary_placement=True,
+                visibility_status="visible",
+                is_system_node=False,
+                can_have_children=False,
+            )
+        )
+    repair_input(url, "tree-node", node, "title", "Independent library label")
     repair_input(url, "library-item", item, "title", None)
     repair_input(url, "mcp-chat", chat, "title", None)
     command.upgrade(config, "head")
@@ -292,6 +368,13 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
         assert connection.execute(
             sa.text("SELECT title,title_user_edited FROM mcp_chat_session")
         ).one() == (None, 0)
+        assert (
+            connection.scalar(
+                sa.text("SELECT title FROM workspace_tree_node WHERE id=:id"),
+                {"id": node.hex},
+            )
+            == "Independent library label"
+        )
     engine.dispose()
 
 

@@ -1644,6 +1644,8 @@ class ReviewService:
         not collide, and a dedup hit is never returned to a principal who did
         not author it.
         """
+        if note is not None:
+            validate_text(note, field="note", max_length=2000)
         self._lock_context_page_for_review_update(
             session,
             workspace_id=workspace_id,

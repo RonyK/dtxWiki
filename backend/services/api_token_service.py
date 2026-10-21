@@ -15,6 +15,7 @@ from backend.catalog.mcp_apps import (
     get_mcp_app_catalog_repository,
 )
 from backend.domain.input_policy import (
+    SHORT_TEXT_SPACES,
     normalize_short_text,
     validate_list_count,
 )
@@ -931,12 +932,7 @@ def api_token_record(session: Session, token: ApiToken) -> ApiTokenRecord:
 
 
 def normalize_token_name(name: str) -> str:
-    normalized = normalize_short_text(name, field="name", max_length=128)
-    if not normalized:
-        raise InvalidApiTokenRequestError("API token name is required")
-    if len(normalized) > 128:
-        raise InvalidApiTokenRequestError("API token name is too long")
-    return normalized
+    return normalize_short_text(name, field="name", max_length=128)
 
 
 def normalize_scopes(scopes: list[str]) -> list[str]:
@@ -978,15 +974,15 @@ def resolve_catalog_app_association(
     snapshot = repository.snapshot()
     requested_app_id = _normalized_optional_text(catalog_app_id)
     legacy_type = _normalized_optional_text(legacy_mcp_client_type)
-    requested_custom_label = (
-        normalize_short_text(
-            custom_app_label, field="custom_app_label", max_length=160, optional=True
+    requested_custom_label = custom_app_label
+    if isinstance(custom_app_label, str) and not custom_app_label.strip(
+        SHORT_TEXT_SPACES
+    ):
+        requested_custom_label = None
+    if requested_custom_label is not None:
+        requested_custom_label = normalize_short_text(
+            requested_custom_label, field="custom_app_label", max_length=160
         )
-        if custom_app_label is not None
-        else None
-    )
-    if requested_custom_label is not None and len(requested_custom_label) > 160:
-        raise InvalidApiTokenRequestError("custom app label is too long")
 
     if legacy_type == LEGACY_GENERIC_MCP_CLIENT_TYPE:
         if requested_app_id is not None:

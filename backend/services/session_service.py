@@ -32,6 +32,7 @@ from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.utils.database_errors import is_single_column_unique_violation
 
 logger = logging.getLogger("dtxwiki.session")
 
@@ -493,6 +494,10 @@ class SessionService:
             try:
                 session.flush()
             except IntegrityError as exc:
+                if not is_single_column_unique_violation(
+                    exc, table="users", column="email"
+                ):
+                    raise
                 raise DuplicateEmailError("email already exists") from exc
             # Onboarding is decoupled from the installation's legacy/default
             # content workspace.  Every signup mode starts in an ordinary,

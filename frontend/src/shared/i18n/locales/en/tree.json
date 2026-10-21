@@ -101,7 +101,7 @@
     "pickSourceFile": "Pick a source file to add to the Library.",
     "pageTitle": "Page title",
     "folderName": "Folder name",
-    "titleLength": "Enter 1-80 characters.",
+    "titleLength": "Enter 1-{{maximum}} characters.",
     "slugPreview": "Slug preview: {{slug}}",
     "editorHint": "The editor will open with this title and location.",
     "advancedSlug": "Advanced slug",

@@ -1491,9 +1491,10 @@ def _coerce_policy_value(key: str, value):
 def _normalize_workspace_slug(value) -> str:
     validate_text(_coerce_string(value), field="slug", max_length=80, min_length=1)
     slug = re.sub(r"[^a-z0-9-]+", "-", _coerce_string(value).lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)[:80].strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
     if not slug:
         raise SettingsPolicyUpdateRejected("workspace slug is required")
+    validate_text(slug, field="slug", max_length=80, min_length=1)
     return slug
 
 

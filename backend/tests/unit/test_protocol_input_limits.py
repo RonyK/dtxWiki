@@ -6,12 +6,16 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import Response
 
 from backend.api.cookie_budget import set_bounded_cookie
-from backend.api.oauth import authorize_form, parse_request_values
+from backend.api.oauth import _try_bearer_revoker, parse_request_values
 from backend.domain.oauth_input import validate_identifier
+from backend.policy import auth
+from backend.schemas.auth import OAuthConsentSettingsUpdateRequest
 from backend.services import oauth_service
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.oauth_cimd import CIMDFetchError, _parse_metadata
@@ -134,7 +138,6 @@ def test_serialized_cookie_limit_includes_escaping_name_and_attributes():
         ("grant_types", "authorization_code"),
         ("grant_types", ["client_credentials"]),
         ("response_types", ["code", "code"]),
-        ("token_endpoint_auth_method", "client_secret_basic"),
         ("application_type", {"native": True}),
     ],
 )
@@ -185,6 +188,14 @@ def test_cimd_same_redirect_budget_and_original_body_limit():
         _parse_metadata(client_id, json.dumps(payload).encode())
     with pytest.raises(CIMDFetchError):
         _parse_metadata(client_id, b" " * 5121)
+    payload["redirect_uris"] = ["https://client.example/cb"]
+    for field, value in (
+        ("token_endpoint_auth_method", "client_secret_basic"),
+        ("token_endpoint_auth_method", "private_key_jwt"),
+        ("application_type", "custom"),
+    ):
+        with pytest.raises(CIMDFetchError):
+            _parse_metadata(client_id, json.dumps({**payload, field: value}).encode())
 
 
 def test_pkce_s256_and_verifier_boundaries_before_hash(monkeypatch):
@@ -249,19 +260,54 @@ def test_oauth_invalid_credentials_never_reach_database_lock_or_jwt_decode(monke
             state="s" * 22,
             workspace_ids=[uuid4()] * 257,
         )
+    with pytest.raises(ValidationError) as failure:
+        OAuthConsentSettingsUpdateRequest(workspace_ids=["not-a-uuid"] * 257)
+    assert [error["type"] for error in failure.value.errors()] == ["too_long"]
 
 
-def test_oversized_authorize_query_rejected_before_login_or_parsing():
+def test_rest_and_revoke_bearer_padding_preserves_the_token(monkeypatch):
     request = Request(
         {
             "type": "http",
-            "method": "GET",
-            "path": "/oauth/authorize",
-            "query_string": b"a" * 16385,
-            "headers": [],
+            "headers": [(b"authorization", b"bEaReR  \tclient-token\t ")],
+            "app": SimpleNamespace(
+                state=SimpleNamespace(
+                    settings=SimpleNamespace(public_base_url="https://wiki.example")
+                )
+            ),
         }
     )
-    assert authorize_form(request, SimpleNamespace()).status_code == 400
+    actor = SimpleNamespace(
+        workspace_id=None, token_kind="oauth_jwt", user_id=uuid4(), client_id="client"
+    )
+    received = []
+
+    def authenticate(*, token, **kwargs):
+        received.append(token)
+        return actor
+
+    monkeypatch.setattr(auth, "_session_factory", lambda request: None)
+    monkeypatch.setattr(auth, "_authenticate_api_token", authenticate)
+    assert (
+        auth.get_rest_actor(
+            request,
+            HTTPAuthorizationCredentials(
+                scheme="Bearer", credentials=" \tclient-token\t "
+            ),
+        )
+        is actor
+    )
+
+    def revoke_authenticate(request, token):
+        received.append(token)
+        return actor
+
+    monkeypatch.setattr(
+        "backend.api.oauth.authenticate_bearer_token", revoke_authenticate
+    )
+    revoker = _try_bearer_revoker(request=request, session_factory=None, settings=None)
+    assert revoker.client_id == "client"
+    assert received == ["client-token", "client-token"]
 
 
 @pytest.mark.parametrize(

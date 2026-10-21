@@ -136,6 +136,7 @@ from backend.utils.page_frontmatter import (
     PAGE_TYPES,
     derive_nav_description,
     parse_page_frontmatter,
+    title_from_markdown_heading,
     upsert_page_frontmatter,
     validate_page_markdown_input,
 )
@@ -4110,6 +4111,7 @@ class PageService:
         previous body and (healed) map, carrying ids of unchanged blocks.
         """
 
+        validate_page_markdown_input(body_md)
         if prepared_block_map is None:
             previous_map = base_block_map
             if previous_map is None:
@@ -4125,7 +4127,6 @@ class PageService:
                 identity_seed=str(version.id),
             )
         version.block_map = prepared_block_map
-        validate_body(body_md)
         version.body_md = body_md
         version.content_hash = content_hash
 
@@ -5366,15 +5367,6 @@ def _page_version_metadata_changes(
         for key in ("title", "tags", "aliases", "page_type", "placement")
         if before[key] != after[key]
     ]
-
-
-def title_from_markdown_heading(body_md: str) -> str | None:
-    for line in body_md.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("# "):
-            title = stripped[2:].strip()
-            return title or None
-    return None
 
 
 def sync_page_projections(

@@ -2,11 +2,12 @@ import difflib
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.domain.input_policy import validate_text
+from backend.domain.input_policy import InputPolicyError, validate_text, validate_title
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.review import ReviewItem
@@ -37,7 +38,7 @@ from backend.services.review_risk_policy import (
 from backend.services.tree_service import ensure_primary_tree_placement
 from backend.spi.types import AI_PROVENANCES
 from backend.utils.actor_display import resolve_actor_display_name
-from backend.utils.page_frontmatter import validate_page_markdown_input
+from backend.utils.page_frontmatter import validate_agent_markdown_input
 from backend.utils.uuid import parse_uuid_or_none
 
 CATEGORY_PRIORITIES = {
@@ -298,8 +299,10 @@ class AgentPageService:
         version = session.get(AgentPageVersion, version_id)
         if version is None or version.agent_page_id != page.id:
             raise ReadNotFoundError("agent page version not found")
-        validate_page_markdown_input(version.body_markdown)
-        proposed_meta = self._proposed_page_meta(version)
+        validate_agent_markdown_input(version.body_markdown)
+        proposed_meta = dict(self._proposed_page_meta(version))
+        if "title" in proposed_meta:
+            proposed_meta["title"] = validate_title(proposed_meta["title"])
         proposed_category = proposed_meta.get("category", page.category)
         self._ensure_activation_allowed(
             page=page,
@@ -506,14 +509,12 @@ class AgentPageService:
         )
         if target.body_markdown is None:
             raise ReadValidationError("source version has no content")
+        validate_agent_markdown_input(target.body_markdown)
         edit_base_version_id = (
             page.latest_draft_version_id or page.current_active_version_id
         )
-        return self.write_draft(
-            session=session,
-            workspace_id=workspace_id,
-            agent_page_id=page.id,
-            request=AgentPageDraftRequest(
+        try:
+            request = AgentPageDraftRequest(
                 base_version_id=edit_base_version_id,
                 body_markdown=target.body_markdown,
                 category=page.category,
@@ -522,7 +523,16 @@ class AgentPageService:
                 sensitivity=page.sensitivity,
                 slug=page.slug,
                 title=page.title,
-            ),
+            )
+        except ValidationError as exc:
+            raise InputPolicyError(
+                "stored Agent page violates current input policy"
+            ) from exc
+        return self.write_draft(
+            session=session,
+            workspace_id=workspace_id,
+            agent_page_id=page.id,
+            request=request,
             actor_kind=actor_kind,
             actor_id=actor_id,
             actor_provenance=actor_provenance,

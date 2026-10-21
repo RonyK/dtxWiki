@@ -128,6 +128,7 @@ export function WorkspaceMembersSection() {
   let exactLoginEmail = "";
   try { exactLoginEmail = normalizeAccountEmail(queryDraft); } catch { /* Search may be a name rather than an email. */ }
   const canAddExactLoginEmail = looksLikeLoginEmail(exactLoginEmail);
+  const invalidLoginEmail = queryDraft.includes("@") && !exactLoginEmail;
 
   useEffect(() => {
     if (!target || !isOwner) {
@@ -600,7 +601,9 @@ export function WorkspaceMembersSection() {
                   ? t("workspaceMembers.add.fromSearchReady", {
                       email: exactLoginEmail,
                     })
-                  : t("workspaceMembers.add.fromSearchHint")}
+                  : invalidLoginEmail
+                    ? t("auth:validation.email")
+                    : t("workspaceMembers.add.fromSearchHint")}
               </span>
             </div>
             <label className="field-stack">

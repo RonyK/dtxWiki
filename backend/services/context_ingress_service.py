@@ -226,6 +226,8 @@ class ContextIngressService:
             parent_id=request.final_parent_node_id,
         )
         body = self._body_for_accept(session, workspace_id, proposal, request)
+        if request.final_save_mode == "feedback_only":
+            validate_text(body, field="body", min_length=1, max_length=10000)
         try:
             validate_markdown_media_policy(body)
         except MarkdownMediaPolicyError as exc:

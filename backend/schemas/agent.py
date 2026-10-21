@@ -84,7 +84,9 @@ class BuildBundleRequest(InputRequest):
     client_id: UUID
     token_budget: int = Field(ge=512, le=200_000)
     ttl_override_seconds: int | None = None
-    requested_categories: list[str] = Field(default_factory=list)
+    requested_categories: list[Literal["agent_guide", "persona", "skill", "memory"]] = (
+        Field(default_factory=list, max_length=4)
+    )
     context_refs: list[UUID] = Field(default_factory=list)
     library_artifact_refs: list[UUID] = Field(default_factory=list)
     permission_context: dict[str, Any] = Field(default_factory=dict)

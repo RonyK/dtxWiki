@@ -1113,9 +1113,11 @@
             "title": "Base Version Id"
           },
           "body_markdown": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "title": "Body Markdown",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "category": {
             "enum": [
@@ -1399,7 +1401,14 @@
           "custom_app_label": {
             "anyOf": [
               {
-                "type": "string",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "x-normalized-maxLength": 160
               },
               {
@@ -2165,9 +2174,10 @@
             "title": "Ttl Override Seconds"
           },
           "user_message": {
-            "maxLength": 8000,
+            "description": "Maximum 8000 Unicode code points after trimming surrounding whitespace.",
             "title": "User Message",
-            "type": "string"
+            "type": "string",
+            "x-normalized-maxLength": 8000
           }
         },
         "required": [
@@ -2401,8 +2411,10 @@
                 "type": "null"
               }
             ],
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
-            "title": "Body Markdown"
+            "title": "Body Markdown",
+            "x-final-maxLength": 1000000
           },
           "page_type": {
             "enum": [
@@ -2811,6 +2823,12 @@
           },
           "requested_categories": {
             "items": {
+              "enum": [
+                "agent_guide",
+                "persona",
+                "skill",
+                "memory"
+              ],
               "type": "string"
             },
             "maxItems": 4,
@@ -3072,8 +3090,10 @@
                 "type": "null"
               }
             ],
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
-            "title": "Body Markdown"
+            "title": "Body Markdown",
+            "x-final-maxLength": 1000000
           },
           "final_page_type": {
             "anyOf": [
@@ -4237,9 +4257,11 @@
           },
           "body_md": {
             "default": "",
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "title": "Body Md",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "page_type": {
             "anyOf": [
@@ -12561,6 +12583,7 @@
                   "format": "uuid",
                   "type": "string"
                 },
+                "maxItems": 256,
                 "minItems": 1,
                 "type": "array"
               },
@@ -12719,10 +12742,12 @@
             "type": "string"
           },
           "body_md": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "minLength": 1,
             "title": "Body Md",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "destination_node_id": {
             "anyOf": [
@@ -13238,10 +13263,12 @@
             "type": "string"
           },
           "body_md": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "minLength": 1,
             "title": "Body Md",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "destination_node_id": {
             "anyOf": [

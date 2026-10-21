@@ -3142,7 +3142,10 @@ export interface components {
         AgentPageDraftRequest: {
             /** Base Version Id */
             base_version_id?: string | null;
-            /** Body Markdown */
+            /**
+             * Body Markdown
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_markdown: string;
             /**
              * Category
@@ -3263,7 +3266,7 @@ export interface components {
             /** Catalog App Id */
             catalog_app_id?: string | null;
             /** Custom App Label */
-            custom_app_label?: string | null;
+            custom_app_label?: (string | null) | null;
             /** Expires In Days */
             expires_in_days?: number | null;
             /** Mcp Client Type */
@@ -3532,7 +3535,10 @@ export interface components {
         AskTurnCreate: {
             /** Ttl Override Seconds */
             ttl_override_seconds?: number | null;
-            /** User Message */
+            /**
+             * User Message
+             * @description Maximum 8000 Unicode code points after trimming surrounding whitespace.
+             */
             user_message: string;
         };
         /** AskTurnDetail */
@@ -3602,7 +3608,10 @@ export interface components {
             alternatives?: {
                 [key: string]: unknown;
             }[];
-            /** Body Markdown */
+            /**
+             * Body Markdown
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_markdown?: string | null;
             /**
              * Page Type
@@ -3762,7 +3771,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Requested Categories */
-            requested_categories?: string[];
+            requested_categories?: ("agent_guide" | "persona" | "skill" | "memory")[];
             /** Task Intent */
             task_intent: string;
             /** Token Budget */
@@ -3853,7 +3862,10 @@ export interface components {
         ContextImageMediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
         /** ContextIngressAcceptRequest */
         ContextIngressAcceptRequest: {
-            /** Body Markdown */
+            /**
+             * Body Markdown
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_markdown?: string | null;
             /** Final Page Type */
             final_page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
@@ -4324,6 +4336,7 @@ export interface components {
             aliases?: string[] | null;
             /**
              * Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
              * @default
              */
             body_md: string;
@@ -7320,7 +7333,10 @@ export interface components {
              * Format: uuid
              */
             base_version_id: string;
-            /** Body Md */
+            /**
+             * Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_md: string;
             /** Destination Node Id */
             destination_node_id?: string | null;
@@ -7519,7 +7535,10 @@ export interface components {
              * Format: uuid
              */
             base_version_id: string;
-            /** Body Md */
+            /**
+             * Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             body_md: string;
             /** Destination Node Id */
             destination_node_id?: string | null;

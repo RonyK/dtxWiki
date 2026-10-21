@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
+from backend.domain.input_policy import InputPolicyError
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.user import User
 from backend.models.workspace import WorkspaceMembership
@@ -25,6 +26,12 @@ def test_explicit_empty_seed_password_is_rejected_before_provisioning(tmp_path):
     with pytest.raises(RuntimeError, match="password"):
         seed_remote_mcp_smoke(settings, login_password="")
     assert not path.exists()
+    for workspace_slug in ("a" * 81, "İ" * 80):
+        with pytest.raises(InputPolicyError, match="slug"):
+            seed_remote_mcp_smoke(
+                settings, workspace_a=workspace_slug, login_password="correct-password"
+            )
+        assert not path.exists()
 
 
 def test_seed_remote_mcp_smoke_outputs_usable_material(tmp_path):
@@ -40,6 +47,21 @@ def test_seed_remote_mcp_smoke_outputs_usable_material(tmp_path):
     )
 
     env = result.as_env()
+    # Match the remote fixture's fallback names to real provisioned workspaces.
+    # Secret values stay local to this disposable test database.
+    import os
+    from unittest.mock import patch
+
+    from tests.e2e.conftest import remote_seed_material
+
+    with patch.dict(os.environ, env):
+        os.environ.pop("DTXWIKI_REMOTE_E2E_WORKSPACE_A", None)
+        os.environ.pop("DTXWIKI_REMOTE_E2E_WORKSPACE_B", None)
+        material = remote_seed_material.__wrapped__()
+    assert (material.workspace_a, material.workspace_b) == (
+        result.workspace_a,
+        result.workspace_b,
+    )
     required = {
         "DTXWIKI_REMOTE_E2E_PAT_READ",
         "DTXWIKI_REMOTE_E2E_PAT_AGENT",
@@ -81,10 +103,13 @@ def test_seed_remote_mcp_smoke_outputs_usable_material(tmp_path):
         alice = session.scalar(select(User).where(User.email == result.alice_email))
         assert alice is not None
         assert alice.personal_workspace_id is not None
-        assert session.get(
-            WorkspaceMembership,
-            (alice.id, alice.personal_workspace_id),
-        ).role == "owner"
+        assert (
+            session.get(
+                WorkspaceMembership,
+                (alice.id, alice.personal_workspace_id),
+            ).role
+            == "owner"
+        )
         assert (
             session.get(
                 WorkspaceMembership,

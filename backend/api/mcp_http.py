@@ -256,11 +256,11 @@ async def mcp_http(request: Request):
     # does not drift for an MCP endpoint whose contract is JSON-RPC based.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization_header_is_valid(authorization) or not authorization.startswith(
-        "Bearer "
-    ):
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ")
+    token = authorization[7:].strip(" \t")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -385,11 +385,11 @@ async def mcp_http_get(request: Request):
     # OpenAPI does not carry the MCP transport design text.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization_header_is_valid(authorization) or not authorization.startswith(
-        "Bearer "
-    ):
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ")
+    token = authorization[7:].strip(" \t")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor
@@ -435,11 +435,11 @@ async def mcp_http_delete(request: Request):
     # remains idempotent for missing or unknown session ids.
     mode = getattr(request.app.state.settings, "mcp_http_mode", "json_stateless")
     authorization = request.headers.get("authorization", "")
-    if not authorization_header_is_valid(authorization) or not authorization.startswith(
-        "Bearer "
-    ):
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
         return mcp_unauthorized(request)
-    token = authorization.removeprefix("Bearer ")
+    token = authorization[7:].strip(" \t")
     actor = _authenticate_mcp_actor(request, token)
     if isinstance(actor, JSONResponse):
         return actor

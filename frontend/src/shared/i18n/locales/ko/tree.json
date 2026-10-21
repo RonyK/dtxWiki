@@ -101,7 +101,7 @@
     "pickSourceFile": "Library에 추가할 소스 파일을 선택하세요.",
     "pageTitle": "페이지 제목",
     "folderName": "폴더 이름",
-    "titleLength": "1-80자를 입력하세요.",
+    "titleLength": "1-{{maximum}}자를 입력하세요.",
     "slugPreview": "슬러그 미리보기: {{slug}}",
     "editorHint": "이 제목과 위치로 편집기가 열립니다.",
     "advancedSlug": "고급 슬러그",

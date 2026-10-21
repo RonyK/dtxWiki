@@ -134,6 +134,13 @@ def _make_sqlite_ddl_transactional(engine) -> None:
     @event.listens_for(engine, "connect")
     def _driver_does_not_begin(dbapi_connection, _connection_record) -> None:
         dbapi_connection.isolation_level = None
+        # Batch rebuilds drop parent tables. Never inherit a build-dependent
+        # foreign_keys default that could cascade-delete their children.
+        dbapi_connection.execute("PRAGMA foreign_keys=OFF")
+        if dbapi_connection.execute("PRAGMA foreign_keys").fetchone()[0] != 0:
+            raise RuntimeError(
+                "SQLite migrations require foreign_keys=OFF before BEGIN"
+            )
 
     @event.listens_for(engine, "begin")
     def _begin_with_the_write_lock(connection) -> None:
@@ -178,6 +185,11 @@ def run_migrations_online() -> None:
         with context.begin_transaction():
             context.run_migrations()
             _validate_resulting_revision_shape(connection)
+            if (
+                sqlite
+                and connection.exec_driver_sql("PRAGMA foreign_key_check").first()
+            ):
+                raise RuntimeError("SQLite migration refused: foreign key violations")
 
 
 if context.is_offline_mode():

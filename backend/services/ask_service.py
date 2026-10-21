@@ -7,6 +7,11 @@ from uuid import UUID
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session
 
+from backend.domain.input_policy import (
+    InputPolicyError,
+    fit_generated_title,
+    normalize_ask_user_message,
+)
 from backend.llm.base import (
     LLMMessage,
     LLMProvider,
@@ -123,15 +128,10 @@ class InvalidUserMessageError(ValueError):
 
 
 def _validate_user_message(raw: str) -> str:
-    if not isinstance(raw, str):
-        raise InvalidUserMessageError("user_message must be a string")
-    stripped = raw.strip()
-    if not stripped:
-        raise InvalidUserMessageError("user_message must not be empty")
-    if len(stripped) > USER_MESSAGE_MAX_CHARS:
-        raise InvalidUserMessageError(
-            f"user_message exceeds {USER_MESSAGE_MAX_CHARS} characters"
-        )
+    try:
+        stripped = normalize_ask_user_message(raw)
+    except InputPolicyError as exc:
+        raise InvalidUserMessageError(str(exc)) from exc
     cleaned = "".join(
         ch for ch in stripped if ch.isprintable() or ch in ("\n", "\t", "\r")
     ).strip()
@@ -177,7 +177,7 @@ def derive_title_snippet(message: str, max_words: int = ASK_TITLE_MAX_WORDS) -> 
     snippet = " ".join(words[:max_words]).strip(" .,:;!?")
     if len(words) > max_words:
         snippet = f"{snippet}..."
-    return snippet[:96]
+    return fit_generated_title(snippet, max_length=96) if snippet else ""
 
 
 class AskService:
@@ -840,7 +840,9 @@ class AskService:
         if not intent:
             return
         anchor = _dominant_context_anchor(session, ask_session)
-        next_title = (f"{anchor}: {intent}" if anchor else intent)[:256]
+        if anchor:
+            anchor = fit_generated_title(anchor, max_length=256 - 2 - len(intent))
+        next_title = fit_generated_title(f"{anchor}: {intent}" if anchor else intent)
         if next_title == ask_session.title:
             return
         ask_session.title = next_title

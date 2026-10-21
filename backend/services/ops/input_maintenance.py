@@ -12,6 +12,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from packaging.version import Version
 
+from backend.app.runtime_resources import RuntimeResources
+from backend.app.settings import Settings
 from backend.app.version import package_version
 from backend.domain.identity_policy import normalize_email, validate_display_name
 from backend.domain.input_policy import normalize_short_text, validate_text
@@ -22,7 +24,6 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
 )
 from backend.models.normalized_keys import normalize_search_key
 from backend.repositories.input_metadata_repair import InputMetadataRepairRepository
-from backend.services.ops import runtime_lock
 from backend.services.ops.input_history_audit import audit_preserved_inputs
 from backend.services.ops.migration_preflight import (
     evaluate_connection_preflight,
@@ -161,7 +162,9 @@ def repair_input(
                 )
         elif field in {"goal", "decision_note", "nav_summary"}:
             value = validate_text(
-                value, field=field, max_length=maximum,
+                value,
+                field=field,
+                max_length=maximum,
                 min_length=1 if field == "goal" else 0,
             )
             if field == "goal" and not value.strip():
@@ -186,7 +189,8 @@ def repair_input(
         raise InputMaintenanceError(
             "input maintenance requires a supported, consistent stamped database"
         )
-    with runtime_lock.acquire_exclusive():
+    resources = RuntimeResources.for_settings(Settings(database_url=database_url))
+    with resources.acquire_activity("exclusive"):
         engine = make_non_mutating_engine(database_url, query_only=False)
         if engine.dialect.name == "sqlite":
 

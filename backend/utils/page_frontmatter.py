@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
+from backend.utils.markdown_fence import fence_opener, is_fence_closer
+
 FRONTMATTER_DELIMITERS = {"---", "..."}
 PAGE_METADATA_FIELDS = {"title", "slug", "type", "tags", "aliases"}
 TAG_MAX_LENGTH = 48
@@ -41,7 +43,11 @@ def validate_frontmatter_input(markdown: str) -> None:
 
     Reads keep supporting historical metadata. Only write boundaries call this.
     """
-    from backend.domain.input_policy import validate_labels, validate_title
+    from backend.domain.input_policy import (
+        InputPolicyError,
+        validate_labels,
+        validate_title,
+    )
 
     lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     closing = _frontmatter_closing_index(lines)
@@ -62,11 +68,13 @@ def validate_frontmatter_input(markdown: str) -> None:
                     decoded = json.loads(raw)
                 except json.JSONDecodeError:
                     decoded = None
-                values = (
-                    decoded
-                    if isinstance(decoded, list)
-                    else _inline_metadata_values(raw)
-                )
+                if isinstance(decoded, list) and any(
+                    isinstance(value, (dict, list)) for value in decoded
+                ):
+                    raise InputPolicyError(f"{key} entries must be scalar values")
+                # Share the reader's lexical scalar extraction. str(True) or
+                # str(1e3) would change the stored labels to True or 1000.0.
+                values = _inline_metadata_values(raw)
             elif not raw:
                 for following in header[index + 1 :]:
                     if not following.strip():
@@ -77,17 +85,40 @@ def validate_frontmatter_input(markdown: str) -> None:
             validate_labels(values, field=key, max_length=48 if key == "tags" else 80)
 
 
-def validate_page_markdown_input(markdown: str) -> None:
-    """Check the complete stored Markdown when creating or resubmitting it."""
-    from backend.domain.input_policy import validate_body, validate_title
+def validate_agent_markdown_input(markdown: str) -> None:
+    """Agent titles are explicit metadata, independent of Markdown headings."""
+    from backend.domain.input_policy import validate_body
 
     validate_body(markdown)
     validate_frontmatter_input(markdown)
+
+
+def validate_page_markdown_input(markdown: str) -> None:
+    """Check the complete stored Context Markdown and its derived title."""
+    from backend.domain.input_policy import validate_title
+
+    validate_agent_markdown_input(markdown)
     parsed = parse_page_frontmatter(markdown)
-    for line in parsed.body.splitlines():
-        if line.strip().startswith("# "):
-            validate_title(line.strip()[2:].strip())
-            break
+    title = title_from_markdown_heading(parsed.body)
+    if title is not None:
+        validate_title(title)
+
+
+def title_from_markdown_heading(markdown: str) -> str | None:
+    """Return the first prose H1, ignoring CommonMark fenced code blocks."""
+    fence = None
+    for line in markdown.splitlines():
+        if fence is not None:
+            if is_fence_closer(line, marker=fence[0], minimum=fence[1]):
+                fence = None
+            continue
+        fence = fence_opener(line)
+        if fence is not None:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip() or None
+    return None
 
 
 def render_frontmatter(fields: dict[str, object]) -> str:

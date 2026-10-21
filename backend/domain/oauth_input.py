@@ -9,10 +9,10 @@ from backend.domain.credential_input import (
 
 
 def validate_scope_input(value: object) -> str:
-    if (
-        not isinstance(value, str)
-        or len(value) > OAUTH_SCOPE_MAX_BYTES
-        or any(not " " <= character <= "~" for character in value)
+    if not isinstance(value, str):
+        raise ValueError("scope must be a string")
+    if len(value) > OAUTH_SCOPE_MAX_BYTES or any(
+        not " " <= character <= "~" for character in value
     ):
         raise ValueError("scope must contain at most 256 ASCII bytes")
     return value
@@ -85,15 +85,6 @@ def validate_supported_metadata(payload: dict) -> None:
             or required not in values
         ):
             raise ValueError(f"{field} contains unsupported client metadata")
-    if "application_type" in payload and payload["application_type"] not in (
-        "native",
-        "web",
-    ):
-        raise ValueError("application_type must be native or web")
-    if (
-        "token_endpoint_auth_method" in payload
-        and payload["token_endpoint_auth_method"] != "none"
-    ):
-        raise ValueError("token_endpoint_auth_method must be none")
-    if "client_secret" in payload or "client_secret_expires_at" in payload:
-        raise ValueError("public client metadata must not contain client secrets")
+    for field in ("application_type", "token_endpoint_auth_method"):
+        if payload.get(field) is not None and not isinstance(payload[field], str):
+            raise ValueError(f"{field} must be a string")

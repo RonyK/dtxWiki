@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,6 +19,7 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
+from backend.domain.input_policy import InputPolicyError
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
@@ -4217,11 +4219,17 @@ class ContextWriteService:
     ) -> None:
         if not metadata_patch:
             return
-        patch = (
-            metadata_patch
-            if isinstance(metadata_patch, PageMetadataPatch)
-            else PageMetadataPatch.model_validate(metadata_patch)
-        )
+        try:
+            patch = (
+                metadata_patch
+                if isinstance(metadata_patch, PageMetadataPatch)
+                else PageMetadataPatch.model_validate(metadata_patch)
+            )
+            validate_request_inputs(patch)
+        except ValidationError as exc:
+            raise InputPolicyError(
+                "stored metadata violates current input policy"
+            ) from exc
         fields = patch.model_fields_set
         if "title" in fields:
             page.title = patch.title

@@ -141,8 +141,10 @@
               }
             ],
             "default": null,
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
-            "title": "Body Markdown"
+            "title": "Body Markdown",
+            "x-final-maxLength": 1000000
           },
           "citations": {
             "items": {
@@ -347,10 +349,12 @@
         "additionalProperties": false,
         "properties": {
           "body_markdown": {
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
             "maxLength": 1000000,
             "minLength": 1,
             "title": "Body Markdown",
-            "type": "string"
+            "type": "string",
+            "x-final-maxLength": 1000000
           },
           "citations": {
             "items": {
@@ -479,6 +483,7 @@
           }
         ],
         "default": null,
+        "maxLength": 2000,
         "title": "Note"
       },
       "review_item_id": {

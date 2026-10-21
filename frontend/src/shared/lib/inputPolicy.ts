@@ -34,8 +34,21 @@ export function inputTextError(value: string, maximum: number, singleLine = true
 export function markdownInputError(value: string) {
   const bodyError = inputTextError(value, 1_000_000, false);
   if (bodyError) return bodyError;
-  const heading = value.split(/\r\n|\r|\n/).find((line) => line.trim().startsWith("# "));
-  return heading ? inputTextError(heading.trim().slice(2), 256) : "";
+  const lines = value.split(/\r\n|\r|\n/);
+  const closing = lines[0]?.trim() === "---"
+    ? lines.findIndex((line, index) => index > 0 && ["---", "..."].includes(line.trim()))
+    : -1;
+  let fence = "";
+  for (const line of lines.slice(closing + 1)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = "";
+      continue;
+    }
+    if (!fence && line.trim().startsWith("# ")) return inputTextError(line.trim().slice(2), 256);
+  }
+  return "";
 }
 
 /** Let IME and paste complete without shortening input; native form validation

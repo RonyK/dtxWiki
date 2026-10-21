@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, load_only
 
 from backend.domain.input_policy import (
+    fit_generated_title,
     validate_title,
 )
 from backend.models.agent import AgentPage, AgentPageVersion
@@ -1113,9 +1114,11 @@ class McpChatService:
         # artifact title or the first tool action). Client identity and the
         # call count are surfaced separately in the UI (client chip + meta),
         # so they are intentionally omitted from the title here.
-        return self._title_anchor(
-            session, chat_session, actor, shared_only=shared_only
-        )[:120]
+        return fit_generated_title(
+            self._title_anchor(session, chat_session, actor, shared_only=shared_only),
+            max_length=120,
+            fallback="MCP activity",
+        )
 
     def _title_anchor(
         self,
@@ -2030,7 +2033,9 @@ class McpChatService:
                 source, actor, workspace_id=workspace_id
             ):
                 return None, None
-            return source.title or source.uri, f"/library?target={source.id}"
+            return source.title or fit_generated_title(
+                source.uri, fallback="Library item"
+            ), f"/library?target={source.id}"
         if resource_kind == McpChatArtifactKind.CONTEXT_MEDIA_ASSET.value:
             # ContextMediaAsset has no title column; original_filename is the
             # only author-controlled label, and it is already sanitized at

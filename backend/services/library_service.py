@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.domain.input_policy import validate_title
+from backend.domain.input_policy import fit_generated_title, validate_title
 from backend.library_media.ports import LibraryLogicalQuotaFactory
 from backend.media.domain import BlobEpoch, BlobReference
 from backend.models.base import utc_now
@@ -181,7 +181,7 @@ class LibraryService:
 
         item.lifecycle_status = "archived"
         sync_library_doc_sources(session, item)
-        title = item.title or item.uri
+        title = item.title or fit_generated_title(item.uri, fallback="Library item")
         uri = item.uri
         last_version_no = max(
             (version.version_no for version in item.versions),
@@ -905,7 +905,8 @@ class LibraryService:
                     workspace_id=workspace_id,
                     target_kind="library_item",
                     target_id=item.id,
-                    title=item.title or item.uri,
+                    title=item.title
+                    or fit_generated_title(item.uri, fallback="Library item"),
                     slug=None,
                     section="library",
                     parent_id=parent_node_id,
@@ -936,7 +937,8 @@ class LibraryService:
                 workspace_id=workspace_id,
                 target_kind="library_item",
                 target_id=item.id,
-                title=item.title or item.uri,
+                title=item.title
+                or fit_generated_title(item.uri, fallback="Library item"),
                 slug=None,
                 section="library",
                 parent_id=None,

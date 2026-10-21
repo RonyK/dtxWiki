@@ -198,7 +198,7 @@ def test_issue_pat_scope_validation_rejects_unknown(tmp_path, monkeypatch):
         "workspace-admin",
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert "scope" in result.stderr
 
 

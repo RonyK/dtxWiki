@@ -59,8 +59,16 @@
   submitted grant lists. Existing history and larger stored grant sets remain
   readable. Add pre-upgrade input audits and UUID-based metadata repairs;
   migrations refuse invalid current scalar values before changing the schema.
-- Advance the MCP tool contract to revision 12 for the new input constraints.
+- Advance the MCP tool contract to revision 13 for input constraints, supported
+  bundle categories, and final stored-body budget guidance.
   Clients should refresh `tools/list` and handle input validation errors.
+- Keep generated Ask, Library and Chats titles within storage limits, preserve
+  scalar frontmatter labels, and apply the separate Agent body rules.
+- Preserve public-client DCR compatibility and idempotent token revocation, and
+  apply registration rate limits before parsing malformed metadata.
+- Separate upgrade-blocking input findings from preserved history, support
+  baseline audits and independent Library label repairs, and honor runtime
+  activity locks during maintenance.
 - Select the Context publish replay audit by version and change-set identity.
 - Persist changes to nested workspace settings policies.
 - Prevent Settings draft resets from overwriting the user's first edit.

@@ -16,7 +16,7 @@ from backend.domain.identity_policy import (
     normalize_email,
     validate_password,
 )
-from backend.domain.input_policy import normalize_short_text
+from backend.domain.input_policy import SHORT_TEXT_SPACES, normalize_short_text
 from backend.schemas.common import RESTResponseBase
 from backend.services.api_token_service import (
     ALLOWED_API_TOKEN_SCOPES,
@@ -163,10 +163,14 @@ TokenNameInput = Annotated[
     Field(json_schema_extra={"x-normalized-maxLength": 128}),
 ]
 CustomAppLabelInput = Annotated[
-    str,
+    str | None,
     BeforeValidator(
-        lambda value: normalize_short_text(
-            value, field="custom_app_label", max_length=160
+        lambda value: (
+            None
+            if isinstance(value, str) and not value.strip(SHORT_TEXT_SPACES)
+            else normalize_short_text(
+                value, field="custom_app_label", max_length=160, optional=True
+            )
         )
     ),
     Field(json_schema_extra={"x-normalized-maxLength": 160}),
@@ -474,7 +478,7 @@ class OAuthConsentSettingsUpdateRequest(BaseModel):
     # P10.3 T3 (section 2.4): full-set REPLACE of the allowed-workspace set,
     # mirroring ApiTokenUpdateRequest.workspace_grants. Omitted leaves the
     # set unchanged.
-    workspace_ids: list[UUID] | None = Field(default=None, min_length=1)
+    workspace_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def _require_a_setting(self):

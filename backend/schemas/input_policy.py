@@ -3,6 +3,7 @@
 from pydantic import BaseModel, model_validator
 
 from backend.domain.input_policy import (
+    normalize_ask_user_message,
     normalize_short_text,
     validate_body,
     validate_labels,
@@ -50,9 +51,7 @@ def validate_request_inputs(request):
     if name in {"SubmitFeedbackRequest", "SubmitFeedbackInput"}:
         validate_text(request.body, field="body", max_length=10000, min_length=1)
     if hasattr(request, "user_message"):
-        validate_text(
-            request.user_message, field="user_message", max_length=8000, min_length=1
-        )
+        request.user_message = normalize_ask_user_message(request.user_message)
     for key, limit in (("tags", 48), ("default_topic_tags", 48), ("aliases", 80)):
         if hasattr(request, key):
             setattr(
@@ -144,6 +143,12 @@ class InputRequest(BaseModel):
         for key in ("body_md", "body_markdown", "merged_body_markdown"):
             if key in properties:
                 properties[key]["maxLength"] = 1_000_000
+                if cls.__name__ != "LibrarySemanticMarkdownUpdateRequest":
+                    properties[key]["x-final-maxLength"] = 1_000_000
+                    properties[key]["description"] = (
+                        "The final stored Markdown, including managed frontmatter, "
+                        "must contain at most 1000000 Unicode code points."
+                    )
         for key in (
             "reason",
             "decision_reason",
@@ -162,6 +167,13 @@ class InputRequest(BaseModel):
                 if cls.__name__ == "PageInlineCommentCreateRequest" and key == "note":
                     limit = 5000
                 properties[key]["maxLength"] = limit
+                if key == "user_message":
+                    properties[key].pop("maxLength", None)
+                    properties[key]["x-normalized-maxLength"] = 8000
+                    properties[key]["description"] = (
+                        "Maximum 8000 Unicode code points after trimming "
+                        "surrounding whitespace."
+                    )
         if "body" in properties and cls.__name__ in {
             "SubmitFeedbackRequest",
             "SubmitFeedbackInput",

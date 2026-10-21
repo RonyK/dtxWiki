@@ -212,8 +212,8 @@ import {
   type PageIcon,
   type PageMetadata,
   type PageType,
-  normalizeAliasesInput,
-  normalizeTagsInput,
+  normalizeAliases,
+  normalizeTags,
   parsePageDocument,
   serializePageDocument,
 } from "./pageFrontmatter";
@@ -465,8 +465,8 @@ export function PageEditor({
   const [body, setBody] = useState("");
   const [pageIcon, setPageIcon] = useState<PageIcon>(DEFAULT_PAGE_METADATA.icon);
   const [pageType, setPageType] = useState<PageType>(DEFAULT_PAGE_METADATA.type);
-  const [tagInput, setTagInput] = useState("");
-  const [aliasInput, setAliasInput] = useState("");
+  const [tagInput, setTagInput] = useState<string[]>([]);
+  const [aliasInput, setAliasInput] = useState<string[]>([]);
   // Aliases run with truncateItems={false}, so an over-long entry is rejected
   // rather than silently trimmed. Without this the rejection was invisible:
   // Enter simply did nothing. CustomFormatEditor and FormatAliasGroupList
@@ -645,13 +645,13 @@ export function PageEditor({
   const propertiesPopoverTitleId = useId();
 
   const normalizedSlug = slugify(pageSlug);
-  const normalizedTags = useMemo(() => normalizeTagsInput(tagInput), [tagInput]);
+  const normalizedTags = useMemo(() => normalizeTags(tagInput), [tagInput]);
   const normalizedAliases = useMemo(
-    () => normalizeAliasesInput(aliasInput),
+    () => normalizeAliases(aliasInput),
     [aliasInput],
   );
-  const aliasValidationMessage = aliasInput.split(",").some((alias) => alias.trim().length > 80) ||
-    aliasInput.split(",").filter((alias) => alias.trim()).length > 32
+  const aliasValidationMessage = aliasInput.some((alias) => Boolean(inputTextError(alias, 80))) ||
+    aliasInput.filter((alias) => alias.trim()).length > 32
     ? t("editor.aliasesError", { defaultValue: "Use up to 32 aliases, each 80 characters or fewer." })
     : null;
   const pageMetadata = useMemo<PageMetadata>(() => ({
@@ -2706,7 +2706,11 @@ export function PageEditor({
   async function save(options: SaveOptions = {}) {
     const source = options.source ?? "manual";
     const submittedBody = options.bodyOverride ?? body;
-    const inputError = inputTextError(title, TITLE_MAX_LENGTH) || markdownInputError(submittedBody);
+    const serializedBody = serializeDraftBody(
+      { ...currentDraft, body: submittedBody, title: title.trim(), slug: mode === "edit" ? pageSlug : normalizedSlug },
+      frontmatterExtraLinesRef.current,
+    );
+    const inputError = inputTextError(title, TITLE_MAX_LENGTH) || markdownInputError(serializedBody);
     if (inputError) {
       setStatus(inputError);
       setSaveError(true);
@@ -3327,6 +3331,8 @@ export function PageEditor({
         return false;
       }
       const draft = latestDraftRef.current;
+      const serializedBody = serializeDraftBody(draft, frontmatterExtraLinesRef.current);
+      if (markdownInputError(serializedBody)) return false;
       if (
         draftSaveFingerprint(draft, frontmatterExtraLinesRef.current) ===
         lastSavedFingerprintRef.current
@@ -3335,7 +3341,7 @@ export function PageEditor({
       }
       return sendPageAutosave(workspaceId, page.id, {
         title: draft.title.trim(),
-        body_md: serializeDraftBody(draft, frontmatterExtraLinesRef.current),
+        body_md: serializedBody,
         page_type: draft.pageType,
         tags: draft.tags,
         aliases: draft.aliases,
@@ -3485,9 +3491,12 @@ export function PageEditor({
     setStatus(null);
     try {
       const submittedDraft = { ...currentDraft, slug: pageSlug, title: title.trim() };
+      const serializedBody = serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current);
+      const inputError = markdownInputError(serializedBody);
+      if (inputError) { setStatus(inputError); return; }
       const preserved = await updatePage(workspaceId, page.id, {
         title: submittedDraft.title,
-        body_md: serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current),
+        body_md: serializedBody,
         page_type: submittedDraft.pageType,
         tags: submittedDraft.tags,
         aliases: submittedDraft.aliases,
@@ -3550,8 +3559,8 @@ export function PageEditor({
     frontmatterExtraLinesRef.current = [];
     setPageIcon(DEFAULT_PAGE_METADATA.icon);
     setPageType(DEFAULT_PAGE_METADATA.type);
-    setTagInput(tags.join(", "));
-    setAliasInput("");
+    setTagInput(tags);
+    setAliasInput([]);
     setTagQuery("");
     setTagSuggestions([]);
   }
@@ -3560,8 +3569,8 @@ export function PageEditor({
     frontmatterExtraLinesRef.current = metadata.extraLines;
     setPageIcon(metadata.icon);
     setPageType(metadata.type);
-    setTagInput(metadata.tags.join(", "));
-    setAliasInput(metadata.aliases.join(", "));
+    setTagInput(metadata.tags);
+    setAliasInput(metadata.aliases);
   }
 
   function updateSlug(nextSlug: string) {
@@ -3575,12 +3584,12 @@ export function PageEditor({
   }
 
   function updateTags(nextTags: string[]) {
-    setTagInput(nextTags.join(", "));
+    setTagInput(nextTags);
     markDraftMutation();
   }
 
   function updateAliases(nextAliases: string[]) {
-    setAliasInput(nextAliases.join(", "));
+    setAliasInput(nextAliases);
     setAliasItemError(null);
     markDraftMutation();
   }
@@ -5429,8 +5438,8 @@ function ConflictDiffPanel({
 function metadataFromPagePayload(metadata: PageMetadata, page: PagePayload): PageMetadata {
   return {
     ...metadata,
-    aliases: normalizeAliasesInput((page.aliases ?? []).join(", ")),
-    tags: normalizeTagsInput((page.tags ?? []).join(", ")),
+    aliases: normalizeAliases(page.aliases ?? []),
+    tags: normalizeTags(page.tags ?? []),
     type: supportedPageType(page.page_type) ?? metadata.type,
   };
 }

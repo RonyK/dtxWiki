@@ -63,8 +63,10 @@ def rule_sql(rule: Rule, dialect: str) -> str:
     sqlite = dialect == "sqlite"
     position = "instr" if sqlite else "strpos"
     character = "char" if sqlite else "chr"
+
     def octets(value):
         return f"length(CAST({value} AS BLOB))" if sqlite else f"octet_length({value})"
+
     parts = [f"typeof({column}) = 'text'"] if sqlite else []
     maximum = (
         "CASE WHEN node_kind = 'folder' THEN 80 ELSE 256 END"
@@ -100,9 +102,7 @@ def rule_sql(rule: Rule, dialect: str) -> str:
             ]
         )
         parts.extend(f"{position}({column}, {_literal(space)}) = 0" for space in TRIM)
-        parts.extend(
-            f"{position}({column}, {_literal(mark)}) = 0" for mark in '<>,;"'
-        )
+        parts.extend(f"{position}({column}, {_literal(mark)}) = 0" for mark in '<>,;"')
     if rule.kind == "slug":
         parts.extend(
             [
@@ -153,11 +153,20 @@ def check_encoding(connection) -> None:
 def audit(connection, *, allow_missing: bool = False) -> list[dict]:
     """Count violations; only bounded IDs and rule names leave the database."""
     check_encoding(connection)
-    tables = set(sa.inspect(connection).get_table_names())
+    inspector = sa.inspect(connection)
+    tables = set(inspector.get_table_names())
+    columns = {}
     result = []
     for rule in RULES:
-        if rule.table not in tables and allow_missing:
-            continue
+        if allow_missing:
+            if rule.table not in tables:
+                continue
+            if rule.table not in columns:
+                columns[rule.table] = {
+                    column["name"] for column in inspector.get_columns(rule.table)
+                }
+            if rule.field not in columns[rule.table]:
+                continue
         expression = rule_sql(rule, connection.dialect.name)
         predicate = f"NOT ({expression})"
         count = connection.execute(
@@ -175,6 +184,11 @@ def audit(connection, *, allow_missing: bool = False) -> list[dict]:
                 .all()
             )
             result.append(
-                {"rule": rule.name, "count": count, "ids": [str(i) for i in ids]}
+                {
+                    "rule": rule.name,
+                    "classification": "blocking_scalar",
+                    "count": count,
+                    "ids": [str(i) for i in ids],
+                }
             )
     return result

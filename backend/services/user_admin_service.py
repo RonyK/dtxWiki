@@ -17,6 +17,7 @@ from backend.services.session_service import (
     normalize_email,
     validate_password,
 )
+from backend.utils.database_errors import is_single_column_unique_violation
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,10 @@ class UserAdminService:
             try:
                 session.flush()
             except IntegrityError as exc:
+                if not is_single_column_unique_violation(
+                    exc, table="users", column="email"
+                ):
+                    raise
                 raise DuplicateEmailError("email already exists") from exc
             # Account creation owns only its newly provisioned Personal
             # workspace. Membership in an existing workspace is an explicit,

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.domain.input_policy import validate_title
+from backend.domain.input_policy import fit_generated_title, validate_title
 from backend.library_media.ports import (
     LibraryBlobRepositoryFactory,
     LibraryLogicalQuotaFactory,
@@ -290,7 +290,8 @@ class LibraryBinaryRegistrationService:
                 workspace_id=workspace_id,
                 target_kind="library_item",
                 target_id=item.id,
-                title=item.title or item.uri,
+                title=item.title
+                or fit_generated_title(item.uri, fallback="Library item"),
                 slug=None,
                 section="library",
                 parent_id=parent_node_id,

@@ -8,6 +8,19 @@ import { describe, expect, it, vi } from "vitest";
 import { NewItemDialog } from "../NewItemDialog";
 
 describe("NewItemDialog", () => {
+  it("uses the content title budget for pages without cutting Unicode input", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<NewItemDialog parentLabel="Context" onClose={() => undefined} onSubmit={onSubmit} />);
+    const input = screen.getByRole("textbox", { name: /title/i });
+    const submit = screen.getByRole("button", { name: "Open editor" });
+    fireEvent.change(input, { target: { value: "😀".repeat(257) } });
+    expect(input).toHaveValue("😀".repeat(257));
+    expect(submit).toBeDisabled();
+    fireEvent.change(input, { target: { value: "😀".repeat(256) } });
+    await userEvent.click(submit);
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ title: "😀".repeat(256) }));
+  });
+
   it.each([390, 1280])(
     "contains a deeply nested location at a %ipx viewport",
     (viewportWidth) => {

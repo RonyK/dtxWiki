@@ -23,9 +23,11 @@
       },
       "body_md": {
         "default": "",
+        "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
         "maxLength": 1000000,
         "title": "Body Md",
-        "type": "string"
+        "type": "string",
+        "x-final-maxLength": 1000000
       },
       "conversation_token": {
         "anyOf": [
