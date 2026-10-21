@@ -1297,8 +1297,8 @@
   "mcpClients": {
     "filterLabel": "MCP 클라이언트 상태",
     "filter": {
-      "active": "활성",
-      "disabled": "비활성",
+      "active": "사용 가능",
+      "disabled": "그 외 상태",
       "all": "전체"
     },
     "loading": "MCP 클라이언트 불러오는 중…",
@@ -1486,10 +1486,10 @@
       "searchAria": "워크스페이스 검색",
       "searchClear": "워크스페이스 검색 지우기",
       "searchPlaceholder": "워크스페이스 이름 또는 슬러그",
-      "selectAllShown": "표시된 항목 모두 선택",
-      "clearAll": "모두 해제",
+      "selectAllShown": "이 페이지 전체 선택",
+      "clearAll": "전체 선택 지우기",
       "selectedCount": "선택",
-      "toggleAllAria": "표시된 워크스페이스 전체 선택 또는 해제",
+      "toggleAllAria": "이 페이지 선택 또는 해제",
       "defaultBadge": "기본",
       "membershipMissing": "멤버십 없음",
       "noMatches": "검색과 일치하는 워크스페이스가 없습니다.",
@@ -1518,7 +1518,8 @@
     "oauthAppsIntroUrlClientId": "HTTPS URL 클라이언트 식별자가 설정된 MCP 클라이언트는 OAuth를 사용할 수 있습니다. 이 서버에서는 클라이언트 자동 등록이 비활성화되어 있습니다.",
     "oauthAppsIntroUnavailable": "보통 OAuth 지원 MCP 클라이언트가 여기로 연결하지만, 이 서버에서는 사용할 수 없습니다(위 참고). 대신 액세스 키를 사용하세요.",
     "oauthDetailsToggle": "OAuth 상세 보기 (이 서버에서는 사용 불가)",
-    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다). 아래의 액세스 키를 대신 사용하세요.",
+    "useAccessKey": "Access Key를 사용하세요.",
+    "oauthUnavailable": "이 서버는 OAuth를 제공할 수 없습니다(https URL이 필요하며, 표준을 따르는 MCP 클라이언트는 https가 아닌 인증 서버를 거부합니다).",
     "pill": {
       "recommended": "권장",
       "unavailable": "설정 필요",
@@ -1618,7 +1619,7 @@
       "template": "템플릿"
     },
     "setupCommandPlaceholder": "키를 만들면 설정 명령이 여기에 나타납니다.",
-    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하거나 아래의 액세스 키를 사용하세요.",
+    "oauthCapabilityUnknown": "이 서버의 연결 설정을 읽지 못해 OAuth 제공 가능 여부를 알 수 없습니다. 다시 시도하세요.",
     "oauthCapabilityRetry": "다시 시도"
   },
   "clipboard": {
@@ -1677,10 +1678,11 @@
     "connectionTiming": "마지막 사용 {{lastUsed}} · 다음 만료 {{nextExpiry}}",
     "noLiveExpiry": "유효한 토큰 없음",
     "state": {
-      "active": "활성",
-      "expired": "만료됨",
-      "revoked": "해지됨",
-      "disabled": "비활성"
+      "active": "인증 유효",
+      "expired": "인증 만료",
+      "revoked": "인증 취소",
+      "disabled": "사용 차단",
+      "unknown": "인증 상태 확인 필요"
     }
   },
   "dangerZone": {
@@ -1852,5 +1854,42 @@
   },
   "commandBlock": {
     "copyFallback": "{{label}} 복사"
+  },
+  "workspacePicker": {
+    "selectedCount": "{{count}}개 선택",
+    "more": "외 {{count}}개",
+    "open": "전체 목록 보기·선택",
+    "apply": "{{count}}개 선택 적용",
+    "close": "닫기",
+    "showAll": "전체 Workspace 보기",
+    "showSelected": "선택한 항목 ({{count}}개)",
+    "loading": "Workspace 불러오는 중…",
+    "loadError": "Workspace를 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "range": "{{start}}–{{end}} / {{total}}개",
+    "previous": "이전",
+    "next": "다음",
+    "search": "Workspace 이름 또는 slug",
+    "clearSearch": "Workspace 검색 지우기",
+    "noMatches": "검색 결과가 없습니다"
+  },
+  "mcpCard": {
+    "permissions": "권한",
+    "workspaces": "허용 Workspace",
+    "details": "키 세부 정보",
+    "created": "생성일",
+    "lastUsed": "최근 사용",
+    "expires": "키 만료일",
+    "noExpiry": "키 만료일 없음",
+    "sessionExpiry": "세션 만료",
+    "expiryUnknown": "만료 정보 확인 불가",
+    "reapprove": "재승인 필요",
+    "cleanupTitle": "연결 기록 정리",
+    "cleanupBody": "만료되었거나 취소된 연결 기록을 확인한 뒤 정리합니다.",
+    "cleanupPreview": "정리 대상 확인",
+    "allowed": "사용 허용",
+    "blocked": "사용 차단",
+    "granted": "승인일",
+    "expiry": "만료 정보"
   }
 }

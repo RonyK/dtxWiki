@@ -57,12 +57,29 @@
   expiration, not-before, signature, issuer, and audience validation.
 - Avoid deleting Preview runs, attempts, and detail rows twice during a
   Library hard delete.
+- Settings > MCP Access judges each connected client by its own Personal
+  Access Token or OAuth grant, so an expired or revoked credential no longer
+  shows as active because a sibling grant is valid. Cards separate
+  authentication state from the administrator's allow/block setting, and the
+  Active/Inactive filter, counts, and pages share one verdict. After upgrading,
+  a client whose credential cannot be identified (older rows without a
+  recorded credential) reads "authentication status unknown" and appears under
+  the non-active filter until its next call records it.
+- Pick Access Key and OAuth app workspaces in a searchable, paged dialog
+  instead of an inline list, with a server-side membership-limited search.
+- Draw every checkbox at one 16px size while keeping a 24px click target.
+- Share loading indicators across Settings, workspace selection, search, and
+  route loading, including reduced-motion support and accessible status text.
+- Cancel stalled workspace-list reads after 30 seconds, including incomplete
+  response bodies, so a failed refresh can finish and a later attempt can retry.
 
 ### Tests
 
 - Replace flaky timing and ordering assumptions with deterministic checks,
   isolate shared test state, and keep benchmark timing in its separate lane.
 - Reduce backend test setup time through isolated SQLite schema templates.
+- Include MCP connection facets in the PostgreSQL pull-request gate, and bound
+  browser operations with request lifecycle diagnostics for workspace access.
 
 ## 0.1.1 — 2026-10-13
 

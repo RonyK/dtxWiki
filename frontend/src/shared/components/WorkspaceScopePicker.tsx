@@ -1,3 +1,7 @@
+import { useTranslation } from "react-i18next";
+import { Dialog, DialogCloseButton } from "./Dialog";
+import { listCredentialWorkspaces } from "../api/credentialWorkspaces";
+
 import { Check } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -11,17 +15,17 @@ import {
 
 import { CountChip } from "./CountChip";
 import { SearchField } from "./SearchField";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 /**
  * Multi-select workspace picker shared by every account-scoped MCP credential
  * surface (D-01v2: one credential holds a SET of allowed workspaces, not one
  * immutable binding).
  *
- * Deliberately presentational: the rows come from the caller, which reads
- * `useWorkspaceContext().workspaces` and refreshes it once when its dialog
- * opens. No component in `shared/components` opens its own workspace request,
- * and `SettingsScreen` renders in tests without a `WorkspaceProvider`, so a
- * context read inside here would either throw or silently show an empty list.
+ * The caller supplies the initial selected metadata, including remove-only
+ * orphaned grants. Candidate pages come from membership-only server discovery
+ * when serverPaging is enabled. Selected IDs and their metadata survive search
+ * and cursor changes; late responses cannot overwrite the current query.
  */
 export type WorkspaceScopeOption = {
   id: string;
@@ -54,6 +58,8 @@ export type WorkspaceScopePickerLabels = {
 };
 
 type WorkspaceScopePickerProps = {
+  onOptionsLoaded?: (options: WorkspaceScopeOption[]) => void;
+  serverPaging?: boolean;
   autoFocusSearch?: boolean;
   describedBy?: string;
   disabled?: boolean;
@@ -65,6 +71,9 @@ type WorkspaceScopePickerProps = {
   selectedIds: string[];
   workspaces: WorkspaceScopeOption[];
 };
+
+/** Server search waits for typing to pause; each request costs a count + page. */
+const SERVER_SEARCH_DEBOUNCE_MS = 250;
 
 function normalize(value: string) {
   return value.trim().toLowerCase();
@@ -81,6 +90,8 @@ function matchesQuery(option: WorkspaceScopeOption, query: string) {
 }
 
 export function WorkspaceScopePicker({
+  onOptionsLoaded,
+  serverPaging = false,
   autoFocusSearch = false,
   describedBy,
   disabled = false,
@@ -91,34 +102,134 @@ export function WorkspaceScopePicker({
   selectedIds,
   workspaces,
 }: WorkspaceScopePickerProps) {
+  const { t } = useTranslation("settings");
   const [query, setQuery] = useState("");
+  // What the server was last asked for; trails `query` while typing.
+  const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(0);
+  const [availableCount, setAvailableCount] = useState(
+    () => workspaces.filter((w) => !w.membershipMissing).length,
+  );
+  const [selectedOnly, setSelectedOnly] = useState(false);
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [remote, setRemote] = useState<{
+    rows: WorkspaceScopeOption[];
+    total: number;
+    next: string | null;
+    key: string;
+  } | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [known, setKnown] = useState<Map<string, WorkspaceScopeOption>>(
+    () => new Map(workspaces.map((w) => [w.id, w])),
+  );
+  const loadedCallback = useRef(onOptionsLoaded);
+  useEffect(() => {
+    loadedCallback.current = onOptionsLoaded;
+  }, [onOptionsLoaded]);
+  const cursor = cursors[page] ?? null;
+  const requestKey = JSON.stringify([searchTerm, cursor]);
+  useEffect(() => {
+    if (!serverPaging || selectedOnly || query === searchTerm) return;
+    const timer = window.setTimeout(() => {
+      setSearchTerm(query);
+      setPage(0);
+      setCursors([null]);
+    }, SERVER_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [serverPaging, selectedOnly, query, searchTerm]);
+  useEffect(() => {
+    if (!serverPaging || selectedOnly) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(false);
+    listCredentialWorkspaces(searchTerm, cursor)
+      .then((result) => {
+        if (cancelled) return;
+        if (!searchTerm) setAvailableCount(result.total_count);
+        const rows = result.data.map((w) => ({
+          ...w,
+          isDefault: w.is_default,
+        }));
+        loadedCallback.current?.(rows);
+        setRemote({
+          rows,
+          total: result.total_count,
+          next: result.next_cursor,
+          key: JSON.stringify([searchTerm, cursor]),
+        });
+        setKnown(
+          (current) =>
+            new Map([...current, ...rows.map((w) => [w.id, w] as const)]),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [serverPaging, selectedOnly, searchTerm, cursor, retry]);
+  function changeQuery(value: string) {
+    setQuery(value);
+    setActiveIndex(0);
+    // Server paging resets when the debounced term lands; local lists now.
+    if (!serverPaging || selectedOnly) {
+      setPage(0);
+      setCursors([null]);
+    }
+  }
+
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const allCount = serverPaging ? availableCount : workspaces.length;
   const generatedId = useId();
   const normalizedQuery = normalize(query);
 
-  // Section 3.2's order: selected first, then the default workspace, then
-  // title. Inside a search it is the same rule over the matches.
-  const shown = useMemo(() => {
-    const filtered = workspaces.filter((option) =>
-      matchesQuery(option, normalizedQuery),
-    );
-    return [...filtered].sort((left, right) => {
-      const leftSelected = selected.has(left.id) ? 0 : 1;
-      const rightSelected = selected.has(right.id) ? 0 : 1;
-      if (leftSelected !== rightSelected) {
-        return leftSelected - rightSelected;
-      }
-      const leftDefault = left.isDefault ? 0 : 1;
-      const rightDefault = right.isDefault ? 0 : 1;
-      if (leftDefault !== rightDefault) {
-        return leftDefault - rightDefault;
-      }
-      return left.title.localeCompare(right.title);
-    });
-  }, [normalizedQuery, selected, workspaces]);
+  // Selection never affects ordering: checking a row cannot move it off-page.
+  const filtered = useMemo(() => {
+    const options = new Map([
+      ...known,
+      ...workspaces.map((w) => [w.id, w] as const),
+    ]);
+    return [...options.values()]
+      .filter(
+        (option) =>
+          (!selectedOnly || selected.has(option.id)) &&
+          matchesQuery(option, normalizedQuery),
+      )
+      .sort(
+        (left, right) =>
+          Number(Boolean(right.isDefault)) - Number(Boolean(left.isDefault)) ||
+          left.title.localeCompare(right.title) ||
+          left.id.localeCompare(right.id),
+      );
+  }, [known, workspaces, selectedOnly, selected, normalizedQuery]);
+  const useRemote = serverPaging && !selectedOnly;
+  // Keep the loading affordance visible from the first keystroke through the
+  // debounce and request. Otherwise the empty-state message disappears before
+  // the next request starts, leaving an unexplained blank list.
+  const remoteLoading =
+    useRemote && (loading || query !== searchTerm) && !loadError;
+  const total = useRemote ? (remote?.total ?? 0) : filtered.length;
+  const shown = useRemote
+    ? loading || loadError || remote?.key !== requestKey
+      ? []
+      : remote.rows
+    : filtered.slice(page * 8, (page + 1) * 8);
+  const showNoMatches =
+    shown.length === 0 &&
+    (!useRemote ||
+      (!loading && !loadError && remote?.key === requestKey && query === searchTerm));
+  const hasNext = useRemote
+    ? remote?.key === requestKey && Boolean(remote.next)
+    : (page + 1) * 8 < total;
 
   useEffect(() => {
     setActiveIndex((current) =>
@@ -148,7 +259,7 @@ export function WorkspaceScopePicker({
     }
   }, [someShownSelected]);
 
-  const showSearch = workspaces.length > searchThreshold;
+  const showSearch = serverPaging || workspaces.length > searchThreshold;
   const searchRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!autoFocusSearch || !showSearch) {
@@ -185,14 +296,10 @@ export function WorkspaceScopePicker({
     if (shown.length === 0) {
       return;
     }
-    const next = Math.min(
-      Math.max(activeIndex + delta, 0),
-      shown.length - 1,
-    );
+    const next = Math.min(Math.max(activeIndex + delta, 0), shown.length - 1);
     setActiveIndex(next);
-    const node = listRef.current?.querySelectorAll<HTMLElement>(
-      '[role="option"]',
-    )[next];
+    const node =
+      listRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[next];
     node?.focus();
   }
 
@@ -201,7 +308,11 @@ export function WorkspaceScopePicker({
     option: WorkspaceScopeOption,
     index: number,
   ) {
-    if (event.key === " " || event.key === "Spacebar" || event.key === "Enter") {
+    if (
+      event.key === " " ||
+      event.key === "Spacebar" ||
+      event.key === "Enter"
+    ) {
       event.preventDefault();
       setActiveIndex(index);
       toggle(option);
@@ -236,7 +347,9 @@ export function WorkspaceScopePicker({
             aria-label={labels.toggleAllAria}
             checked={allShownSelected}
             disabled={disabled || selectableShown.length === 0}
-            onChange={() => (allShownSelected ? clearShown() : selectAllShown())}
+            onChange={() =>
+              allShownSelected ? clearShown() : selectAllShown()
+            }
             ref={selectAllRef}
             type="checkbox"
           />
@@ -244,8 +357,8 @@ export function WorkspaceScopePicker({
         </label>
         <button
           className="icon-button text-button workspace-scope-clear"
-          disabled={disabled || shownSelectedCount === 0}
-          onClick={clearShown}
+          disabled={disabled || selectedIds.length === 0}
+          onClick={() => onChange([])}
           type="button"
         >
           {labels.clearAll}
@@ -253,7 +366,7 @@ export function WorkspaceScopePicker({
         <CountChip
           compact
           label={labels.selectedCount}
-          outOf={workspaces.length}
+          outOf={Math.max(allCount, selectedIds.length)}
           value={selectedIds.length}
         />
       </div>
@@ -264,7 +377,7 @@ export function WorkspaceScopePicker({
             clearLabel={labels.searchClear}
             compact
             id={`${generatedId}-search`}
-            onChange={setQuery}
+            onChange={changeQuery}
             onKeyDown={(event) => {
               // The create form wraps this picker; Enter in the filter must
               // not submit it (and issue a key) mid-narrowing.
@@ -277,6 +390,51 @@ export function WorkspaceScopePicker({
           />
         </div>
       ) : null}
+      <div className="workspace-scope-view-actions">
+        <button
+          type="button"
+          className="icon-button text-button"
+          aria-pressed={!selectedOnly}
+          onClick={() => {
+            setSelectedOnly(false);
+            setPage(0);
+            setCursors([null]);
+            setActiveIndex(0);
+          }}
+        >
+          {t("workspacePicker.showAll")} ({allCount})
+        </button>
+        <button
+          type="button"
+          className="icon-button text-button"
+          aria-pressed={selectedOnly}
+          onClick={() => {
+            setSelectedOnly(true);
+            setPage(0);
+            setCursors([null]);
+            setActiveIndex(0);
+          }}
+        >
+          {t("workspacePicker.showSelected", { count: selectedIds.length })}
+        </button>
+        {remoteLoading ? (
+          <LoadingIndicator as="p" className="workspace-scope-loading">
+            {t("workspacePicker.loading")}
+          </LoadingIndicator>
+        ) : null}
+        {useRemote && loadError ? (
+          <div role="alert">
+            {t("workspacePicker.loadError")}{" "}
+            <button
+              type="button"
+              className="icon-button text-button"
+              onClick={() => setRetry((n) => n + 1)}
+            >
+              {t("workspacePicker.retry")}
+            </button>
+          </div>
+        ) : null}
+      </div>
       <div
         aria-describedby={describedBy}
         aria-label={labels.listLabel}
@@ -285,7 +443,7 @@ export function WorkspaceScopePicker({
         ref={listRef}
         role="listbox"
       >
-        {shown.length === 0 ? (
+        {showNoMatches ? (
           <p className="empty-state compact-empty">{labels.noMatches}</p>
         ) : (
           shown.map((option, index) => {
@@ -334,10 +492,140 @@ export function WorkspaceScopePicker({
           })
         )}
       </div>
+      <div className="workspace-scope-pagination">
+        <span>
+          {t("workspacePicker.range", {
+            start: shown.length ? page * 8 + 1 : 0,
+            end: shown.length ? Math.min((page + 1) * 8, total) : 0,
+            total,
+          })}
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          disabled={(useRemote && loading) || page === 0}
+          onClick={() => {
+            setPage((n) => n - 1);
+            setActiveIndex(0);
+          }}
+        >
+          {t("workspacePicker.previous")}
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          disabled={(useRemote && (loading || loadError)) || !hasNext}
+          onClick={() => {
+            if (useRemote && remote?.next)
+              setCursors((current) => [
+                ...current.slice(0, page + 1),
+                remote.next,
+              ]);
+            setPage((n) => n + 1);
+            setActiveIndex(0);
+          }}
+        >
+          {t("workspacePicker.next")}
+        </button>
+      </div>
       {selectedIds.length === 0 ? (
         <p className="workspace-scope-empty-warning" role="status">
           {labels.emptySelection}
         </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** The create form commits a draft locally; only its submit issues a key. */
+export function WorkspaceScopeSelector(props: WorkspaceScopePickerProps) {
+  const { t } = useTranslation("settings");
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string[]>([]);
+  const [names, setNames] = useState<Map<string, string>>(() => new Map());
+  const titleId = useId();
+  const summary = props.selectedIds
+    .slice(0, 2)
+    .map(
+      (id) =>
+        props.workspaces.find((w) => w.id === id)?.title ?? names.get(id) ?? id,
+    )
+    .join(", ");
+  return (
+    <div className="workspace-scope-summary">
+      <span title={summary}>
+        {t("workspacePicker.selectedCount", {
+          count: props.selectedIds.length,
+        })}
+        {summary ? ` · ${summary}` : ""}
+        {props.selectedIds.length > 2
+          ? ` · ${t("workspacePicker.more", { count: props.selectedIds.length - 2 })}`
+          : ""}
+      </span>
+      <button
+        type="button"
+        className="icon-button"
+        disabled={props.disabled}
+        onClick={() => {
+          setDraft([...props.selectedIds]);
+          setOpen(true);
+        }}
+      >
+        {t("workspacePicker.open")}
+      </button>
+      {open ? (
+        <Dialog
+          className="workspace-picker-dialog"
+          header={
+            <div className="workspace-picker-heading">
+              <h2 id={titleId}>{props.labels.listLabel}</h2>
+              <DialogCloseButton
+                label={t("workspacePicker.close")}
+                onClick={() => setOpen(false)}
+              />
+            </div>
+          }
+          labelledBy={titleId}
+          onClose={() => setOpen(false)}
+          footer={
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setOpen(false)}
+              >
+                {t("actions.cancel")}
+              </button>
+              <button
+                type="button"
+                className="icon-button primary"
+                disabled={draft.length === 0}
+                onClick={() => {
+                  props.onChange(draft);
+                  setOpen(false);
+                }}
+              >
+                {t("workspacePicker.apply", { count: draft.length })}
+              </button>
+            </div>
+          }
+        >
+          <WorkspaceScopePicker
+            {...props}
+            autoFocusSearch
+            selectedIds={draft}
+            onChange={setDraft}
+            onOptionsLoaded={(options) =>
+              setNames(
+                (current) =>
+                  new Map([
+                    ...current,
+                    ...options.map((w) => [w.id, w.title] as const),
+                  ]),
+              )
+            }
+          />
+        </Dialog>
       ) : null}
     </div>
   );
@@ -371,7 +659,7 @@ export type WorkspaceScopeChipsLabels = {
  */
 export function WorkspaceScopeChips({
   labels,
-  maxVisible = 3,
+  maxVisible = 2,
   roleLabel,
   workspaces,
 }: {
@@ -380,30 +668,17 @@ export function WorkspaceScopeChips({
   roleLabel?: (role: string | null | undefined) => string | null;
   workspaces: WorkspaceGrantSummary[];
 }) {
+  const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    function onDocumentPointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onDocumentPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocumentPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const titleId = useId();
+  const filtered = workspaces.filter((w) => matchesQuery(w, normalize(query)));
+  const showAll = () => {
+    setQuery("");
+    setPage(0);
+    setOpen(true);
+  };
 
   if (workspaces.length === 0) {
     return (
@@ -417,14 +692,14 @@ export function WorkspaceScopeChips({
   const overflow = workspaces.length - visible.length;
 
   return (
-    <div className="workspace-chip-row" ref={containerRef}>
+    <div className="workspace-chip-row">
       {visible.map((workspace) => (
         <button
           className={`workspace-chip${
             workspace.syncState === "failed" ? " is-sync-failed" : ""
           }`}
           key={workspace.id}
-          onClick={() => setOpen((current) => !current)}
+          onClick={showAll}
           title={
             workspace.syncState === "failed" ? labels.syncFailedHint : undefined
           }
@@ -445,20 +720,49 @@ export function WorkspaceScopeChips({
         <button
           aria-label={labels.showAll}
           className="workspace-chip workspace-chip-more"
-          onClick={() => setOpen((current) => !current)}
+          onClick={showAll}
           type="button"
         >
           {labels.more(overflow)}
         </button>
       ) : null}
       {open ? (
-        <div
-          aria-label={labels.popoverLabel}
-          className="workspace-chip-popover"
-          role="group"
+        <Dialog
+          className="workspace-picker-dialog"
+          header={
+            <div className="workspace-picker-heading">
+              <h2 id={titleId}>{labels.popoverLabel}</h2>
+              <DialogCloseButton
+                label={t("workspacePicker.close")}
+                onClick={() => setOpen(false)}
+              />
+            </div>
+          }
+          labelledBy={titleId}
+          onClose={() => setOpen(false)}
+          footer={
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setOpen(false)}
+            >
+              {t("workspacePicker.close")}
+            </button>
+          }
         >
-          <ul>
-            {workspaces.map((workspace) => {
+          <SearchField
+            ariaLabel={t("workspacePicker.search")}
+            clearLabel={t("workspacePicker.clearSearch")}
+            id={`${titleId}-search`}
+            value={query}
+            onChange={(value) => {
+              setQuery(value);
+              setPage(0);
+            }}
+            placeholder={t("workspacePicker.search")}
+          />
+          <ul className="workspace-grant-details">
+            {filtered.slice(page * 8, (page + 1) * 8).map((workspace) => {
               const role = roleLabel?.(workspace.role) ?? null;
               return (
                 <li key={workspace.id}>
@@ -487,7 +791,35 @@ export function WorkspaceScopeChips({
               );
             })}
           </ul>
-        </div>
+          {filtered.length === 0 ? (
+            <p>{t("workspacePicker.noMatches")}</p>
+          ) : null}
+          <div className="workspace-scope-pagination">
+            <span>
+              {t("workspacePicker.range", {
+                start: filtered.length ? page * 8 + 1 : 0,
+                end: Math.min((page + 1) * 8, filtered.length),
+                total: filtered.length,
+              })}
+            </span>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={page === 0}
+              onClick={() => setPage((n) => n - 1)}
+            >
+              {t("workspacePicker.previous")}
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={(page + 1) * 8 >= filtered.length}
+              onClick={() => setPage((n) => n + 1)}
+            >
+              {t("workspacePicker.next")}
+            </button>
+          </div>
+        </Dialog>
       ) : null}
     </div>
   );

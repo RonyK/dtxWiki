@@ -3,12 +3,14 @@ from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.bootstrap import run_alembic_upgrade
 from backend.app.db import make_engine
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
+from backend.models.oauth import OAuthClient, OAuthConsent, OAuthRefreshToken
 from backend.models.password_reset import PasswordResetToken
 from backend.models.user import User
 from backend.models.workspace import MCPClient
@@ -205,6 +207,37 @@ def _seed_mcp_access_account(session_factory) -> None:
                     )
                 )
 
+            app_id = f"seed-app-{project_key}"
+            session.add(
+                OAuthClient(
+                    id=app_id,
+                    client_name="Seed app",
+                    redirect_uris=[],
+                    scope="mcp:read",
+                )
+            )
+            session.flush()
+            session.add(
+                OAuthConsent(
+                    user_id=user.id,
+                    client_id=app_id,
+                    workspace_id=workspace_id,
+                    scope="mcp:read",
+                )
+            )
+            disabled_grants = [uuid4() for _ in range(25)]
+            for grant_id in disabled_grants:
+                session.add(
+                    OAuthRefreshToken(
+                        grant_id=grant_id,
+                        user_id=user.id,
+                        client_id=app_id,
+                        token_lookup_hash=f"seed-{grant_id}",
+                        scope="mcp:read",
+                        expires_at=now + timedelta(days=30),
+                    )
+                )
+
             for status in ("active", "disabled"):
                 for index in range(25):
                     session.add(
@@ -215,7 +248,9 @@ def _seed_mcp_access_account(session_factory) -> None:
                             scopes=["mcp:read"],
                             status=status,
                             runtime_binding_key=(
-                                f"e2e-ui:{project_key}:{status}:{index}"
+                                f"api_token:{seeded_tokens[index].id}"
+                                if status == "active"
+                                else f"oauth_grant:{disabled_grants[index]}"
                             ),
                             created_by=user.id,
                             issued_to_user_id=user.id,

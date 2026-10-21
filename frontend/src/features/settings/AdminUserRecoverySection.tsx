@@ -30,9 +30,10 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
   SettingsEmptyState,
+  SettingsLoadingRow,
   SettingsPaneHeader,
 } from "./SettingsPaneParts";
-import { canWriteToClipboard } from "../../shared/lib/clipboard";
+import { writeTextToClipboard } from "../../shared/lib/clipboard";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 
 type IssuedLink = {
@@ -343,11 +344,11 @@ export function AdminUserRecoverySection() {
         })}
       </StatusBanner>
       {recoveryCapability.status === "loading" ? (
-        <StatusBanner tone="info">
+        <SettingsLoadingRow>
           {t("userRecovery.capabilityLoading", {
             defaultValue: "Checking server recovery availability…",
           })}
-        </StatusBanner>
+        </SettingsLoadingRow>
       ) : recoveryCapability.status === "error" ? (
         <StatusBanner tone="warning">
           {t("userRecovery.capabilityError", {
@@ -963,51 +964,6 @@ function maskRecoveryUrl(rawUrl: string): string {
   return `${visible}${query ? `?${query}` : ""}${fragment}`;
 }
 
-/**
- * Copy `text` without ever rendering it.
- *
- * `navigator.clipboard` is gated on a secure context, and the deployment that
- * lacks one -- self-hosted dtxWiki behind plain HTTP -- is exactly where an
- * admin still has to hand a recovery link to a locked-out user. `execCommand`
- * is deprecated but is the only copy path those browsers have.
- *
- * The carrier is created, read and removed inside a single synchronous turn,
- * so it is never painted, never part of a React commit, and cannot be observed
- * by a snapshot taken between renders. That is the whole point: the fallback
- * must not undo the masking above.
- */
-function copyThroughTransientNode(text: string): boolean {
-  if (
-    typeof document === "undefined" ||
-    typeof document.execCommand !== "function"
-  ) {
-    return false;
-  }
-  const carrier = document.createElement("textarea");
-  carrier.value = text;
-  carrier.readOnly = true;
-  carrier.tabIndex = -1;
-  carrier.setAttribute("aria-hidden", "true");
-  carrier.style.position = "fixed";
-  carrier.style.top = "0";
-  carrier.style.opacity = "0";
-  carrier.style.pointerEvents = "none";
-  const previouslyFocused =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-  document.body.append(carrier);
-  try {
-    carrier.select();
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    carrier.remove();
-    previouslyFocused?.focus();
-  }
-}
-
 function OneTimeLinkDialog({
   link,
   onClose,
@@ -1047,26 +1003,8 @@ function OneTimeLinkDialog({
   // Ordered by how much of the credential each rung exposes: the Clipboard API
   // and the transient carrier below never render it, revealing it does.
   async function copyLink() {
-    if (canWriteToClipboard()) {
-      try {
-        await navigator.clipboard.writeText(link.resetUrl);
-        setCopyStatus(
-          t("userRecovery.linkDialog.copied", {
-            defaultValue: "Recovery link copied.",
-          }),
-        );
-        return;
-      } catch {
-        // Permission denied or a transient failure: try the older path before
-        // falling back to putting the secret on screen.
-      }
-    }
-    if (copyThroughTransientNode(link.resetUrl)) {
-      setCopyStatus(
-        t("userRecovery.linkDialog.copied", {
-          defaultValue: "Recovery link copied.",
-        }),
-      );
+    if (await writeTextToClipboard(link.resetUrl)) {
+      setCopyStatus(t("userRecovery.linkDialog.copied", { defaultValue: "Recovery link copied." }));
       return;
     }
     // Already on screen from an earlier attempt: the operator has most likely

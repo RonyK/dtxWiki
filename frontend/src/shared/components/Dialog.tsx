@@ -24,6 +24,7 @@ type DialogProps = {
    */
   dismissible?: boolean;
   footer?: ReactNode;
+  header?: ReactNode;
   labelledBy: string;
   onClose: () => void;
   /**
@@ -111,6 +112,7 @@ export function Dialog({
   className = "",
   dismissible = true,
   footer,
+  header,
   labelledBy,
   onClose,
   restoreFocusFallback,
@@ -229,6 +231,7 @@ export function Dialog({
         tabIndex={-1}
       >
         <DialogOverlayContext.Provider value={overlayScope}>
+          {header == null ? null : <div className="dialog-header">{header}</div>}
           <div className="dialog-scroll-region" ref={setScrollRegion}>
             {children}
           </div>

@@ -531,3 +531,21 @@ class ApiTokenRevokeResponse(RESTResponseBase):
 
 class ApiTokenDeleteResponse(RESTResponseBase):
     data: ApiTokenDeleteData
+
+
+class CredentialWorkspaceOption(BaseModel):
+    id: UUID
+    title: str
+    slug: str
+    role: str
+    is_default: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CredentialWorkspacePage(RESTResponseBase):
+    data: list[CredentialWorkspaceOption]
+    total_count: int = Field(ge=0)
+    next_cursor: str | None = None
+
+    model_config = ConfigDict(extra="forbid")

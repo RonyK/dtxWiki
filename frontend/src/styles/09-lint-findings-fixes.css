@@ -65,8 +65,8 @@
 
 .lint-finding-card .lint-row-checkbox,
 .lint-bulk-label > input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
   margin: 0;
   accent-color: var(--context);
   cursor: pointer;

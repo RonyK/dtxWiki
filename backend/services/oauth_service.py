@@ -56,6 +56,11 @@ from backend.services.credential_replica_service import (
     resolve_oauth_replica_credential_id,
 )
 from backend.services.db_write_intent import acquire_write_intent
+from backend.services.mcp_credential_health import (
+    CredentialHealth,
+    binding_key_for_client,
+    load_credential_health,
+)
 from backend.services.oauth_cimd import (
     CIMDClientMetadata,
     fetch_client_metadata_document,
@@ -506,7 +511,8 @@ def _apply_verified_oauth_association(
 
 
 def oauth_client_id_for_mcp_client(client: MCPClient) -> str | None:
-    value = (client.token_metadata or {}).get("oauth_client_id")
+    metadata = client.token_metadata if isinstance(client.token_metadata, dict) else {}
+    value = metadata.get("oauth_client_id")
     return str(value) if value else None
 
 
@@ -712,22 +718,10 @@ WorkspaceConnectionKey = tuple[UUID | None, str]
 
 @dataclass(frozen=True)
 class WorkspaceOAuthHealth:
-    """Everything ONE workspace's connection health depends on, read off the
-    control plane and small enough to push back down as literal key sets.
+    """Control-plane names and exact credential facts for one workspace.
 
-    ``MCPClient`` is workspace-plane while ``OAuthClient``/``OAuthConsent``/
-    ``OAuthRefreshToken`` are control-plane, so the correlation between them
-    cannot be a join once the two planes are separate databases. Both control
-    tables involved carry ``workspace_id``, though, so for a single workspace
-    the answer set is finite and computable on the control plane alone: this
-    snapshot is that answer, and callers turn it into either an ``IN`` filter
-    over ``MCPClient`` columns or a per-row classification.
-
-    Keys are ``(issued_to_user_id, oauth_client_id)``. Every consent and token
-    contributes BOTH its exact key and an aggregate ``(None, client_id)`` key,
-    because an ``MCPClient`` with no issuing user matches any row for the
-    client/workspace pair -- the same disjunction the previous correlated
-    EXISTS spelled out in SQL.
+    The historical class name is retained for the workspace-plane adapter.
+    Identity-less legacy rows never inherit another user's or grant's health.
     """
 
     workspace_id: UUID
@@ -735,62 +729,65 @@ class WorkspaceOAuthHealth:
     # OAuth client ids this snapshot actually looked up, so a refinement can
     # tell "known absent" apart from "never asked".
     known_oauth_client_ids: frozenset[str]
-    live_oauth_client_ids: frozenset[str]
-    consent_keys: frozenset[WorkspaceConnectionKey]
-    live_expiry: Mapping[WorkspaceConnectionKey, datetime]
     oauth_client_names: Mapping[str, str]
     # None means "no search term", which is NOT the same as "nothing matched".
     name_matched_oauth_client_ids: frozenset[str] | None
 
+    credential_health: Mapping[tuple[UUID, str], CredentialHealth] = dataclass_field(
+        default_factory=dict
+    )
+
+    def credential_for(self, client: MCPClient) -> CredentialHealth | None:
+        metadata = (
+            client.token_metadata if isinstance(client.token_metadata, dict) else {}
+        )
+        binding = binding_key_for_client(client)
+        credential = self.credential_health.get((client.issued_to_user_id, binding))
+        # A server-owned binding already identifies a globally unique credential.
+        # Legacy rows may lack the issuer projection; metadata-only fallbacks
+        # still require an exact issuer match before they can be trusted.
+        if (
+            credential is None
+            and client.issued_to_user_id is None
+            and client.runtime_binding_key is not None
+        ):
+            credential = next(
+                (
+                    value
+                    for key, value in self.credential_health.items()
+                    if key[1] == binding
+                ),
+                None,
+            )
+        raw_app_id = metadata.get("oauth_client_id")
+        if credential is not None and raw_app_id not in (
+            None,
+            "",
+            credential.oauth_client_id,
+        ):
+            credential = None
+        return credential
+
     def connection_state_for(
         self,
         client: MCPClient,
-    ) -> tuple[ConnectionState, datetime | None, str | None, str | None]:
+    ) -> tuple[str, datetime | None, str | None, str | None]:
         """Classify one MCPClient row without touching any session."""
 
+        credential = self.credential_for(client)
         oauth_client_id = oauth_client_id_for_mcp_client(client)
-        if oauth_client_id is None:
-            state: ConnectionState = (
-                "active" if client.status == "active" else "disabled"
-            )
-            return state, None, None, None
-        key = (client.issued_to_user_id, oauth_client_id)
-        state, next_expiry = classify_oauth_connection_state(
-            physical_status=client.status,
-            oauth_client_is_live=oauth_client_id in self.live_oauth_client_ids,
-            consent_granted=key in self.consent_keys,
-            live_expiry=self.live_expiry.get(key),
-        )
+        if credential is not None:
+            oauth_client_id = credential.oauth_client_id
+        state = credential.state if credential is not None else "unknown"
+        expiry = credential.expires_at if credential is not None else None
+        if client.status != "active":
+            state = "disabled"
         return (
             state,
-            next_expiry,
+            expiry,
             oauth_client_id,
             self.oauth_client_names.get(oauth_client_id),
         )
-
-    def active_connection_keys(
-        self,
-    ) -> tuple[frozenset[str], frozenset[tuple[UUID, str]]]:
-        """The keys whose OAuth side is healthy, split by the SQL shape each needs.
-
-        Returned as (aggregate client ids, exact ``(user_id, client_id)`` pairs).
-        They stay separate because a row-value ``IN`` never matches a NULL
-        ``issued_to_user_id``: SQL comparison with NULL is UNKNOWN, not TRUE.
-        """
-
-        aggregate: set[str] = set()
-        exact: set[tuple[UUID, str]] = set()
-        for key in self.consent_keys:
-            user_id, oauth_client_id = key
-            if oauth_client_id not in self.live_oauth_client_ids:
-                continue
-            if key not in self.live_expiry:
-                continue
-            if user_id is None:
-                aggregate.add(oauth_client_id)
-            else:
-                exact.add((user_id, oauth_client_id))
-        return frozenset(aggregate), frozenset(exact)
 
 
 def load_workspace_oauth_health(
@@ -798,84 +795,31 @@ def load_workspace_oauth_health(
     *,
     workspace_id: UUID,
     now: datetime,
+    bindings: Collection[str],
     oauth_client_ids: Collection[str] | None = None,
 ) -> WorkspaceOAuthHealth:
-    """Read one workspace's connection health from a CONTROL session.
+    """Capture the named credentials once; resolve app names on the same plane.
 
-    ``oauth_client_ids`` narrows the consent/token scan to a known page of
-    clients; leaving it None loads the whole workspace, which is what a facet
-    count over the whole table needs. Either way the result is keyed exactly,
-    so the two agree row for row.
-
-    Name search is NOT part of this snapshot: it needs a candidate id set read
-    off the workspace plane, which does not exist yet at this point in a
-    listing. ``attach_name_matched_oauth_client_ids`` adds it afterwards.
+    ``bindings`` are the ``runtime_binding_key`` values the caller's workspace
+    rows name. Required on purpose: omitting it must not fall back to scanning
+    every member's credentials.
     """
-
-    # D-01v2/D-01v3 (P10.3 T1/section 2.3): OAuthRefreshToken lost its
-    # workspace_id -- family liveness ("family_alive") is now a GLOBAL
-    # (user, client) value by design, not scoped to this workspace. Only
-    # the consent scan stays workspace-filtered ("consented" = this
-    # workspace has a live oauth_consents row), which is still exactly
-    # right: OAuthConsent's PK still carries workspace_id.
-    consent_filters = [OAuthConsent.workspace_id == workspace_id]
-    token_filters = [
-        OAuthRefreshToken.revoked_at.is_(None),
-        OAuthRefreshToken.expires_at > now,
-    ]
+    credentials = load_credential_health(
+        session, workspace_id=workspace_id, now=now, bindings=bindings
+    )
+    candidate_ids = {
+        c.oauth_client_id for c in credentials.values() if c.oauth_client_id is not None
+    }
     if oauth_client_ids is not None:
-        restriction = list(oauth_client_ids)
-        if not restriction:
-            # A page with no OAuth-backed client correlates against nothing, so
-            # skip both scans instead of issuing two guaranteed-empty IN
-            # queries on what is a hot settings read.
-            return WorkspaceOAuthHealth(
-                workspace_id=workspace_id,
-                now=now,
-                known_oauth_client_ids=frozenset(),
-                live_oauth_client_ids=frozenset(),
-                consent_keys=frozenset(),
-                live_expiry={},
-                oauth_client_names={},
-                name_matched_oauth_client_ids=None,
-            )
-        consent_filters.append(OAuthConsent.client_id.in_(restriction))
-        token_filters.append(OAuthRefreshToken.client_id.in_(restriction))
-
-    consent_keys: set[WorkspaceConnectionKey] = set()
-    for user_id, client_id in session.execute(
-        select(OAuthConsent.user_id, OAuthConsent.client_id).where(*consent_filters)
-    ):
-        consent_keys.add((user_id, client_id))
-        consent_keys.add((None, client_id))
-
-    live_expiry: dict[WorkspaceConnectionKey, datetime] = {}
-    for user_id, client_id, expires_at in session.execute(
-        select(
-            OAuthRefreshToken.user_id,
-            OAuthRefreshToken.client_id,
-            OAuthRefreshToken.expires_at,
-        ).where(*token_filters)
-    ):
-        for key in ((user_id, client_id), (None, client_id)):
-            previous = live_expiry.get(key)
-            if previous is None or expires_at > previous:
-                live_expiry[key] = expires_at
-
-    candidate_ids = {key[1] for key in consent_keys} | {key[1] for key in live_expiry}
-    if oauth_client_ids is not None:
-        candidate_ids |= set(oauth_client_ids)
-    live_ids, names = _load_oauth_client_liveness(session, candidate_ids)
-
+        candidate_ids.update(oauth_client_ids)
+    _, names = _load_oauth_client_liveness(session, candidate_ids)
     return WorkspaceOAuthHealth(
         workspace_id=workspace_id,
         now=now,
         known_oauth_client_ids=frozenset(candidate_ids),
-        live_oauth_client_ids=live_ids,
-        consent_keys=frozenset(consent_keys),
-        live_expiry=live_expiry,
         oauth_client_names=names,
         name_matched_oauth_client_ids=None,
+        credential_health=credentials,
     )
 
 
@@ -943,11 +887,10 @@ def refine_workspace_oauth_health(
     }
     if not missing:
         return health
-    live_ids, names = _load_oauth_client_liveness(session, missing)
+    _, names = _load_oauth_client_liveness(session, missing)
     return replace(
         health,
         known_oauth_client_ids=health.known_oauth_client_ids | frozenset(missing),
-        live_oauth_client_ids=health.live_oauth_client_ids | live_ids,
         oauth_client_names={**health.oauth_client_names, **names},
     )
 

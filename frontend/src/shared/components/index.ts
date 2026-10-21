@@ -39,6 +39,7 @@ export * from "./ReaderTabs";
 export * from "./RecentItemsList";
 export * from "./RelativeTime";
 export * from "./RouteLoading";
+export * from "./LoadingIndicator";
 export * from "./SearchField";
 export * from "./SegmentedControl";
 export * from "./Shell";

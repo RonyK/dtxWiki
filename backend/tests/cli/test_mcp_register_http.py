@@ -842,7 +842,7 @@ def test_register_http_allows_insecure_loopback_only_with_explicit_flag(
         ],
     )
     assert rejected_tokenless.exit_code == 1
-    assert "loopback HTTP registration requires a PAT" in rejected_tokenless.stderr
+    assert "HTTP registration requires a PAT" in rejected_tokenless.stderr
 
     accepted = CliRunner().invoke(
         cli_main.app,
@@ -869,9 +869,11 @@ def test_register_http_allows_insecure_loopback_only_with_explicit_flag(
     [
         "http://127.0.0.2:21080/mcp",
         "http://localhost.:21080/mcp",
+        "http://192.168.1.10:21080/mcp",
+        "http://[fd00::1]:21080/mcp",
     ],
 )
-def test_register_http_accepts_shared_loopback_forms(
+def test_register_http_accepts_local_network_forms(
     url,
     tmp_path,
     monkeypatch,
@@ -926,7 +928,7 @@ def test_register_http_batch_rejects_tokenless_loopback_before_writing(
     )
 
     assert result.exit_code == 1
-    assert "loopback HTTP registration requires a PAT" in result.stderr
+    assert "HTTP registration requires a PAT" in result.stderr
     assert not target.exists()
 
 
@@ -1056,7 +1058,7 @@ def test_manual_command_uses_catalog_for_custom_name_and_oauth_sequence():
 
 
 def test_manual_command_rejects_tokenless_plaintext_loopback():
-    with pytest.raises(ValueError, match="loopback HTTP registration requires a PAT"):
+    with pytest.raises(ValueError, match="HTTP registration requires a PAT"):
         register.manual_command(
             url="http://127.0.0.1:21080/mcp",
             client="codex",
