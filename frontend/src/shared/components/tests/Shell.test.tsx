@@ -38,6 +38,7 @@ const EXPECTED_SIDEBAR_NAV: Array<{
       ["Dashboard", "/dashboard"],
       ["Library", "/library"],
       ["Context", "/context"],
+      ["Chats", "/chats"],
     ],
   },
   {
@@ -163,33 +164,35 @@ describe("Shell", () => {
     renderShell(["/dashboard"], <LabsControlsProbe />);
 
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+    expect((await within(sidebar).findByText("Chats")).closest("a")).toHaveAttribute("href", "/chats");
+    expect(within(sidebar).getByText("Chats").closest("a")?.querySelector(".nav-preview-badge")).toBeNull();
     const agentToggle = await screen.findByRole("button", { name: "Toggle Agent menu" });
-    const chatsToggle = screen.getByRole("button", { name: "Toggle Chats menu" });
+    const askToggle = screen.getByRole("button", { name: "Toggle Ask menu" });
     await waitFor(() => expect(agentToggle).toBeEnabled());
     expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
 
     await user.click(agentToggle);
     expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/agent");
-    expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
 
-    await user.click(chatsToggle);
-    expect(within(sidebar).getByText("Chats").closest("a")).toHaveAttribute("href", "/chats");
+    await user.click(askToggle);
+    expect(within(sidebar).getByText("Ask").closest("a")).toHaveAttribute("href", "/ask");
     const searchbox = screen.getByRole("combobox", { name: "Search workspace" });
     await user.click(searchbox);
     expect(screen.getByRole("option", { name: "AgentKnowledge" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "ChatsKnowledge" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "AskKnowledge" })).toBeInTheDocument();
 
     await user.click(agentToggle);
     await user.click(searchbox);
     expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "AgentKnowledge" })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "ChatsKnowledge" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "AskKnowledge" })).toBeInTheDocument();
 
-    await user.click(chatsToggle);
+    await user.click(askToggle);
     await user.click(searchbox);
-    expect(within(sidebar).queryByText("Chats")).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "ChatsKnowledge" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "AskKnowledge" })).not.toBeInTheDocument();
   });
 
   it("collapses and restores the desktop sidebar", async () => {
@@ -2014,8 +2017,8 @@ function LabsControlsProbe() {
       <button disabled={!ready} onClick={() => setMenuVisible("agent", !preferences.agent)}>
         Toggle Agent menu
       </button>
-      <button disabled={!ready} onClick={() => setMenuVisible("chats", !preferences.chats)}>
-        Toggle Chats menu
+      <button disabled={!ready} onClick={() => setMenuVisible("ask", !preferences.ask)}>
+        Toggle Ask menu
       </button>
     </>
   );

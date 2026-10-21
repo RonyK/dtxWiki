@@ -8763,7 +8763,7 @@ describe("SettingsScreen", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Show Chats menu" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show Ask menu" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Show Agent menu" })).not.toBeChecked();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });

@@ -1899,8 +1899,8 @@
   "labs": {
     "title": "실험 중인 메뉴",
     "description": "아직 개발 중인 기능입니다. 사용해 보고 싶은 메뉴를 켜세요.",
-    "showChats": "Chats 메뉴 보이기",
-    "showAgent": "Agent 메뉴 보이기",
+    "showAsk": "Ask 메뉴 표시",
+    "showAgent": "Agent 메뉴 표시",
     "savedLocally": "변경 사항은 즉시 적용되며 이 브라우저에서 현재 계정에 저장됩니다."
   }
 }

@@ -17,37 +17,37 @@ describe("LabsSection", () => {
     vi.clearAllMocks();
     setLocale("en", { persist: false });
     vi.mocked(useLabsPreferences).mockReturnValue({
-      preferences: { chats: false, agent: false },
+      preferences: { ask: false, agent: false },
       setMenuVisible,
       ready: true,
     });
   });
 
-  it("changes Chats and Agent independently without a save step", async () => {
+  it("changes Ask and Agent independently without a save step", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<LabsSection labelledBy="labs-heading" />);
 
-    const chats = screen.getByRole("checkbox", { name: "Show Chats menu" });
+    const ask = screen.getByRole("checkbox", { name: "Show Ask menu" });
     const agent = screen.getByRole("checkbox", { name: "Show Agent menu" });
-    expect(chats).not.toBeChecked();
+    expect(ask).not.toBeChecked();
     expect(agent).not.toBeChecked();
 
-    await user.click(chats);
-    expect(setMenuVisible).toHaveBeenLastCalledWith("chats", true);
+    await user.click(ask);
+    expect(setMenuVisible).toHaveBeenLastCalledWith("ask", true);
 
     vi.mocked(useLabsPreferences).mockReturnValue({
-      preferences: { chats: true, agent: false },
+      preferences: { ask: true, agent: false },
       setMenuVisible,
       ready: true,
     });
     rerender(<LabsSection labelledBy="labs-heading" />);
-    expect(chats).toBeChecked();
+    expect(ask).toBeChecked();
     expect(agent).not.toBeChecked();
 
     await user.click(agent);
     expect(setMenuVisible).toHaveBeenLastCalledWith("agent", true);
-    await user.click(chats);
-    expect(setMenuVisible).toHaveBeenLastCalledWith("chats", false);
+    await user.click(ask);
+    expect(setMenuVisible).toHaveBeenLastCalledWith("ask", false);
     expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
     expect(screen.getByText(/saved for your account in this browser/)).toBeInTheDocument();
   });
@@ -55,7 +55,7 @@ describe("LabsSection", () => {
   it("keeps both controls disabled until the account has resolved", async () => {
     const user = userEvent.setup();
     vi.mocked(useLabsPreferences).mockReturnValue({
-      preferences: { chats: false, agent: false },
+      preferences: { ask: false, agent: false },
       setMenuVisible,
       ready: false,
     });

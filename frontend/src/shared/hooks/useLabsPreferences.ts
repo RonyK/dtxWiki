@@ -2,14 +2,14 @@ import { useCallback, useSyncExternalStore } from "react";
 
 import { useOptionalAuth } from "../auth/AuthContext";
 
-type LabsMenu = "chats" | "agent";
+type LabsMenu = "ask" | "agent";
 type LabsPreferences = Readonly<Record<LabsMenu, boolean>>;
 
 const snapshots: readonly LabsPreferences[] = [
-  { chats: false, agent: false },
-  { chats: true, agent: false },
-  { chats: false, agent: true },
-  { chats: true, agent: true },
+  { ask: false, agent: false },
+  { ask: true, agent: false },
+  { ask: false, agent: true },
+  { ask: true, agent: true },
 ];
 
 function parseSnapshot(value: string | null): number {
@@ -17,7 +17,7 @@ function parseSnapshot(value: string | null): number {
     const parsed: unknown = JSON.parse(value ?? "null");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
     const record = parsed as Record<string, unknown>;
-    return (record.chats === true ? 1 : 0) | (record.agent === true ? 2 : 0);
+    return (record.ask === true ? 1 : 0) | (record.agent === true ? 2 : 0);
   } catch {
     return 0;
   }
@@ -64,7 +64,7 @@ function createStore(key: string) {
     },
     setMenuVisible(menu: LabsMenu, visible: boolean) {
       const current = getSnapshot();
-      const flag = menu === "chats" ? 1 : 2;
+      const flag = menu === "ask" ? 1 : 2;
       const next = visible ? current | flag : current & ~flag;
       if (next === current) return;
       lastSnapshot = next;

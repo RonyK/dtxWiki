@@ -11,6 +11,7 @@ import {
   appRoutes,
   isAuthBootstrapPath,
   RequireAuth,
+  RequireAskEnabled,
   RequireEditor,
   RootRouteError,
 } from "./App";
@@ -443,10 +444,18 @@ describe("appRoutes role gating", () => {
   });
 
   it.each(["/ask", "/ask?new=1", "/ask/"])(
-    "resolves the unfinished Ask URL %s to the not-found route",
+    "registers Ask URL %s behind its experiment gate",
     (path) => {
       const matches = matchRoutes(appRoutes, path);
-      expect(matches?.at(-1)?.route.path).toBe("*");
+      const route = matches?.at(-1)?.route;
+      expect(route?.path).toBe("/ask");
+      const element = route?.element;
+      if (!isValidElement<{ children: ReactNode }>(element)) {
+        throw new Error("Ask route has no element");
+      }
+      expect(element.type).toBe(RequireAuth);
+      const child = element.props.children;
+      expect(isValidElement(child) && child.type === RequireAskEnabled).toBe(true);
     },
   );
 

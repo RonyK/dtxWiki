@@ -13,6 +13,7 @@ import {
   SpellCheck,
   Menu,
   MessagesSquare,
+  MessageCircleQuestion,
   Plus,
   Search,
   Settings,
@@ -79,6 +80,7 @@ type NavItemKey =
   | "context"
   | "agent"
   | "chats"
+  | "ask"
   | "review"
   | "lint"
   | "activity"
@@ -124,6 +126,7 @@ const SIDEBAR_NAV_GROUPS: Array<{ key: NavGroupKey; items: SidebarNavItem[] }> =
         { icon: FileText, key: "context", to: "/context" },
         { icon: Bot, key: "agent", preview: true, to: "/agent" },
         { icon: MessagesSquare, key: "chats", to: "/chats" },
+        { icon: MessageCircleQuestion, key: "ask", preview: true, to: "/ask" },
       ],
     },
     {
@@ -270,6 +273,7 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
       context: t("nav.context", { defaultValue: "Context" }),
       agent: t("nav.agent", { defaultValue: "Agent" }),
       chats: t("nav.chats", { defaultValue: "Chats" }),
+      ask: t("nav.ask", { defaultValue: "Ask" }),
       review: t("nav.review", { defaultValue: "Review queue" }),
       lint: t("nav.lint", { defaultValue: "Lint queue" }),
       activity: t("nav.activity", { defaultValue: "Activity" }),
@@ -417,7 +421,7 @@ export function Shell({ children }: ShellProps) {
   // /chats is editor-gated end to end (backend + RequireEditor). Keep this
   // fail-closed until the selected role resolves so a Viewer never sees a
   // transient write-only destination during workspace hydration.
-  const hideChatsNav = !labsPreferences.chats || !canWriteSelectedWorkspace;
+  const hideChatsNav = !canWriteSelectedWorkspace;
   const activeLocale = normalizeLocale(i18n.language);
   const nextLocale = activeLocale === "ko" ? "en" : "ko";
   const nextLocaleLabel = t(`topbar.language.${nextLocale}`);
@@ -430,10 +434,11 @@ export function Shell({ children }: ShellProps) {
       ...group,
       items: group.items.filter((item) =>
         (item.key !== "chats" || !hideChatsNav) &&
-        (item.key !== "agent" || labsPreferences.agent),
+        (item.key !== "agent" || labsPreferences.agent) &&
+        (item.key !== "ask" || labsPreferences.ask),
       ),
     }));
-  }, [hideChatsNav, labsPreferences.agent, shellLabels]);
+  }, [hideChatsNav, labsPreferences.agent, labsPreferences.ask, shellLabels]);
 
   function closeMobileNav() {
     restoreMobileNavFocusRef.current = true;

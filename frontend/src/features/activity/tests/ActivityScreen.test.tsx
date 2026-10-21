@@ -13,14 +13,9 @@ import { ActivityLanePage, ActivityScreen } from "../ActivityScreen";
 const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "workspace-1";
 const activityPreferences = vi.hoisted(() => ({
-  chats: false,
-  agent: false,
   role: "editor",
 }));
 
-vi.mock("../../../shared/hooks/useLabsPreferences", () => ({
-  useLabsPreferences: () => ({ preferences: activityPreferences }),
-}));
 vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
   useOptionalWorkspaceContext: () => ({
     selectedWorkspace: { role: activityPreferences.role },
@@ -31,7 +26,6 @@ describe("ActivityScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    activityPreferences.chats = false;
     activityPreferences.role = "editor";
   });
 
@@ -757,12 +751,10 @@ describe("ActivityScreen", () => {
   });
 
   it.each([
-    { role: "editor", chats: false, visible: false },
-    { role: "editor", chats: true, visible: true },
-    { role: "viewer", chats: true, visible: false },
-  ])("shows empty MCP Chats actions only when enabled for editors ($role, enabled=$chats)", async ({ role, chats, visible }) => {
+    { role: "editor", visible: true },
+    { role: "viewer", visible: false },
+  ])("shows empty MCP Chats actions only for editors ($role)", async ({ role, visible }) => {
     activityPreferences.role = role;
-    activityPreferences.chats = chats;
     renderWithActivity({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -815,7 +807,6 @@ function renderWithActivity(responses: Record<string, unknown>, initialEntry = "
 describe("ActivityLanePage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    activityPreferences.chats = false;
     activityPreferences.role = "editor";
   });
 

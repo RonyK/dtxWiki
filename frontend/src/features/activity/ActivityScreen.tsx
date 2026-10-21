@@ -20,7 +20,6 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
-import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import {
@@ -533,9 +532,8 @@ function ActivityLaneEmpty({
   filtered?: boolean;
 }) {
   const { t } = useTranslation("activity");
-  const { preferences } = useLabsPreferences();
   const workspace = useOptionalWorkspaceContext();
-  const showChats = preferences.chats && isEditorRole(workspace?.selectedWorkspace?.role);
+  const showChats = isEditorRole(workspace?.selectedWorkspace?.role);
   const message =
     kind === "system"
       ? t("empty.system", { defaultValue: "No system events for this period." })

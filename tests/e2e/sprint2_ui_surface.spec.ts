@@ -33,8 +33,10 @@ const SURFACES: Surface[] = [
 
 async function expectLabsMenus(
   navigation: Locator,
-  enabled: { chats: boolean; agent: boolean },
+  enabled: { ask: boolean; agent: boolean },
 ) {
+  await expect(navigation.locator('a[href="/chats"]')).toBeVisible();
+  await expect(navigation.locator('a[href="/chats"] .nav-preview-badge')).toHaveCount(0);
   for (const [menu, visible] of Object.entries(enabled)) {
     const link = navigation.locator(`a[href="/${menu}"]`);
     if (visible) {
@@ -47,13 +49,13 @@ async function expectLabsMenus(
 
 async function expectLabsCommands(
   page: Page,
-  enabled: { chats: boolean; agent: boolean },
+  enabled: { ask: boolean; agent: boolean },
 ) {
   await page.getByRole("combobox", { name: "Search workspace" }).click();
   const commands = page.getByRole("listbox");
   await expect(commands).toBeVisible();
-  await expect(commands.getByRole("option", { name: /^Chats\b/ }))
-    .toHaveCount(enabled.chats ? 1 : 0);
+  await expect(commands.getByRole("option", { name: /^Ask\b/ }))
+    .toHaveCount(enabled.ask ? 1 : 0);
   await expect(commands.getByRole("option", { name: /^Agent\b/ }))
     .toHaveCount(enabled.agent ? 1 : 0);
   await page.keyboard.press("Escape");
@@ -142,9 +144,9 @@ test.describe("Sprint 2 UI surface", () => {
       .toBeVisible();
 
     const sidebar = page.getByRole("navigation", { name: "Sidebar" });
-    await expectLabsMenus(sidebar, { chats: false, agent: false });
+    await expectLabsMenus(sidebar, { ask: false, agent: false });
     await expect(page.locator('a[href="/agent"]')).toHaveCount(0);
-    await expectLabsCommands(page, { chats: false, agent: false });
+    await expectLabsCommands(page, { ask: false, agent: false });
 
     await page.goto("/setup");
     await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
@@ -152,7 +154,7 @@ test.describe("Sprint 2 UI surface", () => {
     await expect(page.locator('a[href="/agent"]')).toHaveCount(0);
     await page.goto("/activity?kind=mcp");
     await expect(page.getByRole("link", { name: "Open MCP setup" }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open Chats", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Open Chats", exact: true }).first()).toBeVisible();
 
     await page.locator(".topbar-actions").getByRole("link", { name: "Settings", exact: true })
       .click();
@@ -160,66 +162,69 @@ test.describe("Sprint 2 UI surface", () => {
     await expect(page).toHaveURL(/\/settings\?section=labs$/);
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
       .toBeVisible();
-    const chats = page.getByRole("checkbox", { name: "Show Chats menu", exact: true });
+    const ask = page.getByRole("checkbox", { name: "Show Ask menu", exact: true });
     const agent = page.getByRole("checkbox", { name: "Show Agent menu", exact: true });
-    await expect(chats).not.toBeChecked();
+    await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Show Chats menu", exact: true })).toHaveCount(0);
 
-    await chats.check();
-    await expectLabsMenus(sidebar, { chats: true, agent: false });
-    await expectLabsCommands(page, { chats: true, agent: false });
+    await ask.check();
+    await expectLabsMenus(sidebar, { ask: true, agent: false });
+    await expectLabsCommands(page, { ask: true, agent: false });
 
-    await page.goto("/activity?kind=mcp");
-    await expect(page.getByRole("link", { name: "Open Chats", exact: true }).first()).toBeVisible();
+    await sidebar.locator('a[href="/ask"]').click();
+    await expect(page).toHaveURL(/\/ask$/);
+    await expect(page.locator(".ask-main")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "We couldn't find that page" })).toHaveCount(0);
     await page.goto("/settings?section=labs");
 
     await agent.check();
-    await expectLabsMenus(sidebar, { chats: true, agent: true });
-    await expectLabsCommands(page, { chats: true, agent: true });
+    await expectLabsMenus(sidebar, { ask: true, agent: true });
+    await expectLabsCommands(page, { ask: true, agent: true });
 
     await page.goto("/setup");
     await expect(page.getByText(/^\d+ of 3 · /)).toBeVisible();
     await expect(page.locator(".main-surface").locator('a[href="/agent"]')).toBeVisible();
     await page.goto("/settings?section=labs");
 
-    await chats.uncheck();
-    await expectLabsMenus(sidebar, { chats: false, agent: true });
+    await ask.uncheck();
+    await expectLabsMenus(sidebar, { ask: false, agent: true });
     await page.reload();
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
       .toBeVisible();
-    await expect(chats).not.toBeChecked();
+    await expect(ask).not.toBeChecked();
     await expect(agent).toBeChecked();
-    await expectLabsMenus(sidebar, { chats: false, agent: true });
-    await expectLabsCommands(page, { chats: false, agent: true });
+    await expectLabsMenus(sidebar, { ask: false, agent: true });
+    await expectLabsCommands(page, { ask: false, agent: true });
 
     await page.goto("/dashboard");
     await expect(page.locator(".main-surface").locator('a[href="/agent"]'))
       .toBeVisible();
     await page.goto("/settings?section=labs");
-    await chats.check();
+    await ask.check();
     await page.setViewportSize({ width: 390, height: 844 });
     const mobile = page.getByRole("navigation", { name: "Mobile" });
     const openNavigation = page.getByRole("button", { name: "Open navigation" });
     await openNavigation.click();
-    await expectLabsMenus(mobile, { chats: true, agent: true });
+    await expectLabsMenus(mobile, { ask: true, agent: true });
     await page.keyboard.press("Escape");
     await expect(mobile).toBeHidden();
 
     await agent.uncheck();
     await openNavigation.click();
-    await expectLabsMenus(mobile, { chats: true, agent: false });
+    await expectLabsMenus(mobile, { ask: true, agent: false });
     await page.keyboard.press("Escape");
     await expect(mobile).toBeHidden();
 
-    await chats.uncheck();
+    await ask.uncheck();
     await openNavigation.click();
-    await expectLabsMenus(mobile, { chats: false, agent: false });
+    await expectLabsMenus(mobile, { ask: false, agent: false });
     await page.keyboard.press("Escape");
     await page.reload();
-    await expect(chats).not.toBeChecked();
+    await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
     await openNavigation.click();
-    await expectLabsMenus(mobile, { chats: false, agent: false });
+    await expectLabsMenus(mobile, { ask: false, agent: false });
   });
 
   test("Labs choices stay with their account in the same browser", async ({
@@ -231,29 +236,29 @@ test.describe("Sprint 2 UI surface", () => {
     const secondEmail = `e2e-labs-second-${suffix}@example.com`;
     await signUp(page.request, firstEmail);
     await page.goto("/settings?section=labs");
-    const chats = page.getByRole("checkbox", { name: "Show Chats menu", exact: true });
+    const ask = page.getByRole("checkbox", { name: "Show Ask menu", exact: true });
     const agent = page.getByRole("checkbox", { name: "Show Agent menu", exact: true });
     const sidebar = page.getByRole("navigation", { name: "Sidebar" });
-    await chats.check();
-    await expectLabsMenus(sidebar, { chats: true, agent: false });
+    await ask.check();
+    await expectLabsMenus(sidebar, { ask: true, agent: false });
 
     const firstLogout = await page.request.post(`${backendBaseUrl}/api/v1/auth/logout`);
     expect(firstLogout.ok()).toBeTruthy();
     await signUp(page.request, secondEmail);
     await page.goto("/settings?section=labs");
-    await expect(chats).not.toBeChecked();
+    await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
-    await expectLabsMenus(sidebar, { chats: false, agent: false });
+    await expectLabsMenus(sidebar, { ask: false, agent: false });
     await agent.check();
-    await expectLabsMenus(sidebar, { chats: false, agent: true });
+    await expectLabsMenus(sidebar, { ask: false, agent: true });
 
     const secondLogout = await page.request.post(`${backendBaseUrl}/api/v1/auth/logout`);
     expect(secondLogout.ok()).toBeTruthy();
     await login(page.request, firstEmail);
     await page.goto("/settings?section=labs");
-    await expect(chats).toBeChecked();
+    await expect(ask).toBeChecked();
     await expect(agent).not.toBeChecked();
-    await expectLabsMenus(sidebar, { chats: true, agent: false });
+    await expectLabsMenus(sidebar, { ask: true, agent: false });
   });
 
   test("supports tree rail expand and collapse in the browser", async ({

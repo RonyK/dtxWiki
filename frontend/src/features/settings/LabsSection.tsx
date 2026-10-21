@@ -17,12 +17,12 @@ export function LabsSection({ labelledBy }: { labelledBy: string }) {
         <p>{t("labs.description")}</p>
         <label className="checkbox-field">
           <input
-            checked={preferences.chats}
+            checked={preferences.ask}
             disabled={!ready}
-            onChange={(event) => setMenuVisible("chats", event.target.checked)}
+            onChange={(event) => setMenuVisible("ask", event.target.checked)}
             type="checkbox"
           />
-          <span>{t("labs.showChats")}</span>
+          <span>{t("labs.showAsk")}</span>
         </label>
         <label className="checkbox-field">
           <input

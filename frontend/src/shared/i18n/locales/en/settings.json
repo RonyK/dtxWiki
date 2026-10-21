@@ -1899,7 +1899,7 @@
   "labs": {
     "title": "Experimental menus",
     "description": "These features are still being developed. Turn on the menus you want to try.",
-    "showChats": "Show Chats menu",
+    "showAsk": "Show Ask menu",
     "showAgent": "Show Agent menu",
     "savedLocally": "Changes apply immediately and are saved for your account in this browser."
   }
