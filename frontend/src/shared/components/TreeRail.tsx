@@ -9,6 +9,7 @@ import {
   Plus,
   Search,
   Upload,
+  Star,
 } from "lucide-react";
 import type {
   CSSProperties,
@@ -17,16 +18,27 @@ import type {
   PointerEvent,
   ReactNode,
 } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { TreeNodePayload } from "../api/workspace";
+import {
+  favoriteTargetKind,
+  getTreeFavoriteSnapshot,
+  subscribeTreeFavorites,
+  toggleTreeFavorite,
+  treeFavoriteKey,
+  type TreeFavoriteScope,
+} from "../api/treeFavorites";
 import { CountChip } from "./CountChip";
 import type { NewItemType } from "./NewItemDialog";
 import { TreeNodeContextMenu } from "./TreeNodeContextMenu";
 import type { TreeNodeContextMenuAction } from "./TreeNodeContextMenu";
 import { collectHiddenSystemRootNodeIds } from "./treeSectionRoot";
 import { WorkspacePanelChrome } from "./WorkspacePanelChrome";
+import { useNowTick } from "./RelativeTime";
+import { contentChangedAt, TREE_RECENT_CHANGE_MS, treeNodeStatus, treeNodeStatusDescription } from "./treeNodeStatus";
+import { useTreeRowTooltip, type TreeRowTooltip } from "./useTreeRowTooltip";
 
 type TreeRowStyle = CSSProperties & {
   "--tree-level": number;
@@ -46,6 +58,7 @@ type TreeRailProps = {
   title: string;
   accent?: "library" | "context" | "agent" | "ask";
   nodes: TreeNodePayload[];
+  favoriteScope?: TreeFavoriteScope;
   activeTargetId?: string | null;
   activeNodeId?: string | null;
   expandedNodeIds?: string[];
@@ -105,6 +118,7 @@ export function TreeRail({
   title,
   accent,
   nodes,
+  favoriteScope,
   activeTargetId,
   activeNodeId,
   expandedNodeIds,
@@ -132,12 +146,39 @@ export function TreeRail({
   uploadAction,
   headerSlot,
 }: TreeRailProps) {
-  const { t } = useTranslation("tree");
+  const { t, i18n } = useTranslation("tree");
+  const relativeNow = useNowTick();
+  const [expiryNow, setExpiryNow] = useState(() => Date.now());
+  const now = Math.max(relativeNow, expiryNow);
+  const favoriteSnapshot = useSyncExternalStore(subscribeTreeFavorites, getTreeFavoriteSnapshot);
+  const favoriteScopeKey = favoriteScope ? JSON.stringify(favoriteScope) : "";
+  const currentScopeRef = useRef(favoriteScopeKey);
+  useLayoutEffect(() => { currentScopeRef.current = favoriteScopeKey; }, [favoriteScopeKey]);
+  const resolvedNodes = useMemo(() => nodes.map((node) => {
+    const value = favoriteScope ? favoriteSnapshot.get(treeFavoriteKey(favoriteScope, node)) : undefined;
+    return value ? { ...node, is_favorite: value.isFavorite } : node;
+  }), [favoriteScope, favoriteSnapshot, nodes]);
+  useEffect(() => {
+    const currentTime = Date.now();
+    const expiries = nodes
+      .filter((node) => treeNodeStatus(node, now) === "recent")
+      .map((node) => contentChangedAt(node) + TREE_RECENT_CHANGE_MS)
+      .filter((expires) => expires > now);
+    if (!expiries.length) return;
+    // Schedule the actual 72h boundary; the shared relative-time tick alone can
+    // run up to 30 seconds later. Expiration never depends on reading a page.
+    const timer = window.setTimeout(() => setExpiryNow(Date.now()),
+      Math.max(0, Math.min(2_147_483_647, Math.min(...expiries) - currentTime)));
+    return () => window.clearTimeout(timer);
+  }, [nodes, now]);
+  const [favoriteFailure, setFavoriteFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
-  const [contextMenu, setContextMenu] = useState<{
+  const [contextMenuState, setContextMenu] = useState<{
     node: TreeNodePayload;
     position: { left: number; top: number };
+    scopeKey: string;
   } | null>(null);
+  const contextMenu = contextMenuState?.scopeKey === favoriteScopeKey ? contextMenuState : null;
   const contextMenuInvokerRef = useRef<HTMLElement | null>(null);
   const [dragState, setDragState] = useState<{
     draggedNodeId: string;
@@ -167,11 +208,17 @@ export function TreeRail({
     }
     return undefined;
   }, [refreshing, t, title]);
-  const orderedNodes = useMemo(() => orderTreeNodes(nodes), [nodes]);
+  const orderedNodes = useMemo(() => orderTreeNodes(resolvedNodes), [resolvedNodes]);
   const nodeById = useMemo(
     () => new Map(orderedNodes.map((node) => [node.id, node])),
     [orderedNodes],
   );
+  const tooltip = useTreeRowTooltip({
+    nodes: nodeById,
+    now,
+    disabled: Boolean(contextMenu || dragState),
+    scopeKey: favoriteScopeKey,
+  });
   const hiddenRootNodeIds = useMemo(
     () =>
       hideSystemRootNodes
@@ -234,15 +281,34 @@ export function TreeRail({
     onCreateItem &&
     (canCreatePage === true || canCreateFolder === true || canUpload === true),
   );
-  const nodeActionEnabled = Boolean(
-    onRenameNode ||
-    onMoveNode ||
-    onReorderNodeAt ||
-    onDeleteNode ||
-    onCopyNodeLink ||
-    createItemEnabled || createFolderEnabled,
-  );
   const anchoredReorderEnabled = Boolean(onReorderNodeAt);
+  const reorderableNodeIds = useMemo(() => {
+    const available = new Set<string>();
+    if (!anchoredReorderEnabled || filterQuery.trim()) return available;
+    const previousByParent = new Map<string | null, TreeNodePayload>();
+    for (const node of orderedNodes) {
+      const previous = previousByParent.get(node.parent_id);
+      if (previous && !previous.is_system_node && !node.is_system_node) {
+        available.add(previous.id);
+        available.add(node.id);
+      }
+      previousByParent.set(node.parent_id, node);
+    }
+    return available;
+  }, [anchoredReorderEnabled, filterQuery, orderedNodes]);
+
+  function canOpenNodeContextMenu(node: TreeNodePayload) {
+    return Boolean(
+      onCopyNodeLink || onRenameNode ||
+      (!node.is_system_node && (onDeleteNode || onMoveNode)) ||
+      reorderableNodeIds.has(node.id) ||
+      (node.can_have_children && (
+        ((onCreateItem || onCreateFolder) && canCreateFolder === true) ||
+        (onCreateItem && canCreatePage === true)
+      )) ||
+      (favoriteScope && favoriteTargetKind(node)),
+    );
+  }
   const resolvedExpandWidthLabel =
     expandWidthLabel ??
     (expandWidthAtMax ? t("resetWidth", { title }) : t("widen", { title }));
@@ -293,6 +359,7 @@ export function TreeRail({
     if (!onExpandedNodeIdsChange) {
       return;
     }
+    tooltip.dismissForActivation();
     const next = new Set(expandedNodeIdSet);
     if (next.has(nodeId)) {
       next.delete(nodeId);
@@ -516,13 +583,14 @@ export function TreeRail({
     position: { left: number; top: number },
     invoker: HTMLElement | null,
   ) {
-    if (!nodeActionEnabled) {
+    if (!canOpenNodeContextMenu(node)) {
       return;
     }
     contextMenuInvokerRef.current = invoker;
     setContextMenu({
       node,
       position: clampContextMenuPosition(position),
+      scopeKey: favoriteScopeKey,
     });
   }
 
@@ -579,6 +647,18 @@ export function TreeRail({
       onDeleteNode?.(action.node);
       return;
     }
+    if (action.type === "favorite") {
+      if (favoriteScope) {
+        setFavoriteFailure(null);
+        void toggleTreeFavorite(favoriteScope, action.node).catch(() => {
+          if (currentScopeRef.current === favoriteScopeKey) {
+            setFavoriteFailure({ scope: favoriteScopeKey, message: t("favorite.failed", { title: action.node.title }) });
+          }
+        });
+      }
+      restoreInvokerFocus();
+      return;
+    }
     onCopyNodeLink?.(action.node);
     restoreInvokerFocus();
   }
@@ -599,6 +679,7 @@ export function TreeRail({
   }
 
   function invokePrimaryAction(node: TreeNodePayload) {
+    tooltip.dismissForActivation();
     if (onSelectTarget) {
       onSelectTarget(node);
       return;
@@ -646,7 +727,7 @@ export function TreeRail({
       invokePrimaryAction(node);
       return;
     }
-    if (event.shiftKey && event.key === "F10" && nodeActionEnabled) {
+    if (event.shiftKey && event.key === "F10" && canOpenNodeContextMenu(node)) {
       event.preventDefault();
       const target = event.currentTarget.getBoundingClientRect();
       openContextMenu(
@@ -702,7 +783,7 @@ export function TreeRail({
         aria-live="polite"
         aria-atomic="true"
       >
-        {refreshAnnouncement || dragAnnouncement}
+        {(favoriteFailure?.scope === favoriteScopeKey ? favoriteFailure.message : "") || refreshAnnouncement || dragAnnouncement}
       </span>
       <div className="tree-rail-header">
         <div className="panel-title-with-count">
@@ -820,6 +901,7 @@ export function TreeRail({
               <TreeRow
                 key={node.id}
                 node={node}
+                now={now}
                 active={
                   (activeNodeId != null && node.id === activeNodeId) ||
                   (activeTargetId != null && node.target_id === activeTargetId)
@@ -829,7 +911,7 @@ export function TreeRail({
                 canCreateFolder={createFolderEnabled}
                 canCreateItem={createItemEnabled}
                 canCreatePage={canCreatePage === true}
-                canOpenContextMenu={nodeActionEnabled}
+                canOpenContextMenu={canOpenNodeContextMenu(node)}
                 canToggleExpanded={Boolean(onExpandedNodeIdsChange)}
                 draggable={draggableNode(node)}
                 dragState={dragState}
@@ -849,11 +931,13 @@ export function TreeRail({
                 onToggleExpanded={toggleExpanded}
                 onSelectTarget={onSelectTarget}
                 visualLevel={visualTreeLevel(node, nodeById, hiddenRootNodeIds)}
+                tooltip={tooltip}
               />
             ))}
           </div>
         )}
       </div>
+      {tooltip.popup}
       {contextMenu ? (
         <TreeNodeContextMenu
           canCreateFolder={Boolean(
@@ -874,7 +958,10 @@ export function TreeRail({
             reorderAvailability(contextMenu.node, orderedNodes).down
           }
           canRename={Boolean(onRenameNode)}
-          node={contextMenu.node}
+          canFavorite={Boolean(favoriteScope && favoriteTargetKind(contextMenu.node))}
+          favoritePending={Boolean(favoriteScope && favoriteSnapshot.get(treeFavoriteKey(favoriteScope, contextMenu.node))?.pending)}
+          statusSummary={treeNodeStatusDescription(nodeById.get(contextMenu.node.id) ?? contextMenu.node, now, i18n.resolvedLanguage ?? i18n.language, t)}
+          node={nodeById.get(contextMenu.node.id) ?? contextMenu.node}
           position={contextMenu.position}
           onAction={handleContextMenuAction}
           onClose={() => {
@@ -898,6 +985,7 @@ export function TreeRail({
 
 function TreeRow({
   node,
+  now,
   active,
   activePath,
   actionsOpen,
@@ -924,8 +1012,10 @@ function TreeRow({
   tabIndex,
   onSelectTarget,
   visualLevel,
+  tooltip,
 }: {
   node: TreeNodePayload;
+  now: number;
   active: boolean;
   activePath: boolean;
   actionsOpen: boolean;
@@ -978,13 +1068,17 @@ function TreeRow({
   tabIndex: number;
   onSelectTarget?: (node: TreeNodePayload) => void;
   visualLevel: number;
+  tooltip: TreeRowTooltip;
 }) {
-  const { t } = useTranslation("tree");
+  const { t, i18n } = useTranslation("tree");
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressOpenedRef = useRef(false);
   const [isLongPressing, setIsLongPressing] = useState(false);
   const titleId = useId();
+  const statusId = useId();
+  const status = treeNodeStatus(node, now);
+  const statusDescription = treeNodeStatusDescription(node, now, i18n.resolvedLanguage ?? i18n.language, t);
   const level = visualLevel;
   const Icon = node.node_kind === "folder" ? Folder : FileText;
   const hasChildren = nodeHasChildren(node);
@@ -1015,6 +1109,7 @@ function TreeRow({
     "aria-expanded": hasChildren ? expanded : undefined,
     "aria-level": level,
     "aria-labelledby": titleId,
+    "aria-describedby": statusDescription ? statusId : undefined,
     "aria-grabbed": draggable ? isDragging : undefined,
     style: { "--tree-level": level } as TreeRowStyle,
     "data-active-path": activePath ? "true" : "false",
@@ -1028,6 +1123,7 @@ function TreeRow({
     "data-system-node": node.is_system_node ? "true" : "false",
     "data-target-id": node.target_id ?? undefined,
     "data-target-kind": node.target_kind ?? undefined,
+    "data-document-state": status ?? undefined,
     "data-visibility-status": node.visibility_status,
   };
 
@@ -1127,24 +1223,27 @@ function TreeRow({
       ) : (
         <span className="tree-row-spacer" aria-hidden="true" />
       )}
-      <Icon
-        className={node.node_kind === "folder" ? "tree-row-icon-folder" : ""}
-        size={15}
-        aria-hidden="true"
-      />
+      <span className="tree-row-document-icon" aria-hidden="true">
+        <Icon className={node.node_kind === "folder" ? "tree-row-icon-folder" : ""} size={15} />
+        {favoriteTargetKind(node) && node.is_favorite ? <Star className="tree-row-favorite" size={11} /> : null}
+      </span>
       <span className="tree-row-label">
         {targetGroup ? (
           <span
-            className={`tree-row-state-dot lc-dot-${targetGroup}`}
+            className={`tree-row-state-dot ${status ? `tree-row-state-${status}` : `lc-dot-${targetGroup}`}`}
             data-target-group={targetGroup}
-            title={t("target", { group: targetGroup })}
+            data-document-state={status ?? undefined}
             aria-hidden="true"
-          />
+          >
+            {status === "review" ? <svg className="tree-row-review-clock" viewBox="0 0 12 12" width="7" height="7">
+              <circle cx="6" cy="6" r="6" fill="currentColor" />
+              <path d="M6 2.5V6L8.3 7.3" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg> : null}
+          </span>
         ) : null}
         <span
           id={titleId}
           className="tree-row-title"
-          title={node.title}
           aria-label={node.title}
         >
           {node.title}
@@ -1167,6 +1266,7 @@ function TreeRow({
           </span>
         ) : null}
       </span>
+      {statusDescription ? <span className="visually-hidden tree-row-description" id={statusId}>{statusDescription}</span> : null}
       {(canCreateItem && onCreateItem && node.can_have_children) ||
       (canCreateFolder && onCreateFolder && node.can_have_children) ||
       canOpenContextMenu ? (
@@ -1236,6 +1336,7 @@ function TreeRow({
       ref={refCallback}
       role="treeitem"
       tabIndex={tabIndex}
+      onClickCapture={tooltip.dismissForActivation}
       onClick={(event) => {
         if (longPressOpenedRef.current) {
           event.preventDefault();
@@ -1264,17 +1365,32 @@ function TreeRow({
           event.currentTarget,
         );
       }}
-      onFocus={() => onFocusNode(node.id)}
+      onFocus={(event) => {
+        tooltip.focus(node.id, event.currentTarget);
+        onFocusNode(node.id);
+      }}
+      onBlur={(event) => {
+        tooltip.blur(event.relatedTarget);
+      }}
+      onMouseEnter={(event) => {
+        tooltip.enter(node.id, event.currentTarget, event);
+      }}
+      onMouseLeave={tooltip.leave}
       onDragEnd={onDragEnd}
       onDragLeave={(event) => onDragLeave(node, event)}
       onDragOver={(event) => onDragOver(node, event)}
       onDragStart={(event) => onDragStart(node, event)}
       onDrop={(event) => onDrop(node, event)}
-      onKeyDown={(event) => onKeyDown(node, event)}
+      onKeyDown={(event) => {
+        onKeyDown(node, event);
+      }}
       onPointerCancel={clearLongPressTimer}
       onPointerDown={startLongPressContextMenu}
       onPointerLeave={clearLongPressTimer}
-      onPointerMove={updateLongPressContextMenu}
+      onPointerMove={(event) => {
+        updateLongPressContextMenu(event);
+        tooltip.move(node.id, event.currentTarget, event);
+      }}
       onPointerUp={clearLongPressTimer}
     >
       {rowContent}

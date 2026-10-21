@@ -141,6 +141,7 @@ import {
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
 const CONTEXT_CHILD_PAGE_SIZE = 5;
@@ -188,6 +189,7 @@ type ContextState = {
 export function ContextScreen() {
   const { t } = useTranslation("context");
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
+  const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
@@ -1192,6 +1194,7 @@ export function ContextScreen() {
           onExpandWidth,
         }) => (
           <TreeRail
+            favoriteScope={auth?.user && state.workspaceId ? { actorId: auth.user.user_id, workspaceId: state.workspaceId } : undefined}
             title={t("rail.title", { defaultValue: "Context" })}
             accent="context"
             nodes={state.tree}

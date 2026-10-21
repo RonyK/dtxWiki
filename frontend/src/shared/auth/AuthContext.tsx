@@ -22,7 +22,8 @@ import {
   type AuthSession,
   type AuthUser,
 } from "../api/auth";
-import { clearPersistedWorkspaceId } from "../api/workspace";
+import { clearPersistedWorkspaceId, invalidateWorkspaceListCache } from "../api/workspace";
+import { setTreeFavoriteActor } from "../api/treeFavorites";
 import { isAbortError } from "../lib/abortError";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous" | "transient_error";
@@ -75,6 +76,23 @@ export function AuthProvider({
   const automaticCapabilitiesLoadStarted = useRef(false);
   const sessionProbeEpochRef = useRef(0);
   const activeSessionProbeRef = useRef<AbortController | null>(null);
+  const sessionActorRef = useRef<string | null>(null);
+
+  const commitUser = useCallback((nextUser: AuthUser | null, workspaceAlreadyCleared = false) => {
+    const nextActorId = nextUser?.user_id ?? null;
+    const previousActorId = sessionActorRef.current;
+    // A cookie can change in another tab while this provider remains mounted.
+    // Fence personal reads/writes synchronously, before rendering that actor.
+    setTreeFavoriteActor(nextActorId);
+    if (previousActorId !== nextActorId) {
+      if (!workspaceAlreadyCleared) {
+        if (previousActorId !== null) clearPersistedWorkspaceId();
+        else invalidateWorkspaceListCache();
+      }
+      sessionActorRef.current = nextActorId;
+    }
+    setUser(nextUser);
+  }, []);
 
   const invalidateSessionProbes = useCallback(() => {
     sessionProbeEpochRef.current += 1;
@@ -104,7 +122,7 @@ export function AuthProvider({
         return null;
       }
       setApiErrorViewerIsServerAdmin(activeUser.is_server_admin === true);
-      setUser(activeUser);
+      commitUser(activeUser);
       setStatus("authenticated");
       setSessionChecked(true);
       setSessionError(null);
@@ -122,7 +140,7 @@ export function AuthProvider({
       // a banner without redirecting to /login (review §6.3 FA-H4).
       if (error instanceof ApiError && error.status === 401) {
         setApiErrorViewerIsServerAdmin(false);
-        setUser(null);
+        commitUser(null);
         setStatus("anonymous");
         setSessionChecked(true);
         setSessionError(null);
@@ -143,7 +161,7 @@ export function AuthProvider({
         activeSessionProbeRef.current = null;
       }
     }
-  }, [sessionChecked]);
+  }, [commitUser, sessionChecked]);
 
   const refreshCapabilities = useCallback(async () => {
     // Fail closed while refreshing. A stale `true` must never keep the signup
@@ -199,7 +217,7 @@ export function AuthProvider({
       // persisted workspace id before emitting the event, and it has to: the
       // public frame has no AuthProvider to listen. Repeating it here would
       // give the teardown sequence two owners.
-      setUser(null);
+      commitUser(null, true);
       setStatus("anonymous");
       setSessionChecked(true);
       setSessionError(null);
@@ -207,7 +225,7 @@ export function AuthProvider({
 
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
-  }, [invalidateSessionProbes]);
+  }, [commitUser, invalidateSessionProbes]);
 
   // Cancelling in-flight probes is the provider's own teardown, not the
   // listener's. Keeping it inside the AUTH_EXPIRED effect tied request
@@ -227,11 +245,11 @@ export function AuthProvider({
   const setAuthenticatedSession = useCallback((session: AuthSession) => {
     invalidateSessionProbes();
     setApiErrorViewerIsServerAdmin(session.user.is_server_admin === true);
-    setUser(session.user);
+    commitUser(session.user);
     setStatus("authenticated");
     setSessionChecked(true);
     setSessionError(null);
-  }, [invalidateSessionProbes]);
+  }, [commitUser, invalidateSessionProbes]);
 
   const signOut = useCallback(async () => {
     // Fence the local session immediately, before waiting for the logout
@@ -253,12 +271,12 @@ export function AuthProvider({
       // workspace title/id/role via WorkspaceRouteBoundary's stale
       // selectedWorkspace before the fresh workspace list resolves.
       clearPersistedWorkspaceId();
-      setUser(null);
+      commitUser(null, true);
       setStatus("anonymous");
       setSessionChecked(true);
       setSessionError(null);
     }
-  }, [invalidateSessionProbes]);
+  }, [commitUser, invalidateSessionProbes]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

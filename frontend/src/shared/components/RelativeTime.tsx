@@ -30,9 +30,10 @@ function subscribe(notify: () => void): () => void {
 }
 
 /** Re-render the caller roughly every TICK_MS so relative labels stay current. */
-export function useNowTick(): void {
-  const [, setTick] = useState(0);
-  useEffect(() => subscribe(() => setTick((value) => value + 1)), []);
+export function useNowTick(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => subscribe(() => setNow(Date.now())), []);
+  return now;
 }
 
 /**

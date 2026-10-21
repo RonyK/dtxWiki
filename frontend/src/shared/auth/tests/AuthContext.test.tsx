@@ -404,9 +404,8 @@ describe("AuthContext", () => {
   it("clears the persisted workspace selection on sign out (WS-05)", async () => {
     // Without this, the next person to sign in on the same browser profile
     // briefly sees the previous user's workspace title/id/role through the
-    // stale localStorage key and in-memory snapshot — WorkspaceProvider
-    // itself never remounts across a sign-out since it lives above the
-    // route outlet.
+    // stale localStorage key and in-memory snapshot, which outlive the
+    // authenticated workspace subtree's identity-keyed remount.
     const user = userEvent.setup();
     window.localStorage.setItem(
       "dtxwiki.selectedWorkspaceId",

@@ -473,10 +473,16 @@ function AppFrame() {
 // reads the session identity and hands it to WorkspaceProvider as a prop —
 // WorkspaceProvider itself must stay callable without an AuthProvider
 // ancestor (see WorkspaceContext.test.tsx's bare renders).
-function WorkspaceScope({ children }: { children: ReactNode }) {
+export function WorkspaceScope({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  // Account switches can preserve the workspace ID. Remount the authenticated
+  // subtree so loaded personal flags and permission-dependent content cannot
+  // cross that identity boundary while the new actor's requests are pending.
   return (
-    <WorkspaceProvider sessionUserId={user?.user_id ?? null}>
+    <WorkspaceProvider
+      key={user?.user_id ?? "anonymous"}
+      sessionUserId={user?.user_id ?? null}
+    >
       {children}
     </WorkspaceProvider>
   );

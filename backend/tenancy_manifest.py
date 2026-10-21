@@ -127,6 +127,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "stored_blob_active_incarnation",
         "stored_blob_inspection",
         "tree_policy",
+        "user_favorite",
         "upload_asset",
         "upload_asset_binding",
         "workspace_credential_grant",

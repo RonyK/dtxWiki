@@ -1484,6 +1484,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/favorites/{target_kind}/{target_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Favorite */
+        put: operations["update_favorite_api_v1_workspaces__workspace_id__favorites__target_kind___target_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/feedback": {
         parameters: {
             query?: never;
@@ -5170,6 +5187,31 @@ export interface components {
             code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "disambiguation_required" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete";
             /** Message */
             message: string;
+        };
+        /** FavoritePayload */
+        FavoritePayload: {
+            /** Is Favorite */
+            is_favorite: boolean;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "context_page" | "library_item" | "agent_page";
+        };
+        /** FavoriteResponse */
+        FavoriteResponse: {
+            data: components["schemas"]["FavoritePayload"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** FavoriteUpdateRequest */
+        FavoriteUpdateRequest: {
+            /** Is Favorite */
+            is_favorite: boolean;
         };
         /** FeedbackEntry */
         FeedbackEntry: {
@@ -9016,6 +9058,8 @@ export interface components {
              * @default 0
              */
             children_count: number;
+            /** Content Changed At */
+            content_changed_at?: string | null;
             /**
              * Has Children
              * @default false
@@ -9026,6 +9070,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * Is Favorite
+             * @default false
+             */
+            is_favorite: boolean;
             /** Is System Node */
             is_system_node: boolean;
             /** Nav Summary */
@@ -9038,6 +9087,10 @@ export interface components {
             parent_id?: string | null;
             /** Primary Placement */
             primary_placement: boolean;
+            /** Review Requested At */
+            review_requested_at?: string | null;
+            /** Review Status */
+            review_status?: ("pending" | "changes_requested") | null;
             /** Section */
             section: string;
             /** Slug */
@@ -16262,6 +16315,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoverageGapListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    update_favorite_api_v1_workspaces__workspace_id__favorites__target_kind___target_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                target_kind: "context_page" | "library_item" | "agent_page";
+                target_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FavoriteUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FavoriteResponse"];
                 };
             };
             /** @description Unauthorized */
