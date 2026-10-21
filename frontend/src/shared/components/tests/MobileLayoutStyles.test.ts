@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse, type AnyNode } from "postcss";
@@ -326,10 +326,15 @@ describe("mobile layout regression styles", () => {
   });
 
   it("confines every collapsed-sidebar style to desktop widths", () => {
+    // Read every stylesheet, so a collapsed rule added to any file is checked.
+    const stylesDir = resolve(process.cwd(), "src/styles");
+    const sources = readdirSync(stylesDir)
+      .filter((name) => name.endsWith(".css"))
+      .map((name) => readFileSync(resolve(stylesDir, name), "utf8"));
     const selectors: string[] = [];
-    for (const source of [baseStyles, shellStyles, workspaceStyles]) {
+    for (const source of sources) {
       parse(source).walkRules((rule) => {
-        if (!/\[data-(?:sidebar-)?collapsed="true"\]/.test(rule.selector)) return;
+        if (!/\[data-sidebar-collapsed="true"\]|\.sidebar\[data-collapsed="true"\]/.test(rule.selector)) return;
         selectors.push(rule.selector);
         let desktopOnly = false;
         for (let parent: AnyNode | undefined = rule.parent; parent; parent = parent.parent) {
