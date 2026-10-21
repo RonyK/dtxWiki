@@ -8834,6 +8834,8 @@ export interface components {
         };
         /** ReviewSelectionItem */
         ReviewSelectionItem: {
+            /** Auto Settled Review Item Ids */
+            auto_settled_review_item_ids?: string[];
             /** Eligible */
             eligible: boolean;
             /**

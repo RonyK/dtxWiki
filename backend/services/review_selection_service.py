@@ -254,7 +254,6 @@ class ReviewSelectionService:
         items: list[ReviewSelectionItem] = []
         visible_impact: set[UUID] = set()
         representative_ids: set[UUID] = set()
-        predicted_settled: set[UUID] = set()
         covered_by: dict[UUID, tuple[UUID, ReviewApprovalPreflight, str]] = {}
         eligible_count = 0
         for review_id in target_ids:
@@ -262,6 +261,7 @@ class ReviewSelectionService:
                 # One representative's domain snapshot already commits every
                 # sibling's identity/status/claim. Repeating its full sibling
                 # query per selected duplicate would make large groups O(N²).
+                # Only actor-visible siblings may reuse representative metadata.
                 representative_id, representative, signature = covered_by[review_id]
                 entries.append(
                     [
@@ -290,15 +290,14 @@ class ReviewSelectionService:
                 actor=actor,
                 actor_role=actor_role,
             )
-            redundant = preflight.eligible and review_id in predicted_settled
+            redundant = preflight.eligible and review_id in visible_impact
             signature = self._fingerprint(preflight)
             if preflight.eligible:
                 eligible_count += int(not redundant)
                 if not redundant:
                     representative_ids.add(review_id)
-                    predicted_settled.update(preflight.superseded_review_ids)
                     visible_impact.update(preflight.visible_superseded_review_ids)
-                    for sibling_id in preflight.superseded_review_ids:
+                    for sibling_id in preflight.visible_superseded_review_ids:
                         covered_by[sibling_id] = (review_id, preflight, signature)
             entries.append(
                 [
@@ -313,6 +312,11 @@ class ReviewSelectionService:
                     id=review_id,
                     eligible=preflight.eligible,
                     will_auto_settle=redundant,
+                    auto_settled_review_item_ids=(
+                        sorted(preflight.visible_superseded_review_ids, key=str)
+                        if preflight.eligible and not redundant
+                        else []
+                    ),
                     reason_code=preflight.reason_code,
                     reason=preflight.reason,
                     target_title=preflight.target_title,
@@ -320,7 +324,7 @@ class ReviewSelectionService:
                 )
             )
         for item in items:
-            if item.id in predicted_settled and item.id not in representative_ids:
+            if item.id in visible_impact and item.id not in representative_ids:
                 item.will_auto_settle = True
                 item.reason_code = "superseded_by_approved_publish"
                 item.reason = (

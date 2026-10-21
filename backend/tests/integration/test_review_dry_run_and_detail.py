@@ -420,6 +420,15 @@ def test_group_selection_includes_unloaded_reviews_and_settles_exact_candidate(
     assert selection["total"] == 6
     assert selection["eligible_count"] == 1
     assert sum(item["will_auto_settle"] for item in selection["items"]) == 5
+    representative = next(item for item in selection["items"] if item["eligible"])
+    assert set(representative["auto_settled_review_item_ids"]) == (
+        expected - {representative["id"]}
+    )
+    assert representative["auto_settled_review_item_ids"] == (
+        selection["auto_settled_review_item_ids"]
+    )
+    assert all(not item["auto_settled_review_item_ids"]
+               for item in selection["items"] if not item["eligible"])
 
     # A new queue item on a different page is outside the fixed selection.
     later = _seed_pending_review(page_service, workspace_id, title="Later page")
@@ -450,13 +459,33 @@ def test_selection_continuation_keeps_explicit_ids_across_batches(page_service):
         _seed_pending_review(page_service, workspace_id, title=f"Batch page {index}")
         for index in range(3)
     ]
+    # The explicit selection omits these same-candidate siblings. Their
+    # effects must still be attributed to the right document/version rather
+    # than presented only as one global count for three different candidates.
+    impact_by_id = {}
+    for index, review_id in enumerate(ids):
+        _page_id, siblings = _seed_same_candidate_reviews(
+            page_service, workspace_id, review_id, 2 - index
+        )
+        impact_by_id[review_id] = set(siblings)
     selection = _selection(client, workspace_id, review_item_ids=ids)
+    assert selection["review_item_ids"] == ids
+    for item in selection["items"]:
+        assert item["eligible"] is True
+        assert item["target_title"] == f"Batch page {ids.index(item['id'])}"
+        assert item["target_version_no"] == 1
+        assert set(item["auto_settled_review_item_ids"]) == impact_by_id[item["id"]]
+    assert set(selection["auto_settled_review_item_ids"]) == set().union(
+        *impact_by_id.values()
+    )
+    assert not set(ids).intersection(selection["auto_settled_review_item_ids"])
     first = _execute_selection(
         client, workspace_id, selection["selection_token"], batch_limit=1
     )
     assert first.status_code == 200, first.text
     first_data = first.json()["data"]
     assert first_data["approved"] == [ids[0]]
+    assert set(first_data["auto_settled_review_item_ids"]) == impact_by_id[ids[0]]
     assert first_data["processed_count"] == 1
     assert first_data["remaining_count"] == 2
     assert first_data["selection_complete"] is False
@@ -468,6 +497,7 @@ def test_selection_continuation_keeps_explicit_ids_across_batches(page_service):
     assert second.status_code == 200, second.text
     data = second.json()["data"]
     assert data["approved"] == ids[1:]
+    assert set(data["auto_settled_review_item_ids"]) == impact_by_id[ids[1]]
     assert data["total"] == 3
     assert data["processed_count"] == 2
     assert data["remaining_count"] == 0

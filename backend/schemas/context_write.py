@@ -993,6 +993,9 @@ class ReviewSelectionItem(BaseModel):
     id: UUID
     eligible: bool
     will_auto_settle: bool = False
+    # Only an eligible representative exposes its actor-visible same-candidate
+    # effect. The global impact list is the union of these per-item subsets.
+    auto_settled_review_item_ids: list[UUID] = Field(default_factory=list)
     reason_code: str | None = None
     reason: str | None = None
     target_title: str | None = None

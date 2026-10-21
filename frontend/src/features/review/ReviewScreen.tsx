@@ -1750,6 +1750,11 @@ export function ReviewScreen() {
                 <li key={item.id}>
                   <strong>{item.target_title ?? t("workflow.unavailableReview")}{item.target_version_no != null ? ` · v${item.target_version_no}` : ""}</strong>
                   <span>{item.will_auto_settle ? t("workflow.autoSettled") : item.eligible ? t("workflow.eligible") : reviewOutcomeReason(item.reason_code, item.reason, t)}</span>
+                  {item.eligible && !item.will_auto_settle && (item.auto_settled_review_item_ids?.length ?? 0) > 0 ? (
+                    <span className="review-bulk-item-impact">
+                      {t("bulk.approvalImpact", { count: item.auto_settled_review_item_ids?.length ?? 0 })}
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>

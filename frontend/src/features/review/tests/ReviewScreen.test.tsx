@@ -1822,9 +1822,11 @@ describe("ReviewScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/selection`) {
         expect(JSON.parse(String(init?.body))).toEqual({ review_item_ids: ["review-1"] });
-        return jsonResponse({ data: selectionPreview([reviewItem()], {
+        const preview = selectionPreview([reviewItem()], {
           auto_settled_review_item_ids: ["sibling-1", "sibling-2"],
-        }) });
+        });
+        preview.items[0].auto_settled_review_item_ids = ["sibling-1", "sibling-2"];
+        return jsonResponse({ data: preview });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/decide-bulk`) {
         bulkBody = JSON.parse(String(init?.body));
@@ -1864,10 +1866,10 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Approve selected" }));
     const dialog = await screen.findByRole("dialog", { name: "Review bulk approval" });
     expect(
-      within(dialog).getByText(
+      within(dialog).getAllByText(
         "2 other reviews for the same candidate will also be automatically settled.",
       ),
-    ).toBeInTheDocument();
+    ).toHaveLength(2); // Global union and the selected document/version row.
     await user.click(within(dialog).getByRole("button", { name: /Approve/ }));
 
     await waitFor(() =>
@@ -2772,11 +2774,28 @@ describe("ReviewScreen", () => {
         reason_code: !changed && item.id === current.id ? null
           : !changed && item.id === sibling.id ? "superseded_by_approved_publish" : "stale_candidate",
         target_title: "Grouped document", target_version_no: item.evidence!.operations[0].content!.candidate_version_no,
+        auto_settled_review_item_ids: !changed && item.id === current.id ? [sibling.id] : [],
       })),
     });
     mockReviewQueue([current, unrelated], "cursor-more", (url, init) => {
       if (url.endsWith("/reviews/selection")) {
-        selectionBodies.push(JSON.parse(String(init?.body)));
+        const request = JSON.parse(String(init?.body));
+        selectionBodies.push(request);
+        if (request.review_item_ids?.includes(arrival.id) && request.review_item_ids.includes(unrelated.id)) {
+          const multi = [...fixed, arrival, unrelated];
+          return jsonResponse({ data: selectionPreview(multi, {
+            selection_token: "multi-candidate-selection-token", eligible_count: 2,
+            auto_settled_review_item_ids: ["outside-filter-sibling-a", "outside-filter-sibling-b", "outside-filter-sibling-c"],
+            items: multi.map(item => ({
+              id: item.id, eligible: [arrival.id, unrelated.id].includes(item.id), will_auto_settle: false,
+              reason_code: [arrival.id, unrelated.id].includes(item.id) ? null : "stale_candidate",
+              target_title: item.evidence!.operations[0].document!.title,
+              target_version_no: item.evidence!.operations[0].content!.candidate_version_no,
+              auto_settled_review_item_ids: item.id === arrival.id ? ["outside-filter-sibling-a"]
+                : item.id === unrelated.id ? ["outside-filter-sibling-b", "outside-filter-sibling-c"] : [],
+            })),
+          }) });
+        }
         return jsonResponse({ data: preview() });
       }
       if (url.includes("cursor=cursor-more")) {
@@ -2841,6 +2860,25 @@ describe("ReviewScreen", () => {
     expect(selectionBodies[2]).toEqual({ review_item_ids: fixed.map(item => item.id) });
     expect(within(reconfirmed).getByRole("button", { name: "Approve 0" })).toBeDisabled();
     expect(decisionBodies).toHaveLength(1);
+    await user.click(within(reconfirmed).getByRole("button", { name: "Cancel" }));
+
+    // Explicitly select two current candidates. Their visible sibling effects
+    // include reviews outside the selected IDs and must be attributed per row.
+    await user.click(within(group).getByRole("checkbox", { name: /^Select Grouped document · v13 ·/ }));
+    await user.click(screen.getByRole("checkbox", { name: /^Select Other document/ }));
+    await user.click(screen.getByRole("button", { name: "Approve selected" }));
+    const multiDialog = await screen.findByRole("dialog", { name: "Review bulk approval" });
+    expect(selectionBodies[3]).toEqual({ review_item_ids: [...fixed, arrival, unrelated].map(item => item.id) });
+    const firstImpactRow = within(multiDialog).getByText("Grouped document · v13").closest("li")!;
+    const secondImpactRow = within(multiDialog).getByText("Other document · v1").closest("li")!;
+    expect(within(firstImpactRow).getByText(i18n.t("review:bulk.approvalImpact", { count: 1 }))).toBeVisible();
+    expect(within(secondImpactRow).getByText(i18n.t("review:bulk.approvalImpact", { count: 2 }))).toBeVisible();
+    expect(within(multiDialog).getByText(i18n.t("review:bulk.approvalImpact", { count: 3 }))).toBeVisible();
+    expect(within(multiDialog).getByText("Grouped document · v11").closest("li")
+      ?.querySelector(".review-bulk-item-impact")).toBeNull();
+    expect(within(multiDialog).queryByText(/outside-filter-sibling/)).not.toBeInTheDocument();
+    expect(within(multiDialog).getByRole("button", { name: "Approve 2" })).toBeEnabled();
+    expect(decisionBodies).toHaveLength(1); // Preview never submits an approval.
   });
 
   it("requires the exact candidate body and applies each server action capability separately", async () => {
@@ -3324,6 +3362,7 @@ function selectionPreview(items: ReviewItem[], overrides: Partial<ReviewSelectio
     total: items.length, limit: 5000, review_item_ids: items.map(item => item.id),
     eligible_count: items.length, items: items.map(item => ({
       id: item.id, eligible: true, will_auto_settle: false, reason_code: null, reason: null,
+      auto_settled_review_item_ids: [],
       target_title: item.evidence?.operations[0]?.document?.title ?? null,
       target_version_no: item.evidence?.operations[0]?.content?.candidate_version_no ?? null,
     })), auto_settled_review_item_ids: [], ...overrides,

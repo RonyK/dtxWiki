@@ -16803,6 +16803,14 @@
       "ReviewSelectionItem": {
         "additionalProperties": false,
         "properties": {
+          "auto_settled_review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Auto Settled Review Item Ids",
+            "type": "array"
+          },
           "eligible": {
             "title": "Eligible",
             "type": "boolean"

@@ -128,6 +128,8 @@
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
+  .review-row-select { width: 44px; height: 44px; top: 6px; }
+  .review-row-shell.has-bulk-select .review-row { padding-inline-start: 60px; }
   .review-document-group-header { grid-template-columns: 44px 44px minmax(0, 1fr) auto; padding: 6px 4px; }
   .review-document-group-check,
   .review-group-collapse,

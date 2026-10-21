@@ -62,8 +62,37 @@ test("reads exact evidence, approves a document group, and records the decision 
   await selectDocumentGroup(page, secondGroup);
   await selectDocumentGroup(page, firstGroup);
   await expect(firstGroup.getByText("3 selected for this document", { exact: true })).toBeVisible();
-  await firstGroup.getByRole("button", { name: "Approve selection", exact: true }).click();
+  const previewResponse = page.waitForResponse((response) => response.request().method() === "POST"
+    && new URL(response.url()).pathname.endsWith("/reviews/selection"));
+  await rail.getByRole("button", { name: "Approve selected", exact: true }).click();
+  const preview = await responseData<{
+    eligible_count: number;
+    auto_settled_review_item_ids: string[];
+    items: Array<{ id: string; eligible: boolean; target_title: string; target_version_no: number;
+      auto_settled_review_item_ids: string[] }>;
+  }>(await previewResponse);
+  expect(preview.eligible_count).toBe(2);
+  const firstItems = preview.items.filter((item) => item.target_title === first.title);
+  const firstRepresentative = firstItems.find((item) => item.eligible)!;
+  const secondRepresentative = preview.items.find((item) => item.target_title === second.title && item.eligible)!;
+  expect(firstItems).toHaveLength(3);
+  expect([...firstRepresentative.auto_settled_review_item_ids].sort()).toEqual(
+    firstItems.filter((item) => item.id !== firstRepresentative.id).map((item) => item.id).sort(),
+  );
+  expect(secondRepresentative.auto_settled_review_item_ids).toEqual([]);
+  expect([...preview.auto_settled_review_item_ids].sort()).toEqual([...firstRepresentative.auto_settled_review_item_ids].sort());
   const confirmation = page.getByRole("dialog");
+  await expect(confirmation).toContainText("Fixed selection: 4 items");
+  const previewItems = confirmation.locator(".review-bulk-preview-items > li");
+  const firstImpact = previewItems.filter({ hasText: first.title }).filter({ hasText: "Eligible for approval" });
+  const secondImpact = previewItems.filter({ hasText: second.title });
+  await expect(firstImpact.locator("strong")).toHaveText(`${first.title} · v${firstRepresentative.target_version_no}`);
+  await expect(firstImpact.locator(".review-bulk-item-impact")).toContainText("2 other reviews for the same candidate");
+  await expect(secondImpact.locator("strong")).toHaveText(`${second.title} · v${secondRepresentative.target_version_no}`);
+  await expect(secondImpact.locator(".review-bulk-item-impact")).toHaveCount(0);
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirmation).toBeHidden();
+  await firstGroup.getByRole("button", { name: "Approve selection", exact: true }).click();
   await expect(confirmation).toContainText("Fixed selection: 3 items");
   await expect(confirmation).toContainText("2 other reviews for the same candidate");
   await confirmation.getByRole("button", { name: "Approve 1", exact: true }).click();
@@ -141,6 +170,27 @@ test("keeps a saved mobile approval after response loss and queue failure, then 
   const approve = detail.getByRole("button", { name: "Approve", exact: true });
   await expect(approve).toBeEnabled();
   await expectNoDocumentOverflow(page);
+  await page.getByRole("button", { name: "Open Review queue drawer", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "Review queue drawer", exact: true });
+  await expect(drawer).toBeVisible();
+  const mobileRows = drawer.locator(".review-row-shell.has-bulk-select");
+  await expect(mobileRows).toHaveCount(2);
+  const touchTargets = [];
+  for (const row of await mobileRows.all()) {
+    const target = await row.locator(".review-row-select").boundingBox();
+    const title = await row.locator(".review-row-identity strong").boundingBox();
+    expect(target).not.toBeNull();
+    expect(title).not.toBeNull();
+    expect(target!.width).toBeGreaterThanOrEqual(44);
+    expect(target!.height).toBeGreaterThanOrEqual(44);
+    expect(target!.x + target!.width).toBeLessThanOrEqual(title!.x);
+    touchTargets.push({ target, title });
+  }
+  await testInfo.attach("review-mobile-touch-targets", {
+    body: JSON.stringify(touchTargets), contentType: "application/json",
+  });
+  await page.getByRole("button", { name: "Close Review queue drawer", exact: true }).click();
+  await expect(drawer).toBeHidden();
   await approve.click();
   await expect(detail.getByText(/Approved saved/)).toBeVisible();
   await expect(detail.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
