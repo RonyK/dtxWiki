@@ -163,6 +163,9 @@ from backend.schemas.settings import (
     SettingsPolicyUpdateRequest,
 )
 from backend.schemas.tree import (
+    FavoriteResponse,
+    FavoriteTargetKind,
+    FavoriteUpdateRequest,
     TreeFolderCreateRequest,
     TreeMoveRequest,
     TreeNodeUpdate,
@@ -193,6 +196,7 @@ from backend.services.coverage_service import (
     record_coverage_gap,
     resolve_coverage_gap,
 )
+from backend.services.favorite_service import set_favorite
 from backend.services.library_binary_registration import (
     LibraryUploadPolicyChangedError,
 )
@@ -395,6 +399,10 @@ def _require_sensitive_agent_page_access(
 def required_role_for_request(request: Request) -> str:
     if request.method == "GET":
         return "viewer"
+    if request.method == "PUT" and _authorization_path(request).endswith(
+        "/favorites/{target_kind}/{target_id}"
+    ):
+        return "viewer"
     if request.method == "POST" and _authorization_path(request).endswith(
         ("/search", "/feedback")
     ):
@@ -435,6 +443,36 @@ def list_workspaces(
                 actor=actor,
             ),
         }
+
+
+@router.put(
+    "/{workspace_id}/favorites/{target_kind}/{target_id}",
+    response_model=FavoriteResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def update_favorite(
+    workspace_id: UUID,
+    target_kind: FavoriteTargetKind,
+    target_id: UUID,
+    request_body: FavoriteUpdateRequest,
+    actor: RestActorDep,
+    _access: WorkspaceViewerAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
+):
+    try:
+        with session_factory.begin() as session:
+            return {
+                "data": set_favorite(
+                    session,
+                    workspace_id=workspace_id,
+                    actor=actor,
+                    target_kind=target_kind,
+                    target_id=target_id,
+                    is_favorite=request_body.is_favorite,
+                )
+            }
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
 
 
 @router.post(

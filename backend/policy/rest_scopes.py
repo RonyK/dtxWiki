@@ -184,6 +184,10 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     # handler's owner-role check at all.)
     ("GET", "/api/v1/workspaces/{workspace_id}/tree"): ("read",),
     (
+        "PUT",
+        "/api/v1/workspaces/{workspace_id}/favorites/{target_kind}/{target_id}",
+    ): ("read",),
+    (
         "POST",
         "/api/v1/workspaces/{workspace_id}/reviews/reconciliations/discard-bulk",
     ): ("draft-write",),

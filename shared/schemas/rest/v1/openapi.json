@@ -6903,6 +6903,66 @@
         "title": "EnvelopeWarning",
         "type": "object"
       },
+      "FavoritePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "is_favorite": {
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "context_page",
+              "library_item",
+              "agent_page"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id",
+          "is_favorite"
+        ],
+        "title": "FavoritePayload",
+        "type": "object"
+      },
+      "FavoriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FavoritePayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "FavoriteResponse",
+        "type": "object"
+      },
+      "FavoriteUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "is_favorite": {
+            "title": "Is Favorite",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_favorite"
+        ],
+        "title": "FavoriteUpdateRequest",
+        "type": "object"
+      },
       "FeedbackEntry": {
         "additionalProperties": false,
         "properties": {
@@ -17799,6 +17859,18 @@
             "title": "Children Count",
             "type": "integer"
           },
+          "content_changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Changed At"
+          },
           "has_children": {
             "default": false,
             "title": "Has Children",
@@ -17808,6 +17880,11 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "is_favorite": {
+            "default": false,
+            "title": "Is Favorite",
+            "type": "boolean"
           },
           "is_system_node": {
             "title": "Is System Node",
@@ -17854,6 +17931,33 @@
           "primary_placement": {
             "title": "Primary Placement",
             "type": "boolean"
+          },
+          "review_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Requested At"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "changes_requested"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
           },
           "section": {
             "title": "Section",
@@ -30125,6 +30229,131 @@
           }
         ],
         "summary": "List Workspace Coverage Gaps",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/favorites/{target_kind}/{target_id}": {
+      "put": {
+        "operationId": "update_favorite_api_v1_workspaces__workspace_id__favorites__target_kind___target_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "context_page",
+                "library_item",
+                "agent_page"
+              ],
+              "title": "Target Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Target Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Favorite",
         "tags": [
           "read"
         ]

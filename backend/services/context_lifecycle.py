@@ -17,7 +17,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.models.base import utc_now
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.repositories.workspace_scoped import get_in_workspace
 from backend.services.context_media_legacy_cutover import (
     require_no_visible_legacy_media,
 )
@@ -26,6 +28,8 @@ from backend.services.public_page_exposure import (
     reconcile_public_exposure_after_publication,
 )
 from backend.services.read_errors import StaleContextDraftError
+from backend.utils.content_recency import normalize_content_recency
+from backend.utils.page_frontmatter import parse_page_frontmatter
 
 CONTEXT_HISTORY_STATUSES = (
     "state_inconsistent",
@@ -972,6 +976,22 @@ def apply_context_publication(
         body_markdown=version.body_md,
     )
     previous_published_version_id = page.current_published_version_id
+    previous = (
+        get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            resource_id=previous_published_version_id,
+        )
+        if previous_published_version_id is not None
+        else None
+    )
+    if previous is None or (
+        normalize_content_recency(parse_page_frontmatter(previous.body_md).body)
+        != normalize_content_recency(parse_page_frontmatter(version.body_md).body)
+        or previous.rendering_profile != version.rendering_profile
+    ):
+        page.content_changed_at = utc_now()
     _normalize_context_published_rows(session, page=page, version=version)
     # A multi-step draft chain (ordinary since staged autosave shipped -- see
     # commit 60593953 -- not an edge case) leaves every ancestor between the

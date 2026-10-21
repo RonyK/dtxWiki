@@ -31,10 +31,9 @@ from pathlib import Path
 
 from deploy_static_bundle import _local_entry_files
 
-# Canonical IDs of the historical schema boundaries, base first. Every later release
-# keeps them as
-# the start of one linear chain: a new revision descends from the current head
-# and never edits a released file (see FROZEN_MIGRATIONS).
+# Canonical IDs of the historical schema boundaries, base first. Later revisions
+# descend from the core boundary and converge to one head. A merge preserves
+# independently applied revisions without editing either parent.
 RELEASED_CHAIN_BASE = [
     ["bd62193d5cf6", None],
     ["efcbcf724889", "bd62193d5cf6"],
@@ -128,6 +127,7 @@ _GRAPH_PROBE = """
 import json
 import os
 import sys
+import warnings
 
 root = sys.argv[1]
 sys.path.insert(0, root)
@@ -140,8 +140,11 @@ config.set_main_option(
     "script_location", os.path.join(root, "backend", "migrations")
 )
 script = ScriptDirectory.from_config(config)
-heads = sorted(script.get_heads())
-chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
+with warnings.catch_warnings():
+    # Alembic otherwise warns and silently replaces a duplicate revision ID.
+    warnings.simplefilter("error", UserWarning)
+    heads = sorted(script.get_heads())
+    chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
 
 contained = os.path.realpath(root)
 foreign = {}
@@ -412,29 +415,78 @@ def _check_migration_graph(root: Path) -> tuple[list[str], str | None]:
 
 
 def _chain_failures(heads: list[str], chain: list[list]) -> list[str]:
-    """One linear chain that starts with the released revisions.
+    """One current head with every later branch descending from frozen core.
 
-    ``chain`` is Alembic's ``walk_revisions`` order (head first). Revisions
-    after ``efcbcf724889`` are allowed; a second head, a merge, or a chain that
-    does not begin with the released 0001 -> 0002 boundary is not.
+    ``chain`` carries Alembic's revision edges. Walk order does not determine
+    ancestry: independent branches may converge through a merge revision.
     """
 
     failures: list[str] = []
     if len(heads) != 1:
         failures.append(f"packaged Alembic heads are {heads}, expected exactly one")
-    base_first = list(reversed(chain))
-    if base_first[: len(RELEASED_CHAIN_BASE)] != RELEASED_CHAIN_BASE:
-        failures.append(
-            f"packaged revision chain is {chain}; it must start with "
-            f"{RELEASED_CHAIN_BASE} (base first)"
-        )
-    for (previous, _), (revision, down_revision) in zip(
-        base_first, base_first[1:], strict=False
-    ):
-        if down_revision != previous:
+    parents: dict[str, tuple[str, ...]] = {}
+    for revision, down_revision in chain:
+        if revision in parents:
+            failures.append(f"packaged revision {revision} is present more than once")
+        if down_revision is None:
+            ancestors = ()
+        elif isinstance(down_revision, str):
+            ancestors = (down_revision,)
+        else:
+            ancestors = tuple(down_revision)
+        if len(set(ancestors)) != len(ancestors):
+            failures.append(f"packaged revision {revision} repeats a parent")
+        parents[revision] = ancestors
+
+    for revision, down_revision in RELEASED_CHAIN_BASE:
+        expected = () if down_revision is None else (down_revision,)
+        if parents.get(revision) != expected:
             failures.append(
-                f"packaged revision {revision} descends from {down_revision!r}, "
-                f"not from {previous}; the chain must be linear"
+                "packaged revision graph must preserve released boundaries "
+                f"{RELEASED_CHAIN_BASE}; {revision} has parents "
+                f"{parents.get(revision)!r}"
+            )
+
+    referenced = {parent for ancestors in parents.values() for parent in ancestors}
+    for revision, ancestors in parents.items():
+        for parent in ancestors:
+            if parent not in parents:
+                failures.append(
+                    f"packaged revision {revision} has missing parent {parent}"
+                )
+    graph_heads = sorted(set(parents) - referenced)
+    if sorted(heads) != graph_heads:
+        failures.append(
+            f"packaged Alembic heads {heads} do not match graph heads {graph_heads}"
+        )
+
+    core = RELEASED_CHAIN_BASE[-1][0]
+    visiting: set[str] = set()
+    reaches_core: dict[str, bool] = {}
+
+    def descends_from_core(revision: str) -> bool:
+        if revision == core:
+            return True
+        if revision in reaches_core:
+            return reaches_core[revision]
+        if revision in visiting:
+            failures.append(f"packaged revision graph contains a cycle at {revision}")
+            return False
+        if revision not in parents:
+            return False
+        visiting.add(revision)
+        # Evaluate every parent so a valid path cannot hide a corrupt sibling.
+        paths = [descends_from_core(parent) for parent in parents[revision]]
+        visiting.remove(revision)
+        reaches_core[revision] = bool(paths) and all(paths)
+        return reaches_core[revision]
+
+    frozen = {revision for revision, _ in RELEASED_CHAIN_BASE}
+    for revision in sorted(set(parents) - frozen):
+        if not descends_from_core(revision):
+            failures.append(
+                f"every ancestry path of packaged revision {revision} "
+                f"must descend from released core {core}"
             )
     return failures
 

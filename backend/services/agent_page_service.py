@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.models.agent import AgentPage, AgentPageVersion
+from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
@@ -35,6 +36,7 @@ from backend.services.review_risk_policy import (
 from backend.services.tree_service import ensure_primary_tree_placement
 from backend.spi.types import AI_PROVENANCES
 from backend.utils.actor_display import resolve_actor_display_name
+from backend.utils.content_recency import normalize_content_recency
 from backend.utils.uuid import parse_uuid_or_none
 
 CATEGORY_PRIORITIES = {
@@ -307,10 +309,17 @@ class AgentPageService:
             raise RejectedByPolicyError("only draft AgentPage versions can activate")
 
         previous_active_version_id = page.current_active_version_id
+        previous = None
         if previous_active_version_id is not None:
             previous = session.get(AgentPageVersion, previous_active_version_id)
             if previous is not None:
                 previous.version_status = "superseded_snapshot"
+        if previous is None or (
+            normalize_content_recency(previous.body_markdown)
+            != normalize_content_recency(version.body_markdown)
+            or self._visible_frontmatter(previous) != self._visible_frontmatter(version)
+        ):
+            page.content_changed_at = utc_now()
 
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
@@ -622,6 +631,14 @@ class AgentPageService:
         if version is None or version.agent_page_id != page.id:
             raise ReadNotFoundError("agent page version not found")
         return version
+
+    @staticmethod
+    def _visible_frontmatter(version: AgentPageVersion) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in (version.frontmatter or {}).items()
+            if key not in {PROPOSED_PAGE_META_KEY, "title", "slug"}
+        }
 
     @staticmethod
     def _proposed_page_meta(version: AgentPageVersion) -> dict[str, Any]:

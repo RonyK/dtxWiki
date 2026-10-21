@@ -1362,7 +1362,7 @@ describe("TreeRail", () => {
     const contextRow = screen.getByRole("treeitem", { name: "Context Page" });
     expect(contextRow).toHaveAttribute("data-target-kind", "context_page");
     expect(contextRow.querySelector(".tree-row-state-dot")).toHaveClass(
-      "lc-dot-context",
+      "tree-row-state-normal",
     );
   });
 
@@ -1436,7 +1436,7 @@ describe("TreeRail", () => {
     const itemRow = screen.getByRole("treeitem", { name: "Library Item" });
     expect(itemRow).toHaveAttribute("data-target-kind", "library_item");
     expect(itemRow.querySelector(".tree-row-state-dot")).toHaveClass(
-      "lc-dot-library",
+      "tree-row-state-normal",
     );
     expect(itemRow.querySelector("[data-target-group]")).toHaveAttribute(
       "data-target-group",
@@ -1474,6 +1474,8 @@ describe("TreeRail", () => {
 
   it("renders the full row title and lets CSS clip it at the rail width", () => {
     const longTitle = "Codex API Markdown 1779209673276 Long Context Draft";
+    const getRect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 100, 280, 36));
 
     render(
       <TreeRail
@@ -1490,13 +1492,17 @@ describe("TreeRail", () => {
       />,
     );
 
-    const title = screen.getByTitle(longTitle);
+    const row = screen.getByRole("treeitem", { name: longTitle });
+    const title = row.querySelector(".tree-row-title");
+    fireEvent.focus(row);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(longTitle);
     expect(title).toHaveClass("tree-row-title");
     expect(title).toHaveAttribute("aria-label", longTitle);
     // The JS middle-ellipsis was dropped: the full title is in the DOM (no "...")
     // so .tree-row-title can ellipsize responsively at the actual rail width.
     expect(title).toHaveTextContent(longTitle);
-    expect(title.textContent).not.toContain("...");
+    expect(title?.textContent).not.toContain("...");
+    getRect.mockRestore();
   });
 
   it("orders duplicate-sort-key siblings by codepoint to match backend reorder order", () => {

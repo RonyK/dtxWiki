@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import { translate } from "../i18n";
+import { beginTreeFavoriteRead, clearTreeFavoriteCache, reconcileTreeFavorites } from "./treeFavorites";
 
 const SELECTED_WORKSPACE_ID_KEY = "dtxwiki.selectedWorkspaceId";
 const SELECTED_WORKSPACE_SLUG_KEY = "dtxwiki.selectedWorkspaceSlug";
@@ -85,6 +86,10 @@ export type TreeNodePayload = {
   visibility_status: string;
   children_count: number;
   has_children?: boolean;
+  content_changed_at?: string | null;
+  review_status?: "pending" | "changes_requested" | null;
+  review_requested_at?: string | null;
+  is_favorite?: boolean;
   breadcrumb: Array<{
     id: string;
     section: string;
@@ -387,6 +392,7 @@ export function currentWorkspaceSelection() {
 }
 
 export function clearPersistedWorkspaceId() {
+  clearTreeFavoriteCache();
   // Fence both the selection snapshot and any request started under the prior
   // authenticated identity. Fetch cannot be cancelled reliably here, but a
   // late completion must neither repopulate this session's cache nor dedupe a
@@ -444,16 +450,16 @@ export async function listTreeData(
   workspaceId: string,
   section?: string,
 ): Promise<TreeListData> {
+  const favoriteRead = beginTreeFavoriteRead();
   const query = section
     ? `?${new URLSearchParams({ section }).toString()}`
     : "";
   const response = await apiRequest<{ data: TreeNodePayload[] | TreeListData }>(
     `/api/v1/workspaces/${workspaceId}/tree${query}`,
   );
-  if (Array.isArray(response.data)) {
-    return { nodes: response.data, policies: {} };
-  }
-  return response.data;
+  const data = Array.isArray(response.data) ? { nodes: response.data, policies: {} } : response.data;
+  reconcileTreeFavorites(workspaceId, data.nodes, favoriteRead);
+  return data;
 }
 
 export async function createTreeFolder(

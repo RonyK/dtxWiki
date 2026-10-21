@@ -7,9 +7,10 @@ import {
   FolderPlus,
   FolderTree,
   Trash2,
+  Star,
 } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
@@ -23,6 +24,7 @@ export type TreeNodeContextMenuAction =
   | { type: "move-up"; node: TreeNodePayload }
   | { type: "move-down"; node: TreeNodePayload }
   | { type: "delete"; node: TreeNodePayload }
+  | { type: "favorite"; node: TreeNodePayload }
   | { type: "copy-link"; node: TreeNodePayload };
 
 type TreeNodeContextMenuProps = {
@@ -34,6 +36,9 @@ type TreeNodeContextMenuProps = {
   canMoveDown?: boolean;
   canRename: boolean;
   canCopyLink: boolean;
+  canFavorite?: boolean;
+  favoritePending?: boolean;
+  statusSummary?: string;
   node: TreeNodePayload;
   position: { left: number; top: number };
   onAction: (action: TreeNodeContextMenuAction) => void;
@@ -58,12 +63,16 @@ export function TreeNodeContextMenu({
   canMoveDown = false,
   canRename,
   canCopyLink,
+  canFavorite = false,
+  favoritePending = false,
+  statusSummary,
   node,
   position,
   onAction,
   onClose,
 }: TreeNodeContextMenuProps) {
   const { t } = useTranslation("tree");
+  const summaryId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [fittedPosition, setFittedPosition] = useState<{
     left: number;
@@ -157,7 +166,7 @@ export function TreeNodeContextMenu({
   // on an actionable element immediately.
   useEffect(() => {
     const [first] = getFocusableMenuItems(menuRef.current);
-    first?.focus();
+    (first ?? menuRef.current)?.focus();
   }, []);
 
   const handleMenuKeyDown = useCallback(
@@ -213,6 +222,8 @@ export function TreeNodeContextMenu({
       ref={menuRef}
       className="tree-node-menu"
       role="menu"
+      aria-label={t("openActions", { title: node.title })}
+      aria-describedby={statusSummary ? summaryId : undefined}
       onKeyDown={handleMenuKeyDown}
       tabIndex={-1}
       style={{
@@ -221,6 +232,13 @@ export function TreeNodeContextMenu({
         top: fittedPosition.top,
       }}
     >
+      {statusSummary ? <div className="tree-node-menu-summary" id={summaryId}>{node.title}<br />{statusSummary}</div> : null}
+      {canFavorite ? <MenuButton
+        icon={<Star size={14} aria-hidden="true" />}
+        label={t(node.is_favorite ? "favorite.remove" : "favorite.add")}
+        disabled={favoritePending}
+        onClick={() => onAction({ type: "favorite", node })}
+      /> : null}
       {canCreateChild && canCreatePage ? (
         <MenuButton
           icon={<FilePlus size={14} aria-hidden="true" />}
@@ -297,11 +315,13 @@ export function TreeNodeContextMenu({
 
 function MenuButton({
   danger,
+  disabled,
   icon,
   label,
   onClick,
 }: {
   danger?: boolean;
+  disabled?: boolean;
   icon: ReactNode;
   label: string;
   onClick: () => void;
@@ -310,6 +330,7 @@ function MenuButton({
     <button
       className={`tree-node-menu-item ${danger ? "danger" : ""}`}
       role="menuitem"
+      disabled={disabled}
       type="button"
       onClick={onClick}
     >
