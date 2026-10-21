@@ -62,6 +62,52 @@ const FAMILY_DIALOG_VIEWPORTS: ViewportCase[] = [
 const CSS_GEOMETRY_EPSILON_PX = 0.001;
 
 test.describe("Overall UI responsive acceptance @cross-browser", () => {
+  test("persisted collapsed sidebar keeps full width after folding and reload", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 850 });
+    await authenticatePage(page, testInfo, "fold-collapsed-sidebar");
+    await page.goto("/dashboard");
+    const shell = page.locator(".app-shell");
+    const toggle = page.locator(".desktop-sidebar-toggle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await toggle.click();
+    await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+
+    // A wide desktop can save this preference before the same browser opens
+    // on a Fold. Both the inner and cover displays must ignore its 64px track.
+    for (const width of [850, 390, 344, 850, 390]) {
+      await page.setViewportSize({ width, height: 850 });
+      for (const reload of [false, true]) {
+        if (reload) await page.reload();
+        await expect(page.locator(".feature-header h1")).toBeVisible();
+        await expect(shell).toHaveAttribute("data-sidebar-collapsed", "true");
+        await expect(page.locator(".sidebar")).toBeHidden();
+        for (const selector of [".topbar", ".main-surface"]) {
+          await expect.poll(() => page.locator(selector).evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return { left: Math.round(rect.left), width: Math.round(rect.width) };
+          })).toEqual({ left: 0, width });
+        }
+      }
+      await evidenceScreenshot(page, testInfo, `fold-collapsed-${width}.png`);
+    }
+
+    // Returning to desktop still honors the saved collapsed preference.
+    await page.setViewportSize({ width: 1280, height: 850 });
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect.poll(() => page.locator(".main-surface").evaluate((element) =>
+      Math.round(element.getBoundingClientRect().left),
+    )).toBe(64);
+    await toggle.click();
+    await expect(shell).toHaveAttribute("data-sidebar-collapsed", "false");
+    await page.setViewportSize({ width: 390, height: 850 });
+    await expect.poll(() => page.locator(".main-surface").evaluate((element) =>
+      Math.round(element.getBoundingClientRect().width),
+    )).toBe(390);
+  });
+
   for (const viewport of VIEWPORTS) {
     test(`${viewport.key}: Context, Library policy, Lint, Chats, and Activity stay usable`, async ({
       page,
