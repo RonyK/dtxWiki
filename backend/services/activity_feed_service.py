@@ -27,7 +27,7 @@ from backend.models.job import Job
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.review import ReviewItem
 from backend.policy.auth import ActorContext
-from backend.repositories.workspace_scoped import list_in_workspace, select_in_workspace
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.schemas.activity import (
     ActivityFeedData,
     ActivityFeedEntry,
@@ -49,9 +49,16 @@ from backend.services.job_read_service import public_job_failure_code
 from backend.utils.actor_display import DeferredIdentityLabels
 
 _BATCH_SIZE = 50
+# Filters run after the visible ledger is merged (they must not move group
+# boundaries), so a sparse filter could otherwise walk the whole ledger. Each
+# request scans at most this many source rows and resumes from its scan
+# position through the cursor.
+_SCAN_BUDGET = 10 * _BATCH_SIZE
 _MAX_GROUP_SIZE = 50
 _GROUP_SPAN = timedelta(minutes=5)
 _TOKEN_TTL = timedelta(hours=2)
+# Tokens are signed here; tolerate another app node's clock running ahead.
+_CLOCK_SKEW = timedelta(minutes=2)
 _LANES = ("pending", "advisory", "history")
 _SUBTYPES = {
     "all": {"all"},
@@ -73,6 +80,21 @@ _PREFIX_SUBTYPE = {
     "ask": "ask",
     "review": "review",
     "mcp_chat_session": "chat",
+}
+# Opening, patching and discarding an editing session all describe a private
+# editing row. Like the matching MCP calls, they stay with their author.
+_PRIVATE_EDITING_ACTIONS = (
+    "page.begin_context_edit",
+    "page.patch_context_edit",
+    "page.discard_context_edit",
+)
+# Feed operations for MCP tools whose presentation verb ("edit") would
+# misdescribe the transition; these match the audit vocabulary below.
+_MCP_OPERATIONS = {
+    "begin_context_edit": "log",
+    "discard_context_edit": "delete",
+    "submit_context_edit_for_review": "review",
+    "submit_revision_for_review": "review",
 }
 
 
@@ -140,10 +162,13 @@ class _VisibleEvent:
     event: ActivityFeedEvent
     source: str
     grouping_key: tuple[str, ...] | None = None
+    # The merged ledger's (occurred_at, source, id). Hydration re-reads
+    # mutable rows (a job's updated_at), so cursors use this, not the event.
+    position: tuple[datetime, str, str] | None = None
 
     @property
     def key(self) -> tuple[datetime, str, str]:
-        return self.event.created_at, self.source, str(self.event.id)
+        return self.position or (self.event.created_at, self.source, str(self.event.id))
 
 
 @dataclass
@@ -153,6 +178,17 @@ class _Entry:
     @property
     def last_key(self) -> tuple[datetime, str, str]:
         return self.members[-1].key
+
+
+@dataclass
+class _Scan:
+    """Where a budgeted scan of the merged ledger stopped."""
+
+    position: tuple[datetime, str, str] | None
+    truncated: bool = False
+    # Position before the last yielded visible row, and where to resume.
+    before: tuple[datetime, str, str] | None = None
+    resume: tuple[datetime, str, str] | None = None
 
 
 class ActivityFeedService:
@@ -211,6 +247,7 @@ class ActivityFeedService:
             after = _parse_key(payload.get("after"))
             if lane is None:
                 raise InvalidActivityTokenError("Overview activity must be refreshed.")
+        scan = _Scan(position=after)
         raw = self._visible_stream(
             session,
             workspace_id,
@@ -220,9 +257,10 @@ class ActivityFeedService:
             since=since,
             until=until,
             after=after,
+            scan=scan,
             deferred_identity=deferred_identity,
         )
-        grouped = self._entries(raw, kind, subtype, lane, group_reads)
+        grouped = self._entries(raw, kind, subtype, lane, group_reads, scan, after)
         # Lane lists page in pure recency. Overview reserves review decisions
         # before filling its budget by recency, without treating failed jobs as
         # human reviews. The overview intentionally has no load-more cursor.
@@ -249,7 +287,8 @@ class ActivityFeedService:
             reserved.sort(key=lambda entry: entry.last_key, reverse=True)
         candidate_budget = limit + len(reserved) + 1
         candidates = list(islice(grouped, candidate_budget))
-        exhausted = len(candidates) < candidate_budget
+        # A budget-truncated scan has not proven the rest of the range empty.
+        exhausted = len(candidates) < candidate_budget and not scan.truncated
         if lane is None:
             selected = reserved[:limit]
             seen = {
@@ -272,13 +311,20 @@ class ActivityFeedService:
             for entry in candidates + reserved
             if (entry.members[0].source, entry.members[0].event.id) not in selected_ids
         ]
-        has_more = bool(remaining)
+        has_more = bool(remaining) or not exhausted
         entries = [
             self._serialize_entry(entry, fingerprint, snapshot, since, until)
             for entry in selected
         ]
+        resume = None
+        if lane is not None:
+            if remaining and selected:
+                resume = selected[-1].last_key
+            elif scan.truncated:
+                # Possibly an empty page: the cursor carries the scan forward.
+                resume = scan.resume
         next_cursor = None
-        if lane is not None and has_more and selected:
+        if resume is not None:
             next_cursor = self._encode(
                 {
                     "type": "cursor",
@@ -286,7 +332,7 @@ class ActivityFeedService:
                     "snapshot": snapshot.isoformat(),
                     "since": since.isoformat() if since else None,
                     "until": until.isoformat() if until else None,
-                    "after": _key_payload(selected[-1].last_key),
+                    "after": _key_payload(resume),
                     "expires": (snapshot + _TOKEN_TTL).isoformat(),
                 }
             )
@@ -393,6 +439,7 @@ class ActivityFeedService:
         since,
         until,
         after,
+        scan,
         deferred_identity,
     ) -> Iterator[_VisibleEvent]:
         sources = []
@@ -409,6 +456,9 @@ class ActivityFeedService:
             conditions = []
             if source == "audit":
                 conditions.append(~_audit_only_observation_event_clause())
+                # Absent rather than redacted: a private record is not even a
+                # group boundary for another reader.
+                conditions.append(_private_editing_visible(actor))
             elif source == "job":
                 conditions.append(Job.job_type.not_in(HIDDEN_JOB_TYPES))
             elif source == "review":
@@ -432,6 +482,7 @@ class ActivityFeedService:
             sources.append(statement)
         merged = union_all(*sources).subquery()
         position = after
+        scanned = 0
         while True:
             statement = select(merged).where(merged.c.occurred_at <= snapshot)
             if since:
@@ -469,11 +520,19 @@ class ActivityFeedService:
                 session, workspace_id, ids, actor, actor_role, deferred_identity
             )
             for source, identifier, occurred in rows:
-                position = (occurred, source, str(identifier))
+                previous = position
+                position = (_aware(occurred), source, str(identifier))
+                scan.position = position
                 item = projected.get((source, identifier))
                 if item is not None:
+                    item.position = position
+                    scan.before = previous
                     yield item
             if len(rows) < _BATCH_SIZE:
+                return
+            scanned += len(rows)
+            if scanned >= _SCAN_BUDGET:
+                scan.truncated = True
                 return
 
     def _hydrate(
@@ -488,6 +547,9 @@ class ActivityFeedService:
             limit=_BATCH_SIZE,
         )
         for source, identifiers in ids.items():
+            # The source readers hand back the rows they loaded, so the
+            # projection below needs no second SELECT of the same batch.
+            loaded = {}
             if source == "audit":
                 items = self.activity._audit_history(
                     **common,
@@ -497,7 +559,9 @@ class ActivityFeedService:
                     deferred_identity=deferred_identity,
                 )
             elif source == "job":
-                items = self.activity._jobs(**common, item_ids=identifiers)
+                items = self.activity._jobs(
+                    **common, item_ids=identifiers, rows_out=loaded
+                )
             elif source == "review":
                 items = self.activity._pending_reviews(
                     **common,
@@ -507,19 +571,12 @@ class ActivityFeedService:
                 )
             else:
                 items = self.activity._mcp_traces(
-                    **common, item_ids=identifiers, deferred_identity=deferred_identity
+                    **common,
+                    item_ids=identifiers,
+                    deferred_identity=deferred_identity,
+                    rows_out=loaded,
                 )
-            mcp_rows = {}
-            if source == "mcp":
-                mcp_rows = {
-                    row.id: row
-                    for row in list_in_workspace(
-                        session,
-                        MCPToolCall,
-                        workspace_id=workspace_id,
-                        conditions=(MCPToolCall.id.in_(identifiers),),
-                    )
-                }
+            mcp_rows = loaded if source == "mcp" else {}
             mcp_projections = {}
             if source == "mcp":
                 from backend.services.mcp_read_projection import (
@@ -529,17 +586,7 @@ class ActivityFeedService:
                 mcp_projections = project_mcp_activity_batch(
                     session, list(mcp_rows.values()), actor
                 )
-            job_rows = {}
-            if source == "job":
-                job_rows = {
-                    row.id: row
-                    for row in list_in_workspace(
-                        session,
-                        Job,
-                        workspace_id=workspace_id,
-                        conditions=(Job.id.in_(identifiers),),
-                    )
-                }
+            job_rows = loaded if source == "job" else {}
             for item in items:
                 event = self._event(item, source)
                 if source == "job":
@@ -561,12 +608,7 @@ class ActivityFeedService:
                         if re.fullmatch(r"[a-z][a-z0-9_]{0,99}", call.tool_name)
                         else None
                     )
-                    operation = projection.operation
-                    if tool_name in {
-                        "submit_context_edit_for_review",
-                        "submit_revision_for_review",
-                    }:
-                        operation = "review"
+                    operation = _MCP_OPERATIONS.get(tool_name, projection.operation)
                     event = event.model_copy(
                         update={
                             "title": "MCP tool execution",
@@ -672,8 +714,10 @@ class ActivityFeedService:
             actual = _PREFIX_SUBTYPE.get((item.body or "").split(".")[0], "")
         return subtype == actual
 
-    def _entries(self, stream, kind, subtype, lane, group_reads):
+    def _entries(self, stream, kind, subtype, lane, group_reads, scan=None, after=None):
+        scan = scan or _Scan(position=after)
         run: list[_VisibleEvent] = []
+        run_resume = None
         for row in stream:
             matches = self._matches(row, kind, subtype, lane)
             joins = bool(
@@ -692,11 +736,20 @@ class ActivityFeedService:
             if not matches:
                 continue
             if group_reads and row.grouping_key:
+                if not run:
+                    run_resume = scan.before
                 run.append(row)
             else:
                 yield _Entry([row])
+        scan.resume = scan.position
         if run:
-            yield _Entry(run)
+            # A truncated scan may have stopped inside this run. Resume at its
+            # first member rather than split it across pages, unless that
+            # would make no progress at all.
+            if scan.truncated and run_resume != after:
+                scan.resume = run_resume
+            else:
+                yield _Entry(run)
 
     def _serialize_entry(self, entry, fingerprint, snapshot, since, until):
         members = entry.members
@@ -850,7 +903,7 @@ class ActivityFeedService:
                 raise ValueError("scope")
             if _parse_time(payload["expires"]) <= now:
                 raise ValueError("expired")
-            if _parse_time(payload["snapshot"]) > now:
+            if _parse_time(payload["snapshot"]) > now + _CLOCK_SKEW:
                 raise ValueError("future snapshot")
             return payload
         except (
@@ -868,6 +921,24 @@ class ActivityFeedService:
 
 def _reader(actor):
     return f"{actor.actor_kind}:{actor.actor_id}:{actor.user_id or ''}"
+
+
+def _private_editing_visible(actor):
+    private = AuditEvent.action.in_(_PRIVATE_EDITING_ACTIONS)
+    if not actor.actor_kind or not actor.actor_id:
+        return ~private
+    return or_(
+        ~private,
+        and_(
+            AuditEvent.actor_kind == actor.actor_kind,
+            AuditEvent.actor_id == str(actor.actor_id),
+        ),
+    )
+
+
+def _aware(value):
+    # SQLite returns the merged ledger's timestamps without an offset.
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _key_hash(key):

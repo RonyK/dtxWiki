@@ -351,8 +351,9 @@ def _project_mcp_activity(session, call, actor, gate, edges, chats):
             version_id = UUID(detail["version_id"])
         except ValueError:
             pass
-    if read is not None and not _served_version_visible(
-        session, gate, read, actor, call
+    served = read
+    if served is not None and not _served_version_visible(
+        session, gate, served, actor, call
     ):
         return McpActivityProjection(visible=False, **common)
     if (
@@ -401,7 +402,10 @@ def _project_mcp_activity(session, call, actor, gate, edges, chats):
             and read is not None
             and read["resource_kind"] == resource_kind
             and UUID(read["resource_id"]) == resource_id
-            and _served_version_visible(session, gate, read, actor, call)
+            and (
+                read is served
+                or _served_version_visible(session, gate, read, actor, call)
+            )
         ):
             key = (
                 str(call.workspace_id),
@@ -440,6 +444,14 @@ def _served_version_visible(
         UUID(read["version_id"]),
         UUID(read["resource_id"]),
     )
+    # A served draft stays draft-readers-only after it is published or
+    # activated in place, as a served editing state stays author-only below.
+    if (
+        read["version_status"] == "draft"
+        and actor is not None
+        and not actor_can_read_drafts(actor)
+    ):
+        return False
     if kind == "context_page":
         version = gate.visible_version(version_id)
         if version is None or version.page_id != resource_id:
@@ -486,21 +498,13 @@ def _served_version_visible(
         workspace_id=gate.workspace_id,
         resource_id=version_id,
     )
-    arguments = call.input_summary if isinstance(call.input_summary, dict) else {}
-    explicit_version_metadata = (
-        call.tool_name == "read"
-        and arguments.get("target_type") == "library_item_version"
-        and arguments.get("target_id") == str(version_id)
-    )
+    # Library versions carry no per-version privacy, so a historical read
+    # stays visible after a newer version becomes ready (or while the served
+    # one is still converting); only the item's own visibility applies.
     return (
         version is not None
         and version.library_item_id == resource_id
-        and library_item_visible(
-            item,
-            actor,
-            workspace_id=gate.workspace_id,
-            version=None if explicit_version_metadata else version,
-        )
+        and library_item_visible(item, actor, workspace_id=gate.workspace_id)
     )
 
 

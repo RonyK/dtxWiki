@@ -398,6 +398,42 @@ def test_captured_private_edit_does_not_become_shared_with_later_revision(
         assert not project_mcp_activity(session, call, downgraded_author).visible
 
 
+def test_served_draft_stays_with_draft_readers_after_publication_in_place(
+    session_factory,
+):
+    with session_factory.begin() as session:
+        workspace, client, page, published, viewer = _seed(session)
+        draft = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=2,
+            body_md="pre-publication draft",
+            content_hash="b" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="author",
+            version_status="draft",
+        )
+        session.add(draft)
+        session.flush()
+        call, _ = _call(session, workspace, client, page, draft)
+        editor = ActorContext(
+            actor_kind="human",
+            actor_id="editor",
+            workspace_id=workspace.id,
+            role="editor",
+            workspace_role="editor",
+            scopes=("read",),
+        )
+        assert project_mcp_activity(session, call, editor).visible
+        assert not project_mcp_activity(session, call, viewer).visible
+        published.version_status = "superseded_snapshot"
+        session.flush()
+        draft.version_status = "published_snapshot"
+        session.flush()
+        assert not project_mcp_activity(session, call, viewer).visible
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -854,6 +890,20 @@ def test_resource_visibility_and_workspace_gate_before_names(session_factory, ki
         call.input_summary = {"type": kind, "id": str(resource.id)}
         session.flush()
         assert project_mcp_activity(session, call, actor).resource_id == resource.id
+        if kind == "library_item":
+            # A newer ready version does not erase the historical read.
+            newer = LibraryItemVersion(
+                workspace_id=workspace.id,
+                library_item_id=resource.id,
+                version_no=2,
+                content_hash="b" * 64,
+                processing_status="ready",
+                raw_storage_ref="test://newer",
+            )
+            session.add(newer)
+            session.flush()
+            resource.current_ready_version_id = resource.current_version_id = newer.id
+            assert project_mcp_activity(session, call, actor).resource_id == resource.id
         if kind == "agent_page":
             resource.sensitivity = "private"
         else:

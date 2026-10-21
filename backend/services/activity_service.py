@@ -483,6 +483,7 @@ class ActivityService:
         limit: int,
         deferred_identity: DeferredIdentityLabels | None = None,
         item_ids: list[UUID] | None = None,
+        rows_out: dict[UUID, MCPToolCall] | None = None,
     ) -> list[ActivityItemRead]:
         occurred_at = func.coalesce(MCPToolCall.completed_at, MCPToolCall.started_at)
         statement = (
@@ -525,6 +526,8 @@ class ActivityService:
         )
         items: list[ActivityItemRead] = []
         for tool_call, client in rows:
+            if rows_out is not None:
+                rows_out[tool_call.id] = tool_call
             activity_actor = ActivityActor(
                 actor_kind="mcp_client",
                 actor_id=str(client.id),
@@ -570,6 +573,7 @@ class ActivityService:
         until: datetime | None,
         limit: int,
         item_ids: list[UUID] | None = None,
+        rows_out: dict[UUID, Job] | None = None,
     ) -> list[ActivityItemRead]:
         # Internal index-maintenance jobs are not user-facing operations: a
         # context edit/publish or a library extraction enqueues an `embed` job on
@@ -596,6 +600,8 @@ class ActivityService:
                 limit
             )
         ).all()
+        if rows_out is not None:
+            rows_out.update((job.id, job) for job in rows)
         return [
             ActivityItemRead(
                 id=job.id,

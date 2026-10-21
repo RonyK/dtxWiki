@@ -167,6 +167,14 @@ def test_cursor_binds_scope_filter_and_expiry(service, monkeypatch):
             lane="history",
             cursor=result.next_cursor + "x",
         )
+    # Another app node's clock may run slightly ahead of this one.
+    now = datetime.now(UTC)
+    payload = service._decode(result.next_cursor, "cursor", None, now)
+    payload["snapshot"] = (now + timedelta(seconds=30)).isoformat()
+    assert service._decode(service._encode(payload), "cursor", None, now)
+    payload["snapshot"] = (now + timedelta(minutes=5)).isoformat()
+    with pytest.raises(InvalidActivityTokenError):
+        service._decode(service._encode(payload), "cursor", None, now)
 
 
 def test_deferred_actor_is_not_copied_and_count_is_not_affected_by_expansion(service):

@@ -362,6 +362,114 @@ def test_subtype_precedes_budget_after_boundaries_and_legacy_stays_single(
         assert len(last.entries) == 1 and last.entries[0].entry_type == "event"
 
 
+def test_sparse_filter_scans_a_bounded_window_and_resumes_by_cursor(
+    session_factory, monkeypatch
+):
+    from backend.services import activity_feed_service
+
+    monkeypatch.setattr(activity_feed_service, "_BATCH_SIZE", 2)
+    monkeypatch.setattr(activity_feed_service, "_SCAN_BUDGET", 4)
+    service = _service()
+    with session_factory.begin() as session:
+        setup = _setup(session)
+        workspace = setup[0]
+        for i in range(6):
+            _call(session, *setup, i)
+        search = _call(session, *setup, 6, tool="search")
+        query = dict(
+            actor=_actor(workspace),
+            actor_role="owner",
+            period="all",
+            kind="mcp",
+            subtype="search",
+            lane="history",
+        )
+        first = service.list_feed(session, workspace.id, **query)
+        # The budget ends before any match: an empty page that still carries
+        # the scan forward instead of walking the rest of the ledger.
+        assert first.entries == [] and first.has_more and first.next_cursor
+        second = service.list_feed(
+            session, workspace.id, cursor=first.next_cursor, **query
+        )
+        assert [entry.event.id for entry in second.entries] == [search.id]
+        assert not second.has_more and second.next_cursor is None
+
+
+def test_private_editing_audit_and_mcp_transitions(session_factory):
+    service = _service()
+    with session_factory.begin() as session:
+        setup = _setup(session)
+        workspace, _client, page, version, _chat = setup
+        for action in (
+            "page.begin_context_edit",
+            "page.patch_context_edit",
+            "page.discard_context_edit",
+            "page.publish",
+        ):
+            session.add(
+                AuditEvent(
+                    workspace_id=workspace.id,
+                    actor_kind="human",
+                    actor_id="author",
+                    action=action,
+                    target_kind="context_page",
+                    target_id=page.id,
+                    payload={"version_id": str(version.id)},
+                    created_at=BASE,
+                )
+            )
+        for index, tool in enumerate(
+            (
+                "begin_context_edit",
+                "discard_context_edit",
+                "submit_context_edit_for_review",
+            )
+        ):
+            _call(session, *setup, index, tool=tool, read_projection=False)
+        session.flush()
+
+        def feed(actor_id, kind):
+            actor = ActorContext(
+                actor_kind="human",
+                actor_id=actor_id,
+                workspace_id=workspace.id,
+                role="owner",
+                workspace_role="owner",
+                token_kind="session",
+                scopes=("read",),
+            )
+            return service.list_feed(
+                session,
+                workspace.id,
+                actor=actor,
+                actor_role="owner",
+                period="all",
+                kind=kind,
+            ).entries
+
+        def page_actions(actor_id):
+            return {
+                entry.event.body
+                for entry in feed(actor_id, "workspace")
+                if (entry.event.body or "").startswith("page.")
+            }
+
+        # An editing session is the author's alone, as its MCP calls are.
+        assert page_actions("reader") == {"page.publish"}
+        assert page_actions("author") == {
+            "page.begin_context_edit",
+            "page.patch_context_edit",
+            "page.discard_context_edit",
+            "page.publish",
+        }
+        # MCP editing transitions use the audit vocabulary, not a blanket edit.
+        assert [entry.event.operation for entry in feed("reader", "mcp")] == [
+            "log",
+            "delete",
+            "review",
+        ]
+
+
 def test_equal_timestamps_total_order_and_new_completion_cannot_shift_cursor(
     session_factory,
 ):
