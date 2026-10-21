@@ -354,7 +354,7 @@ def test_review_approval_cannot_publish_a_malformed_body(page_service):
         headers={"Authorization": f"Bearer {token}"},
     )
 
-    with pytest.raises(RejectedByPolicyError, match="format error"):
+    with pytest.raises(RejectedByPolicyError, match="format error") as refused:
         with page_service.session_factory.begin() as session:
             ReviewService().apply_decision(
                 session=session,
@@ -366,6 +366,12 @@ def test_review_approval_cannot_publish_a_malformed_body(page_service):
                 actor_role="owner",
                 actor_provenance="browser_session",
             )
+
+    assert refused.value.warnings
+    assert all(
+        warning.code == "lint_publish_blocked" for warning in refused.value.warnings
+    )
+    assert any("line 3" in warning.message for warning in refused.value.warnings)
 
     with page_service.session_factory() as session:
         page = session.get(ContextPage, UUID(created["id"]))

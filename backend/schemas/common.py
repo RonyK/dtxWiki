@@ -138,7 +138,11 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  13 -- Bundle categories now expose the supported enum, review notes reject
 #        invalid Unicode, and body budgets describe the final stored Markdown.
 #        Refresh tools/list before submitting content and bundle requests.
-MCP_TOOL_CONTRACT_REVISION = 13
+#  14 -- list_requested_changes evidence adds independently authorized document
+#        destinations and exact candidate/baseline content descriptors. Clients
+#        may ignore these additive fields and keep using the existing target
+#        and diff_ref fields; no tool or input schema changed.
+MCP_TOOL_CONTRACT_REVISION = 14
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

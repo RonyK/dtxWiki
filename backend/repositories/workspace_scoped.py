@@ -7,11 +7,12 @@ key must be the single ``id`` column. Workspace-plane composite identities and
 control- or mixed-plane tables need purpose-specific lookup APIs.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from uuid import UUID
 
 from sqlalchemy import Select, inspect, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from backend.tenancy_manifest import WORKSPACE_PLANE_TABLES
 
@@ -50,6 +51,25 @@ def select_in_workspace_by_ids[Model](
     return select(model).where(
         model.workspace_id == workspace_id,  # type: ignore[attr-defined]
         model.id.in_(resource_ids),  # type: ignore[attr-defined]
+    )
+
+
+def select_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    criteria: Iterable[ColumnElement[bool]] = (),
+) -> Select[tuple[Model]]:
+    """Build a query whose workspace predicate cannot be omitted by its caller.
+
+    Extra criteria narrow the required scope; even a contradictory workspace
+    criterion cannot widen it. The same plane and primary-key checks as the
+    single-row and explicit-ID APIs apply before SQL is constructed.
+    """
+    _validate_workspace_model(model, operation="select_in_workspace")
+    return select(model).where(
+        model.workspace_id == workspace_id,  # type: ignore[attr-defined]
+        *criteria,
     )
 
 

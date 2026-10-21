@@ -19,7 +19,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import OperationalError
 
 from backend.api.deps import (
@@ -106,6 +106,9 @@ from backend.schemas.context_write import (
     ReviewDecisionRequest,
     ReviewItemListResponse,
     ReviewItemResponse,
+    ReviewSelectionLimitErrorBody,
+    ReviewSelectionRequest,
+    ReviewSelectionResponse,
     SubmitFeedbackRequest,
     SubmitFeedbackResponse,
 )
@@ -188,6 +191,7 @@ from backend.services.coverage_service import (
     record_coverage_gap,
     resolve_coverage_gap,
 )
+from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.favorite_service import set_favorite
 from backend.services.library_binary_registration import (
     LibraryUploadPolicyChangedError,
@@ -211,6 +215,11 @@ from backend.services.read_errors import (
     RejectedByPolicyError,
 )
 from backend.services.restricted_library_policy import is_restricted_library_target
+from backend.services.review_selection_service import (
+    ReviewSelectionError,
+    ReviewSelectionLimitError,
+    ReviewSelectionService,
+)
 from backend.services.search_service import (
     KEYWORD_LANE_UNAVAILABLE_WARNING,
     RESTRICTED_LIBRARY_TRUST_LEVELS,
@@ -3258,12 +3267,66 @@ def discard_reconciliations_bulk(
         return read_service_error_response(exc)
 
 
+def _review_selection_error_response(exc: ReviewSelectionError) -> JSONResponse:
+    response = build_rest_error_response(
+        error_code=exc.error_code, message=str(exc), status_code=exc.status_code,
+    )
+    payload = json.loads(response.body)
+    if exc.status_code == 409:
+        payload["envelope"]["result_status"] = "conflict"
+        return JSONResponse(status_code=409, content=payload)
+    if isinstance(exc, ReviewSelectionLimitError):
+        payload["details"] = {"total": exc.total, "limit": exc.limit}
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ReviewSelectionLimitErrorBody.model_validate(payload).model_dump(mode="json"),
+        )
+    return response
+
+
+@router.post(
+    "/{workspace_id}/reviews/selection",
+    response_model=ReviewSelectionResponse,
+    responses={
+        **REST_ERROR_RESPONSES,
+        422: {"model": ReviewSelectionLimitErrorBody | RESTErrorBody},
+    },
+)
+def create_review_selection(
+    http_request: Request,
+    svc: ServicesDep,
+    workspace_id: UUID,
+    request_body: ReviewSelectionRequest,
+    actor: RestActorDep,
+    access: WorkspaceEditorAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
+):
+    selection = ReviewSelectionService(
+        svc.review,
+        get_container_from_app(http_request).settings.effective_session_secret,
+    )
+    try:
+        with session_factory() as session:
+            return {"data": selection.create(
+                session, workspace_id, request_body,
+                actor=actor, actor_role=access.role,
+            )}
+    except ReviewSelectionError as exc:
+        return _review_selection_error_response(exc)
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
+
+
 @router.post(
     "/{workspace_id}/reviews/decide-bulk",
     response_model=ReviewBulkDecisionResponse,
-    responses=REST_ERROR_RESPONSES,
+    responses={
+        **REST_ERROR_RESPONSES,
+        422: {"model": ReviewSelectionLimitErrorBody | RESTErrorBody},
+    },
 )
 def decide_reviews_bulk(
+    http_request: Request,
     svc: ServicesDep,
     workspace_id: UUID,
     request_body: ReviewBulkDecisionRequest,
@@ -3271,54 +3334,85 @@ def decide_reviews_bulk(
     access: WorkspaceEditorAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
 ):
+    if request_body.selection_token is not None:
+        selection = ReviewSelectionService(
+            svc.review,
+            get_container_from_app(http_request).settings.effective_session_secret,
+        )
+        try:
+            return {"data": selection.execute(
+                session_factory, workspace_id, request_body.selection_token,
+                actor=actor, actor_role=access.role,
+                batch_limit=request_body.batch_limit, dry_run=request_body.dry_run,
+            )}
+        except ReviewSelectionError as exc:
+            return _review_selection_error_response(exc)
+        except ReadServiceError as exc:
+            return read_service_error_response(exc)
     try:
         with session_factory() as session:
             if request_body.review_item_ids is not None:
                 target_ids = request_body.review_item_ids
             else:
                 filters = request_body.filters
-                target_ids = svc.review.bulk_review_ids(
-                    session=session,
-                    workspace_id=workspace_id,
-                    status=filters.status if filters else None,
-                    risk_level=filters.risk_level if filters else None,
-                    audience_for=actor.user_id,
-                    scope=filters.scope if filters else "all",
-                    actor_user_id=actor.user_id,
-                    actor_role=access.role,
-                )
+                if filters is not None and filters.target_page_id is not None:
+                    selection = ReviewSelectionService(
+                        svc.review,
+                        get_container_from_app(http_request).settings.effective_session_secret,
+                    )
+                    target_ids = selection.create(
+                        session, workspace_id,
+                        ReviewSelectionRequest(filters=filters),
+                        actor=actor, actor_role=access.role,
+                    ).review_item_ids
+                else:
+                    target_ids = svc.review.bulk_review_ids(
+                        session=session,
+                        workspace_id=workspace_id,
+                        status=filters.status if filters else None,
+                        risk_level=filters.risk_level if filters else None,
+                        audience_for=actor.user_id,
+                        scope=filters.scope if filters else "all",
+                        actor_user_id=actor.user_id,
+                        actor_role=access.role,
+                    )
+    except ReviewSelectionError as exc:
+        return _review_selection_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
 
     approved: list[UUID] = []
     skipped: list[dict[str, object]] = []
     seen: set[UUID] = set()
+    auto_settled: set[UUID] = set()
+    internal_settled: set[UUID] = set()
+    outcomes: list[dict[str, object]] = []
 
     if request_body.dry_run:
-        # L7: the preview only needs decidability, not the full review detail, so
-        # evaluate every target in ONE read-only session via the lightweight
-        # can_decide_review check — instead of a per-item write transaction plus
-        # a full get_review()/_detail() load (decisions/evidence/change-set/
-        # chat-owner). Output shape is unchanged.
+        # Preview uses the same approval-specific domain checks as execution;
+        # common decision permission alone also allows reject/request_changes
+        # and cannot establish that a candidate is publishable.
         with session_factory() as session:
             for review_item_id in target_ids:
                 if review_item_id in seen:
                     continue
                 seen.add(review_item_id)
                 try:
-                    if svc.review.can_decide_review(
-                        session=session,
-                        workspace_id=workspace_id,
-                        review_item_id=review_item_id,
-                        actor_user_id=actor.user_id,
-                        actor_role=access.role,
-                    ):
+                    preflight = svc.review.approval_preflight(
+                        session, workspace_id, review_item_id,
+                        actor=actor, actor_role=access.role,
+                    )
+                    if preflight.eligible:
                         approved.append(review_item_id)
+                        auto_settled.update(preflight.visible_superseded_review_ids)
                     else:
                         skipped.append(
                             {
                                 "id": review_item_id,
-                                "reason": "not eligible for approval",
+                                "reason": (
+                                    preflight.reason or "not eligible for approval"
+                                ),
+                                "reason_code": preflight.reason_code,
                             }
                         )
                 except ReadServiceError as exc:
@@ -3328,16 +3422,41 @@ def decide_reviews_bulk(
                             "reason": str(exc) or getattr(exc, "error_code", "skipped"),
                         }
                     )
-        return {"data": {"approved": approved, "skipped": skipped}}
+        return {"data": {
+            "approved": approved, "skipped": skipped,
+            "auto_settled_review_item_ids": sorted(auto_settled, key=str),
+            "processed_count": len(seen), "total": len(seen),
+        }}
 
     for review_item_id in target_ids:
         if review_item_id in seen:
             continue
         seen.add(review_item_id)
+        if review_item_id in internal_settled:
+            continue
         # Each real decision runs in its own write transaction so one failure
         # does not roll back the others.
         try:
             with session_factory.begin() as session:
+                acquire_workspace_write_intent(session)
+                preflight = svc.review.approval_preflight(
+                    session, workspace_id, review_item_id,
+                    actor=actor, actor_role=access.role, lock=True,
+                )
+                if not preflight.eligible:
+                    skipped.append({
+                        "id": review_item_id,
+                        "reason": preflight.reason or "not eligible for approval",
+                        "reason_code": preflight.reason_code,
+                    })
+                    outcomes.append({
+                        "id": review_item_id, "outcome": "excluded",
+                        "reason": preflight.reason,
+                        "reason_code": preflight.reason_code,
+                        "target_title": preflight.target_title,
+                        "target_version_no": preflight.target_version_no,
+                    })
+                    continue
                 svc.review.apply_decision(
                     session=session,
                     workspace_id=workspace_id,
@@ -3348,16 +3467,43 @@ def decide_reviews_bulk(
                     actor_user_id=actor.user_id,
                     actor_role=access.role,
                     actor_provenance=actor.provenance,
+                    actor=actor,
                 )
             approved.append(review_item_id)
+            outcomes.append({
+                "id": review_item_id, "outcome": "approved",
+                "target_title": preflight.target_title,
+                "target_version_no": preflight.target_version_no,
+            })
+            internal_settled.update(preflight.superseded_review_ids)
+            for sibling_id in preflight.visible_superseded_review_ids:
+                if sibling_id not in auto_settled:
+                    auto_settled.add(sibling_id)
+                    outcomes.append({
+                        "id": sibling_id, "outcome": "auto_settled",
+                        "reason_code": "superseded_by_approved_publish",
+                        "target_title": preflight.target_title,
+                        "target_version_no": preflight.target_version_no,
+                    })
         except ReadServiceError as exc:
             skipped.append(
                 {
                     "id": review_item_id,
                     "reason": str(exc) or getattr(exc, "error_code", "skipped"),
+                    "reason_code": exc.error_code,
                 }
             )
-    return {"data": {"approved": approved, "skipped": skipped}}
+            outcomes.append({
+                "id": review_item_id, "outcome": "failed",
+                "reason": str(exc) or exc.error_code, "reason_code": exc.error_code,
+            })
+    return {"data": {
+        "approved": approved,
+        "skipped": [item for item in skipped if item["id"] not in auto_settled],
+        "outcomes": list({item["id"]: item for item in outcomes}.values()),
+        "auto_settled_review_item_ids": sorted(auto_settled, key=str),
+        "processed_count": len(seen), "total": len(seen),
+    }}
 
 
 @router.get(

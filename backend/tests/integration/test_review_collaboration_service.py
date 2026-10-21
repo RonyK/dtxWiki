@@ -27,6 +27,7 @@ from backend.services.read_errors import (
     ReadNotFoundError,
     ReadValidationError,
     ReviewAlreadyClaimedError,
+    ReviewDecisionIdConflictError,
 )
 from backend.services.review_service import CLAIM_TTL_MINUTES, ReviewService
 
@@ -286,6 +287,13 @@ def test_review_evidence_does_not_hydrate_foreign_version_metadata(session_facto
         assert operation.target_title == "Local evidence target"
         assert operation.target_slug == "local-evidence-target"
         assert operation.target_version_no is None
+        assert operation.document.document_id == local_operation.target_id
+        assert operation.document.can_open is True
+        assert operation.content.can_read is False
+        assert operation.content.candidate_version_id is None
+        assert operation.content.unavailable_reason == "candidate_unavailable"
+        assert detail.actions.approve.allowed is False
+        assert detail.actions.approve.reason_code == "stale_candidate"
 
 
 def test_recent_decisions_hidden_from_uninvolved_viewers(session_factory):
@@ -537,6 +545,7 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
             workspace_id=ws.id,
             audience_for=requester.id,
             actor_role="editor",
+            actor=_actor(requester, ws.id, "editor"),
         )
         _request_changes(
             service,
@@ -552,12 +561,14 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
             audience_for=requester.id,
             scope="to_me",
             actor_role="editor",
+            actor=_actor(requester, ws.id, "editor"),
         )
         outsider_view = service.list_reviews(
             session=session,
             workspace_id=ws.id,
             audience_for=outsider.id,
             actor_role="editor",
+            actor=_actor(outsider, ws.id, "editor"),
         )
 
     assert pending.items[0].can_decide is True
@@ -566,6 +577,79 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
     assert routed.items[0].can_claim is True
     assert outsider_view.items[0].can_decide is False
     assert outsider_view.items[0].can_claim is False
+    assert pending.items[0].actions.approve.allowed is True
+    assert routed.items[0].actions.edit_directly.allowed is True
+    assert outsider_view.items[0].actions.approve.allowed is False
+    assert outsider_view.items[0].actions.approve.reason_code == "not_in_audience"
+
+
+def test_decision_receipt_replay_preserves_later_round_and_rejects_reuse(
+    session_factory,
+):
+    service = ReviewService()
+    with session_factory.begin() as session:
+        workspace = _workspace(session)
+        owner = _make_user(session, "receipt-owner@example.com", workspace.id, "owner")
+        other = _make_user(session, "receipt-other@example.com", workspace.id)
+        review = _seed_review(session, workspace.id, "Receipt target", str(owner.id))
+        unrelated = _seed_review(session, workspace.id, "Receipt other", str(owner.id))
+        request = ReviewDecisionRequest(
+            decision_id=uuid4(),
+            decision_type="request_changes",
+            decision_reason="  Original request.  ",
+            audience_kind="requester",
+        )
+
+        def decide(request_body, *, target=review, acting=owner):
+            return service.apply_decision(
+                session=session,
+                workspace_id=workspace.id,
+                review_item_id=target.id,
+                request=request_body,
+                actor_kind="human",
+                actor_id=str(acting.id),
+                actor_user_id=acting.id,
+                actor_role="owner" if acting is owner else "editor",
+                actor_provenance="browser_session",
+                actor=_actor(
+                    acting, workspace.id, "owner" if acting is owner else "editor"
+                ),
+            )
+
+        first = decide(request)
+        assert first.decisions[0].decision_id == request.decision_id
+        later = decide(ReviewDecisionRequest(
+            decision_id=uuid4(),
+            decision_type="request_changes",
+            decision_reason="A later routing round.",
+            audience_kind="workspace_editors",
+        ))
+        service.claim_review(
+            session, workspace.id, review.id,
+            actor_kind="human", actor_id=str(other.id), actor_role="editor",
+        )
+        replay = decide(request)
+        assert replay.current_audience_kind == later.current_audience_kind
+        assert replay.claimed_by == other.id
+        assert len(replay.decisions) == 2
+        assert session.scalar(select(func.count(ReviewDecision.id))) == 2
+        assert session.scalar(select(func.count(AuditEvent.id)).where(
+            AuditEvent.action == "review.decision"
+        )) == 2
+
+        for changed, target, acting in [
+            (
+                request.model_copy(update={"decision_reason": "Different payload"}),
+                review, owner,
+            ),
+            (request, unrelated, owner),
+            (request, review, other),
+        ]:
+            with pytest.raises(ReviewDecisionIdConflictError):
+                decide(changed, target=target, acting=acting)
+        assert unrelated.status == "pending"
+        assert review.claimed_by == other.id
+        assert session.scalar(select(func.count(ReviewDecision.id))) == 2
 
 
 def test_review_decision_payload_includes_actor_display_name(session_factory):
@@ -1343,6 +1427,17 @@ def test_resolution_clears_claim(session_factory):
             actor_id=str(holder.id),
             actor_role="editor",
         )
+        detail = service.get_review(
+            session, ws.id, review.id,
+            actor_user_id=reviewer.id, actor_role="editor",
+            actor=_actor(reviewer, ws.id, "editor"),
+        )
+        assert detail.actions.approve.allowed is False
+        assert detail.actions.reject.allowed is False
+        assert detail.actions.request_changes.allowed is False
+        assert detail.actions.edit_directly.allowed is False
+        assert detail.actions.approve.reason_code == "claim_conflict"
+        assert detail.reject_effect is None
         # The claim HOLDER applying a decision clears their own claim. (A
         # non-holder is blocked while the claim is live — see
         # test_decision_blocked_by_another_live_claim.)

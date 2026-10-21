@@ -31,5 +31,11 @@
   "shell.json:topbar.language.ko",
   "tree.json:counts",
   "tree.json:folder.pageFolderCount",
-  "settings.json:attachments.policy.daysHours"
+  "settings.json:attachments.policy.daysHours",
+  "review.json:workflow.documentKinds.context",
+  "review.json:workflow.documentKinds.agent",
+  "review.json:workflow.documentKinds.library",
+  "review.json:document.kind.context",
+  "review.json:document.kind.agent",
+  "review.json:document.kind.library"
 ]

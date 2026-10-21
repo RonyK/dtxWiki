@@ -548,11 +548,12 @@ def test_review_context_target_metadata_fails_closed_without_actor(session_facto
 
     assert no_actor["target_title"] is None
     assert no_actor["target_slug"] is None
-    assert no_actor["target_version_no"] == 1
+    assert no_actor["target_version_no"] is None
 
     # An owner (can read drafts) sees the scoped headless preview.
     assert with_owner["target_title"] == "Headless Rejected Draft"
     assert with_owner["target_slug"] == "leak03-headless"
+    assert with_owner["target_version_no"] == 1
 
 
 def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
@@ -672,6 +673,12 @@ def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
     assert first.status == "rejected"
     assert first.evidence.operations[0].target_title == "Sensitive Recall Notes"
     assert first.evidence.operations[0].target_slug == "leak03-sensitive-recall"
+    assert first.evidence.operations[0].document.document_id == agent.id
+    assert first.evidence.operations[0].document.reader_href == (
+        f"/agent?target={agent.id}"
+    )
+    assert first.evidence.operations[0].content.mode == "unsupported"
+    assert first.evidence.operations[0].content.candidate_version_id == version.id
 
     # Same reject, same terminal result already recorded -> idempotent retry
     # branch, this time by the non-owner editor.
@@ -693,6 +700,99 @@ def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
     assert retried.status == "rejected"
     assert retried.evidence.operations[0].target_title is None
     assert retried.evidence.operations[0].target_slug is None
+    assert retried.evidence.operations[0].document.document_id is None
+    assert retried.evidence.operations[0].document.reader_href is None
+    assert retried.evidence.operations[0].content.candidate_version_id is None
+
+
+def test_review_library_artifact_and_version_resolve_to_visible_owning_document(
+    session_factory,
+):
+    from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
+
+    service = ReviewService()
+    with session_factory.begin() as session:
+        workspace = _workspace(session)
+        item = LibraryItem(
+            workspace_id=workspace.id,
+            connector_type="upload",
+            uri="https://example.com/review-source.pdf",
+            title="Reviewed source",
+            trust_level="trusted",
+        )
+        session.add(item)
+        session.flush()
+        version = LibraryItemVersion(
+            workspace_id=workspace.id,
+            library_item_id=item.id,
+            version_no=4,
+            content_hash="reviewed-source",
+            raw_storage_ref="inline://source",
+            processing_status="ready",
+        )
+        session.add(version)
+        session.flush()
+        item.current_version_id = item.current_ready_version_id = version.id
+        artifact = LibraryArtifact(
+            workspace_id=workspace.id,
+            library_item_version_id=version.id,
+            attempt_id=uuid4(),
+            stage="conversion",
+            blob_workspace_id=workspace.id,
+            blob_id=uuid4(),
+            blob_epoch=1,
+            role="markdown",
+            kind="text",
+            media_type="text/plain",
+            content_sha256="b" * 64,
+            byte_size=12,
+        )
+        session.add(artifact)
+        draft = _context_draft(session, workspace.id)
+        for target_type, target_id in [
+            ("library_item_version", version.id), ("library_artifact", artifact.id),
+        ]:
+            session.add(ChangeOperation(
+                workspace_id=workspace.id,
+                change_set_id=draft.change_set_id,
+                target_type=target_type,
+                target_id=target_id,
+                operation="review_source",
+            ))
+        session.flush()
+        detail = service.get_review(
+            session, workspace.id, draft.review_item_id,
+            actor_role="owner", actor=_audit_actor(),
+        )
+        sources = [operation for operation in detail.evidence.operations
+                   if operation.target_type.startswith("library_")]
+        assert len(sources) == 2
+        for operation in sources:
+            assert operation.document.document_id == item.id
+            assert operation.document.reader_href == f"/library?target={item.id}"
+            assert operation.document.can_open is True
+            assert operation.content.mode == "unsupported"
+            assert operation.content.candidate_version_id == version.id
+            assert operation.content.candidate_version_no == 4
+
+        item.trust_level = "restricted"
+        editor = ActorContext(
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+            token_kind="session",
+            workspace_id=workspace.id,
+            workspace_role="editor",
+            role="editor",
+        )
+        redacted = service.get_review(
+            session, workspace.id, draft.review_item_id,
+            actor_role="editor", actor=editor,
+        )
+        for operation in redacted.evidence.operations:
+            if operation.target_type.startswith("library_"):
+                assert operation.document.document_id is None
+                assert operation.document.reader_href is None
+                assert operation.content.candidate_version_id is None
 
 
 def test_review_decision_audience_kind_optional_for_request_changes():

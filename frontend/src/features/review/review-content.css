@@ -1,0 +1,208 @@
+/* Review-only composition; controls, tabs, markdown and diff keep shared styles. */
+.review-evidence-panel {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.review-evidence-document {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.review-document-heading {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.review-document-heading > svg {
+  margin-top: 3px;
+  color: var(--ink-soft);
+}
+
+.review-document-identity {
+  min-width: 0;
+}
+
+.review-document-identity h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.review-document-meta,
+.review-document-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.review-document-meta {
+  margin-top: 4px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.review-document-kind {
+  gap: 6px;
+}
+
+.review-document-open {
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.review-document-unavailable {
+  padding-block: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.review-evidence-operations,
+.review-operation-diagnostics {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 0 0;
+  margin: 12px 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.review-evidence-operations li,
+.review-operation-diagnostics li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-evidence-operations strong,
+.review-operation-diagnostics strong {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-evidence-operations p {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.review-version-content {
+  min-width: 0;
+  margin-top: 16px;
+}
+
+.review-content-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.review-content-heading h4 {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.review-content-heading p,
+.review-content-notice {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.review-content-notice {
+  margin-block: 10px;
+}
+
+.review-content-tabpanel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-content-tabpanel:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.review-content-failure {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.review-content-failure > .status-banner {
+  width: 100%;
+}
+
+.review-evidence-diagnostics {
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.review-evidence-diagnostics > summary {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-evidence-diagnostics > summary:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+.review-evidence-diagnostics dl {
+  margin-block: 10px;
+}
+
+.review-evidence-diagnostics dd,
+.review-evidence-diagnostics code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .review-document-open {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .review-document-heading {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .review-document-open,
+  .review-document-unavailable {
+    grid-column: 1 / -1;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .review-document-identity h3 {
+    font-size: 16px;
+  }
+
+  .review-content-heading {
+    align-items: start;
+  }
+}

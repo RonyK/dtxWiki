@@ -2227,6 +2227,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/reviews/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Review Selection */
+        post: operations["create_review_selection_api_v1_workspaces__workspace_id__reviews_selection_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/reviews/sweep-auto-approvals": {
         parameters: {
             query?: never;
@@ -8267,6 +8284,20 @@ export interface components {
             /** Worker Required */
             worker_required: boolean;
         };
+        /** ReviewActionAvailability */
+        ReviewActionAvailability: {
+            /** Allowed */
+            allowed: boolean;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /** ReviewActionCapabilities */
+        ReviewActionCapabilities: {
+            approve: components["schemas"]["ReviewActionAvailability"];
+            edit_directly: components["schemas"]["ReviewActionAvailability"];
+            reject: components["schemas"]["ReviewActionAvailability"];
+            request_changes: components["schemas"]["ReviewActionAvailability"];
+        };
         /** ReviewAutoApprovalSweepPayload */
         ReviewAutoApprovalSweepPayload: {
             /** Approved */
@@ -8289,16 +8320,54 @@ export interface components {
             scope: "to_me" | "from_me" | "all";
             /** Status */
             status?: string | null;
+            /** Target Page Id */
+            target_page_id?: string | null;
         };
         /** ReviewBulkDecisionPayload */
         ReviewBulkDecisionPayload: {
             /** Approved */
             approved: string[];
+            /** Auto Settled Review Item Ids */
+            auto_settled_review_item_ids?: string[];
+            /** Next Selection Token */
+            next_selection_token?: string | null;
+            /** Outcomes */
+            outcomes?: components["schemas"]["ReviewBulkItemOutcome"][];
+            /**
+             * Processed Count
+             * @default 0
+             */
+            processed_count: number;
+            /**
+             * Remaining Count
+             * @default 0
+             */
+            remaining_count: number;
+            /**
+             * Requires Reconfirmation
+             * @default false
+             */
+            requires_reconfirmation: boolean;
+            /**
+             * Selection Complete
+             * @default true
+             */
+            selection_complete: boolean;
             /** Skipped */
             skipped: components["schemas"]["ReviewBulkSkippedItem"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /** ReviewBulkDecisionRequest */
         ReviewBulkDecisionRequest: {
+            /**
+             * Batch Limit
+             * @default 500
+             */
+            batch_limit: number;
             /**
              * Decision Type
              * @constant
@@ -8312,11 +8381,34 @@ export interface components {
             filters?: components["schemas"]["ReviewBulkDecisionFilters"] | null;
             /** Review Item Ids */
             review_item_ids?: string[] | null;
+            /** Selection Token */
+            selection_token?: string | null;
         };
         /** ReviewBulkDecisionResponse */
         ReviewBulkDecisionResponse: {
             data: components["schemas"]["ReviewBulkDecisionPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ReviewBulkItemOutcome */
+        ReviewBulkItemOutcome: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "approved" | "auto_settled" | "excluded" | "failed";
+            /** Reason */
+            reason?: string | null;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+            /** Target Version No */
+            target_version_no?: number | null;
         };
         /** ReviewBulkSkippedItem */
         ReviewBulkSkippedItem: {
@@ -8327,6 +8419,47 @@ export interface components {
             id: string;
             /** Reason */
             reason: string;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /**
+         * ReviewContentTarget
+         * @description The exact reviewed version and its independently authorized baseline.
+         */
+        ReviewContentTarget: {
+            /**
+             * Baseline Kind
+             * @default unavailable
+             * @enum {string}
+             */
+            baseline_kind: "published" | "parent" | "empty" | "unavailable";
+            /** Baseline Version Id */
+            baseline_version_id?: string | null;
+            /** Baseline Version No */
+            baseline_version_no?: number | null;
+            /**
+             * Can Diff
+             * @default false
+             */
+            can_diff: boolean;
+            /**
+             * Can Read
+             * @default false
+             */
+            can_read: boolean;
+            /** Candidate Version Id */
+            candidate_version_id?: string | null;
+            /** Candidate Version No */
+            candidate_version_no?: number | null;
+            /** Is Current Candidate */
+            is_current_candidate?: boolean | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "context_version" | "metadata_only" | "unsupported" | "unavailable";
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
         };
         /** ReviewCountsPayload */
         ReviewCountsPayload: {
@@ -8469,6 +8602,8 @@ export interface components {
         ReviewDecisionRequest: {
             /** Audience Kind */
             audience_kind?: ("chat_owner" | "requester" | "workspace_editors") | null;
+            /** Decision Id */
+            decision_id?: string | null;
             /** Decision Reason */
             decision_reason?: string | null;
             /**
@@ -8477,12 +8612,40 @@ export interface components {
              */
             decision_type: "approve" | "reject" | "request_changes";
         };
+        /**
+         * ReviewDocumentTarget
+         * @description Actor-visible document identity, independent of an operation's raw ID.
+         */
+        ReviewDocumentTarget: {
+            /**
+             * Can Open
+             * @default false
+             */
+            can_open: boolean;
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Document Kind
+             * @enum {string}
+             */
+            document_kind: "context" | "agent" | "library";
+            /** Reader Href */
+            reader_href?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+        };
         /** ReviewEvidenceOperation */
         ReviewEvidenceOperation: {
+            content?: components["schemas"]["ReviewContentTarget"] | null;
             /** Diff Ref */
             diff_ref?: string | null;
             /** Diff Summary */
             diff_summary?: string | null;
+            document?: components["schemas"]["ReviewDocumentTarget"] | null;
             /** Operation */
             operation: string;
             /**
@@ -8519,6 +8682,7 @@ export interface components {
         };
         /** ReviewItemDetail */
         ReviewItemDetail: {
+            actions?: components["schemas"]["ReviewActionCapabilities"] | null;
             /** Can Claim */
             can_claim: boolean;
             /** Can Decide */
@@ -8584,6 +8748,7 @@ export interface components {
             reconciliation_page_id?: string | null;
             /** Reconciliation Version Id */
             reconciliation_version_id?: string | null;
+            reject_effect?: components["schemas"]["ReviewRejectEffect"] | null;
             /** Review Type */
             review_type: string;
             /** Risk Level */
@@ -8640,6 +8805,113 @@ export interface components {
         /** ReviewItemResponse */
         ReviewItemResponse: {
             data: components["schemas"]["ReviewItemDetail"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ReviewRejectEffect */
+        ReviewRejectEffect: {
+            /** Candidate Version Id */
+            candidate_version_id?: string | null;
+            /** Candidate Version No */
+            candidate_version_no?: number | null;
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "restore_published" | "hide_unpublished" | "no_head_change";
+            /** Published Version Id */
+            published_version_id?: string | null;
+            /** Published Version No */
+            published_version_no?: number | null;
+            /**
+             * Visible Sibling Count
+             * @default 0
+             */
+            visible_sibling_count: number;
+            /** Visible Sibling Review Ids */
+            visible_sibling_review_ids?: string[];
+        };
+        /** ReviewSelectionItem */
+        ReviewSelectionItem: {
+            /** Eligible */
+            eligible: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reason */
+            reason?: string | null;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Target Title */
+            target_title?: string | null;
+            /** Target Version No */
+            target_version_no?: number | null;
+            /**
+             * Will Auto Settle
+             * @default false
+             */
+            will_auto_settle: boolean;
+        };
+        /** ReviewSelectionLimitDetails */
+        ReviewSelectionLimitDetails: {
+            /** Limit */
+            limit: number;
+            /** Total */
+            total: number;
+        };
+        /** ReviewSelectionLimitErrorBody */
+        ReviewSelectionLimitErrorBody: {
+            details: components["schemas"]["ReviewSelectionLimitDetails"];
+            envelope: components["schemas"]["RESTResultEnvelope"];
+            /** Error Code */
+            error_code: string;
+            /** Message */
+            message: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id?: string;
+            /** Warnings */
+            warnings?: components["schemas"]["EnvelopeWarning"][];
+        };
+        /** ReviewSelectionPayload */
+        ReviewSelectionPayload: {
+            /** Auto Settled Review Item Ids */
+            auto_settled_review_item_ids?: string[];
+            /** Eligible Count */
+            eligible_count: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Items */
+            items: components["schemas"]["ReviewSelectionItem"][];
+            /**
+             * Limit
+             * @default 5000
+             */
+            limit: number;
+            /** Review Item Ids */
+            review_item_ids: string[];
+            /** Selection Token */
+            selection_token: string;
+            /** Total */
+            total: number;
+        };
+        /** ReviewSelectionRequest */
+        ReviewSelectionRequest: {
+            filters?: components["schemas"]["ReviewBulkDecisionFilters"] | null;
+            /** Review Item Ids */
+            review_item_ids?: string[] | null;
+        };
+        /** ReviewSelectionResponse */
+        ReviewSelectionResponse: {
+            data: components["schemas"]["ReviewSelectionPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ReviewStatusByRiskBreakdown */
@@ -20070,7 +20342,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["ReviewSelectionLimitErrorBody"] | components["schemas"]["RESTErrorBody"];
                 };
             };
         };
@@ -20211,6 +20483,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    create_review_selection_api_v1_workspaces__workspace_id__reviews_selection_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSelectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSelectionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSelectionLimitErrorBody"] | components["schemas"]["RESTErrorBody"];
                 };
             };
         };

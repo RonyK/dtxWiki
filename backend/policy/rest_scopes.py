@@ -288,6 +288,9 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     # are gated by role + a personal-queue projection in the handlers.
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews"): ("review-read",),
     ("GET", "/api/v1/workspaces/{workspace_id}/reviews/counts"): ("review-read",),
+    # Captures a signed read-only selection; approval remains a separate
+    # draft-write operation with its own actor/provenance checks.
+    ("POST", "/api/v1/workspaces/{workspace_id}/reviews/selection"): ("review-read",),
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/reviews/decisions/recent",

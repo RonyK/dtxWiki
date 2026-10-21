@@ -72,6 +72,13 @@
 - Separate upgrade-blocking input findings from preserved history, support
   baseline audits and independent Library label repairs, and honor runtime
   activity locks during maintenance.
+- Review evidence now distinguishes the current document destination from the
+  exact reviewed Context version and its comparison baseline. Group approvals
+  use a fixed, signed selection and preserve individual results across batches;
+  single decisions accept a durable receipt ID for safe retries.
+- MCP tool contract revision 14 adds authorized document and content descriptors
+  to `list_requested_changes` evidence. Existing clients can ignore these
+  additive fields and continue using the existing target and `diff_ref` fields.
 - Select the Context publish replay audit by version and change-set identity.
 - Persist changes to nested workspace settings policies.
 - Prevent Settings draft resets from overwriting the user's first edit.

@@ -67,7 +67,21 @@ export type ReviewBulkDecisionFilters = {
   status?: ReviewStatusFilter | string;
   risk_level?: string;
   scope?: ReviewScope;
+  target_page_id?: string;
 };
+
+export type ReviewSelection = components["schemas"]["ReviewSelectionPayload"];
+
+export async function createReviewSelection(
+  workspaceId: string,
+  input: { review_item_ids?: string[]; filters?: ReviewBulkDecisionFilters },
+) {
+  const response = await apiRequest<{ data: ReviewSelection }>(
+    `/api/v1/workspaces/${workspaceId}/reviews/selection`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return response.data;
+}
 
 export type ReviewBulkDecisionResult =
   components["schemas"]["ReviewBulkDecisionPayload"];
@@ -253,6 +267,7 @@ export async function listReviews(
     limit?: number;
     cursor?: string | null;
     include_deferred_reconciliations?: boolean;
+    target_page_id?: string;
   } = {},
 ) {
   const query = encodeQuery(filters);
@@ -305,7 +320,7 @@ export async function decideReview(
   reviewItemId: string,
   decision_type: ReviewDecisionType,
   decision_reason?: string | null,
-  options: { audience_kind?: ReviewAudienceKind } = {},
+  options: { audience_kind?: ReviewAudienceKind; decision_id?: string } = {},
 ) {
   const response = await apiRequest<{ data: ReviewItem }>(
     `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decision`,
@@ -314,6 +329,7 @@ export async function decideReview(
       body: JSON.stringify({
         decision_type,
         decision_reason: decision_reason || null,
+        ...(options.decision_id ? { decision_id: options.decision_id } : {}),
         // Only include audience_kind when routing a request_changes decision;
         // omitting it preserves the server default for approve/reject.
         ...(options.audience_kind
@@ -332,6 +348,8 @@ export async function decideReviewsBulk(
     filters?: ReviewBulkDecisionFilters | null;
     decision_type: "approve";
     dry_run?: boolean;
+    selection_token?: string;
+    batch_limit?: number;
   },
 ) {
   const response = await apiRequest<{ data: ReviewBulkDecisionResult }>(

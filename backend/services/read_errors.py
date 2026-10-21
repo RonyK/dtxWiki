@@ -137,6 +137,17 @@ class ReviewAlreadyClaimedError(ReadServiceError):
     error_code = "review_already_claimed"
 
 
+class ReviewDecisionIdConflictError(ReadServiceError):
+    """A decision receipt ID was reused for a different authenticated request."""
+
+    error_code = "decision_id_conflict"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "decision_id was already used for a different review decision"
+        )
+
+
 class RevisionSubmissionRequiredError(ReadServiceError):
     error_code = "revision_submission_required"
 

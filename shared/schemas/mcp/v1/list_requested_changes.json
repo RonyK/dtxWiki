@@ -650,9 +650,222 @@
         "title": "RequestedChangeTarget",
         "type": "object"
       },
+      "ReviewContentTarget": {
+        "additionalProperties": false,
+        "description": "The exact reviewed version and its independently authorized baseline.",
+        "properties": {
+          "baseline_kind": {
+            "default": "unavailable",
+            "enum": [
+              "published",
+              "parent",
+              "empty",
+              "unavailable"
+            ],
+            "title": "Baseline Kind",
+            "type": "string"
+          },
+          "baseline_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Baseline Version Id"
+          },
+          "baseline_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Baseline Version No"
+          },
+          "can_diff": {
+            "default": false,
+            "title": "Can Diff",
+            "type": "boolean"
+          },
+          "can_read": {
+            "default": false,
+            "title": "Can Read",
+            "type": "boolean"
+          },
+          "candidate_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidate Version Id"
+          },
+          "candidate_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidate Version No"
+          },
+          "is_current_candidate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Is Current Candidate"
+          },
+          "mode": {
+            "enum": [
+              "context_version",
+              "metadata_only",
+              "unsupported",
+              "unavailable"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ReviewContentTarget",
+        "type": "object"
+      },
+      "ReviewDocumentTarget": {
+        "additionalProperties": false,
+        "description": "Actor-visible document identity, independent of an operation's raw ID.",
+        "properties": {
+          "can_open": {
+            "default": false,
+            "title": "Can Open",
+            "type": "boolean"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Document Id"
+          },
+          "document_kind": {
+            "enum": [
+              "context",
+              "agent",
+              "library"
+            ],
+            "title": "Document Kind",
+            "type": "string"
+          },
+          "reader_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reader Href"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Slug"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "document_kind"
+        ],
+        "title": "ReviewDocumentTarget",
+        "type": "object"
+      },
       "ReviewEvidenceOperation": {
         "additionalProperties": false,
         "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ReviewContentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "diff_ref": {
             "anyOf": [
               {
@@ -676,6 +889,17 @@
             ],
             "default": null,
             "title": "Diff Summary"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ReviewDocumentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation": {
             "title": "Operation",

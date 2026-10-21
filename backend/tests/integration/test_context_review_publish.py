@@ -253,6 +253,18 @@ def test_reject_latest_draft_restores_published_head_for_both_reader_classes(
         workspace, published, draft = _published_page_with_draft(
             session, "Restore published on reject"
         )
+        before = ReviewService().get_review(
+            session, workspace.id, draft.review_item_id,
+            actor_user_id=ACTOR_UUID, actor_role="owner",
+            actor=_actor(workspace.id, "owner"),
+        )
+        candidate = before.evidence.operations[0].content
+        assert candidate.candidate_version_id == draft.draft_version_id
+        assert candidate.baseline_version_id == published.draft_version_id
+        assert candidate.baseline_kind == "published"
+        assert candidate.can_diff is True
+        assert before.reject_effect.effect == "restore_published"
+        assert before.reject_effect.published_version_id == published.draft_version_id
         _reject(session, workspace.id, draft.review_item_id)
 
         page = session.get(ContextPage, published.page_id)
@@ -308,6 +320,18 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
         assert _decision_audit(session, created.review_item_id).payload[
             "reject_effect"
         ] == "hide_unpublished"
+        detail = ReviewService().get_review(
+            session, workspace.id, created.review_item_id,
+            actor_user_id=ACTOR_UUID, actor_role="owner",
+            actor=_actor(workspace.id, "owner"),
+        )
+        operation = detail.evidence.operations[0]
+        assert operation.document.document_id == page.id
+        assert operation.document.can_open is False
+        assert operation.document.reader_href is None
+        assert operation.content.candidate_version_id == version.id
+        assert operation.content.can_read is True
+        assert detail.actions.approve.allowed is False
         page_id = page.id
         version_id = version.id
         workspace_id = workspace.id
@@ -634,6 +658,7 @@ def test_approving_latest_draft_publishes_and_only_settles_context_reviews(
             created.review_item_id,
             actor_user_id=ACTOR_UUID,
             actor_role="owner",
+            actor=_actor(workspace.id, "owner"),
         )
         detail = _approve(session, workspace.id, created.review_item_id)
 
@@ -695,6 +720,20 @@ def test_approving_non_latest_draft_refuses_without_resolving_review(session_fac
             session, workspace.id, created.page_id, version_id=created.draft_version_id
         )
         old_change_set = session.get(ChangeSet, old_review.change_set_id)
+        detail = ReviewService().get_review(
+            session, workspace.id, old_review.id,
+            actor_user_id=ACTOR_UUID, actor_role="owner",
+            actor=_actor(workspace.id, "owner"),
+        )
+        operation = detail.evidence.operations[0]
+        assert operation.document.can_open is True
+        assert operation.content.candidate_version_id == created.draft_version_id
+        assert operation.content.is_current_candidate is False
+        assert operation.content.can_read is True
+        assert detail.actions.approve.allowed is False
+        assert detail.actions.approve.reason_code == "stale_candidate"
+        assert detail.actions.reject.allowed is True
+        assert detail.reject_effect.effect == "no_head_change"
         with pytest.raises(
             ReadValidationError,
             match="stale or superseded Context review",

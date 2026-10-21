@@ -15119,6 +15119,56 @@
         "title": "RecoveryConfigurationStatus",
         "type": "object"
       },
+      "ReviewActionAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "title": "ReviewActionAvailability",
+        "type": "object"
+      },
+      "ReviewActionCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "approve": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          },
+          "edit_directly": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          },
+          "reject": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          },
+          "request_changes": {
+            "$ref": "#/components/schemas/ReviewActionAvailability"
+          }
+        },
+        "required": [
+          "approve",
+          "reject",
+          "request_changes",
+          "edit_directly"
+        ],
+        "title": "ReviewActionCapabilities",
+        "type": "object"
+      },
       "ReviewAutoApprovalSweepPayload": {
         "additionalProperties": false,
         "properties": {
@@ -15184,6 +15234,18 @@
               }
             ],
             "title": "Status"
+          },
+          "target_page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Page Id"
           }
         },
         "title": "ReviewBulkDecisionFilters",
@@ -15200,12 +15262,63 @@
             "title": "Approved",
             "type": "array"
           },
+          "auto_settled_review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Auto Settled Review Item Ids",
+            "type": "array"
+          },
+          "next_selection_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Selection Token"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewBulkItemOutcome"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "processed_count": {
+            "default": 0,
+            "title": "Processed Count",
+            "type": "integer"
+          },
+          "remaining_count": {
+            "default": 0,
+            "title": "Remaining Count",
+            "type": "integer"
+          },
+          "requires_reconfirmation": {
+            "default": false,
+            "title": "Requires Reconfirmation",
+            "type": "boolean"
+          },
+          "selection_complete": {
+            "default": true,
+            "title": "Selection Complete",
+            "type": "boolean"
+          },
           "skipped": {
             "items": {
               "$ref": "#/components/schemas/ReviewBulkSkippedItem"
             },
             "title": "Skipped",
             "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
@@ -15218,6 +15331,13 @@
       "ReviewBulkDecisionRequest": {
         "additionalProperties": false,
         "properties": {
+          "batch_limit": {
+            "default": 500,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Batch Limit",
+            "type": "integer"
+          },
           "decision_type": {
             "const": "approve",
             "title": "Decision Type",
@@ -15253,6 +15373,18 @@
               }
             ],
             "title": "Review Item Ids"
+          },
+          "selection_token": {
+            "anyOf": [
+              {
+                "maxLength": 1500000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Token"
           }
         },
         "required": [
@@ -15277,6 +15409,76 @@
         "title": "ReviewBulkDecisionResponse",
         "type": "object"
       },
+      "ReviewBulkItemOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "approved",
+              "auto_settled",
+              "excluded",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "target_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version No"
+          }
+        },
+        "required": [
+          "id",
+          "outcome"
+        ],
+        "title": "ReviewBulkItemOutcome",
+        "type": "object"
+      },
       "ReviewBulkSkippedItem": {
         "additionalProperties": false,
         "properties": {
@@ -15288,6 +15490,17 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
           }
         },
         "required": [
@@ -15295,6 +15508,116 @@
           "reason"
         ],
         "title": "ReviewBulkSkippedItem",
+        "type": "object"
+      },
+      "ReviewContentTarget": {
+        "additionalProperties": false,
+        "description": "The exact reviewed version and its independently authorized baseline.",
+        "properties": {
+          "baseline_kind": {
+            "default": "unavailable",
+            "enum": [
+              "published",
+              "parent",
+              "empty",
+              "unavailable"
+            ],
+            "title": "Baseline Kind",
+            "type": "string"
+          },
+          "baseline_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Version Id"
+          },
+          "baseline_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Version No"
+          },
+          "can_diff": {
+            "default": false,
+            "title": "Can Diff",
+            "type": "boolean"
+          },
+          "can_read": {
+            "default": false,
+            "title": "Can Read",
+            "type": "boolean"
+          },
+          "candidate_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version Id"
+          },
+          "candidate_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version No"
+          },
+          "is_current_candidate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Current Candidate"
+          },
+          "mode": {
+            "enum": [
+              "context_version",
+              "metadata_only",
+              "unsupported",
+              "unavailable"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ReviewContentTarget",
         "type": "object"
       },
       "ReviewCountsPayload": {
@@ -15695,6 +16018,18 @@
             ],
             "title": "Audience Kind"
           },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
           "decision_reason": {
             "anyOf": [
               {
@@ -15723,9 +16058,100 @@
         "title": "ReviewDecisionRequest",
         "type": "object"
       },
+      "ReviewDocumentTarget": {
+        "additionalProperties": false,
+        "description": "Actor-visible document identity, independent of an operation's raw ID.",
+        "properties": {
+          "can_open": {
+            "default": false,
+            "title": "Can Open",
+            "type": "boolean"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "document_kind": {
+            "enum": [
+              "context",
+              "agent",
+              "library"
+            ],
+            "title": "Document Kind",
+            "type": "string"
+          },
+          "reader_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reader Href"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "document_kind"
+        ],
+        "title": "ReviewDocumentTarget",
+        "type": "object"
+      },
       "ReviewEvidenceOperation": {
         "additionalProperties": false,
         "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewContentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "diff_ref": {
             "anyOf": [
               {
@@ -15747,6 +16173,16 @@
               }
             ],
             "title": "Diff Summary"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDocumentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "operation": {
             "title": "Operation",
@@ -15856,6 +16292,16 @@
       "ReviewItemDetail": {
         "additionalProperties": false,
         "properties": {
+          "actions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewActionCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "can_claim": {
             "title": "Can Claim",
             "type": "boolean"
@@ -16079,6 +16525,16 @@
             ],
             "title": "Reconciliation Version Id"
           },
+          "reject_effect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewRejectEffect"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "review_type": {
             "title": "Review Type",
             "type": "string"
@@ -16251,6 +16707,333 @@
           "data"
         ],
         "title": "ReviewItemResponse",
+        "type": "object"
+      },
+      "ReviewRejectEffect": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version Id"
+          },
+          "candidate_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Version No"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "effect": {
+            "enum": [
+              "restore_published",
+              "hide_unpublished",
+              "no_head_change"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id"
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version No"
+          },
+          "visible_sibling_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Visible Sibling Count",
+            "type": "integer"
+          },
+          "visible_sibling_review_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Visible Sibling Review Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "effect"
+        ],
+        "title": "ReviewRejectEffect",
+        "type": "object"
+      },
+      "ReviewSelectionItem": {
+        "additionalProperties": false,
+        "properties": {
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "target_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version No"
+          },
+          "will_auto_settle": {
+            "default": false,
+            "title": "Will Auto Settle",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "eligible"
+        ],
+        "title": "ReviewSelectionItem",
+        "type": "object"
+      },
+      "ReviewSelectionLimitDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "limit"
+        ],
+        "title": "ReviewSelectionLimitDetails",
+        "type": "object"
+      },
+      "ReviewSelectionLimitErrorBody": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ReviewSelectionLimitDetails"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          },
+          "error_code": {
+            "title": "Error Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "envelope",
+          "error_code",
+          "message",
+          "details"
+        ],
+        "title": "ReviewSelectionLimitErrorBody",
+        "type": "object"
+      },
+      "ReviewSelectionPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_settled_review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Auto Settled Review Item Ids",
+            "type": "array"
+          },
+          "eligible_count": {
+            "title": "Eligible Count",
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSelectionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "default": 5000,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "review_item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Review Item Ids",
+            "type": "array"
+          },
+          "selection_token": {
+            "title": "Selection Token",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selection_token",
+          "expires_at",
+          "total",
+          "review_item_ids",
+          "eligible_count",
+          "items"
+        ],
+        "title": "ReviewSelectionPayload",
+        "type": "object"
+      },
+      "ReviewSelectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewBulkDecisionFilters"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_item_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "maxItems": 5000,
+            "title": "Review Item Ids"
+          }
+        },
+        "title": "ReviewSelectionRequest",
+        "type": "object"
+      },
+      "ReviewSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewSelectionPayload"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ReviewSelectionResponse",
         "type": "object"
       },
       "ReviewStatusByRiskBreakdown": {
@@ -35505,7 +36288,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ReviewSelectionLimitErrorBody"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RESTErrorBody"
+                    }
+                  ],
+                  "title": "Response 422 Decide Reviews Bulk Api V1 Workspaces  Workspace Id  Reviews Decide Bulk Post"
                 }
               }
             },
@@ -35725,6 +36516,115 @@
           }
         ],
         "summary": "Discard Reconciliations Bulk",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/reviews/selection": {
+      "post": {
+        "operationId": "create_review_selection_api_v1_workspaces__workspace_id__reviews_selection_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ReviewSelectionLimitErrorBody"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RESTErrorBody"
+                    }
+                  ],
+                  "title": "Response 422 Create Review Selection Api V1 Workspaces  Workspace Id  Reviews Selection Post"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Review Selection",
         "tags": [
           "read"
         ]

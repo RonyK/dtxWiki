@@ -25,6 +25,7 @@ import {
 import { clearPersistedWorkspaceId, invalidateWorkspaceListCache } from "../api/workspace";
 import { setTreeFavoriteActor } from "../api/treeFavorites";
 import { isAbortError } from "../lib/abortError";
+import { clearReviewDrafts } from "../lib/reviewDraftStorage";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous" | "transient_error";
 type PasswordRecoveryMode = "email" | "admin_assisted" | "disabled";
@@ -139,6 +140,7 @@ export function AuthProvider({
       // log the user out — surface them as sessionError so the UI can show
       // a banner without redirecting to /login (review §6.3 FA-H4).
       if (error instanceof ApiError && error.status === 401) {
+        clearReviewDrafts();
         setApiErrorViewerIsServerAdmin(false);
         commitUser(null);
         setStatus("anonymous");
@@ -271,6 +273,7 @@ export function AuthProvider({
       // workspace title/id/role via WorkspaceRouteBoundary's stale
       // selectedWorkspace before the fresh workspace list resolves.
       clearPersistedWorkspaceId();
+      clearReviewDrafts();
       commitUser(null, true);
       setStatus("anonymous");
       setSessionChecked(true);
