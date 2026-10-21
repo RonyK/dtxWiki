@@ -20,6 +20,7 @@ from backend.services import settings_service
 from backend.services.api_token_service import ApiTokenService, WorkspaceGrantRequest
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.mcp_client_service import evaluate_mcp_client_runtime
+from backend.services.mcp_credential_health import CredentialHealth
 from backend.services.oauth_service import WorkspaceOAuthHealth
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.settings_service import SettingsService
@@ -173,6 +174,7 @@ def test_mcp_client_counts_and_page_share_one_sqlite_snapshot(db):
                 workspace_id=db.workspace_id,
                 actor=_human_actor(db),
                 cursor_secret="snapshot-secret",
+                status="all",
             )
     finally:
         event.remove(db.engine, "after_cursor_execute", insert_after_total_count)
@@ -500,9 +502,6 @@ def test_pushdown_guard_counts_the_name_search_key_set(monkeypatch):
         workspace_id=uuid4(),
         now=utc_now(),
         known_oauth_client_ids=frozenset(),
-        live_oauth_client_ids=frozenset(),
-        consent_keys=frozenset(),
-        live_expiry={},
         oauth_client_names={},
         name_matched_oauth_client_ids=frozenset(f"app-{index}" for index in range(9)),
     )
@@ -547,6 +546,7 @@ def test_two_users_sharing_one_oauth_client_are_faceted_apart(db):
         session.add(_oauth_client("shared-app", client_name="Shared App"))
         session.flush()
         other_user_id = other_user.id
+        live_grant_id = uuid4()
         for user_id, name in (
             (db.user_id, "Live holder"),
             (other_user_id, "Tokenless holder"),
@@ -567,11 +567,15 @@ def test_two_users_sharing_one_oauth_client_are_faceted_apart(db):
                     scopes=["mcp:read"],
                     status="active",
                     issued_to_user_id=user_id,
+                    runtime_binding_key=f"oauth_grant:{live_grant_id}"
+                    if user_id == db.user_id
+                    else None,
                     token_metadata={"oauth_client_id": "shared-app"},
                 )
             )
         session.add(
             OAuthRefreshToken(
+                grant_id=live_grant_id,
                 token_lookup_hash="sha256:live-holder",
                 user_id=db.user_id,
                 client_id="shared-app",
@@ -594,18 +598,20 @@ def test_two_users_sharing_one_oauth_client_are_faceted_apart(db):
     everything = listing("all")
     states = {row.name: row.connection_state for row in everything.data}
     assert states["Live holder"] == "active"
-    assert states["Tokenless holder"] == "expired"
+    assert states["Tokenless holder"] == "unknown"
 
     # The facet is the SQL twin of that classification, so the server-side
     # split has to land the two rows where the per-row rendering just did.
     # `Seed client` is the fixture's OAuth-less row and rides the first arm.
     assert {row.name for row in listing("active").data} == {
-        "Seed client",
         "Live holder",
     }
-    assert {row.name for row in listing("disabled").data} == {"Tokenless holder"}
-    assert everything.status_counts.active == 2
-    assert everything.status_counts.disabled == 1
+    assert {row.name for row in listing("disabled").data} == {
+        "Tokenless holder",
+        "Seed client",
+    }
+    assert everything.status_counts.active == 1
+    assert everything.status_counts.disabled == 2
 
 
 def test_active_connection_predicate_compiles_on_postgresql():
@@ -624,15 +630,14 @@ def test_active_connection_predicate_compiles_on_postgresql():
     workspace_id = uuid4()
     user_id = uuid4()
     health = WorkspaceOAuthHealth(
+        credential_health={
+            (user_id, f"oauth_grant:{uuid4()}"): CredentialHealth(
+                "active", utc_now(), "shared-app"
+            )
+        },
         workspace_id=workspace_id,
         now=utc_now(),
         known_oauth_client_ids=frozenset({"shared-app"}),
-        live_oauth_client_ids=frozenset({"shared-app"}),
-        consent_keys=frozenset({(user_id, "shared-app"), (None, "shared-app")}),
-        live_expiry={
-            (user_id, "shared-app"): utc_now(),
-            (None, "shared-app"): utc_now(),
-        },
         oauth_client_names={"shared-app": "Shared App"},
         name_matched_oauth_client_ids=frozenset({"shared-app"}),
     )

@@ -1397,16 +1397,6 @@ a.search-disambiguation-candidate:hover {
   background: var(--surface-hover);
 }
 
-.search-field-spinner {
-  animation: search-field-spin 800ms linear infinite;
-}
-
-@keyframes search-field-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (pointer: coarse) {
   .search-field {
     min-height: 44px;

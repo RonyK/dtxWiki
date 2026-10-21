@@ -1562,8 +1562,8 @@
 }
 
 .review-row-select input {
-  width: 16px;
-  height: 16px;
+  width: var(--checkbox-size);
+  height: var(--checkbox-size);
   margin: 0;
   accent-color: var(--review);
 }

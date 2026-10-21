@@ -72,6 +72,105 @@ function sectionOf(notices: string, title: string): string {
 
 const flat = (text: string) => text.replace(/\s+/g, " ").trim();
 
+describe("pinned upstream package notices", () => {
+  const licenseFile = "frontend/licenses/storybook-10.5.3.LICENSE";
+  const licenseText = readFileSync(path.join(REPO_ROOT, licenseFile), "utf-8").replaceAll("\r\n", "\n");
+  const source =
+    "https://github.com/storybookjs/storybook/blob/9ac273930a49ad33b6a331f1f36dc472f5c36054/LICENSE";
+  const packages = ["storybook", "@storybook/react", "@storybook/react-dom-shim"];
+  let scratch: string | undefined;
+
+  afterEach(() => {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+    scratch = undefined;
+  });
+
+  function packageFixture(overrides: Record<string, unknown> = {}) {
+    scratch = mkdtempSync(path.join(tmpdir(), "dtxwiki-upstream-license-"));
+    const root = path.join(scratch, "node_modules", "storybook");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({
+        name: "storybook",
+        version: "10.5.3",
+        license: "MIT",
+        repository: { url: "https://github.com/storybookjs/storybook.git" },
+        ...overrides,
+      }),
+    );
+    const copiedLicense = path.join(scratch, licenseFile);
+    mkdirSync(path.dirname(copiedLicense), { recursive: true });
+    writeFileSync(copiedLicense, licenseText);
+    return {
+      root,
+      copiedLicense,
+      emit: () =>
+        emitNotices(
+          { moduleIds: [path.join(root, "index.js")] },
+          { vendored: [], repoRoot: scratch },
+        ),
+    };
+  }
+
+  it.each(packages)("attributes the installed %s package to its exact upstream license", (name) => {
+    const module = resolveModule(`${name}/package.json`);
+    const notices = emitNotices({ moduleIds: [module] }, { vendored: [] });
+    const section = sectionOf(notices, `${name}@10.5.3`);
+    expect(section).toContain(`from ${source}; omitted by the npm package`);
+    expect(section).toContain(licenseText.trim());
+    expect(section).toContain("Copyright (c) 2024 Storybook");
+    expect(section).toContain("NON-INFRINGEMENT");
+    expect(section).not.toContain("reconstructed from package.json");
+  });
+
+  it("preserves the npm package's own license when it ships one", () => {
+    const fixture = packageFixture();
+    writeFileSync(path.join(fixture.root, "LICENSE"), "A license shipped by the package.");
+    rmSync(fixture.copiedLicense);
+    expect(fixture.emit()).toContain("A license shipped by the package.");
+    expect(fixture.emit()).not.toContain(source);
+  });
+
+  it.each([
+    { name: "unregistered-package" },
+    { version: "10.5.4" },
+  ])("rejects missing legal text for an unregistered package or version: %j", (metadata) => {
+    expect(packageFixture(metadata).emit).toThrow("bundled packages ship no license text");
+  });
+
+  it.each([
+    { license: "Apache-2.0" },
+    { repository: { url: "https://example.com/unrelated.git" } },
+  ])("rejects changed upstream metadata: %j", (metadata) => {
+    expect(packageFixture(metadata).emit).toThrow("metadata does not match its pinned upstream license");
+  });
+
+  it("rejects a missing copy of the pinned license", () => {
+    const fixture = packageFixture();
+    rmSync(fixture.copiedLicense);
+    expect(fixture.emit).toThrow("pinned upstream license is missing");
+  });
+
+  it("rejects modified upstream license text, even when it still reads as MIT", () => {
+    const fixture = packageFixture();
+    writeFileSync(fixture.copiedLicense, licenseText.replace("2024 Storybook", "2026 Someone"));
+    expect(fixture.emit).toThrow("pinned upstream license changed");
+  });
+
+  it("accepts the same pinned license in a Windows checkout", () => {
+    const fixture = packageFixture();
+    writeFileSync(fixture.copiedLicense, licenseText.replaceAll("\n", "\r\n"));
+    expect(fixture.emit()).toContain(licenseText.trim());
+  });
+
+  it("does not add Storybook notices when it is absent from the bundle", () => {
+    const notices = emitNotices({}, { vendored: [] });
+    expect(notices).not.toContain("Storybook");
+    expect(notices).not.toContain("storybook");
+  });
+});
+
 describe("vendored third-party notices", () => {
   it("emits the copied agent template's MIT notice and the PDF.js worker's embedded licenses", () => {
     const notices = emitNotices({ assets: [PDFJS_WORKER] });

@@ -1297,8 +1297,8 @@
   "mcpClients": {
     "filterLabel": "MCP client state",
     "filter": {
-      "active": "Active",
-      "disabled": "Deactivated",
+      "active": "Available",
+      "disabled": "Other states",
       "all": "All"
     },
     "loading": "Loading MCP clients…",
@@ -1487,10 +1487,10 @@
       "searchAria": "Filter workspaces",
       "searchClear": "Clear workspace filter",
       "searchPlaceholder": "Workspace name or slug",
-      "selectAllShown": "Select all shown",
-      "clearAll": "Clear all",
+      "selectAllShown": "Select this page",
+      "clearAll": "Clear all selections",
       "selectedCount": "selected",
-      "toggleAllAria": "Select or clear every shown workspace",
+      "toggleAllAria": "Select or clear this page",
       "defaultBadge": "Default",
       "membershipMissing": "No membership",
       "noMatches": "No workspace matches this search.",
@@ -1519,7 +1519,8 @@
     "oauthAppsIntroUrlClientId": "OAuth is available for MCP clients configured with an HTTPS URL client identifier. Automatic client self-registration is disabled on this server.",
     "oauthAppsIntroUnavailable": "OAuth-aware MCP clients normally connect here, but it is unavailable on this server (see above). Use an Access Key instead.",
     "oauthDetailsToggle": "Show OAuth details (unavailable on this server)",
-    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+    "useAccessKey": "Use an Access Key.",
+    "oauthUnavailable": "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server).",
     "pill": {
       "recommended": "Recommended",
       "unavailable": "Not configured",
@@ -1619,7 +1620,7 @@
       "template": "Template"
     },
     "setupCommandPlaceholder": "The setup command appears here once a key exists.",
-    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+    "oauthCapabilityUnknown": "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
     "oauthCapabilityRetry": "Try again"
   },
   "clipboard": {
@@ -1678,10 +1679,11 @@
     "connectionTiming": "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
     "noLiveExpiry": "no live token",
     "state": {
-      "active": "Active",
-      "expired": "Expired",
-      "revoked": "Revoked",
-      "disabled": "Deactivated"
+      "active": "Credential valid",
+      "expired": "Credential expired",
+      "revoked": "Credential revoked",
+      "disabled": "Use blocked",
+      "unknown": "Check credential status"
     }
   },
   "dangerZone": {
@@ -1853,5 +1855,42 @@
   },
   "commandBlock": {
     "copyFallback": "Copy {{label}}"
+  },
+  "workspacePicker": {
+    "selectedCount": "{{count}} selected",
+    "more": "{{count}} more",
+    "open": "View and select workspaces",
+    "apply": "Apply {{count}} selected",
+    "close": "Close",
+    "showAll": "Show all workspaces",
+    "showSelected": "Selected items ({{count}})",
+    "loading": "Loading workspaces…",
+    "loadError": "Could not load workspaces.",
+    "retry": "Retry",
+    "range": "{{start}}–{{end}} / {{total}}",
+    "previous": "Previous",
+    "next": "Next",
+    "search": "Workspace name or slug",
+    "clearSearch": "Clear workspace search",
+    "noMatches": "No matching workspace"
+  },
+  "mcpCard": {
+    "permissions": "Permissions",
+    "workspaces": "Allowed workspaces",
+    "details": "Key details",
+    "created": "Created",
+    "lastUsed": "Last used",
+    "expires": "Key expiry",
+    "noExpiry": "No key expiry",
+    "sessionExpiry": "Session expiry",
+    "expiryUnknown": "Expiry unavailable",
+    "reapprove": "Reauthorization required",
+    "cleanupTitle": "Connection history cleanup",
+    "cleanupBody": "Review expired or revoked connection records before cleaning them up.",
+    "cleanupPreview": "Review cleanup candidates",
+    "allowed": "Use allowed",
+    "blocked": "Use blocked",
+    "granted": "Granted",
+    "expiry": "Expiry"
   }
 }

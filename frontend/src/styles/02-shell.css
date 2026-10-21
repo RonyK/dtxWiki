@@ -952,16 +952,6 @@
   font-size: 0.92rem;
 }
 
-.route-loading-icon {
-  animation: dtx-spin 900ms linear infinite;
-}
-
-@keyframes dtx-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .page-workspace {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);

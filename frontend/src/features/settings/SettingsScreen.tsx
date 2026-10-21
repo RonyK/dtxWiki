@@ -104,6 +104,7 @@ import {
 } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
+import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { PaginatedCredentialList } from "../../shared/components/PaginatedCredentialList";
@@ -151,11 +152,12 @@ import { codePointLength, inputTextError, textInputLimit, trimShortText } from "
 import {
   WorkspaceScopeChips,
   WorkspaceScopePicker,
+  WorkspaceScopeSelector,
   type WorkspaceScopeOption,
 } from "../../shared/components/WorkspaceScopePicker";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useCursorPage } from "../../shared/hooks/useCursorPage";
-import { canWriteToClipboard, selectText } from "../../shared/lib/clipboard";
+import { writeTextToClipboard, selectText } from "../../shared/lib/clipboard";
 import { i18n, setLocale, translate } from "../../shared/i18n";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { humanizeEnum } from "../../shared/lib/domainLabel";
@@ -439,6 +441,8 @@ function SettingsScreenBody() {
   const [accessKeySearchDraft, setAccessKeySearchDraft] = useState("");
   const [cleanupCount, setCleanupCount] = useState<number | null>(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const cleanupTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [tokenName, setTokenName] = useState("MCP connection access key");
   const [tokenNameTouched, setTokenNameTouched] = useState(false);
   const [selectedScopes, setSelectedScopes] = useState<string[]>([
@@ -1669,6 +1673,7 @@ function SettingsScreenBody() {
   }
 
   async function requestConnectionCleanup() {
+    setCleanupError(null);
     setCleanupBusy(true);
     clearConsentError();
     try {
@@ -1682,6 +1687,7 @@ function SettingsScreenBody() {
   }
 
   async function confirmConnectionCleanup() {
+    setCleanupError(null);
     setCleanupBusy(true);
     clearConsentError();
     try {
@@ -1689,7 +1695,7 @@ function SettingsScreenBody() {
       await Promise.all([refreshConsents(), refreshPoliciesNow()]);
       setCleanupCount(null);
     } catch (caught) {
-      reportConsentError(caught);
+      setCleanupError(errorMessage(caught));
     } finally {
       setCleanupBusy(false);
     }
@@ -1852,33 +1858,12 @@ function SettingsScreenBody() {
     success: string;
     text: string;
   }) {
-    if (!canWriteToClipboard()) {
-      if (selectText(selectTarget)) {
-        setCopyStatus(t("clipboard.selected", { label, defaultValue: "{{label}} selected" }));
-      } else {
-        setCopyStatus(
-          t("clipboard.unavailable", {
-            label,
-            defaultValue: "Copy unavailable - select the {{label}} text instead",
-          }),
-        );
-      }
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await writeTextToClipboard(text)) {
       setCopyStatus(success);
-    } catch {
-      if (selectText(selectTarget)) {
-        setCopyStatus(t("clipboard.selected", { label, defaultValue: "{{label}} selected" }));
-      } else {
-        setCopyStatus(
-          t("clipboard.failed", {
-            label,
-            defaultValue: "Copy failed - select the {{label}} text instead",
-          }),
-        );
-      }
+    } else {
+      setCopyStatus(selectText(selectTarget)
+        ? t("clipboard.selected", { label, defaultValue: "{{label}} selected" })
+        : t("clipboard.failed", { label, defaultValue: "Copy failed - select the {{label}} text instead" }));
     }
   }
 
@@ -2156,12 +2141,21 @@ function SettingsScreenBody() {
             {oauthCapabilityUnknown
               ? t("access.oauthCapabilityUnknown", {
                   defaultValue:
-                    "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again, or use an Access Key below.",
+                    "This server's connection settings could not be read, so whether OAuth can be offered is unknown. Reload to try again.",
                 })
               : t("access.oauthUnavailable", {
                   defaultValue:
-                    "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server). Use an Access Key below instead.",
+                    "This server can't offer OAuth (it needs an https URL, and standards-compliant MCP clients refuse a non-https authorization server).",
                 })}
+          </p>
+          <p>
+            <a
+              className="inline-action mcp-access-key-link"
+              href="#mcp-key-setup"
+              onClick={() => mcpKeySetupHeadingRef.current?.focus({ preventScroll: true })}
+            >
+              {t("access.useAccessKey", { defaultValue: "Use an Access Key." })}
+            </a>
           </p>
           {serverOauthReason ? (
             <p className="feature-subtitle">{serverOauthReason}</p>
@@ -2273,32 +2267,6 @@ function SettingsScreenBody() {
           </div>
         </MaybeDisclosure>
       ) : null}
-      <div className="mcp-connection-controls">
-        {oauthConsentFilter === "active" && hiddenConnectionCount > 0 ? (
-          <CountChip
-            compact
-            label={t("connections.hidden", {
-              count: hiddenConnectionCount,
-              defaultValue_one: "expired or revoked connection hidden",
-              defaultValue_other: "expired or revoked connections hidden",
-            })}
-            value={hiddenConnectionCount}
-          />
-        ) : null}
-        <button
-          className="icon-button text-button"
-          disabled={cleanupBusy}
-          onClick={() => void requestConnectionCleanup()}
-          type="button"
-        >
-          <Trash2 size={15} aria-hidden="true" />
-          <span>
-            {t("connections.cleanup", {
-              defaultValue: "Clean up expired and revoked connections",
-            })}
-          </span>
-        </button>
-      </div>
       <div className="mcp-access-subsection">
         {/* Hand-rolled before, which dropped the `.panel-title` class the
             component adds. Revoking the last consent moves focus back here,
@@ -2467,14 +2435,11 @@ function SettingsScreenBody() {
                         <KeyRound size={16} aria-hidden="true" />
                       )}
                       <div className="oauth-consent-details">
-                        <strong>{presentation.label}</strong>
-                  <p>{consent.scope}</p>
-                  <p className="meta-line">
-                    {t("access.consentGrantedMeta", {
-                      defaultValue: "Granted {{granted}}",
-                      granted: formatDateTime(consent.granted_at),
-                    })}
-                  </p>
+                        <div className="mcp-credential-heading"><strong>{presentation.label}</strong><StatusPill compact status={oauthConsentConnectionState(consent)} /></div>
+                  <p className="meta-line">OAuth</p>
+                  <span className="mcp-field-label">{t("mcpCard.permissions")}</span>
+                  <div className="scope-chip-row">{consent.scope.split(/\s+/).filter(Boolean).map(scope => <span className="scope-chip" key={scope}>{scopeLabel(scope, t)}</span>)}</div>
+                  <span className="mcp-field-label">{t("mcpCard.workspaces")}</span>
                   <WorkspaceScopeChips
                     labels={workspaceChipLabels}
                     roleLabel={workspaceRoleLabel}
@@ -2483,16 +2448,10 @@ function SettingsScreenBody() {
                       title: workspace.title,
                       slug: workspace.slug,
                       role: workspace.membership_role,
+                      scopes: consent.scope.split(/\s+/).filter(Boolean),
                     }))}
                   />
-                  <p className="meta-line">
-                    {connectionTimingLabel(
-                      oauthConsentConnectionState(consent),
-                      consent.last_used_at,
-                      consent.next_expiry,
-                      t,
-                    )}
-                  </p>
+                  <McpCredentialTimes kind="oauth" state={oauthConsentConnectionState(consent)} lastUsed={consent.last_used_at} expiry={consent.next_expiry} grantedAt={consent.granted_at} />
                   <details className="oauth-consent-settings">
                     <summary
                       aria-label={t("access.sessionSettingsFor", {
@@ -2595,12 +2554,7 @@ function SettingsScreenBody() {
                       actions on the line below. Two sibling columns used to
                       stretch the chip to the button's height. */}
                   <div className="row-actions oauth-consent-actions">
-                    <div className="row-actions-status">
-                      <StatusPill
-                        compact
-                        status={oauthConsentConnectionState(consent)}
-                      />
-                    </div>
+
                     <div className="row-actions-buttons">
                       <button
                         aria-label={t("access.editWorkspacesFor", {
@@ -2660,6 +2614,33 @@ function SettingsScreenBody() {
               </div>
           </PaginatedCredentialList>
         )}
+      <div className="mcp-connection-controls">
+        <div><strong>{t("mcpCard.cleanupTitle")}</strong><p>{t("mcpCard.cleanupBody")}</p></div>
+        {oauthConsentFilter === "active" && hiddenConnectionCount > 0 ? (
+          <CountChip
+            compact
+            label={t("connections.hidden", {
+              count: hiddenConnectionCount,
+              defaultValue_one: "expired or revoked connection hidden",
+              defaultValue_other: "expired or revoked connections hidden",
+            })}
+            value={hiddenConnectionCount}
+          />
+        ) : null}
+        <button
+          className="icon-button text-button"
+          disabled={cleanupBusy}
+          ref={cleanupTriggerRef}
+          onClick={() => void requestConnectionCleanup()}
+          type="button"
+        >
+          <Trash2 size={15} aria-hidden="true" />
+          <span>
+            {t("mcpCard.cleanupPreview")}
+          </span>
+        </button>
+      </div>
+
       </div>
       </MaybeDisclosure>
       ) : (
@@ -3171,7 +3152,8 @@ function SettingsScreenBody() {
                       workspace: currentWorkspaceTitle,
                     })}
                   </span>
-                  <WorkspaceScopePicker
+                  <WorkspaceScopeSelector
+                    serverPaging
                     describedBy="mcp-key-workspace-scope-hint"
                     disabled={tokenBusy}
                     labels={workspaceScopePickerLabels}
@@ -3917,6 +3899,8 @@ function SettingsScreenBody() {
         <ConfirmConnectionCleanupModal
           busy={cleanupBusy}
           count={cleanupCount}
+          error={cleanupError}
+          restoreFocusFallback={() => cleanupTriggerRef.current}
           onCancel={() => setCleanupCount(null)}
           onConfirm={() => void confirmConnectionCleanup()}
         />
@@ -3974,46 +3958,15 @@ function CommandBlock({
 
   async function handleSelfCopy() {
     const node = snippetRef.current;
-    if (!canWriteToClipboard()) {
-      flashStatus(
-        selectText(node)
-          ? t("clipboard.selected", {
-              label: targetLabel,
-              defaultValue: "{{label}} selected",
-            })
-          : t("clipboard.unavailable", {
-              label: targetLabel,
-              defaultValue:
-                "Copy unavailable - select the {{label}} text instead",
-            }),
-        4000,
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(command);
-      flashStatus(
-        successMessage ??
-          t("clipboard.copied", {
-            label: targetLabel,
-            defaultValue: "{{label}} copied",
-          }),
-        1600,
-      );
-    } catch {
-      flashStatus(
-        selectText(node)
-          ? t("clipboard.selected", {
-              label: targetLabel,
-              defaultValue: "{{label}} selected",
-            })
-          : t("clipboard.failed", {
-              label: targetLabel,
-              defaultValue: "Copy failed - select the {{label}} text instead",
-            }),
-        4000,
-      );
-    }
+    const copied = await writeTextToClipboard(command);
+    flashStatus(
+      copied
+        ? successMessage ?? t("clipboard.copied", { label: targetLabel, defaultValue: "{{label}} copied" })
+        : selectText(node)
+          ? t("clipboard.selected", { label: targetLabel, defaultValue: "{{label}} selected" })
+          : t("clipboard.failed", { label: targetLabel, defaultValue: "Copy failed - select the {{label}} text instead" }),
+      copied ? 1600 : 4000,
+    );
   }
 
   const copyLabel =
@@ -4188,34 +4141,15 @@ function DeploymentSection() {
     );
   }
 
-  // The async clipboard API is missing in non-secure contexts (plain HTTP) -
-  // exactly the state this tab helps fix - so fall back to selecting the
-  // command text instead of failing silently.
   async function copyCommand(
     title: string,
     target: HTMLElement | null,
     feedbackKey = title,
   ) {
     const text = target?.textContent ?? "";
-    if (!text) {
-      return;
-    }
-    if (!canWriteToClipboard()) {
-      flashCopyFeedback(
-        feedbackKey,
-        selectText(target) ? "selected" : "unavailable",
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      flashCopyFeedback(feedbackKey, "copied");
-    } catch {
-      flashCopyFeedback(
-        feedbackKey,
-        selectText(target) ? "selected" : "unavailable",
-      );
-    }
+    if (!text) return;
+    const copied = await writeTextToClipboard(text);
+    flashCopyFeedback(feedbackKey, copied ? "copied" : selectText(target) ? "selected" : "unavailable");
   }
 
   function commandCopyLabel(title: string, feedbackKey = title) {
@@ -4996,7 +4930,9 @@ function McpKeyRow({
     }
   }, [isRenaming]);
   return (
-    <div className={`operations-row compact mcp-key-row ${inactive ? "is-disabled" : ""}`}>
+    <div
+      className={`operations-row compact mcp-key-row ${inactive ? "is-disabled" : ""}`}
+    >
       <KeyRound size={16} aria-hidden="true" />
       <div className="mcp-key-main">
         {isRenaming ? (
@@ -5034,69 +4970,42 @@ function McpKeyRow({
           </div>
         ) : (
           <div className="mcp-key-title">
-            <strong>{token.name}</strong>
-            {token.token_preview ? (
-              <code
-                className="mcp-key-preview"
-                title={t("keyRow.previewTitle", {
-                  defaultValue:
-                    "Starts with {{prefix}}. Match this with the access key copied when it was created.",
-                  prefix: token.token_preview,
-                })}
-              >
-                {tokenPreviewLabel(token)}
-              </code>
-            ) : (
-              <span
-                className="mcp-key-preview-unavailable"
-                title={t("keyRow.prefixNotSavedTitle", {
-                  defaultValue:
-                    "This key was created before prefix previews were stored.",
-                })}
-              >
-                {t("keyRow.prefixNotSaved", { defaultValue: "Prefix not saved" })}
-              </span>
-            )}
+            <div className="mcp-credential-heading">
+              <strong>{token.name}</strong>
+              <StatusPill status={status} compact />
+            </div>
+            <div className="mcp-key-identity">
+              <span>{mcpTokenClientLabel(token)}</span>
+              {token.token_preview ? (
+                <code
+                  className="mcp-key-preview"
+                  title={t("keyRow.previewTitle", {
+                    defaultValue:
+                      "Starts with {{prefix}}. Match this with the access key copied when it was created.",
+                    prefix: token.token_preview,
+                  })}
+                >
+                  {tokenPreviewLabel(token)}
+                </code>
+              ) : (
+                <span
+                  className="mcp-key-preview-unavailable"
+                  title={t("keyRow.prefixNotSavedTitle", {
+                    defaultValue:
+                      "This key was created before prefix previews were stored.",
+                  })}
+                >
+                  {t("keyRow.prefixNotSaved", {
+                    defaultValue: "Prefix not saved",
+                  })}
+                </span>
+              )}
+            </div>
           </div>
         )}
-        <div className="mcp-key-meta">
-          <span>
-            {t("keyRow.created", {
-              defaultValue: "Created {{date}}",
-              date: formatDateTime(token.created_at),
-            })}
-          </span>
-          <span>
-            {t("keyRow.lastUsed", {
-              defaultValue: "Last used {{date}}",
-              date: token.last_used_at ? formatDateTime(token.last_used_at) : never,
-            })}
-          </span>
-          <span>
-            {t("keyRow.expires", {
-              defaultValue: "Expires {{date}}",
-              date: token.expires_at ? formatDateTime(token.expires_at) : never,
-            })}
-          </span>
-          <span>
-            {t("keyRow.client", {
-              defaultValue: "Client {{client}}",
-              client: mcpTokenClientLabel(token),
-            })}
-          </span>
-          <span
-            className="mcp-key-internal-id"
-            title={t("keyRow.uuidTitle", {
-              defaultValue: "Internal token UUID: {{id}}",
-              id: token.id,
-            })}
-          >
-            {t("keyRow.uuid", {
-              defaultValue: "UUID {{id}}",
-              id: shortTokenId(token.id),
-            })}
-          </span>
-        </div>
+        <span className="mcp-field-label">
+          {t("mcpCard.permissions")}
+        </span>
         <div className="scope-chip-row">
           {token.scopes.map((scope) => (
             <span className="scope-chip" key={scope}>
@@ -5104,6 +5013,9 @@ function McpKeyRow({
             </span>
           ))}
         </div>
+        <span className="mcp-field-label">
+          {t("mcpCard.workspaces")}
+        </span>
         <WorkspaceScopeChips
           labels={chipLabels}
           roleLabel={roleLabel}
@@ -5116,11 +5028,34 @@ function McpKeyRow({
             syncState: workspace.sync_state,
           }))}
         />
+        <dl className="mcp-card-times">
+          <div>
+            <dt>{t("mcpCard.created")}</dt>
+            <dd>{formatDateTime(token.created_at)}</dd>
+          </div>
+          <div>
+            <dt>{t("mcpCard.lastUsed")}</dt>
+            <dd>
+              {token.last_used_at ? formatDateTime(token.last_used_at) : never}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("mcpCard.expires")}</dt>
+            <dd>
+              {token.expires_at
+                ? formatDateTime(token.expires_at)
+                : t("mcpCard.noExpiry")}
+            </dd>
+          </div>
+        </dl>
+        <details className="mcp-key-details">
+          <summary>{t("mcpCard.details")}</summary>
+          <p>
+            UUID <code>{token.id}</code>
+          </p>
+        </details>
       </div>
       <div className="row-actions mcp-key-actions">
-        <div className="row-actions-status">
-          <StatusPill status={status} compact />
-        </div>
         <div className="row-actions-buttons">
           {!inactive ? (
             <button
@@ -5135,7 +5070,9 @@ function McpKeyRow({
             >
               <Building2 size={15} aria-hidden="true" />
               <span>
-                {t("keyRow.editWorkspaces", { defaultValue: "Edit workspaces" })}
+                {t("keyRow.editWorkspaces", {
+                  defaultValue: "Edit workspaces",
+                })}
               </span>
             </button>
           ) : null}
@@ -5176,7 +5113,9 @@ function McpKeyRow({
               type="button"
             >
               <Trash2 size={15} aria-hidden="true" />
-              <span>{t("keyRow.deleteKey", { defaultValue: "Delete key" })}</span>
+              <span>
+                {t("keyRow.deleteKey", { defaultValue: "Delete key" })}
+              </span>
             </button>
           ) : null}
         </div>
@@ -5336,7 +5275,8 @@ function McpClientList({
               <div className="operations-row compact mcp-client-row" key={clientKey(client, index)}>
                 <KeyRound size={16} aria-hidden="true" />
                 <div>
-                  <strong>{clientName(client, index)}</strong>
+                  <div className="mcp-credential-heading"><strong>{clientName(client, index)}</strong><StatusPill status={connectionState} compact label={clientConnectionStateLabel(connectionState, t)} /></div>
+                  <p className="meta-line">{t(status === "active" ? "mcpCard.allowed" : "mcpCard.blocked")}</p>
                   <p>
                     {t("clientRow.scopes", {
                       defaultValue: "{{type}} · Scopes {{scopes}}",
@@ -5344,14 +5284,7 @@ function McpClientList({
                       scopes: clientScopesLabel(client, t),
                     })}
                   </p>
-                  <p className="meta-line">
-                    {connectionTimingLabel(
-                      connectionState,
-                      client.last_used_at,
-                      client.next_expiry,
-                      t,
-                    )}
-                  </p>
+                  <McpCredentialTimes kind={client.credential_kind === "pat" || client.credential_kind === "oauth" ? client.credential_kind : "unknown"} state={connectionState} lastUsed={client.last_used_at} expiry={client.next_expiry} />
                   <details className="mcp-client-details">
                     <summary>
                       {t("clientRow.viewDetails", { defaultValue: "View details" })}
@@ -5371,12 +5304,7 @@ function McpClientList({
                         </dt>
                         <dd>
                           {status === "active"
-                            ? t("mcpClients.filter.active", {
-                                defaultValue: "Active",
-                              })
-                            : t("mcpClients.filter.disabled", {
-                                defaultValue: "Deactivated",
-                              })}
+                            ? t("mcpCard.allowed") : t("mcpCard.blocked")}
                         </dd>
                       </div>
                       <div>
@@ -5397,9 +5325,7 @@ function McpClientList({
                   </details>
                 </div>
                 <div className="row-actions mcp-client-actions">
-                  <div className="row-actions-status">
-                    <StatusPill status={connectionState} compact />
-                  </div>
+
                   <div className="row-actions-buttons">
                   {canManage && active ? (
                     <button
@@ -6198,52 +6124,28 @@ function WorkspaceScopeEditModal({
     (id) => workspaces.find((option) => option.id === id)?.title ?? id,
   );
   return (
-    <ConfirmModalFrame
-      busy={busy}
+    <Dialog
+      className="workspace-picker-dialog"
+      dismissible={!busy}
       labelledBy="workspace-scope-modal-title"
-      onCancel={onCancel}
-    >
-      <div className="modal-panel workspace-scope-modal">
-        <h2 id="workspace-scope-modal-title">
-          {t("access.workspaceScope.editTitle", {
-            defaultValue: "Workspaces for {{subject}}",
-            subject: subjectLabel,
-          })}
-        </h2>
-        <p className="meta-line">
-          {t("access.workspaceScope.editIntro", {
-            defaultValue:
-              "This connection can reach exactly the workspaces checked below. Adding one lets the existing credential reach it without re-authenticating.",
-          })}
-        </p>
-        <WorkspaceScopePicker
-          autoFocusSearch
-          disabled={busy}
-          labels={labels}
-          onChange={onSelectionChange}
-          roleLabel={roleLabel}
-          selectedIds={selectedIds}
-          workspaces={workspaces}
-        />
-        <p className="meta-line workspace-scope-diff" role="status">
-          {added.length === 0 && removed.length === 0
-            ? t("access.workspaceScope.diffNone", {
-                defaultValue: "No change yet.",
-              })
-            : removed.length > 0
-              ? t("access.workspaceScope.diffWithRemovals", {
-                  defaultValue:
-                    "{{added}} added · {{removed}} removed ({{names}} — access stops immediately). Work already in progress is kept.",
-                  added: added.length,
-                  removed: removed.length,
-                  names: removedTitles.join(", "),
-                })
-              : t("access.workspaceScope.diffAddedOnly", {
-                  defaultValue: "{{added}} added · 0 removed.",
-                  added: added.length,
-                })}
-        </p>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      onClose={onCancel}
+      header={
+        <div className="workspace-picker-heading">
+          {" "}
+          <h2 id="workspace-scope-modal-title">
+            {t("access.workspaceScope.editTitle", {
+              defaultValue: "Workspaces for {{subject}}",
+              subject: subjectLabel,
+            })}
+          </h2>
+          <DialogCloseButton
+            disabled={busy}
+            label={t("workspacePicker.close")}
+            onClick={onCancel}
+          />
+        </div>
+      }
+      footer={
         <div className="modal-actions">
           <button
             className="icon-button"
@@ -6270,8 +6172,44 @@ function WorkspaceScopeEditModal({
                 })}
           </button>
         </div>
-      </div>
-    </ConfirmModalFrame>
+      }
+    >
+      <p className="meta-line">
+        {t("access.workspaceScope.editIntro", {
+          defaultValue:
+            "This connection can reach exactly the workspaces checked below. Adding one lets the existing credential reach it without re-authenticating.",
+        })}
+      </p>
+      <WorkspaceScopePicker
+        serverPaging
+        autoFocusSearch
+        disabled={busy}
+        labels={labels}
+        onChange={onSelectionChange}
+        roleLabel={roleLabel}
+        selectedIds={selectedIds}
+        workspaces={workspaces}
+      />
+      <p className="meta-line workspace-scope-diff" role="status">
+        {added.length === 0 && removed.length === 0
+          ? t("access.workspaceScope.diffNone", {
+              defaultValue: "No change yet.",
+            })
+          : removed.length > 0
+            ? t("access.workspaceScope.diffWithRemovals", {
+                defaultValue:
+                  "{{added}} added · {{removed}} removed ({{names}} — access stops immediately). Work already in progress is kept.",
+                added: added.length,
+                removed: removed.length,
+                names: removedTitles.join(", "),
+              })
+            : t("access.workspaceScope.diffAddedOnly", {
+                defaultValue: "{{added}} added · 0 removed.",
+                added: added.length,
+              })}
+      </p>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+    </Dialog>
   );
 }
 
@@ -6339,56 +6277,60 @@ function ConfirmRevokeModal({
 function ConfirmConnectionCleanupModal({
   busy,
   count,
+  error,
+  restoreFocusFallback,
   onCancel,
   onConfirm,
 }: {
   busy: boolean;
   count: number;
+  error: string | null;
+  restoreFocusFallback: () => HTMLElement | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation("settings");
   return (
-    <ConfirmModalFrame
-      busy={busy}
+    <Dialog
+      dismissible={!busy}
       labelledBy="connection-cleanup-modal-title"
-      onCancel={onCancel}
+      onClose={onCancel}
+      restoreFocusFallback={restoreFocusFallback}
     >
-      <div className="modal-panel">
-        <h2 id="connection-cleanup-modal-title">
-          {t("connections.cleanupTitle", {
-            defaultValue: "Clean up old connections",
-          })}
-        </h2>
-        <p>
-          {t("connections.cleanupBody", {
-            count,
-            defaultValue:
-              "Remove {{count}} expired or revoked consent records? MCP client identities and their traces stay in history.",
-          })}
-        </p>
-        <div className="modal-actions">
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={onCancel}
-            type="button"
-          >
-            {t("actions.cancel", { defaultValue: "Cancel" })}
-          </button>
-          <button
-            className="icon-button primary"
-            disabled={busy || count === 0}
-            onClick={onConfirm}
-            type="button"
-          >
-            {busy
-              ? t("connections.cleaning", { defaultValue: "Cleaning up…" })
-              : t("connections.cleanupConfirm", { defaultValue: "Clean up" })}
-          </button>
-        </div>
+      <h2 id="connection-cleanup-modal-title">
+        {t("connections.cleanupTitle", {
+          defaultValue: "Clean up old connections",
+        })}
+      </h2>
+      <p>
+        {t("connections.cleanupBody", {
+          count,
+          defaultValue:
+            "Remove {{count}} expired or revoked consent records? MCP client identities and their traces stay in history.",
+        })}
+      </p>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      <div className="modal-actions">
+        <button
+          className="icon-button"
+          disabled={busy}
+          onClick={onCancel}
+          type="button"
+        >
+          {t("actions.cancel", { defaultValue: "Cancel" })}
+        </button>
+        <button
+          className="icon-button primary"
+          disabled={busy || count === 0}
+          onClick={onConfirm}
+          type="button"
+        >
+          {busy
+            ? t("connections.cleaning", { defaultValue: "Cleaning up…" })
+            : t("connections.cleanupConfirm", { defaultValue: "Clean up" })}
+        </button>
       </div>
-    </ConfirmModalFrame>
+    </Dialog>
   );
 }
 
@@ -10436,24 +10378,29 @@ function oauthConsentConnectionState(consent: OAuthConsent): ConnectionState {
   return consent.connection_state ?? "active";
 }
 
-function mcpClientConnectionState(client: McpClientRecord): ConnectionState {
+function mcpClientConnectionState(
+  client: McpClientRecord,
+): ConnectionState | "unknown" {
   const derived = String(client.connection_state ?? "").toLowerCase();
   if (
     derived === "active" ||
     derived === "expired" ||
     derived === "revoked" ||
-    derived === "disabled"
+    derived === "disabled" ||
+    derived === "unknown"
   ) {
     return derived;
   }
-  return mcpClientStatus(client) === "active" ? "active" : "disabled";
+  return mcpClientStatus(client) === "disabled" ? "disabled" : "unknown";
 }
 
 function clientConnectionStateLabel(
-  state: ConnectionState,
+  state: ConnectionState | "unknown",
   t: TFunction<"settings">,
 ) {
   switch (state) {
+    case "unknown":
+      return t("clientRow.state.unknown");
     case "expired":
       return t("clientRow.state.expired", { defaultValue: "Expired" });
     case "revoked":
@@ -10472,21 +10419,52 @@ function connectionMatchesFilter(
   return filter === "all" || state === filter;
 }
 
-function connectionTimingLabel(
-  state: ConnectionState,
-  lastUsedAt: unknown,
-  nextExpiry: unknown,
-  t: TFunction,
-) {
-  const never = t("clientRow.never", { defaultValue: "never" });
-  const noExpiry = t("clientRow.noLiveExpiry", {
-    defaultValue: state === "active" ? "not set" : "no live token",
-  });
-  return t("clientRow.connectionTiming", {
-    defaultValue: "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
-    lastUsed: lastUsedAt ? formatDateTime(String(lastUsedAt)) : never,
-    nextExpiry: nextExpiry ? formatDateTime(String(nextExpiry)) : noExpiry,
-  });
+function McpCredentialTimes({
+  kind,
+  state,
+  lastUsed,
+  expiry,
+  grantedAt,
+}: {
+  kind: "pat" | "oauth" | "unknown";
+  state: ConnectionState | "unknown";
+  lastUsed: unknown;
+  expiry: unknown;
+  grantedAt?: string;
+}) {
+  const { t } = useTranslation("settings");
+  const expiryLabel =
+    kind === "pat"
+      ? "mcpCard.expires"
+      : kind === "oauth"
+        ? "mcpCard.sessionExpiry"
+        : "mcpCard.expiry";
+  const noExpiry =
+    kind === "pat"
+      ? t("mcpCard.noExpiry")
+      : kind === "unknown" || state === "unknown"
+        ? t("mcpCard.expiryUnknown")
+        : t("mcpCard.reapprove");
+  return (
+    <dl className="mcp-card-times">
+      {grantedAt ? (
+        <div>
+          <dt>{t("mcpCard.granted")}</dt>
+          <dd>{formatDateTime(grantedAt)}</dd>
+        </div>
+      ) : null}
+      <div>
+        <dt>{t("mcpCard.lastUsed")}</dt>
+        <dd>
+          {lastUsed ? formatDateTime(String(lastUsed)) : t("clientRow.never")}
+        </dd>
+      </div>
+      <div>
+        <dt>{t(expiryLabel)}</dt>
+        <dd>{expiry ? formatDateTime(String(expiry)) : noExpiry}</dd>
+      </div>
+    </dl>
+  );
 }
 
 function mcpClientId(client: McpClientRecord) {
@@ -10793,9 +10771,6 @@ export function uniqueTokenName(baseName: string, existingNames: string[]) {
   return trimmed;
 }
 
-function shortTokenId(tokenId: string) {
-  return tokenId.replace(/-/g, "").slice(0, 8);
-}
 
 function tokenPreviewFromPlain(token: string) {
   return token.slice(0, 9);

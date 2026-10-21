@@ -22,6 +22,7 @@ from backend.schemas.auth import (
     AuthLogoutResponse,
     AuthMeResponse,
     AuthSessionResponse,
+    CredentialWorkspacePage,
     EmailVerificationConfirmRequest,
     EmailVerificationResponse,
     LoginRequest,
@@ -647,6 +648,42 @@ def password_reset_status(
         return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
     return {"data": {"valid": True}}
+
+
+@router.get(
+    "/credential-workspaces",
+    response_model=CredentialWorkspacePage,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_credential_workspace_candidates(
+    request: Request,
+    session_service: SessionServiceDep,
+    session_factory: SessionFactoryDep,
+    q: Annotated[str, Query(max_length=128)] = "",
+    limit: Annotated[int, Query(ge=1, le=50)] = 8,
+    cursor: Annotated[str | None, Query(max_length=4096)] = None,
+):
+    from backend.services.credential_workspace_service import list_credential_workspaces
+
+    try:
+        user = current_session_user(request, session_service)
+        with session_factory() as session:
+            return list_credential_workspaces(
+                session,
+                user_id=user.user_id,
+                secret=request.app.state.settings.effective_session_secret,
+                query=q,
+                limit=limit,
+                cursor=cursor,
+            )
+    except SessionServiceError as exc:
+        return auth_error_response(exc)
+    except ValueError:
+        return build_rest_error_response(
+            status_code=422,
+            error_code="validation_failed",
+            message="Invalid workspace cursor",
+        )
 
 
 @router.get(

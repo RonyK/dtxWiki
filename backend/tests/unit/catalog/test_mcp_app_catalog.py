@@ -242,6 +242,26 @@ def test_planner_and_renderer_preserve_existing_cli_commands(
         assert artifacts[0].env == {"DTXWIKI_MCP_PAT": token}
 
 
+@pytest.mark.parametrize("url", ["http://192.168.1.10:21080/mcp", "http://[fd00::1]:21080/wiki/mcp"])
+def test_renderer_supports_private_http_only_for_access_keys(url):
+    repository = CatalogRepository()
+    planner = SetupPlanner(repository)
+    access_key = planner.plan_for_app(
+        app_id="codex", variant_id="codex-cli-access-key",
+        context=SetupContext(endpoint_reachability="private-network"),
+    )
+    rendered = SetupRenderer(repository).render(
+        access_key, mcp_url=url, shell="bash", access_token="dummy-key"
+    )
+    assert url in rendered[0].argv
+    oauth = planner.plan_for_app(
+        app_id="claude-code", variant_id="claude-code-cli-oauth",
+        context=SetupContext(endpoint_reachability="public-https"),
+    )
+    with pytest.raises(SetupRenderError, match="https://"):
+        SetupRenderer(repository).render(oauth, mcp_url=url, shell="bash")
+
+
 def test_official_oauth_cli_sequence_is_preserved_as_direct_argv():
     repository = CatalogRepository()
     context = SetupContext(endpoint_reachability="public-https")

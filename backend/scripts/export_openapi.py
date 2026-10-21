@@ -57,6 +57,7 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
     ("GET", "/api/v1/auth/me"),
     ("POST", "/api/v1/auth/password"),
     ("POST", "/api/v1/auth/email-verification/request"),
+    ("GET", "/api/v1/auth/credential-workspaces"),
     ("GET", "/api/v1/auth/tokens"),
     ("POST", "/api/v1/auth/tokens"),
     ("PATCH", "/api/v1/auth/tokens/{token_id}"),
