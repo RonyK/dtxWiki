@@ -26,7 +26,8 @@ from backend.models.workspace import MCPClient, Workspace
 from backend.services.mcp_chat_service import mcp_session_trace_uuid
 from backend.services.tree_service import ensure_primary_tree_placement
 
-USER_NAME = "Documentation Team Member With A Very Long Display Name"
+# As long as a display name may be (DISPLAY_NAME_MAX_LENGTH = 32).
+USER_NAME = "Documentation Reviewer Avery Kim"
 MCP_NAME = "Codex CLI — Product documentation workspace and integration verification"
 PAGE_TITLE = "Activity navigation and repeated reads guide"
 REVIEW_TITLE = "Activity UI changes awaiting review"
