@@ -933,7 +933,7 @@ describe("DashboardScreen", () => {
     expect(await screen.findByText("Recovered activity")).toBeInTheDocument();
   });
 
-  it.each([0, 1])("reconciles a permission-shrunken read group to %s visible events before a failed reload", async visibleCount => {
+  it.each([0, 1])("reconciles a permission-shrunken read group to %s visible events without reloading", async visibleCount => {
     let feedAttempts = 0;
     const grouped = dashboardReadGroup();
     const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/context?target=visible-page" } };
@@ -949,19 +949,29 @@ describe("DashboardScreen", () => {
     render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
     await screen.findByRole("link", { name: "Read Old private title 4 times" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument());
     expect(screen.getByText("Other visible activity")).toBeInTheDocument();
-    expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument();
     expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
     if (visibleCount) {
       expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/context?target=visible-page");
       expect(screen.getAllByText("2 entries · 2 original events")).toHaveLength(2);
     } else expect(screen.getAllByText("1 entry · 1 original event")).toHaveLength(2);
-    // Retrying the same failed reload must preserve these reconciled rows/counts.
-    await userEvent.click(screen.getByRole("button", { name: "Reload activity" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText("Other visible activity")).toBeInTheDocument();
-    expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument();
+    // The reconciled entry replaces the group in place; nothing re-fetches.
+    expect(feedAttempts).toBe(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("marks a lane count as a lower bound only when the server confirms more for that lane", async () => {
+    const feed = dashboardFeed([dashboardEntry("history", "History event")]);
+    feed.data.lanes.history.has_more = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      return jsonResponse(url === dashboardFeedUrl ? feed : dashboardResponse(url));
+    });
+    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    await screen.findByText("History event");
+    expect(document.querySelector('.metric-card[href^="/activity/history"] strong')).toHaveTextContent(/^1\+$/);
+    expect(document.querySelector('.metric-card[href^="/activity/advisory"] strong')).toHaveTextContent(/^0$/);
   });
 
   it("keeps loaded group counts and detail retry when an invalid token refresh also fails", async () => {

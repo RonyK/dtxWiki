@@ -9,10 +9,8 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
-import { ApiError } from "../../shared/api/client";
 import {
   getSettingsPolicies,
-  getActivityReadGroup,
   listActivityFeed,
   listRecentReviewDecisions,
   listReviews,
@@ -20,6 +18,7 @@ import {
 import type {
   ActivityFeedEntry,
   ActivityFeedData,
+  ActivityFeedEvent,
   ActivityPeriod,
   ReviewItem,
   SettingsPolicies,
@@ -42,6 +41,7 @@ import {
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
+import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { activityCountLabel, activityEntryCounts, activityHref, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
@@ -61,7 +61,6 @@ type DashboardState = {
   queryKey: string;
   activity: ActivityFeedEntry[];
   activityLaneCounts: ActivityFeedData["lanes"] | null;
-  activityHasMore: boolean;
   systemActivityCount: number;
   reviews: ReviewItem[];
   reviewsHasMore: boolean;
@@ -120,7 +119,6 @@ export function DashboardScreen() {
         queryKey,
         activity: activity.entries,
         activityLaneCounts: activity.lanes,
-        activityHasMore: activity.has_more,
         systemActivityCount: systemActivity.entries.length,
         reviews: reviews.items,
         // The pending count is fetched capped at limit:20; a next_cursor means
@@ -156,21 +154,10 @@ export function DashboardScreen() {
   const preview = workspaceActivity.slice(0, DASHBOARD_RECENT_DISPLAY_LIMIT);
   const previewCounts = activityEntryCounts(preview);
   const loadedCounts = activityEntryCounts(workspaceActivity);
-  const loadGroup = useCallback(async (token: string) => {
-    if (!state?.workspaceId) throw new Error("Workspace not found");
-    try {
-      const group = await getActivityReadGroup(state.workspaceId, token);
-      const prior = state.activity.find(entry => entry.group_token === token);
-      if (prior) {
-        setData(current => current?.queryKey === state.queryKey ? { ...current, activity: reconcileActivityReadGroup(current.activity, token, group.events) } : current);
-        if (prior.event_count !== group.events.length) reload();
-      }
-      return group.events;
-    } catch (error) {
-      if (error instanceof ApiError && error.body.error_code === "invalid_activity_token") reload();
-      throw error;
-    }
-  }, [state, reload, setData]);
+  const reconcileGroup = useCallback((token: string, events: ActivityFeedEvent[]) => {
+    setData(current => current?.queryKey === queryKey ? { ...current, activity: reconcileActivityReadGroup(current.activity, token, events) } : current);
+  }, [queryKey, setData]);
+  const loadGroup = useActivityGroupLoader(state?.workspaceId, reconcileGroup, reload);
   function updateGrouping(checked: boolean) {
     const next = new URLSearchParams(searchParams);
     next.set("group_reads", checked ? "1" : "0");
@@ -183,6 +170,10 @@ export function DashboardScreen() {
     !state?.setupProgress.library ||
     !state.setupProgress.context ||
     !state.setupProgress.review;
+  // A lane count reads as a lower bound only where the server confirmed more
+  // for that lane; a merely full window is described by the scope text.
+  const laneMoreSuffix = (lane: "advisory" | "history") =>
+    state?.activityLaneCounts?.[lane]?.has_more === true ? "+" : undefined;
   const lanes = (() => {
     // Pending reviews appear in the activity feed as one pending-lane row per
     // ReviewItem (carrying review_item_id); those rows are already counted via
@@ -214,7 +205,7 @@ export function DashboardScreen() {
         title: t("lanes.advisory", { defaultValue: "Advisory" }),
         description: t("lanes.advisoryHint", { defaultValue: "Needs attention" }),
         count: activityEntryCounts(advisory).represented_event_count,
-        countSuffix: undefined,
+        countSuffix: laneMoreSuffix("advisory"),
         href: activityHref(query, "advisory"),
         icon: iconForActivityLane("advisory"),
       },
@@ -223,7 +214,7 @@ export function DashboardScreen() {
         title: t("lanes.history", { defaultValue: "History" }),
         description: t("lanes.historyHint", { defaultValue: "Completed changes" }),
         count: activityEntryCounts(history).represented_event_count,
-        countSuffix: undefined,
+        countSuffix: laneMoreSuffix("history"),
         href: activityHref(query, "history"),
         icon: iconForActivityLane("history"),
       },

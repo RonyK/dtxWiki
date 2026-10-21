@@ -1758,6 +1758,8 @@ a.search-disambiguation-candidate:hover {
 .activity-action-badge[data-action="created"] { --activity-action-tone: #0f766e; }
 .activity-action-badge[data-action="published"] { --activity-action-tone: #166534; }
 .activity-action-badge[data-action="restored"] { --activity-action-tone: #7e22ce; }
+.activity-action-badge[data-action="deleted"] { --activity-action-tone: #9f1239; }
+.activity-action-badge[data-action="reviewed"] { --activity-action-tone: #0e7490; }
 .activity-action-badge[data-action="failed"] { --activity-action-tone: #b91c1c; }
 .activity-action-badge:is([data-action="pending"], [data-action="partial"], [data-action="accepted"]) { --activity-action-tone: #92400e; }
 .activity-entry__review-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; margin-top: 8px; }

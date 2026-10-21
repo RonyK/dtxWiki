@@ -19,6 +19,9 @@ describe("activity feed presenter", () => {
   it.each([["partial", "partial"], ["accepted", "accepted"], ["needs_review", "accepted"], ["unknown", "logged"], [null, "logged"]] as const)("preserves %s outcomes", (result_status, action) => {
     expect(activityAction(feedEvent({ result_status }))).toBe(action);
   });
+  it.each([["delete", "deleted"], ["review", "reviewed"], ["log", "logged"]] as const)("gives the %s operation its own badge", (operation, action) => {
+    expect(activityAction(feedEvent({ operation }))).toBe(action);
+  });
   it("uses a closed vocabulary and does not expose raw tool payloads or guessed hidden names", () => {
     const shown = presentActivityFeedEvent(feedEvent({ operation: "__proto__", tool_name: "feed.mcpOperations.edit", result_status: "constructor", target_title: "Hidden title" }));
     expect(shown.title).toBe("MCP tool execution record");

@@ -125,12 +125,22 @@ describe("ActivityScreen", () => {
     expect(screen.queryByText("Signed in")).not.toBeInTheDocument();
   });
 
+  it("marks a lane card as a lower bound only from that lane's server has_more", async () => {
+    const body = data([entry(event("history", "History event"))]);
+    body.data.lanes.history.has_more = true;
+    show({ [feedUrl()]: body });
+    await screen.findByText("History event");
+    expect(document.querySelector('.metric-card[href^="/activity/history"] strong')).toHaveTextContent(/^1\+$/);
+    expect(document.querySelector('.metric-card[href^="/activity/advisory"] strong')).toHaveTextContent(/^0$/);
+  });
   it("defaults to All and renders both workspace and system events", async () => {
     show({ [feedUrl()]: data([entry(event("draft", "Draft created")), entry(event("auth", "auth.session.created", { body: "auth.session.created" }))]) });
     expect(await screen.findByText("Draft created")).toBeInTheDocument();
     expect(screen.getByText("Signed in")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Repeated reads grouped")).toBeInTheDocument();
+    expect(screen.queryByText("Filtered")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
   });
 
   it("refetches a selected subtype from the server and renders that explicit response", async () => {
@@ -402,7 +412,7 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
     expect(await screen.findByText("Recovered activity")).toBeInTheDocument();
   });
 
-  it.each([0, 1])("reconciles %s visible read-group members before reload failure and keeps other loaded activity", async visibleCount => {
+  it.each([0, 1])("reconciles %s visible read-group members in place without re-snapshotting the feed", async visibleCount => {
     const grouped = entry(event("group", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "old-page", title: "Old private title", href: "/context?target=old-page" } }), 4);
     const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/context?target=visible-page" } };
     let feedAttempts = 0;
@@ -418,18 +428,16 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
     renderRoute();
     await screen.findByRole("link", { name: "Read Old private title 4 times" });
     await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument());
     expect(screen.getByText("Other visible activity")).toBeInTheDocument();
-    expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument();
     expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
     if (visibleCount) {
       expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/context?target=visible-page");
       expect(screen.getAllByText("2 entries · 2 original events").length).toBeGreaterThan(0);
     } else expect(screen.getAllByText("1 entry · 1 original event").length).toBeGreaterThan(0);
-    await userEvent.click(screen.getByRole("button", { name: "Reload activity" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText("Other visible activity")).toBeInTheDocument();
-    expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument();
+    // A re-snapshot would collapse the opened group and drop loaded pages.
+    expect(feedAttempts).toBe(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("keeps the loaded group and counts when an invalid token is followed by a failed reload", async () => {
     const grouped = entry(event("group", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "page-1", title: "Known guide", href: "/context?target=page-1" } }), 4);

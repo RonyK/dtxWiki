@@ -199,6 +199,8 @@
       "created": "Created",
       "published": "Published",
       "restored": "Restored",
+      "deleted": "Deleted",
+      "reviewed": "Reviewed",
       "failed": "Failed",
       "partial": "Partially completed",
       "accepted": "Accepted"

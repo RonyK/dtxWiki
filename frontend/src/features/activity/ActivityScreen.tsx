@@ -5,10 +5,11 @@ import { useTranslation } from "react-i18next";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
-import { getActivityReadGroup, listActivityFeed } from "../../shared/api/operations";
+import { listActivityFeed } from "../../shared/api/operations";
 import type {
   ActivityFeedData,
   ActivityFeedEntry,
+  ActivityFeedEvent,
   ActivityLane,
   ActivityPeriod,
 } from "../../shared/api/operations";
@@ -20,13 +21,15 @@ import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { ACTIVITY_SUBTYPES } from "../../shared/lib/activityLabels";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import {
   DEFAULT_ACTIVITY_QUERY, activityCountLabel, activityEntryCounts,
-  activityHref, activityQueryParams, parseActivityQuery, reconcileActivityReadGroup, type ActivityQuery,
+  activityHref, activityQueryParams, parseActivityQuery, reconcileActivityReadGroup,
+  type ActivityGroupLoader, type ActivityQuery,
 } from "../../shared/lib/activityFeed";
 import { iconForActivityLane } from "../../shared/lib/activityLanes";
 const PERIODS: ActivityPeriod[] = ["today", "yesterday", "week", "month", "all"];
@@ -68,28 +71,18 @@ function useFeed(query: ActivityQuery, lane?: ActivityLane) {
     signalAware: true,
     errorMessage: t("errors.load", { defaultValue: "Failed to load Activity" }),
   });
-  return { ...result, queryKey };
+  const { setData } = result;
+  const reconcile = useCallback((token: string, events: ActivityFeedEvent[]) => {
+    setData(current => current?.queryKey === queryKey ? reconcileFeedGroup(current, token, events) : current);
+  }, [queryKey, setData]);
+  const loadGroup = useActivityGroupLoader(result.data?.workspaceId, reconcile, result.reload);
+  return { ...result, queryKey, loadGroup };
 }
 
 export function ActivityScreen() {
   const { t } = useTranslation("activity");
   const { query, update, reset } = useActivityQuery();
-  const { data, error, loading, setData, reload, queryKey } = useFeed(query);
-  const loadGroup = useCallback(async (token: string) => {
-    if (!data?.workspaceId) throw new Error("Workspace not found");
-    try {
-      const group = await getActivityReadGroup(data.workspaceId, token);
-      const prior = data.feed.entries.find(entry => entry.group_token === token);
-      if (prior) {
-        setData(current => current?.queryKey === data.queryKey ? reconcileFeedGroup(current, token, group.events) : current);
-        if (prior.event_count !== group.events.length) reload();
-      }
-      return group.events;
-    } catch (error) {
-      if (error instanceof ApiError && error.body.error_code === "invalid_activity_token") reload();
-      throw error;
-    }
-  }, [data, reload, setData]);
+  const { data, error, loading, reload, queryKey, loadGroup } = useFeed(query);
   if (!data || data.queryKey !== queryKey) {
     if (error && !loading) return <ActivityLoadError error={error} reload={reload} />;
     return <RouteLoading />;
@@ -122,7 +115,11 @@ export function ActivityScreen() {
             {LANES.map(({ lane, title, tone }) => (
               <Link className="metric-card linked" key={lane} to={activityHref(query, lane)}>
                 <div className="metric-card-title">{iconForActivityLane(lane)}<span>{t(`lanes.${lane}.title`, { defaultValue: title })}</span></div>
-                <strong>{data.feed.lanes[lane]?.represented_event_count ?? activityEntryCounts(grouped.get(lane) ?? []).represented_event_count}</strong>
+                <strong>
+                  {data.feed.lanes[lane]?.represented_event_count ?? activityEntryCounts(grouped.get(lane) ?? []).represented_event_count}
+                  {/* A lower bound only where the server confirmed more for this lane. */}
+                  {data.feed.lanes[lane]?.has_more === true ? "+" : ""}
+                </strong>
                 <p>{t(`lanes.${lane}.tone`, { defaultValue: tone })}</p>
                 <p className="activity-feed-scope">{t("feed.scope", { defaultValue: "Current query range" })}</p>
               </Link>
@@ -357,26 +354,28 @@ function ActivityFilterSummary({
   if (period !== "all") {
     chips.push(periodLabel(period, t));
   }
+  // The grouping mode is always named, even on the default view, but only a
+  // view that differs from the defaults is labelled "Filtered" and offers Reset.
+  const filtered = chips.length > 0 || !groupReads;
   chips.push(t(groupReads ? "feed.grouped" : "feed.raw"));
-  // No active filters means no chips and no Reset: rendering the bare
-  // "Filtered" eyebrow over nothing would mislabel the default view.
-  if (chips.length === 0) {
-    return null;
-  }
   return (
     <div className="activity-filter-summary">
-      <span className="activity-filter-summary-label">
-        {t("filterSummary.label", { defaultValue: "Filtered" })}
-      </span>
+      {filtered ? (
+        <span className="activity-filter-summary-label">
+          {t("filterSummary.label", { defaultValue: "Filtered" })}
+        </span>
+      ) : null}
       {chips.map((chip) => (
         <span className="activity-filter-chip" key={chip}>
           {chip}
         </span>
       ))}
-      <button className="activity-filter-reset" onClick={onReset} type="button">
-        <RotateCcw size={13} aria-hidden="true" />
-        <span>{t("filterSummary.reset", { defaultValue: "Reset" })}</span>
-      </button>
+      {filtered ? (
+        <button className="activity-filter-reset" onClick={onReset} type="button">
+          <RotateCcw size={13} aria-hidden="true" />
+          <span>{t("filterSummary.reset", { defaultValue: "Reset" })}</span>
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -462,7 +461,7 @@ const LANE_PREVIEW_LIMIT = 5;
 
 function ActivityLaneSection({ query, lane, title, entries, loadGroup }: {
   query: ActivityQuery; lane: ActivityLane; title: string; entries: ActivityFeedEntry[];
-  loadGroup: (token: string) => Promise<Awaited<ReturnType<typeof getActivityReadGroup>>["events"]>;
+  loadGroup: ActivityGroupLoader;
 }) {
   const { t } = useTranslation("activity");
   const preview = entries.slice(0, LANE_PREVIEW_LIMIT);
@@ -485,28 +484,13 @@ export function ActivityLanePage() {
   const { lane: laneParam } = useParams();
   const lane = parseLane(laneParam);
   const { query, update, reset } = useActivityQuery();
-  const { data, error, loading, setData, setError, reload, queryKey } = useFeed(query, lane ?? undefined);
+  const { data, error, loading, setData, setError, reload, queryKey, loadGroup } = useFeed(query, lane ?? undefined);
   const [loadingMore, setLoadingMore] = useState(false);
   const moreController = useRef<AbortController | null>(null);
   useEffect(() => {
     setLoadingMore(false);
     return () => { moreController.current?.abort(); moreController.current = null; };
   }, [queryKey]);
-  const loadGroup = useCallback(async (token: string) => {
-    if (!data?.workspaceId) throw new Error("Workspace not found");
-    try {
-      const group = await getActivityReadGroup(data.workspaceId, token);
-      const prior = data.feed.entries.find(entry => entry.group_token === token);
-      if (prior) {
-        setData(current => current?.queryKey === data.queryKey ? reconcileFeedGroup(current, token, group.events) : current);
-        if (prior.event_count !== group.events.length) reload();
-      }
-      return group.events;
-    } catch (error) {
-      if (error instanceof ApiError && error.body.error_code === "invalid_activity_token") reload();
-      throw error;
-    }
-  }, [data, reload, setData]);
   async function loadMore() {
     if (!lane || !data?.workspaceId || data.queryKey !== queryKey || !data.feed.next_cursor || loadingMore) return;
     const controller = new AbortController();
@@ -554,7 +538,7 @@ export function ActivityLanePage() {
   </section></div>;
 }
 
-function reconcileFeedGroup(current: FeedScreenState, token: string, events: Awaited<ReturnType<typeof getActivityReadGroup>>["events"]): FeedScreenState {
+function reconcileFeedGroup(current: FeedScreenState, token: string, events: ActivityFeedEvent[]): FeedScreenState {
   const entries = reconcileActivityReadGroup(current.feed.entries, token, events);
   const lanes = { ...current.feed.lanes };
   for (const { lane } of LANES) {

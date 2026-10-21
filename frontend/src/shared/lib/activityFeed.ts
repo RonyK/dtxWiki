@@ -11,7 +11,7 @@ export type ActivityQuery = {
   group_reads: boolean;
 };
 export type ActivityGroupLoader = (token: string) => Promise<ActivityFeedEvent[]>;
-export type ActivityAction = "edited" | "read" | "search" | "logged" | "created" | "published" | "restored" | "failed" | "partial" | "accepted";
+export type ActivityAction = "edited" | "read" | "search" | "logged" | "created" | "published" | "restored" | "deleted" | "reviewed" | "failed" | "partial" | "accepted";
 
 const PERIODS: readonly string[] = ["today", "yesterday", "week", "month", "all"];
 const KINDS: readonly string[] = ["all", "workspace", "mcp", "system"];
@@ -48,6 +48,7 @@ export function activityCountLabel(entryCount: number, eventCount: number): stri
 
 const ACTION_BY_OPERATION: Record<string, ActivityAction> = {
   read: "read", search: "search", edit: "edited", create: "created", publish: "published", restore: "restored",
+  delete: "deleted", review: "reviewed",
 };
 export function isMcpExecution(event: ActivityFeedEvent): boolean {
   return event.target?.target_kind === "mcp_tool_call" || Boolean(event.tool_name);

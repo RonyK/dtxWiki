@@ -199,6 +199,8 @@
       "created": "생성됨",
       "published": "게시됨",
       "restored": "복원됨",
+      "deleted": "삭제됨",
+      "reviewed": "검토됨",
       "failed": "실패",
       "partial": "일부 처리",
       "accepted": "접수됨"
