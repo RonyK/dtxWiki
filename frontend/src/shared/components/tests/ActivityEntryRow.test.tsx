@@ -112,16 +112,23 @@ describe("shared activity entry", () => {
     fireEvent.pointerEnter(actor, { pointerType: "mouse" });
     expect(screen.getByRole("dialog")).toBeVisible();
 
-    await user.keyboard("{Escape}");
-    expect(actor).toHaveFocus();
+    // A hover preview yields Escape to the focused control: IME composition
+    // keeps it open, and dismissal neither moves focus nor cancels the key.
+    const title = screen.getByRole("link", { name: "Read Guide" });
+    expect(title).toHaveFocus();
+    fireEvent.keyDown(title, { key: "Escape", isComposing: true });
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(fireEvent.keyDown(title, { key: "Escape" })).toBe(true);
+    expect(title).toHaveFocus();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.pointerEnter(actor, { pointerType: "mouse" });
+    fireEvent.pointerMove(actor, { pointerType: "mouse" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.pointerLeave(actor, { pointerType: "mouse" });
+    // Moving anywhere else releases the hold without a leave from the chip.
+    fireEvent.pointerMove(document.body, { pointerType: "mouse" });
     fireEvent.pointerEnter(actor, { pointerType: "mouse" });
     expect(screen.getByRole("dialog")).toBeVisible();
 
-    await user.tab();
     await user.tab({ shift: true });
     expect(actor).toHaveFocus();
     expect(screen.getByRole("dialog")).toBeVisible();

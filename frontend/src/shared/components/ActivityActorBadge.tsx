@@ -15,6 +15,7 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
   const suppressFocusPreview = useRef(false);
   const suppressPointerPreview = useRef(false);
   const focusPopoverOnOpen = useRef(false);
+  const releasePointer = useRef<(() => void) | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mode, setMode] = useState<"closed" | "preview" | "pinned">("closed");
   const [position, setPosition] = useState({ left: 12, top: 12 });
@@ -28,15 +29,30 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
     ? actor.credential_owner_display_name
     : null;
   const fullName = owner ? `${owner} · ${name}` : name;
-  const closeAndReturnFocus = useCallback(() => {
-    // WebKit can deliver focus and pointer entry after focus() returns and
-    // scrolls this chip under a stationary pointer. Keep both previews
-    // dismissed until focus or the pointer actually leaves the trigger.
-    suppressFocusPreview.current = true;
+  const suppressPointer = useCallback(() => {
+    // WebKit can retarget a stationary pointer onto this chip after a
+    // dismissal scrolls it, so hold the hover preview until the pointer moves
+    // somewhere else rather than until it leaves a chip it may never have
+    // been over.
     suppressPointerPreview.current = true;
+    if (releasePointer.current) return;
+    const release = (event: PointerEvent) => {
+      if (trigger.current?.contains(event.target as Node)) return;
+      suppressPointerPreview.current = false;
+      document.removeEventListener("pointermove", release);
+      releasePointer.current = null;
+    };
+    document.addEventListener("pointermove", release);
+    releasePointer.current = () => document.removeEventListener("pointermove", release);
+  }, []);
+  const closeAndReturnFocus = useCallback(() => {
+    // WebKit can deliver focus after focus() returns; keep the focus preview
+    // dismissed until focus actually leaves the trigger.
+    suppressFocusPreview.current = true;
+    suppressPointer();
     setMode("closed");
     trigger.current?.focus();
-  }, []);
+  }, [suppressPointer]);
 
   useLayoutEffect(() => {
     if (!open || !trigger.current || !popover.current) return;
@@ -69,7 +85,16 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
       }
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
+      const focused = document.activeElement;
+      if (focused && focused !== document.body
+        && !trigger.current?.contains(focused) && !popover.current?.contains(focused)) {
+        // A hover preview over another control's focus: dismiss it, but leave
+        // focus and that control's own Escape handling where the user is.
+        suppressPointer();
+        setMode("closed");
+        return;
+      }
       event.preventDefault();
       closeAndReturnFocus();
     };
@@ -79,9 +104,12 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
       document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("keydown", escape);
     };
-  }, [open, closeAndReturnFocus]);
+  }, [open, closeAndReturnFocus, suppressPointer]);
 
-  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    releasePointer.current?.();
+  }, []);
   const keepOpen = () => { if (closeTimer.current) clearTimeout(closeTimer.current); };
   const leave = () => {
     keepOpen();
