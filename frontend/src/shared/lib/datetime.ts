@@ -110,14 +110,15 @@ export function formatDisplayDate(
 export function formatRelativeTimestamp(
   value: string | null | undefined,
   locale: string,
+  options?: { now?: number; alwaysRelative?: boolean },
 ): string {
   const date = parseDate(value);
   if (!date) {
     return "—";
   }
-  const diffMs = date.getTime() - Date.now();
+  const diffMs = date.getTime() - (options?.now ?? Date.now());
   const absDays = Math.abs(diffMs) / 86_400_000;
-  if (absDays < 7 && typeof Intl.RelativeTimeFormat === "function") {
+  if ((absDays < 7 || options?.alwaysRelative) && typeof Intl.RelativeTimeFormat === "function") {
     const [amount, unit] = bestRelativeUnit(diffMs);
     return relativeFormatterFor(locale).format(amount, unit);
   }

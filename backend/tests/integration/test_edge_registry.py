@@ -67,6 +67,8 @@ _GRAPH_FK_TARGET_TABLES = {
     "workspace_tree_node",
 }
 _NON_EDGE_RELATION_SOURCES = {
+    # A personal preference is not a shared knowledge-graph relationship.
+    "user_favorite.target_kind+target_id",
     # Mutable head pointers and rebuildable lookup/index rows are storage
     # mechanics, not knowledge edges.
     "agent_page.current_active_version_id->agent_page_version.id",

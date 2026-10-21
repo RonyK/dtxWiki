@@ -109,6 +109,10 @@ class TreeNodePayload(TreePathEntry):
     target_kind: str | None = None
     target_id: UUID | None = None
     target_meta: dict[str, str] = Field(default_factory=dict)
+    content_changed_at: datetime | None = None
+    review_status: Literal["pending", "changes_requested"] | None = None
+    review_requested_at: datetime | None = None
+    is_favorite: bool = False
     is_system_node: bool
     can_have_children: bool
     primary_placement: bool

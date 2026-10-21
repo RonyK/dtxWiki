@@ -96,6 +96,7 @@ import {
   type ResilientUploadQueueStatus,
 } from "../../shared/media/uploadQueue";
 import { isEditorRole } from "../../shared/workspace/permissions";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { ArtifactChatsSection } from "../mcp-chats/ArtifactChatsSection";
 import { LibrarySemanticMarkdownEditor } from "./LibrarySemanticMarkdownEditor";
@@ -139,6 +140,7 @@ const LIBRARY_NEW_ITEM_TYPE_ORDER: readonly NewItemType[] = [
 export function LibraryScreen() {
   const { t } = useTranslation("library");
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
+  const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
@@ -1047,6 +1049,7 @@ export function LibraryScreen() {
           onExpandWidth,
         }) => (
           <TreeRail
+            favoriteScope={auth?.user && state.workspaceId ? { actorId: auth.user.user_id, workspaceId: state.workspaceId } : undefined}
             title={t("libraryName")}
             accent="library"
             nodes={libraryTree}

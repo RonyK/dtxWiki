@@ -1875,10 +1875,128 @@
 }
 
 .tree-row-state-dot {
+  position: relative;
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border-radius: 999px;
+  color: var(--tree-document-state-color);
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.tree-row-state-dot[data-target-group="context"] {
+  --tree-document-state-color: var(--lifecycle-context);
+}
+
+.tree-row-state-dot[data-target-group="library"] {
+  --tree-document-state-color: var(--lifecycle-library);
+}
+
+.tree-row-state-dot[data-target-group="agent"] {
+  --tree-document-state-color: var(--lifecycle-agent);
+}
+
+.tree-row-state-recent {
+  background: currentColor;
+}
+
+/* Artifact and legacy references retain their existing type-only filled dot. */
+.tree-row-state-dot:not([data-document-state]) {
+  border: 0;
+  background: currentColor;
+}
+
+.tree-row-state-review {
+  border: 0;
+}
+
+.tree-row-review-clock {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  left: 0;
+  top: 0;
+  /* WebKit drops the top raster row at fractional positions with SVG clipping. */
+  overflow: visible;
+}
+
+.tree-row-document-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.tree-row > .tree-row-description {
+  position: absolute;
+}
+
+.tree-row-favorite {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  fill: var(--tree-favorite-fill);
+  stroke: var(--tree-favorite-edge);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 1px var(--tree-row-action-surface)) drop-shadow(0 0 1px var(--tree-row-action-surface));
+  pointer-events: none;
+}
+
+.tree-row-tooltip {
+  position: fixed;
+  z-index: 80;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  max-width: min(320px, calc(100vw - 16px));
+  pointer-events: auto;
+}
+
+.tree-row-tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  max-height: calc(100dvh - 18px);
+  overflow-y: auto;
+}
+
+/* The transparent hit area joins the row and popup without a hover timeout.
+ * Keep it outside the scrolling surface so the six-pixel gap is enterable. */
+.tree-row-tooltip::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: 100%;
+  height: 7px;
+}
+
+.tree-row-tooltip[data-placement^="top"]::before {
+  top: 100%;
+  bottom: auto;
+}
+
+body:has(.tree-node-menu) .tree-row-tooltip {
+  display: none;
+}
+
+.tree-node-menu-summary {
+  max-width: 280px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .tree-row-system-badge {
