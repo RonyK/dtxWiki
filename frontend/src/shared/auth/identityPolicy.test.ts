@@ -8,9 +8,12 @@ describe("account input units and normalization", () => {
     expect(() => normalizeAccountName("😀".repeat(33))).toThrow();
     expect(() => validateAccountPassword("😀".repeat(128), true)).not.toThrow();
     expect(() => validateAccountPassword("😀".repeat(129))).toThrow();
-    expect(() => validateAccountPassword("x".repeat(14), true)).toThrow();
-    expect(() => validateAccountPassword("x".repeat(15), true)).not.toThrow();
-    expect(() => validateAccountPassword(" ".repeat(15), true)).not.toThrow();
+    expect(() => validateAccountPassword("x")).not.toThrow();
+    expect(() => validateAccountPassword("😀".repeat(7), true)).toThrow();
+    expect(() => validateAccountPassword("😀".repeat(8), true)).not.toThrow();
+    expect(() => validateAccountPassword("x".repeat(7), true)).toThrow();
+    expect(() => validateAccountPassword("x".repeat(8), true)).not.toThrow();
+    expect(() => validateAccountPassword(" ".repeat(8), true)).not.toThrow();
   });
 
   it("uses UTF-8 bytes after lowercasing for every email input", () => {

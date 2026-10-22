@@ -83,7 +83,7 @@ then connect an AI tool through **Settings > Integrations** when you want help.
 
 Account display names accept 1–32 Unicode code points. Email addresses allow up
 to 254 UTF-8 bytes in total, including at most 64 bytes before `@`. New passwords
-must contain 15–128 Unicode code points. These limits apply to the web app, API,
+must contain 8–128 Unicode code points. These limits apply to the web app, API,
 and CLI; explicit values over the limit are rejected rather than shortened.
 
 **[Open the documentation →](http://docs.dtxwiki.com/)** for installation details,

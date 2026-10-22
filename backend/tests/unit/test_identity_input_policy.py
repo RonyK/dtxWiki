@@ -69,9 +69,12 @@ def test_email_rejects_one_address_contract_violations():
 def test_password_preserves_exact_secret_and_rejects_maximum_without_exception():
     assert validate_password("😀" * 128, new=True) == "😀" * 128
     assert validate_password("   exact secret   ", new=True) == "   exact secret   "
+    assert validate_password("a" * 8, new=True) == "a" * 8
+    assert validate_password("😀" * 8, new=True) == "😀" * 8
+    assert validate_password(" " * 8, new=True) == " " * 8
     assert validate_password("x") == "x"
     for value, is_new in [
-        ("a" * 14, True),
+        ("a" * 7, True),
         ("a" * 129, False),
         ("\ud800", False),
     ]:
@@ -93,11 +96,11 @@ def test_signup_and_cli_service_reject_before_database_or_kdf():
         signup_enabled=True,
     )
     admin = UserAdminService(session_factory=factory, credential_hasher=hasher)
-    valid = {"email": "a@b", "password": "a" * 15, "display_name": "Alice"}
+    valid = {"email": "a@b", "password": "a" * 8, "display_name": "Alice"}
     for overrides, error in (
         ({"display_name": "a" * 33}, DisplayNameInputPolicyError),
         ({"email": "a" * 65 + "@b"}, EmailInputPolicyError),
-        ({"password": "a" * 14}, PasswordPolicyError),
+        ({"password": "a" * 7}, PasswordPolicyError),
     ):
         for service in (signup.signup, admin.add_user):
             with pytest.raises(error):
@@ -125,7 +128,7 @@ def test_password_specific_helpers_and_login_reject_before_verification():
 def test_request_schema_uses_normalized_name_and_email_byte_contract():
     request = SignupRequest(
         email=" 한글@EXAMPLE.COM ",
-        password="x" * 15,
+        password="x" * 8,
         display_name=" " + "😀" * 32 + " ",
     )
     assert request.email == "한글@example.com"

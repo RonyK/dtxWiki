@@ -26,7 +26,7 @@ export function normalizeAccountName(value: string): string | undefined {
 
 export function validateAccountPassword(value: string, isNew = false): void {
   const length = Array.from(value).length;
-  if (INVALID_SCALAR.test(value) || length < (isNew ? 15 : 1) || length > 128) {
+  if (INVALID_SCALAR.test(value) || length < (isNew ? 8 : 1) || length > 128) {
     throw new Error(isNew ? "validation.passwordNew" : "validation.passwordCurrent");
   }
 }

@@ -357,7 +357,7 @@ def test_consume_is_single_use_revokes_sessions_and_keeps_api_tokens_for_cli_def
 
     consumed = service.consume_password_reset(
         token=token,
-        new_password="replacement-password",
+        new_password="new-pass",
     )
 
     assert consumed.revoked_credentials == {
@@ -370,7 +370,7 @@ def test_consume_is_single_use_revokes_sessions_and_keeps_api_tokens_for_cli_def
         session_service.authenticate_session(existing_session.session_token)
     assert session_service.login(
         email=user.email,
-        password="replacement-password",
+        password="new-pass",
     ).user.user_id == user.user_id
     assert api_service.authenticate_token(pat.plain_token).user.user_id == user.user_id
     with pytest.raises(UsedPasswordResetTokenError):

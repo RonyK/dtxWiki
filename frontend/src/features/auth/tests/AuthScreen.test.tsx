@@ -349,14 +349,14 @@ describe("AuthScreen", () => {
     );
 
     await screen.findByRole("heading", { name: "Sign up" });
-    expect(screen.getByText("15–128 characters.")).toBeInTheDocument();
+    expect(screen.getByText("8–128 characters.")).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("radio", { name: /^Sign in$/i }),
     );
 
     expect(
-      screen.queryByText("15–128 characters."),
+      screen.queryByText("8–128 characters."),
     ).not.toBeInTheDocument();
   });
 
