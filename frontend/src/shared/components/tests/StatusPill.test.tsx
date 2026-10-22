@@ -81,6 +81,9 @@ describe("StatusPill", () => {
     expect(screen.getByText("추출 대기 중")).toBeInTheDocument();
     // The raw enum no longer leaks English into a ko surface.
     expect(screen.queryByText("extract pending")).not.toBeInTheDocument();
+    // A decided review shows its own status on the review screen.
+    rerender(<StatusPill status="approved" />);
+    expect(screen.getByText("승인됨")).toBeInTheDocument();
   });
 
   it("falls back to the de-underscored value for an unmapped status", () => {

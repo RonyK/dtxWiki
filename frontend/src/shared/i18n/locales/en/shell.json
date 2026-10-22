@@ -374,7 +374,10 @@
     "member": "Member",
     "private": "Private",
     "public": "Public",
-    "team": "Team"
+    "team": "Team",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "changes_requested": "Changes requested"
   },
   "time": {
     "unknownTime": "Unknown time",

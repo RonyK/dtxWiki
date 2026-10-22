@@ -42,6 +42,8 @@ test("reads exact evidence, approves a document group, and records the decision 
   await expect(confirmation).toBeHidden();
   await expect(firstGroup).toHaveCount(0);
   await expect(page.locator(".review-bulk-outcomes")).toContainText("3 / 3");
+  // The open review was decided by this run; it is not an outside-filters item.
+  await expect(page.getByText(/outside the current queue filters/)).toHaveCount(0);
   expect(["approved", "superseded"]).toContain((await reviewDetail(page.request, workspace.id, first.review_item_id)).status);
   expect((await reviewDetail(page.request, workspace.id, second.review_item_id)).status).toBe("pending");
   await page.goto("/activity");

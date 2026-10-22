@@ -283,6 +283,10 @@ class ContextIngressService:
             actor_id=actor_id,
         )
         review = None
+        coded_reason = bool(review_reason) and set(review_reason.split(",")) <= {
+            "low_confidence",
+            "page_type_decision",
+        }
         if risk_resolution.review_required:
             review = ReviewItem(
                 workspace_id=workspace_id,
@@ -291,7 +295,15 @@ class ContextIngressService:
                 status="pending",
                 risk_level=change_set.risk_level,
                 **review_risk_snapshot(risk_resolution),
-                decision_summary=review_reason or risk_resolution.summary,
+                # Coded reasons live in the risk signals; the summary is prose.
+                decision_summary=(
+                    "Ask capture requires review"
+                    if coded_reason
+                    else review_reason or risk_resolution.summary
+                ),
+                decision_summary_code=(
+                    "context_ingress_requires_review" if coded_reason else None
+                ),
             )
             session.add(review)
         proposal.status = "accepted"

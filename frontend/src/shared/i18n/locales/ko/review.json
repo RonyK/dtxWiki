@@ -96,7 +96,8 @@
   "decisionSummary": {
     "context_draft_requires_review": "Context 초안을 리뷰해야 합니다",
     "context_update_requires_review": "Context 수정 초안을 리뷰해야 합니다",
-    "context_update_workflow_sequence_incomplete": "워크플로 순서가 완료되지 않아 Context 수정 초안을 리뷰해야 합니다"
+    "context_update_workflow_sequence_incomplete": "워크플로 순서가 완료되지 않아 Context 수정 초안을 리뷰해야 합니다",
+    "context_ingress_requires_review": "Ask 캡처를 리뷰해야 합니다"
   },
   "policy": {
     "title": "리뷰 위험도 정책",

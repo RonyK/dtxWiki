@@ -133,10 +133,14 @@ const REVIEW_DECISION_SUMMARY_DEFAULTS = {
   context_update_requires_review: "Context update draft requires review",
   context_update_workflow_sequence_incomplete:
     "Context update draft requires review because the workflow sequence is incomplete",
+  context_ingress_requires_review: "Ask capture requires review",
 } as const;
+// Ask capture reviews used to store their raw reason codes as the summary prose.
+const LEGACY_INGRESS_REASON_SUMMARY = /^(low_confidence|page_type_decision)(,(low_confidence|page_type_decision))*$/;
 type DecisionSummaryCarrier = {
   decision_summary?: string | null;
   decision_summary_code?: string | null;
+  review_type?: string | null;
 };
 const EMPTY_REVIEW_COUNTS: ReviewCounts = {
   pending: 0,
@@ -1626,6 +1630,7 @@ export function ReviewScreen() {
               </div>
             ) : undefined}>{error || t("workflow.decisionOutcomeUnknown")}</StatusBanner> : null}
             {selectedReview && detachedReview?.id === selectedReview.id && completedReview?.id !== selectedReview.id
+              && !settledReviewStates[selectedReview.id]
               && !reviewMatchesFilters(selectedReview, activeReviewStatus, riskFilter, activeScopeFilter, auth?.user?.user_id ?? null, state.canEditDirectly) ? (
               <StatusBanner tone="info">{t("workflow.outsideFilters")}</StatusBanner>
             ) : null}
@@ -3198,7 +3203,9 @@ function localizedDecisionSummary(
   item: DecisionSummaryCarrier,
   t: TFunction,
 ): string | null {
-  const code = item.decision_summary_code;
+  const code = item.decision_summary_code
+    ?? (item.review_type === "context_ingress_accept" && LEGACY_INGRESS_REASON_SUMMARY.test(item.decision_summary ?? "")
+      ? "context_ingress_requires_review" : null);
   if (
     code
     && Object.prototype.hasOwnProperty.call(REVIEW_DECISION_SUMMARY_DEFAULTS, code)

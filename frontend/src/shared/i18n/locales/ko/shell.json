@@ -374,7 +374,10 @@
     "member": "멤버",
     "private": "비공개",
     "public": "공개",
-    "team": "팀"
+    "team": "팀",
+    "approved": "승인됨",
+    "rejected": "거절됨",
+    "changes_requested": "변경 요청됨"
   },
   "time": {
     "unknownTime": "시간 정보 없음",

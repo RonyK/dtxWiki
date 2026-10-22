@@ -96,7 +96,8 @@
   "decisionSummary": {
     "context_draft_requires_review": "Context draft requires review",
     "context_update_requires_review": "Context update draft requires review",
-    "context_update_workflow_sequence_incomplete": "Context update draft requires review because the workflow sequence is incomplete"
+    "context_update_workflow_sequence_incomplete": "Context update draft requires review because the workflow sequence is incomplete",
+    "context_ingress_requires_review": "Ask capture requires review"
   },
   "policy": {
     "title": "Review risk policy",
