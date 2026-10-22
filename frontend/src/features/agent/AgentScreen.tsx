@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   useLocation,
@@ -69,7 +69,25 @@ import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { Dialog } from "../../shared/components/Dialog";
-import { DiffViewerDialog } from "../../shared/components/DiffViewerDialog";
+import {
+  HistoryCard,
+  HistoryChangesButton,
+  HistoryChangesUnavailable,
+  HistoryLineDelta,
+} from "../../shared/components/HistoryCard";
+import { HistoryDiffDialog } from "../../shared/components/HistoryDiffDialog";
+import { HistoryGraphList } from "../../shared/components/HistoryGraphList";
+import { useVersionPairDiff } from "../../shared/hooks/useVersionPairDiff";
+import {
+  buildHistoryGraph,
+  type HistoryGraphRow,
+} from "../../shared/lib/historyGraph";
+import {
+  changesPairFor,
+  normalizeVersionPair,
+  type VersionPair,
+} from "../../shared/lib/historyVersionPair";
+import { agentHistoryNodes } from "./agentHistory";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
 import type { NewItemType } from "../../shared/components/NewItemDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
@@ -2595,6 +2613,10 @@ function AgentReader({
   );
 }
 
+// Agent's own diffs always have two real ends: unlike Context there is no
+// empty baseline to compare a first version against.
+type AgentVersionPair = { from: string; to: string };
+
 function AgentHistory({
   canEdit,
   detail,
@@ -2616,102 +2638,72 @@ function AgentHistory({
   workspaceId: string;
 }) {
   const { t } = useTranslation("agent");
-  const [compareVersionId, setCompareVersionId] = useState<string | null>(null);
-  const [diff, setDiff] = useState<Awaited<
-    ReturnType<typeof diffAgentPageVersions>
-  > | null>(null);
-  const [diffError, setDiffError] = useState<string | null>(null);
-  const [diffLoadingVersionId, setDiffLoadingVersionId] = useState<
-    string | null
-  >(null);
+  const { t: tShell } = useTranslation("shell");
+  const [pair, setPair] = useState<AgentVersionPair | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
-  const diffRequestIdRef = useRef(0);
-  const versions = history?.versions ?? [];
-  // Which row to hide the affordances on is the server's call (is_current);
-  // what to diff against is not, because the current version need not be in
-  // this timeline at all -- a reader who cannot see drafts gets a list with
-  // the draft head filtered out, and no row is flagged. Falling back to the
-  // detail keeps Compare working there instead of failing closed.
-  const currentVersionId =
-    versions.find((version) => version.is_current)?.version_id ??
-    detail.latest_draft_version_id ??
-    detail.current_active_version_id;
-  const comparedVersion =
-    versions.find((version) => version.version_id === compareVersionId) ?? null;
+  const versions = useMemo(() => history?.versions ?? [], [history?.versions]);
+  const versionNodes = useMemo(() => agentHistoryNodes(versions), [versions]);
+  const historyGraph = useMemo(
+    () =>
+      buildHistoryGraph(versionNodes, {
+        headCandidateIds: [
+          detail.latest_draft_version_id,
+          detail.current_active_version_id,
+        ],
+        complete: true,
+      }),
+    [
+      detail.current_active_version_id,
+      detail.latest_draft_version_id,
+      versionNodes,
+    ],
+  );
+  const loadDiff = useCallback(
+    (next: AgentVersionPair, signal: AbortSignal) =>
+      diffAgentPageVersions(workspaceId, detail.id, next.from, next.to, {
+        signal,
+      }),
+    [detail.id, workspaceId],
+  );
+  const {
+    diff,
+    error: diffError,
+    loadingVersionId,
+  } = useVersionPairDiff(
+    pair,
+    loadDiff,
+    tShell("history.failedChanges", {
+      defaultValue: "Failed to load changes",
+    }),
+  );
+  const pairedVersion =
+    versions.find((version) => version.version_id === pair?.to) ?? null;
+  // What "Compare two versions" opens first: the newest version's own
+  // Changes, or the two newest when that parent is not visible.
+  const newestRow = historyGraph.rows[0];
+  const defaultPair = newestRow
+    ? (changesPairFor(newestRow) ??
+      (historyGraph.rows[1]
+        ? { from: historyGraph.rows[1].node.id, to: newestRow.node.id }
+        : null))
+    : null;
   useEffect(() => {
-    diffRequestIdRef.current += 1;
-    setCompareVersionId(null);
-    setDiff(null);
-    setDiffError(null);
-    setDiffLoadingVersionId(null);
+    setPair(null);
     setRestoreError(null);
     setRestoreMessage(null);
     setRestoreVersionId(null);
   }, [detail.id]);
-
-  async function compareVersion(version: AgentVersionEntry) {
-    if (compareVersionId === version.version_id) {
-      closeCompareVersion();
-      return;
-    }
-    // Defence in depth for the hidden button below: a version diffed against
-    // itself returns an empty diff that renders as a blank dialog.
-    if (version.is_current) {
-      return;
-    }
-    if (!currentVersionId) {
-      setDiffError(
-        t("history.currentUnavailable", {
-          defaultValue: "Current Agent version is unavailable.",
-        }),
-      );
-      return;
-    }
-    setCompareVersionId(version.version_id);
-    setDiff(null);
-    setDiffError(null);
+  useEffect(() => {
     setRestoreError(null);
-    setDiffLoadingVersionId(version.version_id);
-    const requestId = diffRequestIdRef.current + 1;
-    diffRequestIdRef.current = requestId;
-    try {
-      const nextDiff = await diffAgentPageVersions(
-        workspaceId,
-        detail.id,
-        version.version_id,
-        currentVersionId,
-      );
-      if (requestId === diffRequestIdRef.current) {
-        setDiff(nextDiff);
-      }
-    } catch (exc) {
-      if (requestId === diffRequestIdRef.current) {
-        setDiffError(
-          apiErrorMessage(
-            exc,
-            t("history.failedDiff", { defaultValue: "Failed to load diff" }),
-          ),
-        );
-      }
-    } finally {
-      if (requestId === diffRequestIdRef.current) {
-        setDiffLoadingVersionId(null);
-      }
-    }
-  }
+  }, [pair]);
 
-  function closeCompareVersion() {
-    // Bumping the request id invalidates any in-flight diff, which also makes
-    // its `finally` skip the reset below -- so clear the loading version here or
-    // closing the dialog early leaves that card's Compare disabled forever.
-    diffRequestIdRef.current += 1;
-    setCompareVersionId(null);
-    setDiff(null);
-    setDiffError(null);
-    setDiffLoadingVersionId(null);
-    setRestoreError(null);
+  function openPair(candidate: VersionPair) {
+    const normalized = normalizeVersionPair(versionNodes, candidate);
+    if (normalized?.from) {
+      setPair({ from: normalized.from, to: normalized.to });
+    }
   }
 
   async function restoreVersion(version: AgentVersionEntry) {
@@ -2745,8 +2737,7 @@ function AgentHistory({
           defaultValue: "Agent v{{version}} was restored as draft v{{draft}}.",
         }),
       );
-      setCompareVersionId(null);
-      setDiff(null);
+      setPair(null);
       await onVersionRestored(
         restored.agent_page_id,
         restored.draft_version_id,
@@ -2765,123 +2756,146 @@ function AgentHistory({
     }
   }
 
+  function renderCard(row: HistoryGraphRow<AgentVersionEntry>) {
+    const version = row.entry;
+    const selected = selectedVersionId === version.version_id;
+    const open = pair?.to === version.version_id;
+    const changes = changesPairFor(row);
+    return (
+      <HistoryCard
+        actions={
+          <>
+            <button
+              className="text-button compact-button"
+              onClick={() =>
+                onSelectVersion(selected ? null : version.version_id)
+              }
+              type="button"
+            >
+              {selected
+                ? t("history.clearSelection", {
+                    defaultValue: "Clear selection",
+                  })
+                : t("history.selectVersion", {
+                    defaultValue: "Select version",
+                  })}
+            </button>
+            {/* Restoring the version already being read would only stack an
+                identical one, so the current row never offers it. */}
+            {canEdit && !open && !version.is_current ? (
+              <button
+                aria-busy={restoreVersionId === version.version_id}
+                className="text-button compact-button"
+                disabled={restoreVersionId === version.version_id}
+                onClick={() => void restoreVersion(version)}
+                type="button"
+              >
+                {restoreVersionId === version.version_id
+                  ? t("history.restoring", { defaultValue: "Restoring" })
+                  : t("history.restore", {
+                      defaultValue: "Restore this version",
+                    })}
+              </button>
+            ) : null}
+            {changes ? (
+              <HistoryChangesButton
+                baseVersionNo={row.parent?.versionNo ?? null}
+                loading={loadingVersionId === version.version_id}
+                onToggle={() => (open ? setPair(null) : openPair(changes))}
+                open={open}
+                versionNo={version.version_no}
+              />
+            ) : null}
+          </>
+        }
+        author={
+          <AvatarWithTimestamp
+            actorType={version.actor_type}
+            name={version.actor_display_name}
+            timestamp={version.created_at}
+          />
+        }
+        badges={
+          <HistoryLineDelta
+            added={version.lines_added}
+            removed={version.lines_removed}
+          />
+        }
+        description={describeAgentVersion(version, t)}
+        notices={
+          row.relation === "hidden" || row.relation === "missing" ? (
+            <HistoryChangesUnavailable />
+          ) : null
+        }
+        row={row}
+        status={<StatusPill status={version.version_status} compact />}
+      />
+    );
+  }
+
   if (versions.length === 0) {
     return <div className="wiki-empty">{t("history.noVersionHistory")}</div>;
   }
   return (
     <>
       <div>
+        <div className="history-compare-toolbar">
+          <button
+            aria-disabled={defaultPair === null}
+            className="text-button"
+            disabled={defaultPair === null}
+            onClick={() => {
+              if (defaultPair) {
+                openPair(defaultPair);
+              }
+            }}
+            type="button"
+          >
+            {tShell("history.compareTwo", {
+              defaultValue: "Compare two versions",
+            })}
+          </button>
+        </div>
         {restoreMessage ? (
           <StatusBanner tone="info">{restoreMessage}</StatusBanner>
         ) : null}
         {restoreError ? (
           <StatusBanner tone="warning">{restoreError}</StatusBanner>
         ) : null}
-        <ul className="history-timeline" data-accent="agent">
-          {versions.map((version) => {
-            const selected = selectedVersionId === version.version_id;
-            const comparing = compareVersionId === version.version_id;
-            // Diffs run "this version vs the current one", and the current one
-            // is always the newest visible card -- so its Compare produced an
-            // empty self-diff and its Restore would stack a no-op version.
-            // Drop both affordances there, matching the Context history rows.
-            const isCurrent = version.is_current;
-            return (
-              <li
-                aria-current={selected ? "true" : undefined}
-                className={`history-card ${selected ? "is-selected" : ""}`}
-                data-tone={versionTone(version.version_status)}
-                key={version.version_id}
-              >
-                <div className="history-card-title">
-                  <span>v{version.version_no}</span>
-                  <StatusPill status={version.version_status} compact />
-                </div>
-                <div className="history-card-desc">
-                  {describeAgentVersion(version, t)}
-                </div>
-                <div className="history-card-meta">
-                  <AvatarWithTimestamp
-                    actorType={version.actor_type}
-                    name={version.actor_display_name}
-                    timestamp={version.created_at}
-                  />
-                </div>
-                <div className="history-card-actions">
-                  <button
-                    className="text-button compact-button"
-                    onClick={() =>
-                      onSelectVersion(selected ? null : version.version_id)
-                    }
-                    type="button"
-                  >
-                    {selected
-                      ? t("history.clearSelection", {
-                          defaultValue: "Clear selection",
-                        })
-                      : t("history.selectVersion", {
-                          defaultValue: "Select version",
-                        })}
-                  </button>
-                  {isCurrent ? null : (
-                    <button
-                      aria-busy={diffLoadingVersionId === version.version_id}
-                      className="text-button compact-button"
-                      disabled={diffLoadingVersionId === version.version_id}
-                      onClick={() =>
-                        comparing
-                          ? closeCompareVersion()
-                          : void compareVersion(version)
-                      }
-                      type="button"
-                    >
-                      {diffLoadingVersionId === version.version_id
-                        ? t("history.loadingDiff", {
-                            defaultValue: "Loading diff",
-                          })
-                        : comparing
-                          ? t("history.closeDiff", {
-                              defaultValue: "Close diff",
-                            })
-                          : t("history.compare", { defaultValue: "Compare" })}
-                    </button>
-                  )}
-                  {canEdit && !comparing && !isCurrent ? (
-                    <button
-                      aria-busy={restoreVersionId === version.version_id}
-                      className="text-button compact-button"
-                      disabled={restoreVersionId === version.version_id}
-                      onClick={() => void restoreVersion(version)}
-                      type="button"
-                    >
-                      {restoreVersionId === version.version_id
-                        ? t("history.restoring", { defaultValue: "Restoring" })
-                        : t("history.restore", {
-                            defaultValue: "Restore this version",
-                          })}
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <HistoryGraphList
+          accent="agent"
+          graph={historyGraph}
+          renderCard={renderCard}
+          rowView={(row) => {
+            const selected = selectedVersionId === row.node.id;
+            return {
+              ariaCurrent: selected ? "true" : undefined,
+              className: selected ? "is-selected" : undefined,
+              tone: versionTone(row.entry.version_status),
+            };
+          }}
+        />
       </div>
-      {comparedVersion ? (
-        <DiffViewerDialog
+      {pairedVersion && pair ? (
+        <HistoryDiffDialog
           actionError={restoreError}
           diff={diff}
           error={diffError}
-          loading={diffLoadingVersionId === comparedVersion.version_id}
-          onClose={closeCompareVersion}
+          loading={loadingVersionId === pair.to}
+          onClose={() => setPair(null)}
+          onPairChange={openPair}
           onRestore={
-            canEdit ? () => void restoreVersion(comparedVersion) : undefined
+            canEdit && !pairedVersion.is_current
+              ? () => void restoreVersion(pairedVersion)
+              : undefined
           }
-          restoreDisabled={restoreVersionId === comparedVersion.version_id}
-          title={t("history.compareTitle", {
-            version: comparedVersion.version_no,
-            defaultValue: "Compare Agent v{{version}} with current",
-          })}
+          pair={pair}
+          parentOf={(versionId) =>
+            versionNodes.find((node) => node.id === versionId)?.parentId ??
+            null
+          }
+          restoreDisabled={restoreVersionId === pair.to}
+          versions={versionNodes}
         />
       ) : null}
     </>

@@ -540,8 +540,9 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
         await expect(v1).toBeVisible();
         await expect(latest).toBeVisible();
 
-        // Row-level Compare buttons always carry an aria-label. Restore and
-        // discard actions do not, so this proves v1 has no predecessor action.
+        // Row-level Changes buttons always carry an aria-label naming both
+        // versions. Restore and discard actions do not, so this proves v1 has
+        // no predecessor action.
         await expect(
           v1.locator(".history-card-actions button[aria-label]"),
         ).toHaveCount(0);

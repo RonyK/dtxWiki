@@ -1,3 +1,6 @@
+import type { VersionEntry } from "../api/context";
+import type { HistoryGraphNode, PriorRelation } from "./historyGraph";
+
 export const CONTEXT_HISTORY_STATUSES = [
   "state_inconsistent",
   "current_editing",
@@ -84,4 +87,35 @@ export function contextHistoryPresentation(
 export function contextHistoryPillTone(status: ContextHistoryStatus) {
   const tone = CONTEXT_HISTORY_PRESENTATION[status].tone;
   return tone === "neutral" ? "muted" : tone;
+}
+
+export function priorRelationForVersion(entry: VersionEntry): PriorRelation {
+  const explicit = (entry as { prior_relation?: PriorRelation }).prior_relation;
+  if (explicit) {
+    return explicit;
+  }
+  if (entry.prior_version_id) {
+    return "visible";
+  }
+  return entry.version_no <= 1 ? "root" : "missing";
+}
+
+// Context versions name their own parent, so lineage comes straight from the
+// API: prior_version_id (already projected to what this actor may see) and
+// the reconcile merge recorded on the merged branch.
+export function contextHistoryNodes(
+  versions: VersionEntry[],
+): HistoryGraphNode<VersionEntry>[] {
+  return versions.map((entry) => ({
+    entry,
+    id: entry.version_id,
+    versionNo: entry.version_no,
+    parentId: entry.prior_version_id ?? null,
+    parentRelation: priorRelationForVersion(entry),
+    mergedIntoId: entry.merged_into_version_id ?? null,
+    branched:
+      entry.graph_status === "branched" ||
+      entry.history_status === "alternative_draft" ||
+      entry.history_status === "discarded_draft",
+  }));
 }
