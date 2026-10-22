@@ -687,7 +687,6 @@
 
   .sidebar[data-collapsed="true"] .sidebar-nav {
     width: 100%;
-    gap: 12px;
   }
 
   .sidebar[data-collapsed="true"] .nav-group-label,
@@ -722,7 +721,13 @@
 
 .sidebar-nav {
   display: grid;
+  /* Tall drawers keep the groups at their content height. */
+  align-content: start;
   gap: 18px;
+}
+
+.mobile-nav-drawer .sidebar-nav {
+  gap: 24px;
 }
 
 .nav-item,

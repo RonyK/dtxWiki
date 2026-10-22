@@ -48,7 +48,9 @@ const identityRecoveryEnv = {
 const backendServerScript = [
   "import uvicorn",
   "from backend.app.main import create_app",
-  `uvicorn.run(create_app(bootstrap_on_startup=True), host="127.0.0.1", port=${backendPort})`,
+  // Explicit response closure prevents Playwright's HTTP agent from reusing
+  // an idle socket whose peer FIN has not reached the client's event loop.
+  `uvicorn.run(create_app(bootstrap_on_startup=True), host="127.0.0.1", port=${backendPort}, headers=[("Connection", "close")])`,
 ].join("; ");
 // Single-origin E2E never issues a cross-origin request, so this list only has
 // to stay non-empty: Settings rejects an empty DTXWIKI_CORS_ORIGINS at startup.
