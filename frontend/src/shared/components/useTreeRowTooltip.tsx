@@ -1,4 +1,5 @@
-import { autoUpdate, computePosition, flip, hide, offset, shift, size } from "@floating-ui/dom";
+import { arrow, autoUpdate, computePosition, flip, hide, offset, shift, size } from "@floating-ui/dom";
+import type { VirtualElement } from "@floating-ui/dom";
 import type { MouseEvent } from "react";
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -8,6 +9,14 @@ import type { TreeNodePayload } from "../api/workspace";
 import { treeNodeStatusDescription } from "./treeNodeStatus";
 
 type TooltipOwner = { element: HTMLElement; nodeId: string; direction: "ltr" | "rtl" };
+
+// The popup's text starts at the row title's text: the cross-axis offset
+// cancels the content's inline padding (.tree-row-tooltip-content), and the
+// arrow points at the title's first glyphs, half this anchor width in.
+const TOOLTIP_TEXT_INSET = 9;
+const TITLE_ANCHOR_WIDTH = 14;
+// Matches the CSS default of --tree-tooltip-title-lines.
+const TITLE_MAX_LINES = 4;
 
 // A focused row in another rail must not leave a second popup behind when a
 // pointer or keyboard user starts reading a different row.
@@ -49,6 +58,7 @@ export function useTreeRowTooltip({
   const [owner, setOwner] = useState<TooltipOwner | null>(null);
   const ownerRef = useRef<TooltipOwner | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
+  const arrowRef = useRef<HTMLSpanElement | null>(null);
   const pointerWithinRef = useRef(false);
   const pointerPositionRef = useRef({ x: 0, y: 0 });
   const suppressionReleaseRef = useRef<(() => void) | null>(null);
@@ -79,10 +89,11 @@ export function useTreeRowTooltip({
     setOwner((current) => current?.element === element ? current : next);
   }
 
+  // The popup is transparent to the pointer (CSS pointer-events: none), so
+  // only the owner row counts. Sweeping down the rail reaches the next row and
+  // the wheel scrolls the rail instead of stopping on the popup.
   function pointerWithin(target: EventTarget | null) {
-    return target instanceof Node && Boolean(
-      ownerRef.current?.element.contains(target) || popupRef.current?.contains(target),
-    );
+    return target instanceof Node && Boolean(ownerRef.current?.element.contains(target));
   }
 
   function leave(event: MouseEvent<HTMLElement>) {
@@ -109,6 +120,19 @@ export function useTreeRowTooltip({
     }
     let disposed = false;
     let revision = 0;
+    // The row's vertical extent with the title's leading edge: the popup opens
+    // beside the whole row, but starts (and points) where the title starts.
+    const anchor: VirtualElement = {
+      contextElement: owner.element,
+      getBoundingClientRect: () => {
+        const row = owner.element.getBoundingClientRect();
+        const title = owner.element.querySelector(".tree-row-title");
+        if (!title) return row;
+        const text = title.getBoundingClientRect();
+        const start = owner.direction === "rtl" ? text.right - TITLE_ANCHOR_WIDTH : text.left;
+        return new DOMRect(start, row.top, TITLE_ANCHOR_WIDTH, row.height);
+      },
+    };
     const update = () => {
       const currentRevision = ++revision;
       if (!owner.element.isConnected) {
@@ -120,18 +144,25 @@ export function useTreeRowTooltip({
         dismiss();
         return;
       }
-      void computePosition(owner.element, popup, {
+      void computePosition(anchor, popup, {
         placement: "bottom-start",
         strategy: "fixed",
         middleware: [
-          offset(6), flip({ padding: 8 }),
+          offset({ mainAxis: 8, crossAxis: -TOOLTIP_TEXT_INSET }), flip({ padding: 8 }),
           size({ padding: 8, apply: ({ availableHeight, elements }) => {
             // A full title can be taller than either side of its row. Keep
-            // the popup beside its owner and let its content scroll to fit.
-            const content = elements.floating.querySelector<HTMLElement>(".tree-row-tooltip-content");
-            if (content) content.style.maxHeight = `${Math.max(0, availableHeight - 2)}px`;
+            // the popup beside its owner by dropping title lines, which then
+            // end in an ellipsis, until the rest of the popup fits.
+            const titleText = elements.floating.querySelector<HTMLElement>(".tree-row-tooltip-title");
+            const lineHeight = titleText ? Number.parseFloat(getComputedStyle(titleText).lineHeight) : NaN;
+            if (!titleText || !(lineHeight > 0)) return;
+            const chrome = elements.floating.getBoundingClientRect().height - titleText.getBoundingClientRect().height;
+            const lines = Math.min(TITLE_MAX_LINES, Math.max(1, Math.floor((availableHeight - chrome) / lineHeight)));
+            elements.floating.style.setProperty("--tree-tooltip-title-lines", String(lines));
           } }),
-          shift({ padding: 8 }), hide({ strategy: "referenceHidden" }),
+          shift({ padding: 8 }),
+          ...(arrowRef.current ? [arrow({ element: arrowRef.current, padding: 6 })] : []),
+          hide({ strategy: "referenceHidden" }),
         ],
       }).then(({ x, y, placement, middlewareData }) => {
         if (disposed || currentRevision !== revision) return;
@@ -142,6 +173,7 @@ export function useTreeRowTooltip({
         popup.style.left = `${x}px`;
         popup.style.top = `${y}px`;
         popup.dataset.placement = placement;
+        if (arrowRef.current && middlewareData.arrow?.x != null) arrowRef.current.style.left = `${middlewareData.arrow.x}px`;
       });
     };
     // Tracks scrollable ancestors, viewport resize, row/content resize, layout
@@ -211,13 +243,12 @@ export function useTreeRowTooltip({
         dir={owner.direction}
         className="tree-row-tooltip"
         data-placement="bottom-start"
-        style={{ left: Math.max(8, rect.left), top: rect.bottom + 6 }}
-        onMouseEnter={() => { pointerWithinRef.current = true; }}
-        onMouseLeave={leave}
+        style={{ left: Math.max(8, rect.left), top: rect.bottom + 8 }}
       >
+        <span ref={arrowRef} className="tree-row-tooltip-arrow" aria-hidden="true" />
         <div className="tree-row-tooltip-content">
-          <strong>{node.title}</strong>
-          {status ? <span>{status}</span> : null}
+          <strong className="tree-row-tooltip-title">{node.title}</strong>
+          {status ? <span className="tree-row-tooltip-status">{status}</span> : null}
         </div>
       </div>, document.body,
     ) : null,

@@ -127,53 +127,33 @@ describe("TreeRail tooltip ownership", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
-  it("allows pointer handoff to the popup, then dismisses when its entire hover region is left", () => {
-    render(<TreeRail title="Context" nodes={[node()]} />);
-    const row = screen.getByRole("treeitem");
-    fireEvent.mouseEnter(row);
-    const popup = screen.getByRole("tooltip");
-    fireEvent.mouseLeave(row, { relatedTarget: popup });
-    fireEvent.mouseEnter(popup, { relatedTarget: row });
-    fireEvent.pointerMove(popup);
-    expect(screen.getByRole("tooltip")).toBe(popup);
-    fireEvent.mouseLeave(popup, { relatedTarget: document.body });
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-  });
-
-  it("keeps Escape inside a popup from immediately reopening the row exposed underneath it", () => {
+  it("leaves the popup out of the hover region, so a downward sweep hands over to the next row", () => {
     render(<TreeRail title="Context" nodes={[node(), node("second")]} />);
     const [first, second] = screen.getAllByRole("treeitem");
-    fireEvent.mouseEnter(first, { clientX: 20, clientY: 30 });
+    fireEvent.mouseEnter(first);
     const popup = screen.getByRole("tooltip");
+    // The popup covers the next row; leaving its owner toward it still ends
+    // the hover instead of holding the first row's popup open.
     fireEvent.mouseLeave(first, { relatedTarget: popup });
-    fireEvent.pointerMove(popup, { clientX: 20, clientY: 80 });
-    fireEvent.keyDown(document.body, { key: "Escape" });
-    fireEvent.mouseEnter(second, { clientX: 20, clientY: 80 });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    fireEvent.pointerMove(second, { clientX: 20, clientY: 80 });
-    fireEvent.mouseEnter(second, { clientX: 20, clientY: 80 });
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    fireEvent.pointerMove(second, { clientX: 21, clientY: 80 });
-    fireEvent.mouseEnter(second, { clientX: 21, clientY: 80 });
+    fireEvent.mouseEnter(second);
     expect(screen.getByRole("tooltip")).toHaveTextContent("second full title");
   });
 
   it("ignores rounded stationary mouseenter after Escape and resumes on actual pointer movement", () => {
-    render(<TreeRail title="Context" nodes={[node(), node("second")]} />);
-    const [first, second] = screen.getAllByRole("treeitem");
-    fireEvent.mouseEnter(first, { clientX: 20, clientY: 30 });
-    const popup = screen.getByRole("tooltip");
-    fireEvent.mouseLeave(first, { relatedTarget: popup });
-    fireEvent.pointerMove(popup, { clientX: 20, clientY: 80.75 });
+    render(<TreeRail title="Context" nodes={[node()]} />);
+    const row = screen.getByRole("treeitem");
+    fireEvent.mouseEnter(row, { clientX: 20, clientY: 80 });
+    fireEvent.pointerMove(row, { clientX: 20, clientY: 80.75 });
     fireEvent.keyDown(document.body, { key: "Escape" });
     // Chromium truncates MouseEvent coordinates while PointerEvent retains
-    // fractions; removing the popup synthesizes enter without moving.
-    fireEvent.mouseEnter(second, { clientX: 20, clientY: 80 });
+    // fractions; a layout change under a still pointer synthesizes enter.
+    fireEvent.mouseEnter(row, { clientX: 20, clientY: 80 });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    fireEvent.pointerMove(second, { clientX: 20, clientY: 80.75 });
+    fireEvent.pointerMove(row, { clientX: 20, clientY: 80.75 });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    fireEvent.pointerMove(second, { clientX: 20, clientY: 81 });
-    expect(screen.getByRole("tooltip")).toHaveTextContent("second full title");
+    fireEvent.pointerMove(row, { clientX: 20, clientY: 81 });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("first full title");
   });
 
   it("does not open a hover tooltip during touch movement", () => {
@@ -229,16 +209,19 @@ describe("TreeRail tooltip ownership", () => {
 });
 
 describe("TreeRail tooltip live geometry", () => {
-  function layout({ tooltipHeight = 70, viewportHeight = 768 } = {}) {
+  function layout({ titleLines = 2, chrome = 36, viewportHeight = 768 } = {}) {
     let rowTop = 150;
     let rowLeft = 30;
+    // A title shows no more than the line count the hook clamps it to.
+    const shownLines = (popup: HTMLElement | null) => Math.min(titleLines,
+      Number(popup?.style.getPropertyValue("--tree-tooltip-title-lines")) || 4);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.matches(".tree-row") && this.closest<HTMLElement>(".tree-rail-body")?.style.display === "none") return new DOMRect();
       if (this.matches(".tree-row")) return new DOMRect(rowLeft, rowTop, 240, 36);
-      if (this.matches(".tree-row-tooltip")) {
-        const contentMaxHeight = Number.parseFloat(this.querySelector<HTMLElement>(".tree-row-tooltip-content")?.style.maxHeight ?? "");
-        return new DOMRect(0, 0, 280, Math.min(tooltipHeight, Number.isFinite(contentMaxHeight) ? contentMaxHeight + 2 : tooltipHeight));
-      }
+      if (this.matches(".tree-row-title")) return new DOMRect(rowLeft + 50, rowTop + 8, 150, 20);
+      if (this.matches(".tree-row-tooltip")) return new DOMRect(0, 0, 280, chrome + shownLines(this) * 17);
+      if (this.matches(".tree-row-tooltip-title")) return new DOMRect(0, 0, 262, shownLines(this.closest(".tree-row-tooltip")) * 17);
+      if (this.matches(".tree-row-tooltip-arrow")) return new DOMRect(0, 0, 8, 8);
       if (this.matches(".tree-rail-body")) return new DOMRect(20, 100, 260, 240);
       return new DOMRect(0, 0, 1024, viewportHeight);
     });
@@ -264,13 +247,15 @@ describe("TreeRail tooltip live geometry", () => {
 
   it("repositions a focused owner on scroll and viewport resize using its current box", async () => {
     const { rail, move } = layout();
-    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "192px" }); });
+    // Below the row, with the popup text (9px inset) starting at the title.
+    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "194px", left: "71px" }); });
+    expect(screen.getByRole("tooltip").querySelector(".tree-row-tooltip-arrow")).toHaveStyle({ left: "12px" });
     move(180);
     fireEvent.scroll(rail);
-    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "222px" }); });
+    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "224px" }); });
     move(210, 60);
     fireEvent.resize(window);
-    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "252px", left: "60px" }); });
+    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "254px", left: "101px" }); });
   });
 
   it("dismisses a still-focused owner once it scrolls out of the clipped rail", async () => {
@@ -291,15 +276,15 @@ describe("TreeRail tooltip live geometry", () => {
     expect(row).toHaveFocus();
   });
 
-  it("fits a long title into the available side height without covering its owner or leaving the viewport", async () => {
-    const { row } = layout({ tooltipHeight: 700, viewportHeight: 280 });
-    await waitFor(() => {
-      const popup = screen.getByRole("tooltip");
-      const top = Number.parseFloat(popup.style.top);
-      const height = popup.getBoundingClientRect().height;
-      expect(top).toBeGreaterThanOrEqual(8);
-      expect(top + height).toBeLessThanOrEqual(row.getBoundingClientRect().top - 6);
-      expect(Number.parseFloat(popup.querySelector<HTMLElement>(".tree-row-tooltip-content")!.style.maxHeight)).toBeGreaterThan(0);
-    });
+  it("drops long-title lines to stay beside its owner inside the viewport", async () => {
+    const { row } = layout({ titleLines: 12, chrome: 70, viewportHeight: 280 });
+    const popup = screen.getByRole("tooltip");
+    popup.querySelector<HTMLElement>(".tree-row-tooltip-title")!.style.lineHeight = "17px";
+    fireEvent.resize(window);
+    // Four lines (138px) fit neither side; the 134px above the row holds three.
+    await waitFor(() => { expect(popup.style.getPropertyValue("--tree-tooltip-title-lines")).toBe("3"); });
+    const top = Number.parseFloat(popup.style.top);
+    expect(top).toBeGreaterThanOrEqual(8);
+    expect(top + popup.getBoundingClientRect().height).toBeLessThanOrEqual(row.getBoundingClientRect().top - 8);
   });
 });

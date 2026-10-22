@@ -1945,44 +1945,63 @@
   pointer-events: none;
 }
 
+/* A read-only label, not a surface. Inverted like a plain tooltip so it does
+   not read as the white menu and popover cards that hold controls, and
+   transparent to the pointer: sweeping down the rail reaches the next row and
+   the wheel keeps scrolling the rail instead of stopping on the popup. */
 .tree-row-tooltip {
   position: fixed;
   z-index: 80;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
   max-width: min(320px, calc(100vw - 16px));
-  pointer-events: auto;
+  pointer-events: none;
 }
 
+/* The inline padding is TOOLTIP_TEXT_INSET in useTreeRowTooltip.tsx, which
+   lines this text up with the row title above it. */
 .tree-row-tooltip-content {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  max-height: calc(100dvh - 18px);
-  overflow-y: auto;
+  gap: 2px;
+  padding: 6px 9px;
 }
 
-/* The transparent hit area joins the row and popup without a hover timeout.
- * Keep it outside the scrolling surface so the six-pixel gap is enterable. */
-.tree-row-tooltip::before {
-  content: "";
+/* The popup cannot be scrolled, so a long title ends in an ellipsis. The hook
+   lowers the line count when the side the popup opens on is short. */
+.tree-row-tooltip-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--tree-tooltip-title-lines, 4);
+  overflow: hidden;
+  font-weight: 600;
+}
+
+.tree-row-tooltip-status {
+  color: color-mix(in srgb, var(--surface) 78%, var(--ink));
+}
+
+/* The hook sets the arrow's left edge so it points at the title start. */
+.tree-row-tooltip-arrow {
   position: absolute;
-  left: -1px;
-  right: -1px;
-  bottom: 100%;
-  height: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: inherit;
+  transform: rotate(45deg);
 }
 
-.tree-row-tooltip[data-placement^="top"]::before {
-  top: 100%;
-  bottom: auto;
+.tree-row-tooltip[data-placement^="bottom"] .tree-row-tooltip-arrow {
+  top: -4px;
+}
+
+.tree-row-tooltip[data-placement^="top"] .tree-row-tooltip-arrow {
+  bottom: -4px;
 }
 
 body:has(.tree-node-menu) .tree-row-tooltip {
