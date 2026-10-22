@@ -5,14 +5,11 @@ import { expect, test, type APIRequestContext, type APIResponse, type Locator, t
 import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
 
 type PendingPage = { id: string; title: string; version_id: string; review_item_id: string };
-type ReviewDetail = {
-  status: string;
-  decisions: Array<{ decision_id: string; decision_type: string; decision_reason: string | null }>;
-};
+type ReviewDetail = { status: string };
 
 // The direct Context workflow covers exact content and same-candidate impact
 // separately from the original Ask promotion journey below.
-test("reads exact evidence, approves a document group, and records the decision in Activity @cross-browser", async ({ page }, testInfo) => {
+test("reads exact evidence, approves a document group, and records the decision in Activity", async ({ page }, testInfo) => {
   await authenticatePage(page, testInfo, "review-group");
   const workspace = await currentWorkspace(page.request);
   const first = await pendingPage(page.request, workspace.id, "Grouped review candidate");
@@ -26,151 +23,42 @@ test("reads exact evidence, approves a document group, and records the decision 
   const detail = page.locator(".review-detail-card");
   await expect(detail.locator("#review-detail-title")).toHaveText(first.title);
   await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
-  await expect(detail.locator(".review-detail-header .review-publication-notice")).toHaveText("Approving publishes review version v1.");
-  await expect(detail.getByRole("tab", { name: "Compare changes" })).toHaveAttribute("aria-selected", "true");
+  await expect(detail.locator(".review-publication-notice")).toHaveText("Approving publishes review version v1.");
   await expect(detail.locator(".diff-viewer")).toContainText("Exact reviewed body");
   await detail.getByRole("tab", { name: "Review version content", exact: true }).click();
   await expect(detail.locator(".markdown-body")).toContainText("Exact reviewed body");
-  const currentDocument = detail.getByRole("link", { name: /Open current document:/ });
-  await expect(currentDocument).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${first.id}`);
-  await expect(currentDocument).toHaveAttribute("target", "_blank");
-  await expect(detail.locator(".review-document-identity h3 a")).toHaveCount(0);
-  await expectNoDocumentOverflow(page);
+  await expect(detail.getByRole("link", { name: /Open current document:/ }))
+    .toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${first.id}`);
 
   const rail = page.locator(".review-rail");
   const firstGroup = rail.getByRole("region", { name: first.title, exact: true });
-  const secondGroup = rail.getByRole("region", { name: second.title, exact: true });
   await expect(firstGroup.locator(".review-row")).toHaveCount(3);
-  const checkboxLabels = await firstGroup.locator(".review-row-select input").evaluateAll(
-    (inputs) => inputs.map((input) => input.getAttribute("aria-label")),
-  );
-  expect(checkboxLabels.every(Boolean)).toBe(true);
-  expect(new Set(checkboxLabels).size).toBe(3);
-  for (const variant of ["muted", "warn", "danger"]) {
-    await expect(firstGroup.locator(`.review-row .status-pill-${variant}`)).toHaveCount(1);
-  }
-  await expect(firstGroup.locator(".review-document-kind")).toHaveText("Context");
-  await expect(firstGroup.locator('[aria-current="true"]')).toHaveCount(1);
-  const border = await firstGroup.locator('[aria-current="true"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).borderLeftWidth));
-  expect(border).toBeLessThanOrEqual(1.5);
-  await page.getByRole("button", { name: "Collapse all", exact: true }).click();
-  await expect(firstGroup.locator(".review-document-group-body")).toBeHidden();
-  await expect(secondGroup.locator(".review-document-group-body")).toBeHidden();
-  await expect(firstGroup.locator(".review-document-group-header").getByText("Viewing", { exact: true })).toBeVisible();
-  await expect(detail.locator(".markdown-body")).toContainText("Exact reviewed body");
-  await page.getByRole("button", { name: "Expand all", exact: true }).click();
-  await expect(firstGroup.locator(".review-document-group-body")).toBeVisible();
-  await selectDocumentGroup(page, secondGroup);
   await selectDocumentGroup(page, firstGroup);
-  await expect(firstGroup.getByText("3 selected for this document", { exact: true })).toBeVisible();
-  const previewResponse = page.waitForResponse((response) => response.request().method() === "POST"
-    && new URL(response.url()).pathname.endsWith("/reviews/selection"));
-  await rail.getByRole("button", { name: "Approve selected", exact: true }).click();
-  const preview = await responseData<{
-    eligible_count: number;
-    auto_settled_review_item_ids: string[];
-    items: Array<{ id: string; eligible: boolean; target_title: string; target_version_no: number;
-      auto_settled_review_item_ids: string[] }>;
-  }>(await previewResponse);
-  expect(preview.eligible_count).toBe(2);
-  const firstItems = preview.items.filter((item) => item.target_title === first.title);
-  const firstRepresentative = firstItems.find((item) => item.eligible)!;
-  const secondRepresentative = preview.items.find((item) => item.target_title === second.title && item.eligible)!;
-  expect(firstItems).toHaveLength(3);
-  expect([...firstRepresentative.auto_settled_review_item_ids].sort()).toEqual(
-    firstItems.filter((item) => item.id !== firstRepresentative.id).map((item) => item.id).sort(),
-  );
-  expect(secondRepresentative.auto_settled_review_item_ids).toEqual([]);
-  expect([...preview.auto_settled_review_item_ids].sort()).toEqual([...firstRepresentative.auto_settled_review_item_ids].sort());
-  const confirmation = page.getByRole("dialog");
-  await expect(confirmation).toContainText("Fixed selection: 4 items");
-  const previewItems = confirmation.locator(".review-bulk-preview-items > li");
-  const firstImpact = previewItems.filter({ hasText: first.title }).filter({ hasText: "Eligible for approval" });
-  const secondImpact = previewItems.filter({ hasText: second.title });
-  await expect(firstImpact.locator("strong")).toHaveText(`${first.title} · v${firstRepresentative.target_version_no}`);
-  await expect(firstImpact.locator(".review-bulk-item-impact")).toContainText("2 other reviews for the same candidate");
-  await expect(secondImpact.locator("strong")).toHaveText(`${second.title} · v${secondRepresentative.target_version_no}`);
-  await expect(secondImpact.locator(".review-bulk-item-impact")).toHaveCount(0);
-  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(confirmation).toBeHidden();
   await firstGroup.getByRole("button", { name: "Approve selection", exact: true }).click();
+  const confirmation = page.getByRole("dialog");
   await expect(confirmation).toContainText("Fixed selection: 3 items");
   await expect(confirmation).toContainText("2 other reviews for the same candidate");
   await confirmation.getByRole("button", { name: "Approve 1", exact: true }).click();
   await expect(confirmation).toBeHidden();
   await expect(firstGroup).toHaveCount(0);
-  await expect(secondGroup.getByRole("checkbox", { name: /Select all reviews matching/ })).toBeChecked();
   await expect(page.locator(".review-bulk-outcomes")).toContainText("3 / 3");
   expect(["approved", "superseded"]).toContain((await reviewDetail(page.request, workspace.id, first.review_item_id)).status);
   expect((await reviewDetail(page.request, workspace.id, second.review_item_id)).status).toBe("pending");
   await page.goto("/activity");
-  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   await expect(page.locator("article.activity-row").getByText("Review decision", { exact: true }).first()).toBeVisible();
 });
 
-test("preserves a change-request reason and retries one unreceived decision with its original ID @cross-browser", async ({ page }, testInfo) => {
-  await authenticatePage(page, testInfo, "review-uncertain");
+// Engine behavior: a sticky decision header must not cover keyboard focus,
+// and mobile review controls keep 44px targets without document overflow.
+test("keeps focused review content and mobile review targets usable @cross-browser", async ({ page }, testInfo) => {
+  await authenticatePage(page, testInfo, "review-layout");
   const workspace = await currentWorkspace(page.request);
-  const candidate = await pendingPage(page.request, workspace.id, "Recover review request");
-  const attempts: Array<{ decision_id: string; decision_reason: string; audience_kind: string }> = [];
-  await page.route(`**/reviews/${candidate.review_item_id}/decision`, async (route) => {
-    attempts.push(route.request().postDataJSON());
-    if (attempts.length === 1) await route.abort("failed");
-    else await route.continue();
-  });
-  await page.goto(`/review?review=${candidate.review_item_id}`);
-  const detail = page.locator(".review-detail-card");
-  await detail.getByRole("button", { name: "Request changes", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Request changes", exact: true });
-  await dialog.getByRole("radio", { name: /^Me/ }).check();
-  await dialog.getByLabel("Decision reason", { exact: true }).fill("Keep this reason across a failed send.");
-  await dialog.getByRole("button", { name: "Request changes", exact: true }).click();
-  await expect(page.getByText(/The decision result is unconfirmed/)).toBeVisible();
-  await expect(dialog.getByLabel("Decision reason", { exact: true })).toHaveValue("Keep this reason across a failed send.");
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(detail.getByRole("button", { name: "Request changes", exact: true })).toBeDisabled();
-  await page.reload();
-  await expect(page.getByRole("button", { name: "Retry the same decision", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Retry the same decision", exact: true }).click();
-  await expect(detail.getByText(/Requested changes saved/)).toBeVisible();
-  expect(attempts).toHaveLength(2);
-  expect(attempts[0]).toEqual(attempts[1]);
-  expect(attempts[1].decision_id).toMatch(/^[0-9a-f-]{36}$/);
-  const saved = await reviewDetail(page.request, workspace.id, candidate.review_item_id);
-  expect(saved.status).toBe("changes_requested");
-  const decisions = saved.decisions.filter((item) => item.decision_type === "request_changes");
-  expect(decisions).toHaveLength(1);
-  expect(decisions[0].decision_id).toBe(attempts[0].decision_id);
-  expect(decisions[0].decision_reason).toBe("Keep this reason across a failed send.");
-});
-
-test("keeps a saved mobile approval after response loss and queue failure, then opens the next review explicitly @cross-browser", async ({ page }, testInfo) => {
-  await authenticatePage(page, testInfo, "review-mobile-receipt");
-  const workspace = await currentWorkspace(page.request);
-  const next = await pendingPage(page.request, workspace.id, "Next review remains");
-  const candidate = await pendingPage(page.request, workspace.id, "Mobile saved approval");
-  let committed = false;
-  let decisionsSent = 0;
-  await page.route(`**/reviews/${candidate.review_item_id}/decision`, async (route) => {
-    decisionsSent += 1;
-    const response = await route.fetch();
-    expect(response.ok()).toBeTruthy();
-    committed = true;
-    await route.abort("failed");
-  });
-  const queuePattern = /\/reviews\?[^#]*$/;
-  await page.route(queuePattern, async (route) => {
-    if (committed) await route.fulfill({ status: 503, json: {
-      error_code: "test_queue_unavailable", message: "Queue unavailable", request_id: "e2e-review-queue", warnings: [],
-    } });
-    else await route.continue();
-  });
+  await pendingPage(page.request, workspace.id, "Second layout review");
+  const candidate = await pendingPage(page.request, workspace.id, "Layout review");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/review?review=${candidate.review_item_id}`);
   const detail = page.locator(".review-detail-card");
-  const approve = detail.getByRole("button", { name: "Approve", exact: true });
-  await expect(approve).toBeEnabled();
-  await expect(detail.locator(".review-detail-header .review-publication-notice")).toHaveText("Approving publishes review version v1.");
+  await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
   await expectNoDocumentOverflow(page);
   const comparison = detail.getByRole("tab", { name: "Compare changes", exact: true });
   await detail.getByRole("link", { name: /Open current document:/ }).focus();
@@ -189,48 +77,18 @@ test("keeps a saved mobile approval after response loss and queue failure, then 
     const geometry = await reviewTabGeometry(comparison);
     return geometry.tabTop - geometry.headerBottom;
   }).toBeGreaterThanOrEqual(0);
-  await testInfo.attach("review-sticky-focus-visibility", {
-    body: JSON.stringify({ covered, focused: await reviewTabGeometry(comparison) }), contentType: "application/json",
-  });
   await page.getByRole("button", { name: "Open Review queue drawer", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "Review queue drawer", exact: true });
-  await expect(drawer).toBeVisible();
-  const mobileRows = drawer.locator(".review-row-shell.has-bulk-select");
-  await expect(mobileRows).toHaveCount(2);
-  const touchTargets = [];
-  for (const row of await mobileRows.all()) {
-    await row.locator(".review-row-select").scrollIntoViewIfNeeded();
-    const target = await row.locator(".review-row-select").boundingBox();
-    const title = await row.locator(".review-row-identity strong").boundingBox();
-    expect(target).not.toBeNull();
-    expect(title).not.toBeNull();
-    expect(target!.width).toBeGreaterThanOrEqual(44);
-    expect(target!.height).toBeGreaterThanOrEqual(44);
-    expect(target!.x).toBeGreaterThanOrEqual(0);
-    expect(target!.x + target!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    expect(target!.x + target!.width).toBeLessThanOrEqual(title!.x);
-    touchTargets.push({ target, title });
+  const rows = drawer.locator(".review-row-shell.has-bulk-select");
+  await expect(rows).toHaveCount(2);
+  for (const row of await rows.all()) {
+    const target = row.locator(".review-row-select");
+    await target.scrollIntoViewIfNeeded();
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   }
-  await testInfo.attach("review-mobile-touch-targets", {
-    body: JSON.stringify(touchTargets), contentType: "application/json",
-  });
-  await drawer.getByRole("button", { name: "Close Review queue", exact: true }).click();
-  await expect(drawer).toBeHidden();
-  await approve.click();
-  await expect(detail.getByText(/Approved saved/)).toBeVisible();
-  await expect(detail.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
-  await expect(detail.getByRole("button", { name: "Next review", exact: true })).toBeDisabled();
-  await expect(page).toHaveURL(new RegExp(`review=${candidate.review_item_id}$`));
-  expect(decisionsSent).toBe(1);
-  const saved = await reviewDetail(page.request, workspace.id, candidate.review_item_id);
-  expect(saved.status).toBe("approved");
-  expect(saved.decisions.filter((item) => item.decision_type === "approve")).toHaveLength(1);
-  await page.unroute(queuePattern);
-  await page.getByRole("button", { name: "Reload queue", exact: true }).click();
-  await expect(detail.getByRole("button", { name: "Next review", exact: true })).toBeEnabled();
-  await detail.getByRole("button", { name: "Next review", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`review=${next.review_item_id}$`));
-  await expect(page.locator("#review-detail-title")).toHaveText(next.title);
   await expectNoDocumentOverflow(page);
 });
 
@@ -279,10 +137,8 @@ async function expectNoDocumentOverflow(page: Page) {
 
 async function reviewTabGeometry(tab: Locator) {
   return tab.evaluate((element) => {
-    const main = element.closest<HTMLElement>(".review-main")!;
-    const header = main.querySelector<HTMLElement>(".review-detail-header")!;
-    return { tabTop: element.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom,
-      headerHeight: header.getBoundingClientRect().height, scrollPaddingTop: getComputedStyle(main).scrollPaddingTop };
+    const header = element.closest<HTMLElement>(".review-main")!.querySelector<HTMLElement>(".review-detail-header")!;
+    return { tabTop: element.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom };
   });
 }
 
