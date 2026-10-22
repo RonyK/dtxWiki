@@ -21,10 +21,25 @@ describe("ChatsListScreen", () => {
   });
 
   it("renders MCP chat cards with client, summary, artifacts, counts, and time", async () => {
+    const chat = chatFixture();
+    // Two verb rows for one page plus an older second page. The list only
+    // carries a sample of rows, so the hint names the newest artifact once and
+    // marks the rest instead of counting them.
+    const [referenced] = chat.linked_artifacts;
+    chat.linked_artifacts.push(
+      { ...referenced, id: "artifact-link-2", verb: "cited" },
+      {
+        ...referenced,
+        id: "artifact-link-3",
+        resource_id: "page-2",
+        artifact_title: "Session policy",
+        last_occurred_at: "2026-05-27T09:01:00Z",
+      },
+    );
     renderWithChats({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats?period=all&writes_only=false&archived=false&sort=last_activity_desc`]:
-        chatsResponse([chatFixture()]),
+        chatsResponse([chat]),
     });
 
     expect(
@@ -40,7 +55,12 @@ describe("ChatsListScreen", () => {
     ).toBeInTheDocument();
     expect(within(card).getByLabelText("Codex CLI")).toBeInTheDocument();
     expect(within(card).queryByText(/Search and read activity/)).toBeNull();
-    expect(within(card).getByText(/Authentication policy/)).toBeInTheDocument();
+    const hint = card.querySelector(".mcp-chat-card-artifacts");
+    expect(hint).toHaveTextContent("Authentication policy and more");
+    expect(hint).toHaveAttribute(
+      "title",
+      "Recently linked: Authentication policy, Session policy",
+    );
     expect(within(card).getByText("3 calls")).toBeInTheDocument();
     expect(within(card).getByText("1 write")).toBeInTheDocument();
     expect(within(card).getByLabelText("Archived")).toBeInTheDocument();
