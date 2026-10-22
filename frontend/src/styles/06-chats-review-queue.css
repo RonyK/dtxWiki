@@ -560,6 +560,42 @@
   white-space: nowrap;
 }
 
+/* Chat detail "Linked artifacts": one card per artifact with its verb pills.
+   Equal columns and equal rows give every card the same size however many
+   pills it carries; the per-call "linked" tab keeps the plain flex strip. */
+.mcp-artifact-strip--grouped {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  grid-auto-rows: 1fr;
+}
+
+.mcp-artifact-strip--grouped .mcp-artifact-chip {
+  max-width: none;
+}
+
+.mcp-artifact-strip--grouped .mcp-artifact-chip-meta {
+  gap: 4px;
+}
+
+/* The title wins the line: when it and the time do not fit together, the
+   time wraps under the title instead of truncating it. */
+.mcp-artifact-chip-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 2px;
+  min-width: 0;
+}
+
+.mcp-artifact-chip-heading strong {
+  min-width: 0;
+}
+
+.mcp-artifact-chip-heading small {
+  margin-left: auto;
+}
+
 /* ---- Chat detail: flow (rail + pinned panel) ----
    Both panes size to the remaining height of .feature-main (already a
    definite-height, overflow-y:auto scrollport -- see 04-knowledge.css) and

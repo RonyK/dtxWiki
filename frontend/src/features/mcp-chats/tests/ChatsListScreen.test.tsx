@@ -21,10 +21,18 @@ describe("ChatsListScreen", () => {
   });
 
   it("renders MCP chat cards with client, summary, artifacts, counts, and time", async () => {
+    const chat = chatFixture();
+    // A second verb row for the same page is still one linked artifact, so the
+    // hint names it instead of reporting "2 linked".
+    chat.linked_artifacts.push({
+      ...chat.linked_artifacts[0],
+      id: "artifact-link-2",
+      verb: "cited",
+    });
     renderWithChats({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats?period=all&writes_only=false&archived=false&sort=last_activity_desc`]:
-        chatsResponse([chatFixture()]),
+        chatsResponse([chat]),
     });
 
     expect(

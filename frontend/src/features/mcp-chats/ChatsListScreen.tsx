@@ -39,6 +39,7 @@ import {
   type TimeBucketKey,
 } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
+import { groupLinkedArtifacts } from "./chatArtifacts";
 import { chatFailureCounts, chatSummaryLine } from "./chatLabels";
 import { chatPresentationLine } from "./chatPresentation";
 import { safeChatErrorMessage } from "./chatErrors";
@@ -927,10 +928,12 @@ function linkedArtifactHint(
   if (!artifacts || artifacts.length === 0) {
     return null;
   }
-  const titles = artifacts.map(
-    (artifact) =>
-      artifact.artifact_title ??
-      domainLabel("chats", "artifactKind", artifact.resource_kind, t),
+  // One entry per artifact: its verb rows (edited + referenced, ...) are not
+  // separate links.
+  const titles = groupLinkedArtifacts(artifacts).map(
+    ({ latest }) =>
+      latest.artifact_title ??
+      domainLabel("chats", "artifactKind", latest.resource_kind, t),
   );
   if (titles.length === 1) {
     return { label: titles[0], full: titles[0] };

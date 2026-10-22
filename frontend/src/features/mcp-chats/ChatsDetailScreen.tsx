@@ -69,6 +69,7 @@ import {
   type ChatFlowPhase,
   type ChatFlowStep,
 } from "./chatFlow";
+import { artifactVerbRank, groupLinkedArtifacts } from "./chatArtifacts";
 import { artifactVerbLabel, chatSummaryLine } from "./chatLabels";
 import { safeChatErrorMessage } from "./chatErrors";
 import { ChatEditCard, chatHasEditPreviews } from "./ChatEditCard";
@@ -769,15 +770,22 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
   const { t } = useTranslation("chats");
   const [open, setOpen] = usePersistedOpen(ARTIFACTS_OPEN_KEY, false);
   const [showAll, setShowAll] = useState(false);
-  const all = chat.linked_artifacts;
-  const visible = showAll ? all : all.slice(0, ARTIFACT_PREVIEW_LIMIT);
-  const hidden = all.length - visible.length;
+  // One card per artifact; its verbs become pills (chatArtifacts.ts).
+  const groups = useMemo(
+    () => groupLinkedArtifacts(chat.linked_artifacts),
+    [chat.linked_artifacts],
+  );
+  const visible = showAll ? groups : groups.slice(0, ARTIFACT_PREVIEW_LIMIT);
+  const hidden = groups.length - visible.length;
 
+  // Rows are unique per (artifact, verb), so a verb's row count is already the
+  // number of distinct artifacts carrying it.
   const verbCounts = new Map<string, number>();
-  for (const artifact of all) {
+  for (const artifact of chat.linked_artifacts) {
     verbCounts.set(artifact.verb, (verbCounts.get(artifact.verb) ?? 0) + 1);
   }
   const subtitle = Array.from(verbCounts.entries())
+    .sort(([a], [b]) => artifactVerbRank(a) - artifactVerbRank(b))
     .map(([verb, count]) => `${artifactVerbLabel(verb, t)} ${count}`)
     .join(" · ");
 
@@ -788,49 +796,54 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
       subtitle={subtitle}
       trailing={
         <CountChip
-          value={all.length}
-          label={t(all.length === 1 ? "counts.artifact_one" : "counts.artifact_other")}
+          value={groups.length}
+          label={t(groups.length === 1 ? "counts.artifact_one" : "counts.artifact_other")}
           compact
         />
       }
       open={open}
       onOpenChange={setOpen}
     >
-      <div className="mcp-artifact-strip">
-        {visible.map((artifact) => (
-          <Link
-            className="mcp-artifact-chip"
-            data-kind={artifact.resource_kind}
-            key={artifact.id}
-            to={artifactNavigationPath(artifact)}
-          >
-            <span className="mcp-artifact-chip-icon" aria-hidden="true">
-              {iconForArtifactKind(artifact.resource_kind)}
-            </span>
-            <span className="mcp-artifact-chip-body">
-              <strong>
-                {artifact.artifact_title
-                  ?? t(`labels.artifactKind.${artifact.resource_kind}`, {
-                    defaultValue: t("labels.artifactKind.unknown"),
-                  })}
-              </strong>
-              <span className="mcp-artifact-chip-meta">
-                <StatusPill
-                  status={artifact.verb}
-                  label={artifactVerbLabel(artifact.verb, t)}
-                  title={artifactVerbLabel(artifact.verb, t)}
-                  compact
-                />
-                <small>
-                  {artifact.occurrence_count > 1
-                    ? `${t("detail.artifactLinks", { count: artifact.occurrence_count })} · `
-                    : ""}
-                  {formatVersionTimestamp(artifact.last_occurred_at)}
-                </small>
+      <div className="mcp-artifact-strip mcp-artifact-strip--grouped">
+        {visible.map(({ key, latest, links }) => {
+          const title = latest.artifact_title
+            ?? t(`labels.artifactKind.${latest.resource_kind}`, {
+              defaultValue: t("labels.artifactKind.unknown"),
+            });
+          return (
+            <Link
+              className="mcp-artifact-chip"
+              data-kind={latest.resource_kind}
+              key={key}
+              title={title}
+              to={artifactNavigationPath(latest)}
+            >
+              <span className="mcp-artifact-chip-icon" aria-hidden="true">
+                {iconForArtifactKind(latest.resource_kind)}
               </span>
-            </span>
-          </Link>
-        ))}
+              <span className="mcp-artifact-chip-body">
+                <span className="mcp-artifact-chip-heading">
+                  <strong>{title}</strong>
+                  <small>{formatVersionTimestamp(latest.last_occurred_at)}</small>
+                </span>
+                <span className="mcp-artifact-chip-meta">
+                  {links.map((link) => {
+                    const verb = artifactVerbLabel(link.verb, t);
+                    return (
+                      <StatusPill
+                        key={link.verb}
+                        status={link.verb}
+                        label={link.occurrence_count > 1 ? `${verb} ×${link.occurrence_count}` : verb}
+                        title={`${verb} · ${t("detail.artifactLinks", { count: link.occurrence_count })} · ${formatVersionTimestamp(link.last_occurred_at)}`}
+                        compact
+                      />
+                    );
+                  })}
+                </span>
+              </span>
+            </Link>
+          );
+        })}
       </div>
       {hidden > 0 ? (
         <button
@@ -838,7 +851,7 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
           className="mcp-strip-toggle"
           onClick={() => setShowAll(true)}
         >
-          {t("detail.showAllArtifacts", { count: all.length })}
+          {t("detail.showAllArtifacts", { count: groups.length })}
         </button>
       ) : null}
     </AdvancedSection>
