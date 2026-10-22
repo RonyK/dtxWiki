@@ -471,7 +471,7 @@ function ActivityLaneSection({ query, lane, title, entries, loadGroup }: {
     <ListPanelHeader title={title} count={preview.length} unit={t("feed.entryUnit", { count: preview.length, defaultValue: "entries" })}
       action={<Link className="activity-feed-see-all" to={activityHref(query, lane)}>{t(actionKey[lane])}<ChevronRight size={14} aria-hidden="true" /></Link>} />
     <div className="activity-feed-summary"><div><p className="activity-feed-counts">{activityCountLabel(counts.returned_entry_count, counts.represented_event_count)}</p><p className="activity-feed-scope">{t("feed.scope", { defaultValue: "Current query range" })}</p></div></div>
-    {preview.length === 0 ? <ActivityLaneEmpty kind={query.kind} title={title} /> : <div className="operations-list">{preview.map(entry => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}</div>}
+    {preview.length === 0 ? <ActivityLaneEmpty kind={query.kind} title={title} /> : <div className="operations-list activity-feed-list">{preview.map(entry => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}</div>}
   </section>;
 }
 
@@ -532,7 +532,7 @@ export function ActivityLanePage() {
     {error ? <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" onClick={reload} type="button">{t("feed.reload", { defaultValue: "Reload activity" })}</button></StatusBanner> : null}
     <ActivityFiltersPanel kind={query.kind} kindFilterLabel={t("kind.label", { defaultValue: "Type" })} subtype={query.subtype} subtypeFilterLabel={t("subtype.label", { defaultValue: "Sub-type" })} period={query.period} periodFilterLabel={t("period.label", { defaultValue: "Period" })} groupReads={query.group_reads} onGroupingChange={group_reads => update({ group_reads })} onKindChange={kind => update({ kind })} onPeriodChange={period => update({ period })} onSubtypeChange={subtype => update({ subtype })} onReset={reset} />
     <section className="feature-section activity-feed-panel">
-      {data.feed.entries.length === 0 ? <ActivityLaneEmpty kind={query.kind} title={title} /> : <div className="operations-list">{data.feed.entries.map(entry => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}</div>}
+      {data.feed.entries.length === 0 ? <ActivityLaneEmpty kind={query.kind} title={title} /> : <div className="operations-list activity-feed-list">{data.feed.entries.map(entry => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}</div>}
       {data.feed.next_cursor ? <div className="load-more-row"><button className="icon-button text-button" disabled={loadingMore} onClick={() => void loadMore()} type="button">{loadingMore ? t("loadingMore", { defaultValue: "Loading" }) : t("loadMore", { defaultValue: "Load more" })}</button></div> : !error ? <p className="activity-feed-scope" role="status">{t("feed.loadedAll", { defaultValue: "All matching activity in this snapshot is shown" })}</p> : null}
     </section>
   </section></div>;

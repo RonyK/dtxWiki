@@ -1,4 +1,4 @@
-import { ChevronRight, ClipboardCheck, Unlink } from "lucide-react";
+import { Bot, ChevronRight, ClipboardCheck, FileText, Library, ListChecks, MessagesSquare, Unlink, type LucideIcon } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -11,6 +11,16 @@ import { ActivityActionBadge } from "./ActivityActionBadge";
 import { ActivityActorBadge } from "./ActivityActorBadge";
 import { ActivityReadGroup } from "./ActivityReadGroup";
 import { RelativeTime } from "./RelativeTime";
+
+// The sidebar's glyph for each section, so a row's type reads like its menu.
+const TYPE_ICONS: Record<string, LucideIcon> = { context: FileText, library: Library, agent: Bot, review: ListChecks, mcp: MessagesSquare };
+
+/** A same-day group range drops the repeated date: "16:46 – 16:49". */
+function rangeEnds(first: string, last: string): [string, string] {
+  const from = formatVersionTimestamp(first);
+  const to = formatVersionTimestamp(last);
+  return from.slice(0, 10) === to.slice(0, 10) ? [from.slice(11), to.slice(11)] : [from, to];
+}
 
 export function ActivityEntryRow({ entry, query = DEFAULT_ACTIVITY_QUERY, loadGroup }: {
   entry: ActivityFeedEntry;
@@ -36,12 +46,14 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
   const descriptionId = useId();
   const presentation = presentActivityFeedEvent(event, count);
   const navigation = activityNavigation(event, query);
+  const [rangeFrom, rangeTo] = rangeEnds(firstOccurredAt, lastOccurredAt);
+  const TypeIcon = TYPE_ICONS[presentation.typeKey];
   const times = <div className="activity-entry__times">
     <RelativeTime value={lastOccurredAt} locale={i18n.language} />
     {count > 1 && <span className="activity-entry__time-range" aria-label={t("feed.group.timeRange")}>
-      <time dateTime={firstOccurredAt} title={formatVersionTimestamp(firstOccurredAt, "long")}>{formatVersionTimestamp(firstOccurredAt)}</time>
+      <time dateTime={firstOccurredAt} title={formatVersionTimestamp(firstOccurredAt, "long")}>{rangeFrom}</time>
       <span aria-hidden="true"> – </span>
-      <time dateTime={lastOccurredAt} title={formatVersionTimestamp(lastOccurredAt, "long")}>{formatVersionTimestamp(lastOccurredAt)}</time>
+      <time dateTime={lastOccurredAt} title={formatVersionTimestamp(lastOccurredAt, "long")}>{rangeTo}</time>
     </span>}
   </div>;
   const heading = <span className="activity-entry__heading"><span>{presentation.title}</span>{navigation.href && <ChevronRight aria-hidden="true" size={14} />}</span>;
@@ -49,7 +61,10 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
     <div className={`activity-entry__layout${presentation.pendingReview ? " activity-entry__layout--review" : ""}`}>
       <div className="activity-entry__body">
         <div className="activity-entry__identity">
-          <span className="activity-entry__type">{presentation.typeLabel}</span>
+          <span className="activity-entry__type" data-kind={presentation.typeKey}>
+            {TypeIcon && <TypeIcon className="activity-entry__type-icon" aria-hidden="true" size={14} />}
+            <span>{presentation.typeLabel}</span>
+          </span>
           <ActivityActorBadge actor={event.actor} />
         </div>
         {navigation.href ? <Link className="activity-entry__title-link" to={navigation.href} aria-label={presentation.pendingReview ? t("feed.openReview", { title: presentation.title }) : presentation.title} aria-describedby={presentation.body ? descriptionId : undefined}>

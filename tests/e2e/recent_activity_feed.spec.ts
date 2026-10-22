@@ -23,7 +23,9 @@ async function metrics(page: Page) {
     rows: entries.filter(e => e.getClientRects().length).map(entry => {
       const identity = entry.querySelector(".activity-entry__identity")!;
       const type = identity.querySelector<HTMLElement>(".activity-entry__type")!;
-      const actor = identity.querySelector<HTMLElement>(".activity-actor-disclosure");
+      // Expanded group members do not repeat the group's actor.
+      const rendered = identity.querySelector<HTMLElement>(".activity-actor-disclosure");
+      const actor = rendered?.getClientRects().length ? rendered : null;
       const chip = actor?.querySelector<HTMLElement>(".activity-actor-split,.activity-actor-pill");
       const heading = entry.querySelector<HTMLElement>(".activity-entry__heading");
       const title = entry.querySelector<HTMLElement>(".activity-entry__title-link");
@@ -164,9 +166,9 @@ for (const language of ["en", "ko"]) {
         expect(measurement.rows.every(row => row.typeContrast >= 4.5 && row.badgeContrasts.every(ratio => ratio >= 4.5))).toBeTruthy();
         expect(measurement.rows.every(row => row.actorGap === null || Math.abs(row.actorGap - 8) < .1)).toBeTruthy();
         expect(measurement.rows.every(row => row.chipToTitle === null || Math.abs(row.chipToTitle - 4) < .1)).toBeTruthy();
-        expect(measurement.rows.every(row => row.actorHeight === undefined || (row.actorHeight >= 44 && row.actorWidth! >= 44))).toBeTruthy();
+        expect(measurement.rows.every(row => row.actorHeight === undefined || (row.actorHeight >= 24 && row.actorWidth! >= 24))).toBeTruthy();
         expect(measurement.rows.every(row => row.chipHeight === undefined || row.chipHeight === 22)).toBeTruthy();
-        expect(measurement.rows.every(row => row.titleHeight === undefined || row.titleHeight >= 44)).toBeTruthy();
+        expect(measurement.rows.every(row => row.titleHeight === undefined || row.titleHeight >= 24)).toBeTruthy();
         expect(measurement.rows.every(row => row.overlap === 0)).toBeTruthy();
         expect(measurement.rows.flatMap(row => row.labels).every(label => label.nowrap === "nowrap" && label.ellipsis === "ellipsis")).toBeTruthy();
         evidence.push({ language, width, route, ...measurement });

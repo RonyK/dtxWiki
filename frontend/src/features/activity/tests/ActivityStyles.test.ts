@@ -12,21 +12,19 @@ function rule(selector: string): string {
 }
 
 describe("Shared activity feed geometry", () => {
-  it("keeps the shared entry surface neutral -- identity lives in the pill, not the surface", () => {
-    const entry = rule(".activity-feed-entry");
-    expect(entry).toMatch(/border:\s*1px solid var\(--border\);/);
-    expect(entry).toMatch(/border-radius:\s*8px;/);
-    expect(entry).toMatch(/background:\s*var\(--surface\);/);
+  it("draws one neutral list surface and separates rows with a hairline", () => {
+    const list = rule(".activity-feed-list");
+    expect(list).toMatch(/border:\s*1px solid var\(--border\);/);
+    expect(list).toMatch(/background:\s*var\(--surface\);/);
+    expect(rule(".activity-feed-list > .activity-feed-entry + .activity-feed-entry")).toMatch(/border-top:\s*1px solid var\(--border\);/);
   });
 
-  it("tones the actor pill per kind without a fourth, uncovered actor_kind", () => {
-    for (const [kind, token] of [
-      ["human", "--context"],
-      ["agent", "--library"],
-      ["system", "--ink-muted"],
-    ]) {
-      expect(rule(`.activity-actor-pill[data-actor="${kind}"]`)).toContain(`--av-tone: var(${token});`);
-    }
+  it("keeps people and the system neutral and leaves color to sections, AI and status", () => {
+    const neutral = rule('.activity-actor-pill[data-actor="human"],\n.activity-actor-pill[data-actor="system"]');
+    expect(neutral).toContain("--av-bg: var(--surface-active);");
+    expect(neutral).toContain("--av-ink: var(--ink);");
+    expect(rule('.activity-actor-pill[data-actor="agent"]')).toContain("--av-bg: var(--library-soft);");
+    expect(rule(".activity-actor-split__ai")).toContain("background: var(--agent-soft);");
   });
 
   it("splits the MCP actor pill instead of collapsing to one generic label", () => {
@@ -39,21 +37,17 @@ describe("Shared activity feed geometry", () => {
   it("keeps type and actor adjacent with compact chip-to-title and description spacing", () => {
     expect(rule(".activity-entry__identity")).toMatch(/gap:\s*8px;/);
     const title = rule(".activity-entry__title-link, .activity-entry__plain-title");
-    expect(title).toMatch(/padding-top:\s*4px;/);
+    expect(title).toMatch(/margin-top:\s*4px;/);
     expect(title).toMatch(/gap:\s*4px;/);
   });
 
-  it("provides 44px actor and navigation targets without relying on the removed source chip", () => {
+  it("provides 24px pointer targets and 32px touch targets without adding row height", () => {
     const actor = rule(".activity-actor-disclosure");
-    expect(actor).toMatch(/min-width:\s*44px;/);
-    expect(actor).toMatch(/height:\s*44px;/);
-    for (const selector of [
-      ".activity-entry__title-link",
-      ".activity-entry__review-link",
-      ".activity-feed-see-all",
-    ]) {
-      expect(rule(selector)).toMatch(/min-height:\s*44px;/);
-    }
+    expect(actor).toMatch(/min-width:\s*24px;/);
+    expect(actor).toMatch(/height:\s*24px;/);
+    expect(rule(".activity-entry__title-link")).toMatch(/min-height:\s*24px;/);
+    expect(css).toMatch(/@media \(pointer: coarse\) \{\s*\.activity-actor-disclosure \{ height: 32px; margin-top: -8px; \}/);
+    expect(rule(".activity-feed-see-all")).toMatch(/min-height:\s*44px;/);
   });
 
   it("references no undefined design token", () => {

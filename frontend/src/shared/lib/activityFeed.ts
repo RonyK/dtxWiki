@@ -113,7 +113,7 @@ export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
     context_page: "context", agent_page: "agent", source: "library", library_item: "library", mcp_tool_call: "mcp", workspace_tree_node: "tree", change_set: "review", job: "job",
   };
   const typeKey = pendingReview ? "review" : Object.hasOwn(typeKeys, kind) ? typeKeys[kind] : isMcpActivityItem(event) ? "mcp" : "activity";
-  return { title, body: body === title ? "" : body, action, pendingReview, typeLabel: i18n.t(`activity:feed.types.${typeKey}`) };
+  return { title, body: body === title ? "" : body, action, pendingReview, typeKey, typeLabel: i18n.t(`activity:feed.types.${typeKey}`) };
 }
 
 /** Accept only exact, same-app resource routes from the permission-filtered projection. */
