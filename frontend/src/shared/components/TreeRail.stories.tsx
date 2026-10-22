@@ -39,7 +39,7 @@ export const DocumentMarkers = {
 
 export const TooltipReadingAndScroll = {
   render: () => <div>
-    <p>Hover a row, move across the gap into its tooltip beside the rail, sweep down to the next rows, and press Escape. Focus a row and use PageDown to scroll it out of view.</p>
+    <p>Hover a row and sweep down to the next rows; the tooltip beside the rail never takes the pointer. Press Escape to close it. Focus a row and use PageDown to scroll it out of view.</p>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 24 }}>
       {(["ltr", "rtl"] as const).map((direction) => <div key={direction} dir={direction} style={{ width: 280, maxWidth: "100%", height: 300 }}>
         <TreeRail title={`Context · ${direction.toUpperCase()}`} accent="context" nodes={Array.from({ length: 30 }, (_, index) => ({

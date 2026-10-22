@@ -1945,12 +1945,20 @@
   pointer-events: none;
 }
 
-/* A read-only label, not a surface: inverted like a plain tooltip so it does
-   not read as the white menu and popover cards that hold controls. Beside the
-   rail it covers no other row and stays hoverable for pointer magnifiers
-   (WCAG 1.4.13). The narrow-drawer fallback below or above covers the next
-   rows, so there it lets the pointer through: a downward sweep reaches the
-   next row and the wheel keeps scrolling the rail. */
+/* DECISION (2026-10-23, user-directed -- do not make it hoverable again):
+   the row tooltip is a read-only label that never takes the pointer, wherever
+   it opens. The inverted dark style, unlike the white menu and popover cards
+   that hold controls, is what tells users it cannot be reached.
+   - Placement: beside the rail, so it covers no other row. A drawer with no
+     room beside it falls back below or above its row (useTreeRowTooltip).
+   - Moving the pointer onto it leaves the row and closes it; a downward
+     sweep always reaches the next row, and the wheel always scrolls the rail.
+   - Accepted trade-off: pointer-magnifier users cannot move onto its text
+     (WCAG 1.4.13 hoverable, failure F95). Keyboard focus still opens it and
+     Escape closes it.
+   History: 3a001f1e made it pointer-transparent below the row; d81de271
+   moved it beside the rail for a review and briefly made it hoverable there,
+   which this decision reverses. */
 .tree-row-tooltip {
   position: fixed;
   z-index: 80;
@@ -1962,7 +1970,7 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
   max-width: min(320px, calc(100vw - 16px));
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .tree-row-tooltip-content {
@@ -1984,31 +1992,6 @@
 
 .tree-row-tooltip-status {
   color: color-mix(in srgb, var(--surface) 78%, var(--ink));
-}
-
-.tree-row-tooltip[data-placement^="bottom"],
-.tree-row-tooltip[data-placement^="top"] {
-  pointer-events: none;
-}
-
-/* Beside the rail, the transparent bridge spans the 8px offset, joining the
-   row and popup without a hover timeout. It lies over the rail's own padding,
-   never over another row. */
-.tree-row-tooltip[data-placement^="right"]::before,
-.tree-row-tooltip[data-placement^="left"]::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-}
-
-.tree-row-tooltip[data-placement^="right"]::before {
-  right: 100%;
-}
-
-.tree-row-tooltip[data-placement^="left"]::before {
-  left: 100%;
 }
 
 /* The hook slides the arrow along the edge facing the row to the row's

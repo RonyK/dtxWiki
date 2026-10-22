@@ -83,15 +83,12 @@ export function useTreeRowTooltip({
     setOwner((current) => current?.element === element ? current : next);
   }
 
-  // Beside the rail, the popup and its bridge belong to the hover region, so
-  // pointer-magnifier users can move onto its text (WCAG 1.4.13); there it
-  // covers no other row. The narrow-drawer fallback below or above is
-  // pointer-transparent (CSS), so it never becomes a target and a downward
-  // sweep reaches the next row.
+  // DECISION (2026-10-23, user-directed -- do not add the popup back): the
+  // tooltip never takes the pointer (see .tree-row-tooltip in
+  // 04-knowledge.css), so only the owner row is the hover region. Moving the
+  // pointer onto the popup leaves the row and closes it.
   function pointerWithin(target: EventTarget | null) {
-    return target instanceof Node && Boolean(
-      ownerRef.current?.element.contains(target) || popupRef.current?.contains(target),
-    );
+    return target instanceof Node && Boolean(ownerRef.current?.element.contains(target));
   }
 
   function leave(event: MouseEvent<HTMLElement>) {
@@ -132,8 +129,8 @@ export function useTreeRowTooltip({
       // The whole row is the reference, so a deeply indented row whose title
       // is clipped still keeps its popup while the row itself is visible.
       void computePosition(owner.element, popup, {
-        // Beside the rail, outside the rows. A drawer with no room beside it
-        // falls back below or above its row, where it lets the pointer through.
+        // Beside the rail, so it covers no other row. A drawer with no room
+        // beside it falls back below or above its row.
         placement: owner.direction === "rtl" ? "left-start" : "right-start",
         strategy: "fixed",
         middleware: [
@@ -187,7 +184,7 @@ export function useTreeRowTooltip({
     const handlePointerMove = (event: globalThis.PointerEvent) => {
       pointerPositionRef.current = { x: event.clientX, y: event.clientY };
       // WebKit can omit mouseleave when expanding a row replaces its hovered
-      // chevron SVG. The next real target reconciles row and popup ownership.
+      // chevron SVG. The next real target reconciles row ownership.
       pointerWithinRef.current = pointerWithin(event.target);
       if (!pointerWithinRef.current && !owner.element.contains(document.activeElement)) dismiss();
     };
@@ -240,8 +237,6 @@ export function useTreeRowTooltip({
         className="tree-row-tooltip"
         data-placement="right-start"
         style={{ left: rect.right + 8, top: rect.top }}
-        onMouseEnter={() => { pointerWithinRef.current = true; }}
-        onMouseLeave={leave}
       >
         <span ref={arrowRef} className="tree-row-tooltip-arrow" aria-hidden="true" />
         <div className="tree-row-tooltip-content">

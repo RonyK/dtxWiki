@@ -127,17 +127,16 @@ describe("TreeRail tooltip ownership", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
-  it("allows pointer handoff to the popup, then dismisses when its entire hover region is left", () => {
-    render(<TreeRail title="Context" nodes={[node()]} />);
-    const row = screen.getByRole("treeitem");
-    fireEvent.mouseEnter(row);
+  it("never counts the popup as hover region: leaving the row toward it closes it and the next row takes over", () => {
+    render(<TreeRail title="Context" nodes={[node(), node("second")]} />);
+    const [first, second] = screen.getAllByRole("treeitem");
+    fireEvent.mouseEnter(first);
     const popup = screen.getByRole("tooltip");
-    fireEvent.mouseLeave(row, { relatedTarget: popup });
-    fireEvent.mouseEnter(popup, { relatedTarget: row });
-    fireEvent.pointerMove(popup);
-    expect(screen.getByRole("tooltip")).toBe(popup);
-    fireEvent.mouseLeave(popup, { relatedTarget: document.body });
+    // DECISION (2026-10-23): the tooltip never takes the pointer.
+    fireEvent.mouseLeave(first, { relatedTarget: popup });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.mouseEnter(second);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("second full title");
   });
 
   it("ignores rounded stationary mouseenter after Escape and resumes on actual pointer movement", () => {
@@ -209,7 +208,7 @@ describe("TreeRail tooltip ownership", () => {
 });
 
 describe("TreeRail tooltip live geometry", () => {
-  function layout({ titleLines = 2, chrome = 36, viewportHeight = 768 } = {}) {
+  function layout({ titleLines = 2, chrome = 36, viewportHeight = 768, titleOffset = 50 } = {}) {
     let rowTop = 150;
     let rowLeft = 30;
     // A title shows no more than the line count the hook clamps it to.
@@ -218,9 +217,7 @@ describe("TreeRail tooltip live geometry", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.matches(".tree-row") && this.closest<HTMLElement>(".tree-rail-body")?.style.display === "none") return new DOMRect();
       if (this.matches(".tree-row")) return new DOMRect(rowLeft, rowTop, 240, 36);
-      // A deeply indented title starts past the rail's clip (right edge 280);
-      // the popup's visibility must follow the whole row, not the title.
-      if (this.matches(".tree-row-title")) return new DOMRect(rowLeft + 300, rowTop + 8, 150, 20);
+      if (this.matches(".tree-row-title")) return new DOMRect(rowLeft + titleOffset, rowTop + 8, 150, 20);
       if (this.matches(".tree-row-tooltip")) return new DOMRect(0, 0, 280, chrome + shownLines(this) * 17);
       if (this.matches(".tree-row-tooltip-title")) return new DOMRect(0, 0, 262, shownLines(this.closest(".tree-row-tooltip")) * 17);
       if (this.matches(".tree-row-tooltip-arrow")) return new DOMRect(0, 0, 8, 8);
@@ -260,9 +257,11 @@ describe("TreeRail tooltip live geometry", () => {
     await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ top: "210px", left: "308px" }); });
   });
 
-  it("dismisses a still-focused owner once it scrolls out of the clipped rail", async () => {
-    const { row, rail, move } = layout();
-    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+  it("keeps the popup while its row is visible, even with the title indented past the rail, and dismisses once the row scrolls out", async () => {
+    // Deep indentation pushes the title start past the rail's clip (right
+    // edge 280) while the row itself stays visible: the popup must stay.
+    const { row, rail, move } = layout({ titleOffset: 300 });
+    await waitFor(() => { expect(screen.getByRole("tooltip")).toHaveStyle({ left: "278px" }); });
     move(50);
     fireEvent.scroll(rail);
     await waitFor(() => { expect(screen.queryByRole("tooltip")).not.toBeInTheDocument(); });
