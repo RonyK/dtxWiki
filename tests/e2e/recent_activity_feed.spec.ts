@@ -201,7 +201,14 @@ for (const language of ["en", "ko"]) {
 }
 
 test.describe("touch activity disclosures", () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test.use({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    // Firefox supports touch emulation but rejects the isMobile context option.
+    isMobile: async ({ browserName }, use) => {
+      await use(browserName !== "firefox");
+    },
+  });
   test("full names and group members stay accessible to touch", async ({ page }, info) => {
     const seed = await setup(page, info);
     await page.addInitScript(() => localStorage.setItem("dtxwiki.uiLanguage", "ko"));
