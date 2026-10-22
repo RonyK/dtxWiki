@@ -1634,6 +1634,54 @@ function mermaidDiagramFamily(root: Element) {
 // which is what pushed ER table names and attribute rows off their left edge.
 const MERMAID_CENTRED_LABEL_FAMILIES = new Set(["flowchart-v2", "flowchart"]);
 
+const MERMAID_SEQUENCE_MESSAGE_CLASSES = new Set(["messageLine0", "messageLine1"]);
+const MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH = "1.5";
+const MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH = "2";
+
+const MERMAID_SEQUENCE_FALLBACK_RULES: {
+  applies: (element: Element) => boolean;
+  apply: (element: Element) => void;
+}[] = [
+  {
+    applies: (element) =>
+      ["line", "path"].includes(element.localName.toLowerCase()) &&
+      Array.from(element.classList).some((name) =>
+        MERMAID_SEQUENCE_MESSAGE_CLASSES.has(name)),
+    apply: (element) => {
+      // Sequence messages use `stroke="none"` as a placeholder for CSS.
+      // Remove it so the shared connector fallback supplies the colour.
+      // Restore the stylesheet's width too: markers scale with stroke width.
+      // Intentional `none` elsewhere (gantt text, wardley markers, cynefin
+      // domains) and explicit message colours keep their attributes.
+      if (element.getAttribute("stroke") === "none") {
+        element.removeAttribute("stroke");
+      }
+      element.setAttribute("stroke-width", MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH);
+    },
+  },
+  {
+    applies: (element) =>
+      element.localName.toLowerCase() === "line" &&
+      (element.getAttribute("marker-start") ?? "").endsWith("-sequencenumber)"),
+    apply: (element) => {
+      // Autonumber circles sit on zero-length lines. Mermaid emits width 0
+      // then overrides it with CSS; without that width the marker vanishes.
+      if (element.getAttribute("stroke-width") === "0") {
+        element.removeAttribute("stroke-width");
+      }
+      setSvgAttributeIfMissing(
+        element,
+        "stroke-width",
+        MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH,
+      );
+    },
+  },
+  {
+    applies: (element) => element.matches("text.sequenceNumber"),
+    apply: (element) => setSvgAttributeIfMissing(element, "fill", "#fff"),
+  },
+];
+
 // The marker shapes Mermaid deliberately leaves unfilled, and the tags it
 // draws them with. Matched on the marker's SEMANTIC CLASS rather than its
 // id: Mermaid stamps `class="marker aggregation class"` identically under
@@ -1654,15 +1702,6 @@ const MERMAID_MARKER_SHAPE_TAGS = new Set([
   "rect",
 ]);
 
-// Sequence message lines (solid `messageLine0`, dotted `messageLine1`) are the
-// one connector Mermaid 11.16.1 ships with `stroke="none"` as an attribute,
-// leaving the colour to its `.messageLine0/1` stylesheet rule. Once that rule
-// is stripped, the fill-if-missing connector rule keeps the `none`, and only
-// the arrowhead markers stay visible. So these alone get their stroke
-// overwritten, at the stylesheet's 1.5 width. Other `stroke="none"` attributes
-// (gantt axis text, wardley markers) are intentional and stay untouched.
-const MERMAID_SEQUENCE_MESSAGE_CLASSES = new Set(["messageLine0", "messageLine1"]);
-
 function mermaidMarkerFill(marker: Element, isEntityRelationship: boolean) {
   // ER hollows out every cardinality end at once: its stylesheet overrides
   // the shared base with `.marker { fill: none !important }`.
@@ -1681,6 +1720,7 @@ function applyMermaidFallbackStyles(root: Element) {
   const family = mermaidDiagramFamily(root);
   const centresNodeLabels = MERMAID_CENTRED_LABEL_FAMILIES.has(family);
   const isEntityRelationship = family === "er";
+  const sequenceRules = family === "sequence" ? MERMAID_SEQUENCE_FALLBACK_RULES : [];
   for (const element of Array.from(root.querySelectorAll("*"))) {
     const tagName = element.localName.toLowerCase();
     const className = element.getAttribute("class") ?? "";
@@ -1712,6 +1752,11 @@ function applyMermaidFallbackStyles(root: Element) {
       setSvgAttributeIfMissing(element, "stroke-width", "1");
       continue;
     }
+    for (const rule of sequenceRules) {
+      if (rule.applies(element)) {
+        rule.apply(element);
+      }
+    }
     if (tagName === "rect" && className.includes("background")) {
       setSvgAttributeIfMissing(element, "fill", "transparent");
     }
@@ -1721,14 +1766,6 @@ function applyMermaidFallbackStyles(root: Element) {
     ) {
       setSvgAttributeIfMissing(element, "fill", "#f8fafc");
       setSvgAttributeIfMissing(element, "stroke", "#334155");
-    }
-    if (
-      className
-        .split(/\s+/)
-        .some((name) => MERMAID_SEQUENCE_MESSAGE_CLASSES.has(name))
-    ) {
-      element.setAttribute("stroke", "#64748b");
-      element.setAttribute("stroke-width", "1.5");
     }
     if (
       ["line", "polyline"].includes(tagName) ||

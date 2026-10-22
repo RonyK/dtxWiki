@@ -1262,14 +1262,19 @@ describe("MarkdownView", () => {
   it("strips Mermaid style blocks and supplies safe connector attributes", async () => {
     mermaidMock.render.mockResolvedValueOnce({
       svg: [
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80">',
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"' +
+          ' aria-roledescription="sequence">',
         "<style>.messageLine0{stroke:#334155;fill:none;}</style>",
         // Mermaid 11.16.1 stamps stroke="none" and leaves colour to the
-        // stylesheet stripped above; without the overwrite only arrowheads show.
+        // stylesheet stripped above; without a fallback only arrowheads show.
         '<line class="messageLine0" x1="0" y1="0" x2="20" y2="20"',
         ' stroke-width="2" stroke="none" style="fill: none;" />',
-        '<line class="messageLine1" x1="0" y1="40" x2="20" y2="40"',
+        '<path class="messageLine1" d="M 0 40 C 20 40 20 60 0 60"',
         ' stroke-width="2" stroke="none" style="stroke-dasharray: 3, 3; fill: none;" />',
+        '<line id="authored-message" class="messageLine0" stroke="#ef4444"',
+        ' style="stroke: #16a34a;" x1="0" y1="60" x2="20" y2="60" />',
+        '<line id="hidden-line" stroke="none" stroke-width="0"',
+        ' x1="0" y1="70" x2="20" y2="70" />',
         '<text font-size="16px" font-family="serif"',
         ' style="font:italic 700 16px serif;text-anchor:start">',
         '<tspan font-size="18px" style="font-size:18px">Sequence label</tspan>',
@@ -1287,16 +1292,24 @@ describe("MarkdownView", () => {
     expect(await screen.findByText("Sequence label")).toBeInTheDocument();
     const diagram = document.querySelector(".mermaid-diagram");
     expect(diagram?.querySelector("style")).not.toBeInTheDocument();
-    for (const selector of ["line.messageLine0", "line.messageLine1"]) {
+    for (const selector of ["line.messageLine0", "path.messageLine1"]) {
       const line = diagram?.querySelector(selector);
       expect(line).toHaveAttribute("stroke", "#64748b");
       expect(line).toHaveAttribute("stroke-width", "1.5");
       expect(line).toHaveAttribute("fill", "none");
     }
     expect(
-      (diagram?.querySelector("line.messageLine1") as SVGElement).style
+      (diagram?.querySelector("path.messageLine1") as SVGElement).style
         .getPropertyValue("stroke-dasharray"),
     ).toBe("3, 3");
+    const authoredMessage = diagram?.querySelector("#authored-message");
+    expect(authoredMessage).toHaveAttribute("stroke", "#ef4444");
+    expect((authoredMessage as SVGElement).style.getPropertyValue("stroke"))
+      .toBe("#16a34a");
+    expect(diagram?.querySelector("#hidden-line"))
+      .toHaveAttribute("stroke", "none");
+    expect(diagram?.querySelector("#hidden-line"))
+      .toHaveAttribute("stroke-width", "0");
     const svg = diagram?.querySelector(".mermaid-diagram-svg > svg");
     const text = diagram?.querySelector("text");
     const tspan = diagram?.querySelector("tspan");

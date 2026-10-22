@@ -6,13 +6,19 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { MarkdownView } from "../MarkdownView";
 
 const REAL_MERMAID_FIXTURES = [
-  ["flowchart", "flowchart LR\n  A[Alpha] --> B[Beta]"],
+  [
+    "flowchart",
+    "flowchart LR\n  A[Alpha] --> B[Beta]\n  class A messageLine0",
+  ],
   [
     "sequence",
-    "sequenceDiagram\n  participant A as Alpha\n  participant B as Beta\n  A->>B: Hello",
+    "sequenceDiagram\n  autonumber\n  participant A as Alpha\n  participant B as Beta\n  A->>B: Hello\n  B-->>A: Reply\n  A-->>A: Self call",
   ],
   ["state", "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Done"],
-  ["class", "classDiagram\n  class Animal\n  Animal : +name string"],
+  [
+    "class",
+    "classDiagram\n  class Animal\n  Animal : +name string\n  Animal --> Habitat",
+  ],
   ["entity relationship", "erDiagram\n  CUSTOMER ||--o{ ORDER : places"],
 ] as const;
 
@@ -79,7 +85,7 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
 
   it.each(REAL_MERMAID_FIXTURES)(
     "renders %s with positive intrinsic SVG geometry",
-    async (_diagramType, source) => {
+    async (diagramType, source) => {
       const { container } = render(
         createElement(MarkdownView, {
           body: `\`\`\`mermaid\n${source}\n\`\`\``,
@@ -129,6 +135,46 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
           '[fill]:not([fill="none"]), [stroke]:not([stroke="none"])',
         ).length,
       ).toBeGreaterThan(0);
+      const connectors = Array.from(
+        svg?.querySelectorAll(
+          'line, polyline, path[marker-start], path[marker-end], ' +
+          'path.flowchart-link, path.transition, path.relation, ' +
+          'path.relationshipLine, path.messageLine0, path.messageLine1',
+        ) ?? [],
+      ).filter((element) => !element.closest("marker"));
+      expect(connectors.length).toBeGreaterThan(0);
+      expect(
+        connectors.filter((element) => {
+          const stroke = element.getAttribute("stroke")?.trim().toLowerCase();
+          return !stroke || stroke === "none" || stroke === "transparent";
+        }).map((element) => element.outerHTML),
+      ).toEqual([]);
+      if (diagramType === "flowchart") {
+        const nodeWithSequenceClass = svg?.querySelector("g.node.messageLine0");
+        expect(nodeWithSequenceClass).toBeInTheDocument();
+        expect(nodeWithSequenceClass).not.toHaveAttribute("stroke");
+        expect(nodeWithSequenceClass).not.toHaveAttribute("stroke-width");
+      }
+      if (diagramType === "sequence") {
+        const numberMarker = svg?.querySelector('marker[id$="-sequencenumber"]');
+        expect(numberMarker?.querySelector("circle")).toBeInTheDocument();
+        const badgeCarriers = connectors.filter((element) =>
+          element.getAttribute("marker-start")?.includes(`#${numberMarker?.id}`),
+        );
+        expect(badgeCarriers).toHaveLength(3);
+        expect(
+          badgeCarriers.every((element) =>
+            Number(element.getAttribute("stroke-width")) > 0),
+        ).toBe(true);
+        const numbers = Array.from(svg?.querySelectorAll("text.sequenceNumber") ?? []);
+        expect(numbers).toHaveLength(badgeCarriers.length);
+        expect(
+          numbers.every((element) => {
+            const fill = getComputedStyle(element).fill || element.getAttribute("fill");
+            return ["white", "#fff", "#ffffff", "rgb(255, 255, 255)"].includes(fill ?? "");
+          }),
+        ).toBe(true);
+      }
       expect(document.querySelector("body > svg")).toBeNull();
     },
     // This case deliberately drives the real Mermaid parser, layout engines and
