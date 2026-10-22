@@ -109,19 +109,64 @@ test("reviews a retained Ask API proposal and records activity", async ({ page }
   await page
     .getByLabel("Decision reason")
     .fill("Cross-screen workflow reviewed");
+  const decisionResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.startsWith(
+        `/api/v1/workspaces/${workspace.id}/reviews/`,
+      ) &&
+      new URL(response.url()).pathname.endsWith("/decision"),
+  );
   await page.getByRole("button", { name: "Approve" }).click();
+  const decisionResponse = await decisionResponsePromise;
+  expect(decisionResponse.ok()).toBeTruthy();
+  const reviewId = (await decisionResponse.json()).data.id;
+  expect(reviewId).toEqual(expect.any(String));
 
   await expect(reviewRequests).toHaveCount(pendingBefore - 1);
 
+  const feedResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/workspaces/${workspace.id}/activity/feed`,
+  );
   await page.goto("/activity");
+  const feedResponse = await feedResponsePromise;
+  expect(feedResponse.ok()).toBeTruthy();
+  const feed = (await feedResponse.json()).data;
+  expect(feed.entries).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      event: expect.objectContaining({
+        body: "review.decision",
+        target: expect.objectContaining({
+          target_kind: "review_item",
+          target_id: reviewId,
+        }),
+      }),
+    }),
+  ]));
 
   await expect(
     page.getByRole("heading", { name: "Activity", exact: true }),
   ).toBeVisible();
-  await expect(
-    page
-      .locator("article.activity-row")
-      .getByText("Review decision", { exact: true })
-      .first(),
-  ).toBeVisible();
+  const decisionRow = page.getByRole("article").filter({
+    has: page.getByText("Review decision", { exact: true }),
+  });
+  await expect(decisionRow).toHaveCount(1);
+  await expect(decisionRow).toBeVisible();
+  const historyLink = decisionRow.getByRole("link", {
+    name: "View activity list",
+    exact: true,
+  });
+  await historyLink.click();
+  await expect(page).toHaveURL((url) =>
+    url.pathname === "/activity/history" &&
+    url.searchParams.get("period") === "all" &&
+    url.searchParams.get("kind") === "all" &&
+    url.searchParams.get("subtype") === "all" &&
+    url.searchParams.get("group_reads") === "1",
+  );
+  await expect(decisionRow).toHaveCount(1);
+  await expect(decisionRow).toBeVisible();
 });

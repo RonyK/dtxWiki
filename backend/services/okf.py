@@ -36,6 +36,7 @@ from backend.services.entity_ref import (  # canonical (G0-1)
     context_concept_path,
     library_concept_path,
 )
+from backend.services.mcp_read_projection import record_served_read
 from backend.utils.page_frontmatter import (
     derive_nav_description,
     parse_page_frontmatter,
@@ -437,6 +438,7 @@ def render_library_concept(item: LibraryItem) -> tuple[str, dict[str, object]]:
     )
     if not body:
         body = "_(no extracted text)_"
+    record_served_read("library_item", item.id, version, content=body)
     frontmatter: dict[str, object] = {
         "type": "source",
         "title": item.title or item.uri,

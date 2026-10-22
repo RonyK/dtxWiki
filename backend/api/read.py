@@ -63,7 +63,11 @@ from backend.policy.workspace_resolution import (
     resolve_workspace_for_actor,
     workspace_existence_is_hidden,
 )
-from backend.schemas.activity import ActivityListResponse
+from backend.schemas.activity import (
+    ActivityFeedResponse,
+    ActivityListResponse,
+    ActivityReadGroupResponse,
+)
 from backend.schemas.agent import (
     AgentPageActivateRequest,
     AgentPageDraftRequest,
@@ -166,6 +170,10 @@ from backend.schemas.tree import (
     TreeMoveRequest,
     TreeNodeUpdate,
     TreeReorderRequest,
+)
+from backend.services.activity_feed_service import (
+    ActivityFeedService,
+    InvalidActivityTokenError,
 )
 from backend.services.actor_visible_read import context_page_id_visible
 from backend.services.ask_service import InvalidUserMessageError
@@ -3613,6 +3621,118 @@ def list_activity(
     with control_session_factory() as identity_session:
         deferred_identity.apply(identity_session)
     return {"data": data}
+
+
+@router.get(
+    "/{workspace_id}/activity/feed",
+    response_model=ActivityFeedResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_activity_feed(
+    request: Request,
+    svc: ServicesDep,
+    workspace_id: UUID,
+    actor: RestActorDep,
+    access: WorkspaceViewerAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
+    period: Literal["today", "yesterday", "week", "month", "all"] = "today",
+    kind: Literal["all", "workspace", "mcp", "system", "review_decision"] = "all",
+    subtype: str = "all",
+    lane: Literal["pending", "advisory", "history"] | None = None,
+    group_reads: bool = True,
+    limit: Annotated[int, Query(ge=1, le=50)] = 50,
+    cursor: str | None = None,
+):
+    actor = replace(
+        actor,
+        workspace_id=workspace_id,
+        workspace_role=access.role,
+        role=access.role,
+        scopes=access.granted_scopes
+        if access.granted_scopes is not None
+        else actor.scopes,
+    )
+    deferred_identity = DeferredIdentityLabels()
+    service = ActivityFeedService(
+        svc.activity, cursor_secret=request.app.state.settings.effective_session_secret
+    )
+    try:
+        with session_factory() as session:
+            data = service.list_feed(
+                session,
+                workspace_id,
+                actor=actor,
+                actor_role=access.role,
+                period=period,
+                kind=kind,
+                subtype=subtype,
+                lane=lane,
+                group_reads=group_reads,
+                limit=limit,
+                cursor=cursor,
+                deferred_identity=deferred_identity,
+            )
+        # Never nest workspace and identity sessions. Projected actor models
+        # retain the deferred label targets through event/group serialization.
+        with control_session_factory() as identity_session:
+            deferred_identity.apply(identity_session)
+        return {"data": data}
+    except InvalidActivityTokenError as exc:
+        return build_rest_error_response(
+            "invalid_activity_token",
+            str(exc),
+            status_code=400,
+        )
+
+
+@router.get(
+    "/{workspace_id}/activity/read-group",
+    response_model=ActivityReadGroupResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def get_activity_read_group(
+    request: Request,
+    svc: ServicesDep,
+    workspace_id: UUID,
+    actor: RestActorDep,
+    access: WorkspaceViewerAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
+    token: Annotated[str, Query(min_length=1, max_length=16000)],
+):
+    actor = replace(
+        actor,
+        workspace_id=workspace_id,
+        workspace_role=access.role,
+        role=access.role,
+        scopes=access.granted_scopes
+        if access.granted_scopes is not None
+        else actor.scopes,
+    )
+    deferred_identity = DeferredIdentityLabels()
+    service = ActivityFeedService(
+        svc.activity, cursor_secret=request.app.state.settings.effective_session_secret
+    )
+    try:
+        with session_factory() as session:
+            data = service.read_group(
+                session,
+                workspace_id,
+                actor=actor,
+                actor_role=access.role,
+                token=token,
+                deferred_identity=deferred_identity,
+            )
+        with control_session_factory() as identity_session:
+            deferred_identity.apply(identity_session)
+        return {"data": data}
+    except InvalidActivityTokenError as exc:
+        return build_rest_error_response(
+            "invalid_activity_token",
+            str(exc),
+            status_code=400,
+        )
 
 
 @router.get(

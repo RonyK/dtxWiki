@@ -8,6 +8,8 @@ import {
   getSettingsPolicies,
   listArtifactProvenance,
   listActivity,
+  listActivityFeed,
+  getActivityReadGroup,
   listAskSessions,
   listLintFindings,
   listMcpChats,
@@ -66,6 +68,34 @@ describe("operations api", () => {
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=week&lane=pending&limit=10`,
       expect.objectContaining({ headers: expect.any(Headers) }),
     );
+  });
+
+  it("requests server-grouped display entries with the full query and abort signal", async () => {
+    const data = { entries: [], next_cursor: "opaque-next", unread_count: 3,
+      returned_entry_count: 0, represented_event_count: 0, has_more: true, lanes: {} };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ data }));
+    const controller = new AbortController();
+    expect(await listActivityFeed(WORKSPACE_ID, {
+      period: "week", kind: "mcp", subtype: "read", lane: "history",
+      group_reads: false, limit: 50, cursor: "opaque/current",
+    }, controller.signal)).toEqual(data);
+    const url = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(url.pathname).toBe(`/api/v1/workspaces/${WORKSPACE_ID}/activity/feed`);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      period: "week", kind: "mcp", subtype: "read", lane: "history",
+      group_reads: "false", limit: "50", cursor: "opaque/current",
+    });
+    expect(fetchMock.mock.calls[0]![1]?.signal).toBe(controller.signal);
+  });
+
+  it("loads read-group members with an opaque encoded token and no mutation", async () => {
+    const data = { group_id: "group", events: [], event_count: 0 };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ data }));
+    expect(await getActivityReadGroup(WORKSPACE_ID, "signed/a+b?c")).toEqual(data);
+    const url = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(url.pathname).toBe(`/api/v1/workspaces/${WORKSPACE_ID}/activity/read-group`);
+    expect(url.searchParams.get("token")).toBe("signed/a+b?c");
+    expect(fetchMock.mock.calls[0]![1]?.method).toBeUndefined();
   });
 
   it("threads cursor through ask session history and returns pagination fields", async () => {

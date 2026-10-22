@@ -66,6 +66,367 @@
         "title": "ActivityActor",
         "type": "object"
       },
+      "ActivityFeedData": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityFeedEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "lanes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ActivityFeedLaneCount"
+            },
+            "propertyNames": {
+              "enum": [
+                "pending",
+                "advisory",
+                "history"
+              ]
+            },
+            "title": "Lanes",
+            "type": "object"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "represented_event_count": {
+            "title": "Represented Event Count",
+            "type": "integer"
+          },
+          "returned_entry_count": {
+            "title": "Returned Entry Count",
+            "type": "integer"
+          },
+          "unread_count": {
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entries",
+          "next_cursor",
+          "unread_count",
+          "returned_entry_count",
+          "represented_event_count",
+          "has_more",
+          "lanes"
+        ],
+        "title": "ActivityFeedData",
+        "type": "object"
+      },
+      "ActivityFeedEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_type": {
+            "enum": [
+              "event",
+              "read_group"
+            ],
+            "title": "Entry Type",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/ActivityFeedEvent"
+          },
+          "event_count": {
+            "title": "Event Count",
+            "type": "integer"
+          },
+          "first_occurred_at": {
+            "format": "date-time",
+            "title": "First Occurred At",
+            "type": "string"
+          },
+          "group_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Token"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_occurred_at": {
+            "format": "date-time",
+            "title": "Last Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_type",
+          "id",
+          "event",
+          "event_count",
+          "first_occurred_at",
+          "last_occurred_at"
+        ],
+        "title": "ActivityFeedEntry",
+        "type": "object"
+      },
+      "ActivityFeedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "affordances": {
+            "items": {
+              "enum": [
+                "restore_version",
+                "undo_change",
+                "mark_read",
+                "open"
+              ],
+              "type": "string"
+            },
+            "title": "Affordances",
+            "type": "array"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "event_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Event Args",
+            "type": "object"
+          },
+          "event_key": {
+            "anyOf": [
+              {
+                "enum": [
+                  "context_page.draft.publish",
+                  "tree.node.move",
+                  "tree.node.rename",
+                  "workspace.join_request.requested",
+                  "workspace.join_request.approved",
+                  "workspace.join_request.rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Key"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lane": {
+            "enum": [
+              "pending",
+              "advisory",
+              "history"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "navigation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityNavigation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "default": "log",
+            "title": "Operation",
+            "type": "string"
+          },
+          "public_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Error Code"
+          },
+          "result_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Status"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Item Id"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name"
+          }
+        },
+        "required": [
+          "id",
+          "lane",
+          "event_key",
+          "event_args",
+          "title",
+          "body",
+          "actor",
+          "target",
+          "created_at",
+          "review_item_id",
+          "affordances"
+        ],
+        "title": "ActivityFeedEvent",
+        "type": "object"
+      },
+      "ActivityFeedLaneCount": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has More"
+          },
+          "represented_event_count": {
+            "title": "Represented Event Count",
+            "type": "integer"
+          },
+          "returned_entry_count": {
+            "title": "Returned Entry Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "returned_entry_count",
+          "represented_event_count",
+          "has_more"
+        ],
+        "title": "ActivityFeedLaneCount",
+        "type": "object"
+      },
+      "ActivityFeedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ActivityFeedData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ActivityFeedResponse",
+        "type": "object"
+      },
       "ActivityItemRead": {
         "additionalProperties": false,
         "properties": {
@@ -250,6 +611,85 @@
           "data"
         ],
         "title": "ActivityListResponse",
+        "type": "object"
+      },
+      "ActivityNavigation": {
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id",
+          "href"
+        ],
+        "title": "ActivityNavigation",
+        "type": "object"
+      },
+      "ActivityReadGroupData": {
+        "additionalProperties": false,
+        "properties": {
+          "event_count": {
+            "title": "Event Count",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityFeedEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "group_id": {
+            "title": "Group Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_id",
+          "events",
+          "event_count"
+        ],
+        "title": "ActivityReadGroupData",
+        "type": "object"
+      },
+      "ActivityReadGroupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ActivityReadGroupData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ActivityReadGroupResponse",
         "type": "object"
       },
       "ActivityTarget": {
@@ -23689,6 +24129,302 @@
           }
         ],
         "summary": "List Activity",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/activity/feed": {
+      "get": {
+        "operationId": "list_activity_feed_api_v1_workspaces__workspace_id__activity_feed_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "today",
+              "enum": [
+                "today",
+                "yesterday",
+                "week",
+                "month",
+                "all"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "workspace",
+                "mcp",
+                "system",
+                "review_decision"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subtype",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Subtype",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lane",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "advisory",
+                    "history"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lane"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_reads",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Group Reads",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityFeedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Activity Feed",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/activity/read-group": {
+      "get": {
+        "operationId": "get_activity_read_group_api_v1_workspaces__workspace_id__activity_read_group_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "maxLength": 16000,
+              "minLength": 1,
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityReadGroupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Activity Read Group",
         "tags": [
           "read"
         ]

@@ -13,6 +13,20 @@ export type ActivitySubTab = "live" | "history" | "traces" | "proposals";
 // sets an ActivityTarget).
 export type ActivityItem = components["schemas"]["ActivityItemRead"];
 export type ActivityListData = components["schemas"]["ActivityListData"];
+export type ActivityFeedEvent = components["schemas"]["ActivityFeedEvent"];
+export type ActivityFeedEntry = components["schemas"]["ActivityFeedEntry"];
+export type ActivityFeedData = components["schemas"]["ActivityFeedData"];
+export type ActivityReadGroupData = components["schemas"]["ActivityReadGroupData"];
+
+export type ActivityFeedFilters = {
+  period?: ActivityPeriod;
+  kind?: "all" | "workspace" | "system" | "mcp" | "review_decision";
+  subtype?: string;
+  lane?: ActivityLane;
+  group_reads?: boolean;
+  limit?: number;
+  cursor?: string | null;
+};
 
 export type ActivityFilters = {
   period?: ActivityPeriod;
@@ -225,6 +239,30 @@ export async function listActivity(
   const query = encodeQuery(filters);
   const response = await apiRequest<{ data: ActivityListData }>(
     `/api/v1/workspaces/${workspaceId}/activity${query}`,
+  );
+  return response.data;
+}
+
+export async function listActivityFeed(
+  workspaceId: string,
+  filters: ActivityFeedFilters = {},
+  signal?: AbortSignal,
+): Promise<ActivityFeedData> {
+  const response = await apiRequest<{ data: ActivityFeedData }>(
+    `/api/v1/workspaces/${workspaceId}/activity/feed${encodeQuery(filters)}`,
+    { signal },
+  );
+  return response.data;
+}
+
+export async function getActivityReadGroup(
+  workspaceId: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<ActivityReadGroupData> {
+  const response = await apiRequest<{ data: ActivityReadGroupData }>(
+    `/api/v1/workspaces/${workspaceId}/activity/read-group${encodeQuery({ token })}`,
+    { signal },
   );
   return response.data;
 }

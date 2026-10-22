@@ -21,6 +21,10 @@ from backend.services.mcp_chat_service import (
     mcp_session_trace_uuid,
 )
 from backend.services.mcp_client_service import resolve_trace_mcp_client
+from backend.services.mcp_read_projection import (
+    PURE_READ_TOOLS,
+    validate_read_projection,
+)
 from backend.services.mcp_trace_redaction import (
     redact_edit_receipt,
     redact_error_details,
@@ -57,6 +61,7 @@ def persist_mcp_tool_trace(
     latency_ms: int,
     chat_service: McpChatService | None = None,
     create_chat_session: bool = True,
+    read_projection: dict[str, Any] | None = None,
 ) -> MCPToolCall | None:
     arguments, payload = redact_tool_capture(tool_name, arguments, payload)
     envelope = payload.get("envelope", {})
@@ -80,7 +85,9 @@ def persist_mcp_tool_trace(
         input_summary=_jsonable(arguments),
         result_status=str(envelope.get("result_status") or "failed"),
         result_summary=envelope.get("result_summary"),
-        result_detail=_result_detail(tool_name, payload),
+        result_detail=_result_detail(
+            tool_name, payload, read_projection=read_projection
+        ),
         warnings=_jsonable(envelope.get("warnings") or []),
         error_code=envelope.get("error_code"),
         audit_event_id=_uuid_or_none(envelope.get("audit_event_id")),
@@ -117,12 +124,25 @@ def persist_mcp_tool_trace(
         owner_user_id=actor.user_id,
     )
     if tool_call.result_status not in ERROR_RESULT_STATUSES:
-        for candidate in derive_artifact_links(
+        candidates = derive_artifact_links(
             session=session,
             tool_name=tool_name,
             arguments=arguments,
             payload=payload,
-        ):
+        )
+        safe_read = validate_read_projection(read_projection)
+        if not candidates and safe_read is not None and tool_name in PURE_READ_TOOLS:
+            # Slug-based Agent reads have no request UUID. The served snapshot
+            # proves their single artifact without guessing from current heads.
+            # Do not change the existing Context conversation-base ledger.
+            candidates = [
+                ArtifactLinkCandidate(
+                    McpChatArtifactKind(safe_read["resource_kind"]),
+                    UUID(safe_read["resource_id"]),
+                    McpChatArtifactVerb.REFERENCED,
+                )
+            ]
+        for candidate in candidates:
             chat_service.link_artifact(
                 session=session,
                 chat_session=chat,
@@ -360,18 +380,28 @@ EDGE_LESS_TOOLS = frozenset(
 )
 
 
-def _result_detail(tool_name: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-    """The allowlisted slice of a response that Chats needs later.
+def _result_detail(
+    tool_name: str,
+    payload: dict[str, Any],
+    *,
+    read_projection: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Allowlisted edit receipts and separate internal served-read facts.
 
-    Only the context-edit tools contribute: the page and version their edit
+    Context-edit tools contribute the page and version their edit
     landed on (so a read can offer the session's cumulative diff and a discard
     can find the calls whose previews it must drop) and the server's edit
     receipt,
     re-cut and masked by ``redact_edit_receipt``. Nothing else in the
-    response -- in particular no body -- is kept.
+    response -- in particular no body -- is kept. Pure reads accept only
+    the separately captured, revalidated private projection; never a field
+    supplied in the response payload. Chats serializes edit receipts only.
     """
 
     envelope = payload.get("envelope") or {}
+    if tool_name in PURE_READ_TOOLS and envelope.get("result_status") == "succeeded":
+        safe_read = validate_read_projection(read_projection)
+        return {"read_projection": safe_read} if safe_read else None
     if tool_name not in CONTEXT_EDIT_TOOLS:
         return None
     if envelope.get("result_status") in ERROR_RESULT_STATUSES:

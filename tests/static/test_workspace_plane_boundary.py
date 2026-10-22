@@ -546,7 +546,7 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "mislabelling -- measured on the Activity read, and the same missing "
         "table is what every other site in the list queries. "
         "Only on a shard where someone mirrored an EMPTY `users` does it "
-        "degrade quietly, to \"Human editor\" for every human actor. Both "
+        'degrade quietly, to "Human editor" for every human actor. Both '
         "halves of that are measured by "
         "test_activity_feed_resolves_identity_labels_on_the_identity_plane and "
         "test_single_session_identity_label_read_dies_on_a_real_shard below. "
@@ -706,9 +706,7 @@ def test_gate_detects_a_new_unreviewed_call_site(tmp_path: Path):
         control_session_factory_call_sites(root=tmp_path)
         - CONTROL_SESSION_FACTORY_ALLOWLIST.keys()
     )
-    assert violations == [
-        "backend/services/accidental_control_plane_read.py"
-    ]
+    assert violations == ["backend/services/accidental_control_plane_read.py"]
 
 
 def test_gate_ignores_backend_tests_tree(tmp_path: Path):
@@ -948,9 +946,7 @@ def test_standing_cross_plane_write_exposure_is_still_described_correctly() -> N
 # injected control `session_factory()`). It does not prove the acquired
 # factory reaches the helper -- that is data-flow, which this file's docstring
 # declines, and both entries say so in the same breath.
-ROUTE_FUNCTIONS_THAT_MUST_ACQUIRE_A_WORKSPACE_FACTORY: dict[
-    tuple[str, str], str
-] = {
+ROUTE_FUNCTIONS_THAT_MUST_ACQUIRE_A_WORKSPACE_FACTORY: dict[tuple[str, str], str] = {
     ("backend/api/mcp_http.py", "_restricted_library_policy_error"): (
         "TEN-01D: LibraryItem/LibraryItemVersion/LibraryArtifact are "
         "workspace-plane, so the restricted-Library gate must resolve its "
@@ -1038,9 +1034,10 @@ def test_workspace_factory_gate_catches_the_documented_pre_fix_shape(
         "    with workspace_session_factory() as session:\n"
         "        return resolve_restricted_library_target(session=session)\n",
     )
-    for relative_path, function_name in (
-        ROUTE_FUNCTIONS_THAT_MUST_ACQUIRE_A_WORKSPACE_FACTORY
-    ):
+    for (
+        relative_path,
+        function_name,
+    ) in ROUTE_FUNCTIONS_THAT_MUST_ACQUIRE_A_WORKSPACE_FACTORY:
         assert function_name not in functions_acquiring_a_workspace_session_factory(
             relative_path, root=tmp_path
         ), (
@@ -1076,12 +1073,20 @@ ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
         "SessionFactoryDep (control)."
     ),
     "backend/api/read.py": (
-        "FIXED for the two routes that use it: "
+        "FIXED for the routes that use it: "
         "list_workspace_context_media_orphans (same split as admin.py's twin) "
         "and, via DeferredIdentityLabels, list_activity / "
-        "list_context_page_activity. This file's OTHER identity labels are "
+        "list_context_page_activity / list_activity_feed / get_activity_read_group. "
+        "This file's OTHER identity labels are "
         "resolved inside the service modules below and are NOT fixed -- see "
         "FINDING 3 in this file's SESSION_FACTORY_DEP_ALLOWLIST entry."
+    ),
+    "backend/services/activity_feed_service.py": (
+        "FIXED. The typed feed and group member reader pass DeferredIdentityLabels "
+        "through the existing workspace projections and preserve the exact actor "
+        "model instances in typed events. REST closes the workspace session before "
+        "applying the sink on the control session. The behavioral proof is "
+        "test_typed_activity_feed_preserves_deferred_labels_on_a_real_shard."
     ),
     "backend/services/activity_service.py": (
         "FIXED. list_activity(deferred_identity=...) leaves human labels as "
@@ -1501,3 +1506,28 @@ def test_identity_deferring_gate_catches_the_pre_fix_route_shape(
         functions_deferring_identity_labels("backend/api/read.py", root=tmp_path)
         == set()
     )
+
+
+def test_typed_activity_feed_preserves_deferred_labels_on_a_real_shard() -> None:
+    from backend.policy.auth import ActorContext
+    from backend.services.activity_feed_service import ActivityFeedService
+    from backend.utils.actor_display import DeferredIdentityLabels
+
+    control, shard, workspace_id, user_id, _client_id = _two_plane_activity_fixture()
+    deferred = DeferredIdentityLabels()
+    service = ActivityFeedService(_activity_service(), cursor_secret="test-feed-secret")
+    with shard() as session:
+        data = service.list_feed(
+            session,
+            workspace_id,
+            actor=ActorContext(actor_kind="human", actor_id=str(user_id)),
+            actor_role="owner",
+            period="all",
+            deferred_identity=deferred,
+        )
+    with control() as session:
+        assert deferred.apply(session) == 2
+    actors = {entry.event.actor.actor_kind: entry.event.actor for entry in data.entries}
+    assert actors["human"].display_name == "Ada Lovelace"
+    assert actors["mcp_client"].display_name == "Claude Desktop"
+    assert actors["mcp_client"].credential_owner_display_name == "Ada Lovelace"
