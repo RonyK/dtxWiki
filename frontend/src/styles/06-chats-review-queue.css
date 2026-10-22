@@ -495,7 +495,7 @@
   gap: 8px;
 }
 
-.mcp-artifact-chip {
+.mcp-artifact-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
@@ -509,12 +509,12 @@
   text-decoration: none;
 }
 
-.mcp-artifact-chip:hover {
+.mcp-artifact-card:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
 }
 
-.mcp-artifact-chip-icon {
+.mcp-artifact-card-icon {
   display: inline-grid;
   place-items: center;
   width: 28px;
@@ -524,38 +524,38 @@
   color: var(--ink-soft);
 }
 
-.mcp-artifact-chip[data-kind="context_page"] .mcp-artifact-chip-icon {
+.mcp-artifact-card[data-kind="context_page"] .mcp-artifact-card-icon {
   color: var(--context);
 }
 
-.mcp-artifact-chip[data-kind="agent_page"] .mcp-artifact-chip-icon {
+.mcp-artifact-card[data-kind="agent_page"] .mcp-artifact-card-icon {
   color: var(--agent);
 }
 
-.mcp-artifact-chip[data-kind="library_item"] .mcp-artifact-chip-icon {
+.mcp-artifact-card[data-kind="library_item"] .mcp-artifact-card-icon {
   color: var(--library);
 }
 
-.mcp-artifact-chip-body {
+.mcp-artifact-card-body {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.mcp-artifact-chip-meta {
+.mcp-artifact-card-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.mcp-artifact-chip strong {
+.mcp-artifact-card strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.mcp-artifact-chip small {
+.mcp-artifact-card small {
   color: var(--ink-muted);
   white-space: nowrap;
 }
@@ -572,25 +572,25 @@
 /* The title keeps the top line to itself and the pills sit at the bottom, so
    the slack a shorter card gets from the shared row height falls between
    them in every card alike. */
-.mcp-artifact-strip--grouped .mcp-artifact-chip {
+.mcp-artifact-strip--grouped .mcp-artifact-card {
   align-items: stretch;
   max-width: none;
 }
 
-.mcp-artifact-strip--grouped .mcp-artifact-chip-icon {
+.mcp-artifact-strip--grouped .mcp-artifact-card-icon {
   align-self: start;
 }
 
-.mcp-artifact-strip--grouped .mcp-artifact-chip-body {
+.mcp-artifact-strip--grouped .mcp-artifact-card-body {
   align-content: space-between;
 }
 
-.mcp-artifact-strip--grouped .mcp-artifact-chip-meta {
+.mcp-artifact-strip--grouped .mcp-artifact-card-meta {
   gap: 4px;
 }
 
 /* The last-seen time closes the pill row, right-aligned. */
-.mcp-artifact-strip--grouped .mcp-artifact-chip-meta small {
+.mcp-artifact-strip--grouped .mcp-artifact-card-meta small {
   margin-left: auto;
 }
 

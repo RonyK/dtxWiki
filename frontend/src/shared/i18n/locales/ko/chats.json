@@ -124,7 +124,6 @@
     "error_other": "오류",
     "artifact_one": "아티팩트",
     "artifact_other": "아티팩트",
-    "linked": "{{count}}개 연결",
     "failed_one": "실패",
     "failed_other": "실패",
     "rejected_one": "정책 거부",
@@ -174,7 +173,9 @@
     "older": "이전"
   },
   "card": {
-    "archived": "보관됨"
+    "archived": "보관됨",
+    "linkedArtifactsMore": "외",
+    "recentlyLinked": "최근 연결: {{titles}}"
   },
   "clientIdentity": {
     "unknown": "MCP 클라이언트",
@@ -254,7 +255,8 @@
       "stepMetaNoLatency_other": "{{count}} 호출"
     },
     "linkedArtifacts": "연결된 아티팩트",
-    "artifactLinks": "{{count}}개 연결",
+    "artifactLinks_one": "{{count}}개 연결",
+    "artifactLinks_other": "{{count}}개 연결",
     "showAllArtifacts": "아티팩트 {{count}}개 모두 보기",
     "loading": "채팅 상세 불러오는 중",
     "breadcrumb": "상세",

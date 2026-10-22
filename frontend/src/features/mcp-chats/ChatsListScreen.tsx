@@ -38,9 +38,8 @@ import {
   timeBucketFor,
   type TimeBucketKey,
 } from "../../shared/lib/datetime";
-import { domainLabel } from "../../shared/lib/domainLabel";
 import { groupLinkedArtifacts } from "./chatArtifacts";
-import { chatFailureCounts, chatSummaryLine } from "./chatLabels";
+import { artifactDisplayTitle, chatFailureCounts, chatSummaryLine } from "./chatLabels";
 import { chatPresentationLine } from "./chatPresentation";
 import { safeChatErrorMessage } from "./chatErrors";
 import { ClientChip } from "./ClientChip";
@@ -905,7 +904,13 @@ function ChatCard({ chat }: { chat: McpChatSessionRef }) {
           {artifactHint && !summaryLine?.artifactFallback ? (
             <span className="mcp-chat-card-artifacts" title={artifactHint.full}>
               <FileText size={13} aria-hidden="true" />
-              {artifactHint.label}
+              <span className="artifact-label">{artifactHint.title}</span>
+              {artifactHint.more ? (
+                <>
+                  {" "}
+                  <span className="artifact-more">{t("card.linkedArtifactsMore")}</span>
+                </>
+              ) : null}
             </span>
           ) : null}
           {chat.archived_at ? (
@@ -928,19 +933,18 @@ function linkedArtifactHint(
   if (!artifacts || artifacts.length === 0) {
     return null;
   }
-  // One entry per artifact: its verb rows (edited + referenced, ...) are not
-  // separate links.
-  const titles = groupLinkedArtifacts(artifacts).map(
-    ({ latest }) =>
-      latest.artifact_title ??
-      domainLabel("chats", "artifactKind", latest.resource_kind, t),
+  // The list response carries only a chat's few most recent non-search rows
+  // (link_limit in mcp_chat_service.py), so a count here would pass a sample
+  // off as a total. Name the newest artifact, mark that there are others, and
+  // offer the sampled titles as "recently linked".
+  const titles = groupLinkedArtifacts(artifacts).map(({ latest }) =>
+    artifactDisplayTitle(latest, t),
   );
-  if (titles.length === 1) {
-    return { label: titles[0], full: titles[0] };
-  }
+  const more = titles.length > 1;
   return {
-    label: t("counts.linked", { count: titles.length }),
-    full: titles.join(", "),
+    title: titles[0],
+    more,
+    full: more ? t("card.recentlyLinked", { titles: titles.join(", ") }) : titles[0],
   };
 }
 

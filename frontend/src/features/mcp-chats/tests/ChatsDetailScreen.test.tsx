@@ -377,20 +377,14 @@ describe("ChatsDetailScreen", () => {
     expect(duration).toHaveTextContent("unknown");
   });
 
-  it("merges an artifact's verb rows into one card and counts artifacts, not rows", async () => {
+  it("shows one card per artifact: order, counts, preview limit, pill labels and spoken name", async () => {
     const user = userEvent.setup();
     const detail = chatDetail();
     const [referenced] = detail.linked_artifacts;
+    // Deliberately not newest-first: the policy's newest row (edited, 09:03)
+    // comes last, after nine other artifacts last touched at 09:02, so its
+    // card leads only if grouping keeps the newest row and re-sorts.
     detail.linked_artifacts = [
-      {
-        ...referenced,
-        id: "artifact-link-2",
-        verb: "edited",
-        occurrence_count: 3,
-        last_occurred_at: "2026-05-27T09:03:00Z",
-      },
-      referenced,
-      { ...referenced, id: "artifact-link-4", verb: "search_match", occurrence_count: 1 },
       ...Array.from({ length: 9 }, (_, index) => ({
         ...referenced,
         id: `artifact-link-other-${index}`,
@@ -399,6 +393,15 @@ describe("ChatsDetailScreen", () => {
         navigation_path: `/context?target=page-other-${index}`,
         occurrence_count: 1,
       })),
+      referenced,
+      { ...referenced, id: "artifact-link-4", verb: "search_match", occurrence_count: 1 },
+      {
+        ...referenced,
+        id: "artifact-link-2",
+        verb: "edited",
+        occurrence_count: 3,
+        last_occurred_at: "2026-05-27T09:03:00Z",
+      },
     ];
     renderWithDetail({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
@@ -409,7 +412,7 @@ describe("ChatsDetailScreen", () => {
     // artifacts, not rows.
     expect(await screen.findByText("10 artifacts")).toBeInTheDocument();
     await openSection(user, /Linked artifacts/);
-    const cards = () => document.querySelectorAll(".mcp-artifact-strip--grouped .mcp-artifact-chip");
+    const cards = () => document.querySelectorAll(".mcp-artifact-strip--grouped .mcp-artifact-card");
     expect(cards()).toHaveLength(8);
     await user.click(screen.getByRole("button", { name: "Show all 10 artifacts" }));
     expect(cards()).toHaveLength(10);

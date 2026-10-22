@@ -36,7 +36,6 @@ import {
   readMcpChat,
   unarchiveMcpChat,
   updateMcpChatTitle,
-  type McpChatArtifactLink,
   type McpChatDetail,
   type McpChatTimelineItem,
 } from "../../shared/api/operations";
@@ -70,8 +69,15 @@ import {
   type ChatFlowPhase,
   type ChatFlowStep,
 } from "./chatFlow";
-import { artifactVerbRank, groupLinkedArtifacts } from "./chatArtifacts";
-import { artifactVerbLabel, chatSummaryLine } from "./chatLabels";
+import { groupLinkedArtifacts, type LinkedArtifactGroup } from "./chatArtifacts";
+import {
+  artifactDisplayTitle,
+  artifactVerbDescription,
+  artifactVerbLabel,
+  artifactVerbPillLabel,
+  artifactVerbSummary,
+  chatSummaryLine,
+} from "./chatLabels";
 import { safeChatErrorMessage } from "./chatErrors";
 import { ChatEditCard, chatHasEditPreviews } from "./ChatEditCard";
 import {
@@ -767,27 +773,11 @@ function MetaItem({ className, label, value }: { className?: string; label: stri
 
 const ARTIFACT_PREVIEW_LIMIT = 8;
 
-/**
- * "Edited · 3 links" -- the count only when the verb repeated, matching the
- * pill's "×N". A single link therefore never reads "1 links" (the en string
- * has no singular form).
- */
-function artifactVerbCount(
-  link: McpChatArtifactLink,
-  t: TFunction<"chats">,
-  separator: string,
-) {
-  const verb = artifactVerbLabel(link.verb, t);
-  return link.occurrence_count > 1
-    ? `${verb}${separator}${t("detail.artifactLinks", { count: link.occurrence_count })}`
-    : verb;
-}
-
 function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
   const { t } = useTranslation("chats");
   const [open, setOpen] = usePersistedOpen(ARTIFACTS_OPEN_KEY, false);
   const [showAll, setShowAll] = useState(false);
-  // One card per artifact; its verbs become pills (chatArtifacts.ts).
+  // One card per artifact, not per (artifact, verb) row (chatArtifacts.ts).
   const groups = useMemo(
     () => groupLinkedArtifacts(chat.linked_artifacts),
     [chat.linked_artifacts],
@@ -795,22 +785,11 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
   const visible = showAll ? groups : groups.slice(0, ARTIFACT_PREVIEW_LIMIT);
   const hidden = groups.length - visible.length;
 
-  // Rows are unique per (artifact, verb), so a verb's row count is already the
-  // number of distinct artifacts carrying it.
-  const verbCounts = new Map<string, number>();
-  for (const artifact of chat.linked_artifacts) {
-    verbCounts.set(artifact.verb, (verbCounts.get(artifact.verb) ?? 0) + 1);
-  }
-  const subtitle = Array.from(verbCounts.entries())
-    .sort(([a], [b]) => artifactVerbRank(a) - artifactVerbRank(b))
-    .map(([verb, count]) => `${artifactVerbLabel(verb, t)} ${count}`)
-    .join(" · ");
-
   return (
     <AdvancedSection
       icon={null}
       label={t("detail.linkedArtifacts", { defaultValue: "Linked artifacts" })}
-      subtitle={subtitle}
+      subtitle={artifactVerbSummary(chat.linked_artifacts, t)}
       trailing={
         <CountChip
           value={groups.length}
@@ -822,49 +801,9 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
       onOpenChange={setOpen}
     >
       <div className="mcp-artifact-strip mcp-artifact-strip--grouped">
-        {visible.map(({ key, latest, links }) => {
-          const title = latest.artifact_title
-            ?? t(`labels.artifactKind.${latest.resource_kind}`, {
-              defaultValue: t("labels.artifactKind.unknown"),
-            });
-          const lastSeen = formatVersionTimestamp(latest.last_occurred_at);
-          return (
-            <Link
-              // Spoken as words ("Edited 3 links"), never the visual "×3".
-              aria-label={[
-                title,
-                ...links.map((link) => artifactVerbCount(link, t, " ")),
-                lastSeen,
-              ].join(", ")}
-              className="mcp-artifact-chip"
-              data-kind={latest.resource_kind}
-              key={key}
-              to={artifactNavigationPath(latest)}
-            >
-              <span className="mcp-artifact-chip-icon" aria-hidden="true">
-                {iconForArtifactKind(latest.resource_kind)}
-              </span>
-              <span className="mcp-artifact-chip-body">
-                <strong title={title}>{title}</strong>
-                <span className="mcp-artifact-chip-meta">
-                  {links.map((link) => {
-                    const verb = artifactVerbLabel(link.verb, t);
-                    return (
-                      <StatusPill
-                        key={link.verb}
-                        status={link.verb}
-                        label={link.occurrence_count > 1 ? `${verb} ×${link.occurrence_count}` : verb}
-                        title={`${artifactVerbCount(link, t, " · ")} · ${formatVersionTimestamp(link.last_occurred_at)}`}
-                        compact
-                      />
-                    );
-                  })}
-                  <small>{lastSeen}</small>
-                </span>
-              </span>
-            </Link>
-          );
-        })}
+        {visible.map((group) => (
+          <LinkedArtifactCard key={group.key} group={group} />
+        ))}
       </div>
       {hidden > 0 ? (
         <button
@@ -876,6 +815,43 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
         </button>
       ) : null}
     </AdvancedSection>
+  );
+}
+
+function LinkedArtifactCard({ group: { latest, links } }: { group: LinkedArtifactGroup }) {
+  const { t } = useTranslation("chats");
+  const title = artifactDisplayTitle(latest, t);
+  const lastSeen = formatVersionTimestamp(latest.last_occurred_at);
+  return (
+    <Link
+      aria-label={[
+        title,
+        ...links.map((link) => artifactVerbDescription(link, t)),
+        lastSeen,
+      ].join(", ")}
+      className="mcp-artifact-card"
+      data-kind={latest.resource_kind}
+      to={artifactNavigationPath(latest)}
+    >
+      <span className="mcp-artifact-card-icon" aria-hidden="true">
+        {iconForArtifactKind(latest.resource_kind)}
+      </span>
+      <span className="mcp-artifact-card-body">
+        <strong title={title}>{title}</strong>
+        <span className="mcp-artifact-card-meta">
+          {links.map((link) => (
+            <StatusPill
+              key={link.verb}
+              status={link.verb}
+              label={artifactVerbPillLabel(link, t)}
+              title={`${artifactVerbDescription(link, t)} · ${formatVersionTimestamp(link.last_occurred_at)}`}
+              compact
+            />
+          ))}
+          <small>{lastSeen}</small>
+        </span>
+      </span>
+    </Link>
   );
 }
 
@@ -1655,22 +1631,17 @@ function TimelineTabPanel({
         <div className="mcp-artifact-strip">
           {item.linked_artifacts.map((artifact) => (
             <Link
-              className="mcp-artifact-chip"
+              className="mcp-artifact-card"
               data-kind={artifact.resource_kind}
               key={`${artifact.resource_kind}:${artifact.resource_id}:${artifact.verb}`}
               to={artifactNavigationPath(artifact)}
             >
-              <span className="mcp-artifact-chip-icon" aria-hidden="true">
+              <span className="mcp-artifact-card-icon" aria-hidden="true">
                 {iconForArtifactKind(artifact.resource_kind)}
               </span>
-              <span className="mcp-artifact-chip-body">
-                <strong>
-                  {artifact.artifact_title
-                    ?? t(`labels.artifactKind.${artifact.resource_kind}`, {
-                      defaultValue: t("labels.artifactKind.unknown"),
-                    })}
-                </strong>
-                <span className="mcp-artifact-chip-meta">
+              <span className="mcp-artifact-card-body">
+                <strong>{artifactDisplayTitle(artifact, t)}</strong>
+                <span className="mcp-artifact-card-meta">
                   <StatusPill
                     status={artifact.verb}
                     label={artifactVerbLabel(artifact.verb, t)}

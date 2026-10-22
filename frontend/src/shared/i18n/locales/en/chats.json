@@ -124,7 +124,6 @@
     "error_other": "errors",
     "artifact_one": "artifact",
     "artifact_other": "artifacts",
-    "linked": "{{count}} linked",
     "failed_one": "failed",
     "failed_other": "failed",
     "rejected_one": "refused",
@@ -174,7 +173,9 @@
     "older": "Older"
   },
   "card": {
-    "archived": "Archived"
+    "archived": "Archived",
+    "linkedArtifactsMore": "and more",
+    "recentlyLinked": "Recently linked: {{titles}}"
   },
   "clientIdentity": {
     "unknown": "MCP client",
@@ -254,7 +255,8 @@
       "stepMetaNoLatency_other": "{{count}} calls"
     },
     "linkedArtifacts": "Linked artifacts",
-    "artifactLinks": "{{count}} links",
+    "artifactLinks_one": "{{count}} link",
+    "artifactLinks_other": "{{count}} links",
     "showAllArtifacts": "Show all {{count}} artifacts",
     "loading": "Loading chat detail",
     "breadcrumb": "Detail",

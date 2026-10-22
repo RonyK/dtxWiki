@@ -3,21 +3,46 @@ import type { McpChatArtifactLink } from "../../shared/api/operations";
 // The server keeps one link row per (artifact, verb) -- graph and trail
 // projections read the verbs separately, so the rows must stay apart there.
 // A document that was found, read, cited and edited therefore arrives as four
-// rows; the list card and the detail section show it once, with one pill per
-// verb: authoring first, then reading, then search exposure.
-const ARTIFACT_VERB_ORDER = ["created", "edited", "cited", "referenced", "search_match"];
+// rows; the Chats list hint counts it once, and the detail section shows it as
+// one card with a pill per verb.
+
+export type ArtifactVerb = McpChatArtifactLink["verb"];
+
+// Authoring first, then reading, then search exposure. A Record rather than a
+// list, so a verb added to the API schema fails the typecheck until it is
+// ranked here; chatLabels.ts labels exactly these verbs.
+const ARTIFACT_VERB_RANK: Record<ArtifactVerb, number> = {
+  created: 0,
+  edited: 1,
+  cited: 2,
+  referenced: 3,
+  search_match: 4,
+};
+
+export function isArtifactVerb(value: string): value is ArtifactVerb {
+  return Object.hasOwn(ARTIFACT_VERB_RANK, value);
+}
+
+/** Sort key for a verb; one the schema does not know sorts last. */
+export function artifactVerbRank(verb: string): number {
+  return isArtifactVerb(verb)
+    ? ARTIFACT_VERB_RANK[verb]
+    : Object.keys(ARTIFACT_VERB_RANK).length;
+}
+
+/** The count worth showing for a verb: only when it repeated. */
+export function repeatedCount(
+  link: Pick<McpChatArtifactLink, "occurrence_count">,
+): number | null {
+  return link.occurrence_count > 1 ? link.occurrence_count : null;
+}
 
 export interface LinkedArtifactGroup {
   key: string;
   /** The most recently touched row: its title, path and time stand for the artifact. */
   latest: McpChatArtifactLink;
-  /** One row per verb, in ARTIFACT_VERB_ORDER. */
+  /** One row per verb, in verb rank order. */
   links: McpChatArtifactLink[];
-}
-
-export function artifactVerbRank(verb: string): number {
-  const rank = ARTIFACT_VERB_ORDER.indexOf(verb);
-  return rank === -1 ? ARTIFACT_VERB_ORDER.length : rank;
 }
 
 /** Linked-artifact rows merged per artifact, most recently touched first. */
