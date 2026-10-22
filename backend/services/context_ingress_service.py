@@ -40,6 +40,7 @@ from backend.schemas.context_ingress import (
 )
 from backend.schemas.input_policy import validate_request_inputs
 from backend.services.audit_service import AuditService
+from backend.services.context_lifecycle import record_metadata_snapshot
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.page_service import refresh_page_links
 from backend.services.read_errors import (
@@ -503,6 +504,9 @@ class ContextIngressService:
                 diff_summary=f"{request.final_save_mode}: {request.final_title}",
                 diff_ref=f"context_page_version:{version.id}",
             )
+        )
+        record_metadata_snapshot(
+            session, change_set_id=change_set.id, page=page, version=version
         )
         if tree_node is not None:
             session.add(

@@ -97,7 +97,8 @@
     "context_draft_requires_review": "Context 초안을 리뷰해야 합니다",
     "context_update_requires_review": "Context 수정 초안을 리뷰해야 합니다",
     "context_update_workflow_sequence_incomplete": "워크플로 순서가 완료되지 않아 Context 수정 초안을 리뷰해야 합니다",
-    "context_ingress_requires_review": "Ask 캡처를 리뷰해야 합니다"
+    "context_ingress_requires_review": "Ask 캡처를 리뷰해야 합니다",
+    "context_draft_restored_after_rejection": "이후 초안 거절로 되돌아온 초안"
   },
   "policy": {
     "title": "리뷰 위험도 정책",
@@ -286,7 +287,8 @@
       "tree_rename": "트리 이름 변경",
       "tree_reorder": "트리 순서 변경",
       "tree_delete": "트리 삭제",
-      "tree_place": "트리 배치"
+      "tree_place": "트리 배치",
+      "restore_after_rejection": "거절 후 되돌림"
     },
     "triggerType": {
       "mcp_write_draft": "MCP 초안 작성",
@@ -301,7 +303,8 @@
       "tree_mutation": "트리 변경",
       "library_registration": "Library 등록",
       "source_deleted": "원본 삭제",
-      "schedule": "예약"
+      "schedule": "예약",
+      "context_draft_restore": "초안 되돌림"
     },
     "changeSetStatus": {
       "draft_created": "초안 생성됨",
@@ -365,7 +368,8 @@
     "rejectEffects": {
       "restore_published": "검토 초안은 현재 문서에서 제외되고 게시본 v{{version}}가 유지됩니다.",
       "hide_unpublished": "게시본이 없어 거절 후 일반 문서 reader에서 표시되지 않습니다.",
-      "no_head_change": "이 거절은 현재 문서의 head를 변경하지 않습니다."
+      "no_head_change": "이 거절은 현재 문서의 head를 변경하지 않습니다.",
+      "restore_previous_draft": "v{{version}}로 돌아갑니다."
     },
     "outcomes": {
       "approved": "승인",
@@ -393,7 +397,10 @@
       "publication_blocked": "현재 게시할 수 없는 후보입니다. 변경 근거를 확인하세요.",
       "activation_not_allowed": "이 Agent 버전은 현재 활성화할 수 없습니다.",
       "not_requested_changes": "변경 요청 상태가 아닙니다.",
-      "unsupported_revision": "이 변경 버전은 해당 결정을 지원하지 않습니다."
+      "unsupported_revision": "이 변경 버전은 해당 결정을 지원하지 않습니다.",
+      "superseded_by_rejected_ancestor": "바탕이 된 이전 버전이 거절되어 함께 정리됐습니다.",
+      "review_decision_impact_changed": "확인하는 동안 거절 영향이 바뀌었습니다. 바뀐 내용을 확인하고 다시 거절하세요.",
+      "review_reject_blocked_by_private_edit": "이 초안 위에서 다른 작성자의 비공개 편집이 진행 중이라 거절할 수 없습니다. 편집이 제출되거나 취소된 뒤 다시 시도하세요."
     },
     "savedDecision": "{{version}} {{decision}} 저장 완료",
     "queueComplete": "현재 조건의 남은 리뷰가 없습니다.",
@@ -401,7 +408,29 @@
     "currentCandidate": "게시 후보",
     "olderCandidate": "게시 대상 아님",
     "retryDetail": "리뷰 상세 다시 불러오기",
-    "bulkStopped": "리뷰 {{total}}건 중 {{processed}}건을 처리한 뒤 중단했습니다. 확인된 결과는 보존됩니다. 대기열을 새로 불러온 후 남은 항목을 다시 미리 확인해 주세요."
+    "bulkStopped": "리뷰 {{total}}건 중 {{processed}}건을 처리한 뒤 중단했습니다. 확인된 결과는 보존됩니다. 대기열을 새로 불러온 후 남은 항목을 다시 미리 확인해 주세요.",
+    "versionCount": "{{versions}} ({{count}}개)",
+    "rejectImpact": {
+      "candidate": "v{{version}} · 이 리뷰",
+      "cascadedLabel": "함께 거절",
+      "cascaded": "{{versions}} · v{{version}} 위에 쓴 이후 초안",
+      "cascadedReviews": " (리뷰 {{count}}건 함께 정리)",
+      "editHeadLabel": "편집 기준",
+      "reviewStaysOpen": "v{{version}} 리뷰는 그대로 대기합니다.",
+      "reviewReopens": "v{{version}}의 리뷰가 이미 닫혀 있어 새 리뷰를 만듭니다.",
+      "publishedLabel": "게시본",
+      "published": "v{{version}} 유지",
+      "metadataKept": "첫 게시 전 문서라 v{{version}}의 문서 정보(제목·유형·태그)를 되돌릴 기록이 없어 현재 값을 유지합니다."
+    },
+    "settlement": {
+      "superseded_by_rejected_ancestor": "v{{version}} 거절로 함께 정리된 리뷰입니다. 이 초안은 v{{version}}의 변경 위에 쓰였습니다.",
+      "superseded_by_approved_publish": "v{{version}} 승인으로 함께 정리된 리뷰입니다. 이 리뷰의 변경은 그 버전에 포함되어 게시되었습니다.",
+      "superseded_by_rejected_candidate": "같은 버전의 다른 리뷰가 거절되어 함께 정리됐습니다.",
+      "superseded_by_newer_draft": "더 새로운 초안이 작성되어 정리된 리뷰입니다.",
+      "generic": "정리된 리뷰입니다.",
+      "openReview": "v{{version}} 리뷰 열기",
+      "openDecidingReview": "결정한 리뷰 열기"
+    }
   },
   "document": {
     "targets": "검토 대상",
@@ -449,6 +478,11 @@
     "readUnavailable": "버전의 상태 또는 접근 권한이 변경되어 내용을 확인할 수 없습니다.",
     "loadFailed": "검토 버전을 불러오지 못했습니다.",
     "retry": "내용 다시 불러오기",
-    "unavailableBaseline": "비교 기준을 사용할 수 없음"
+    "unavailableBaseline": "비교 기준을 사용할 수 없음",
+    "comparisonMode": "변경 비교 기준",
+    "draftChange": "이 초안의 변경 (v{{parent}} → v{{candidate}})",
+    "publishingChange": "게시되면 바뀌는 내용 (게시본 v{{baseline}} → v{{candidate}})",
+    "publishingEmptyChange": "게시되면 바뀌는 내용 (빈 문서 → v{{candidate}})",
+    "draftParentBaseline": "직전 초안 v{{version}}"
   }
 }

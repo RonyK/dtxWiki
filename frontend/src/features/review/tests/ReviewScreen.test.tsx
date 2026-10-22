@@ -798,6 +798,7 @@ describe("ReviewScreen", () => {
       decision_type: "reject",
       decision_reason: null,
       decision_id: expect.any(String),
+      expected_impact_fingerprint: "impact-review-1",
     });
     // The confirm dialog closes once the decision lands.
     await waitFor(() =>
@@ -805,6 +806,112 @@ describe("ReviewScreen", () => {
         screen.queryByRole("dialog", { name: "Reject this review?" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("compares against the draft parent and reconfirms refreshed rejection impact before saving", async () => {
+    const user = userEvent.setup();
+    const current = reviewItem({ reviewType: "context_update", targetId: "exact-page", targetTitle: "Layered draft", targetVersionNo: 3 });
+    Object.assign(current.evidence!.operations[0].content!, {
+      baseline_version_id: "version-1", baseline_version_no: 1,
+      draft_parent_version_id: "version-2", draft_parent_version_no: 2,
+    });
+    current.reject_effect = {
+      ...current.reject_effect!, effect: "restore_previous_draft",
+      published_version_id: "version-1", published_version_no: 1,
+      resulting_draft_version_id: "version-2", resulting_draft_version_no: 2,
+      cascaded_versions: [7, 4, 6, 5].map(version => ({ version_id: `version-${version}`, version_no: version })),
+      visible_cascaded_review_ids: ["later-review"], cascaded_review_count: 2,
+      visible_sibling_count: 1, impact_fingerprint: "impact-first",
+    };
+    const updated: ReviewItem = {
+      ...current,
+      evidence: { ...current.evidence!, operations: current.evidence!.operations.map(operation => ({ ...operation, diff_summary: "Updated draft evidence" })) },
+      reject_effect: {
+        ...current.reject_effect, restores_review: true, impact_fingerprint: "impact-updated",
+        cascaded_versions: [...current.reject_effect.cascaded_versions!, { version_id: "version-9", version_no: 9 }],
+      },
+    };
+    const decisionBodies: Array<Record<string, unknown>> = [];
+    let detailCalls = 0;
+    let finishImpactRefresh: () => void = () => {};
+    mockReviewQueue([current], null, (url, init) => {
+      if (url.endsWith("/reviews/review-1")) {
+        detailCalls += 1;
+        return detailCalls === 1 ? jsonResponse({ data: current }) : new Promise<Response>(resolve => {
+          finishImpactRefresh = () => resolve(jsonResponse({ data: updated }));
+        });
+      }
+      if (url.endsWith("/decision")) {
+        decisionBodies.push(JSON.parse(String(init?.body)));
+        return decisionBodies.length === 1 ? new Response(JSON.stringify({
+          error_code: "review_decision_impact_changed", message: "Impact changed", warnings: [],
+        }), { status: 409, headers: { "Content-Type": "application/json" } })
+          : jsonResponse({ data: { ...updated, status: "rejected" } });
+      }
+      if (url.endsWith("/reviews?status=pending&limit=50") && decisionBodies.length === 2) {
+        return jsonResponse({ data: { items: [], next_cursor: null } });
+      }
+    });
+    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+
+    const comparison = await screen.findByRole("group", { name: "Comparison baseline" });
+    const parent = within(comparison).getByRole("button", { name: "This draft's change (v2 → v3)" });
+    const published = within(comparison).getByRole("button", { name: "What publishing changes (published v1 → v3)" });
+    expect(parent).toHaveAttribute("aria-pressed", "true");
+    expect(published).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Previous draft v2 → Review version v3")).toBeVisible();
+    await waitFor(() => expect(pagesApi.diffPageVersions).toHaveBeenLastCalledWith(
+      WORKSPACE_ID, "exact-page", "version-2", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    await user.click(published);
+    expect(published).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Current published version v1 → Review version v3")).toBeVisible();
+    await waitFor(() => expect(pagesApi.diffPageVersions).toHaveBeenLastCalledWith(
+      WORKSPACE_ID, "exact-page", "version-1", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    await user.click(parent);
+    await waitFor(() => expect(pagesApi.diffPageVersions).toHaveBeenLastCalledWith(
+      WORKSPACE_ID, "exact-page", "version-2", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(screen.queryByText(i18n.t("review:content.versionMismatch"))).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    const dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
+    expect(within(dialog).getByText("Layered draft")).toBeVisible();
+    expect(within(dialog).getByText("Review version v3")).toBeVisible();
+    expect(within(dialog).getByText("v3 · this review")).toBeVisible();
+    expect(within(dialog).getByText("Also rejected")).toBeVisible();
+    expect(within(dialog).getByText("v4–v7 (4 versions) · later drafts written on v3 (2 reviews settled)")).toBeVisible();
+    expect(within(dialog).queryByText(/v4, v5/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Edit head")).toBeVisible();
+    expect(within(dialog).getByText("Returns to v2. Its review stays open.")).toBeVisible();
+    expect(within(dialog).getByText("Published")).toBeVisible();
+    expect(within(dialog).getByText("v1 stays published")).toBeVisible();
+    expect(within(dialog).getByText(i18n.t("review:workflow.rejectSiblingImpact", { count: 1 }))).toBeVisible();
+    await user.type(within(dialog).getByRole("textbox", { name: "Decision reason" }), "Keep this reason");
+    await user.click(within(dialog).getByRole("button", { name: "Reject" }));
+    expect(decisionBodies[0]).toEqual({
+      decision_type: "reject", decision_reason: "Keep this reason", decision_id: expect.any(String),
+      expected_impact_fingerprint: "impact-first",
+    });
+    await waitFor(() => expect(detailCalls).toBe(2));
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Rejecting" })).toBeDisabled();
+    await act(async () => { finishImpactRefresh(); });
+    expect(await within(dialog).findByText("The rejection's impact changed while you were confirming. Check the updated impact and reject again.")).toBeVisible();
+    expect(within(dialog).getByText("v4–v7, v9 (5 versions) · later drafts written on v3 (2 reviews settled)")).toBeVisible();
+    expect(within(dialog).getByText("Returns to v2. Its review was already closed, so a new review opens.")).toBeVisible();
+    expect(within(dialog).getByRole("textbox", { name: "Decision reason" })).toHaveValue("Keep this reason");
+    await user.click(within(dialog).getByRole("button", { name: "Reject" }));
+    expect(decisionBodies).toHaveLength(2);
+    expect(decisionBodies[1]).toEqual({
+      decision_type: "reject", decision_reason: "Keep this reason", decision_id: expect.any(String),
+      expected_impact_fingerprint: "impact-updated",
+    });
+    expect(decisionBodies[1].decision_id).not.toBe(decisionBodies[0].decision_id);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reject this review?" })).not.toBeInTheDocument());
+    expect(screen.queryByText(i18n.t("review:workflow.decisionOutcomeUnknown"))).not.toBeInTheDocument();
+    expect(await screen.findByText("No pending items")).toBeVisible();
   });
 
   it("cancels the reject confirm without submitting a decision", async () => {
@@ -3420,6 +3527,9 @@ function reviewItem(
       candidate_version_no: overrides.targetVersionNo ?? 1,
       published_version_id: null, published_version_no: null,
       visible_sibling_review_ids: [], visible_sibling_count: 0,
+      cascaded_versions: [], visible_cascaded_review_ids: [], cascaded_review_count: 0,
+      restores_review: false, metadata_kept: false, blocked_reason: null,
+      impact_fingerprint: "impact-review-1",
     },
     reconciliation_available: overrides.reconciliationAvailable ?? false,
     reconciliation_page_id: overrides.reconciliationPageId ?? null,

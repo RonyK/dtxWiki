@@ -15581,6 +15581,29 @@
             ],
             "title": "Candidate Version No"
           },
+          "draft_parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Parent Version Id"
+          },
+          "draft_parent_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Parent Version No"
+          },
           "is_current_candidate": {
             "anyOf": [
               {
@@ -16050,6 +16073,18 @@
             ],
             "title": "Decision Type",
             "type": "string"
+          },
+          "expected_impact_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Impact Fingerprint"
           }
         },
         "required": [
@@ -16589,6 +16624,16 @@
             ],
             "title": "Risk Signals"
           },
+          "settlement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewSettlement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -16712,6 +16757,18 @@
       "ReviewRejectEffect": {
         "additionalProperties": false,
         "properties": {
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "const": "private_edit_in_progress",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
           "candidate_version_id": {
             "anyOf": [
               {
@@ -16735,6 +16792,19 @@
             ],
             "title": "Candidate Version No"
           },
+          "cascaded_review_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cascaded Review Count",
+            "type": "integer"
+          },
+          "cascaded_versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewVersionRef"
+            },
+            "title": "Cascaded Versions",
+            "type": "array"
+          },
           "document_id": {
             "anyOf": [
               {
@@ -16751,10 +16821,27 @@
             "enum": [
               "restore_published",
               "hide_unpublished",
-              "no_head_change"
+              "no_head_change",
+              "restore_previous_draft"
             ],
             "title": "Effect",
             "type": "string"
+          },
+          "impact_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Fingerprint"
+          },
+          "metadata_kept": {
+            "default": false,
+            "title": "Metadata Kept",
+            "type": "boolean"
           },
           "published_version_id": {
             "anyOf": [
@@ -16778,6 +16865,42 @@
               }
             ],
             "title": "Published Version No"
+          },
+          "restores_review": {
+            "default": false,
+            "title": "Restores Review",
+            "type": "boolean"
+          },
+          "resulting_draft_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Draft Version Id"
+          },
+          "resulting_draft_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Draft Version No"
+          },
+          "visible_cascaded_review_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Visible Cascaded Review Ids",
+            "type": "array"
           },
           "visible_sibling_count": {
             "default": 0,
@@ -17044,6 +17167,44 @@
         "title": "ReviewSelectionResponse",
         "type": "object"
       },
+      "ReviewSettlement": {
+        "additionalProperties": false,
+        "description": "Why a superseded review was closed, and by which decided review.",
+        "properties": {
+          "by_review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Review Item Id"
+          },
+          "by_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Version No"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "ReviewSettlement",
+        "type": "object"
+      },
       "ReviewStatusByRiskBreakdown": {
         "additionalProperties": false,
         "properties": {
@@ -17085,6 +17246,26 @@
           }
         },
         "title": "ReviewStatusRiskBreakdown",
+        "type": "object"
+      },
+      "ReviewVersionRef": {
+        "additionalProperties": false,
+        "properties": {
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_id",
+          "version_no"
+        ],
+        "title": "ReviewVersionRef",
         "type": "object"
       },
       "SearchCapabilities": {

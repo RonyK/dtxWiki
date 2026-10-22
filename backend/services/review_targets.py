@@ -306,6 +306,26 @@ def _context_target(
         content.can_diff = True
     else:
         content.unavailable_reason = "baseline_unavailable"
+    if content.is_current_candidate and version.parent_version_id not in (
+        None,
+        page.current_published_version_id,
+    ):
+        # Written on an earlier unpublished draft: comparing with it shows
+        # this draft's own change, which is what rejecting it would reject.
+        parent = get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=workspace_id,
+            resource_id=version.parent_version_id,
+        )
+        if (
+            parent is not None
+            and parent.page_id == page.id
+            and parent.version_status == "draft"
+            and context_version_is_visible(parent, actor)
+        ):
+            content.draft_parent_version_id = parent.id
+            content.draft_parent_version_no = parent.version_no
     if content.can_diff:
         # Same lexical body extraction and input ceiling as PageService.diff_versions.
         from backend.services.page_service import PAGE_DIFF_MAX_INPUT_CHARS

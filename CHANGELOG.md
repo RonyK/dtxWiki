@@ -77,8 +77,14 @@
   use a fixed, signed selection and preserve individual results across batches;
   single decisions accept a durable receipt ID for safe retries.
 - MCP tool contract revision 14 adds authorized document and content descriptors
-  to `list_requested_changes` evidence. Existing clients can ignore these
-  additive fields and continue using the existing target and `diff_ref` fields.
+  to `list_requested_changes` evidence, including the earlier draft a candidate
+  was written on. Existing clients can ignore these additive fields and
+  continue using the existing target and `diff_ref` fields.
+- Approving a Context review publishes the changes up to that draft; rejecting
+  one also rejects the later drafts written on it and returns the edit head to
+  the draft below them. Earlier drafts and branched alternatives are untouched.
+  A reject confirmation whose impact changed meanwhile is refused with 409
+  `review_decision_impact_changed`.
 - Select the Context publish replay audit by version and change-set identity.
 - Persist changes to nested workspace settings policies.
 - Prevent Settings draft resets from overwriting the user's first edit.

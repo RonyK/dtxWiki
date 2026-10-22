@@ -97,7 +97,8 @@
     "context_draft_requires_review": "Context draft requires review",
     "context_update_requires_review": "Context update draft requires review",
     "context_update_workflow_sequence_incomplete": "Context update draft requires review because the workflow sequence is incomplete",
-    "context_ingress_requires_review": "Ask capture requires review"
+    "context_ingress_requires_review": "Ask capture requires review",
+    "context_draft_restored_after_rejection": "Draft restored after a later draft was rejected"
   },
   "policy": {
     "title": "Review risk policy",
@@ -286,7 +287,8 @@
       "tree_rename": "Tree rename",
       "tree_reorder": "Tree reorder",
       "tree_delete": "Tree delete",
-      "tree_place": "Tree place"
+      "tree_place": "Tree place",
+      "restore_after_rejection": "Restored after rejection"
     },
     "triggerType": {
       "mcp_write_draft": "MCP write draft",
@@ -301,7 +303,8 @@
       "tree_mutation": "Tree mutation",
       "library_registration": "Library registration",
       "source_deleted": "Source deleted",
-      "schedule": "Schedule"
+      "schedule": "Schedule",
+      "context_draft_restore": "Draft restored"
     },
     "changeSetStatus": {
       "draft_created": "Draft created",
@@ -365,7 +368,8 @@
     "rejectEffects": {
       "restore_published": "The review draft is removed from the current document; published v{{version}} remains.",
       "hide_unpublished": "There is no published version; the document will not appear in the normal reader after rejection.",
-      "no_head_change": "This rejection does not change the current document head."
+      "no_head_change": "This rejection does not change the current document head.",
+      "restore_previous_draft": "Returns to v{{version}}."
     },
     "outcomes": {
       "approved": "Approved",
@@ -393,7 +397,10 @@
       "publication_blocked": "This candidate cannot currently be published. Check the evidence.",
       "activation_not_allowed": "This Agent version cannot currently be activated.",
       "not_requested_changes": "The review is not in the changes-requested state.",
-      "unsupported_revision": "This revision does not support that decision."
+      "unsupported_revision": "This revision does not support that decision.",
+      "superseded_by_rejected_ancestor": "Settled because an earlier version it builds on was rejected.",
+      "review_decision_impact_changed": "The rejection's impact changed while you were confirming. Check the updated impact and reject again.",
+      "review_reject_blocked_by_private_edit": "This draft has another author’s private edit in progress and cannot be rejected. Try again after the edit is submitted or cancelled."
     },
     "savedDecision": "{{version}} · {{decision}} saved",
     "queueComplete": "No reviews remain under these filters.",
@@ -401,7 +408,29 @@
     "currentCandidate": "Publishable",
     "olderCandidate": "Not publishable",
     "retryDetail": "Retry review detail",
-    "bulkStopped": "Processing stopped after {{processed}} of {{total}} reviews. Confirmed results are preserved. Reload the queue before previewing the remaining items."
+    "bulkStopped": "Processing stopped after {{processed}} of {{total}} reviews. Confirmed results are preserved. Reload the queue before previewing the remaining items.",
+    "versionCount": "{{versions}} ({{count}} versions)",
+    "rejectImpact": {
+      "candidate": "v{{version}} · this review",
+      "cascadedLabel": "Also rejected",
+      "cascaded": "{{versions}} · later drafts written on v{{version}}",
+      "cascadedReviews": " ({{count}} reviews settled)",
+      "editHeadLabel": "Edit head",
+      "reviewStaysOpen": "Its review stays open.",
+      "reviewReopens": "Its review was already closed, so a new review opens.",
+      "publishedLabel": "Published",
+      "published": "v{{version}} stays published",
+      "metadataKept": "This page was never published and v{{version}} has no recorded page details, so the current title, type and tags stay."
+    },
+    "settlement": {
+      "superseded_by_rejected_ancestor": "Settled when v{{version}}, which this draft was written on, was rejected.",
+      "superseded_by_approved_publish": "Settled when v{{version}}, which includes these changes, was approved.",
+      "superseded_by_rejected_candidate": "Settled when another review of the same version was rejected.",
+      "superseded_by_newer_draft": "Settled because a newer draft replaced this one.",
+      "generic": "This review was settled.",
+      "openReview": "Open the v{{version}} review",
+      "openDecidingReview": "Open the deciding review"
+    }
   },
   "document": {
     "targets": "Review targets",
@@ -449,6 +478,11 @@
     "readUnavailable": "This version or its access is no longer available.",
     "loadFailed": "Could not load this review version.",
     "retry": "Reload content",
-    "unavailableBaseline": "Comparison baseline unavailable"
+    "unavailableBaseline": "Comparison baseline unavailable",
+    "comparisonMode": "Comparison baseline",
+    "draftChange": "This draft's change (v{{parent}} → v{{candidate}})",
+    "publishingChange": "What publishing changes (published v{{baseline}} → v{{candidate}})",
+    "publishingEmptyChange": "What publishing changes (empty document → v{{candidate}})",
+    "draftParentBaseline": "Previous draft v{{version}}"
   }
 }

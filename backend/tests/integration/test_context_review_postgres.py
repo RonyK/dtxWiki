@@ -197,6 +197,116 @@ def test_postgres_reviewed_replacement_serializes_before_review_approval(
     _postgres_url() is None,
     reason="requires the dedicated PostgreSQL migration test database",
 )
+def test_postgres_approval_queued_behind_a_cascading_rejection_refuses(monkeypatch):
+    """An approval read before a rejection retires its draft must not publish.
+
+    SQLite serializes whole write transactions, so only PostgreSQL row locks
+    let the approval wait on the page while the rejection retires the draft.
+    """
+
+    database_url = _postgres_url()
+    assert database_url is not None
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    rejection_holds_page = threading.Event()
+    release_rejection = threading.Event()
+    errors: dict[str, list[BaseException]] = {"reject": [], "approve": []}
+    try:
+        with session_factory.begin() as session:
+            workspace = seed_default_workspace(session)
+            user = User(
+                email="postgres-reject-race@example.com",
+                password_hash=CredentialHasher().hash_password("correct-password"),
+                display_name="Reject race",
+                status="active",
+            )
+            session.add(user)
+            session.flush()
+            grant_workspace_membership(
+                session, user_id=user.id, workspace_id=workspace.id, role="owner"
+            )
+            workspace_id, actor_id = workspace.id, str(user.id)
+
+        def write(body):
+            with session_factory.begin() as session:
+                return ContextWriteService().write_draft(
+                    session=session,
+                    workspace_id=workspace_id,
+                    request=WriteDraftRequest(
+                        title="Reject race", page_type="overview",
+                        body_markdown=body, citations=[], reason=body,
+                    ),
+                    actor_kind="human", actor_id=actor_id, actor_role="owner",
+                )
+
+        def decide(review_item_id, decision_type, bucket):
+            try:
+                with session_factory.begin() as session:
+                    ReviewService().apply_decision(
+                        session=session,
+                        workspace_id=workspace_id,
+                        review_item_id=review_item_id,
+                        request=ReviewDecisionRequest(decision_type=decision_type),
+                        actor_kind="human",
+                        actor_id=actor_id,
+                        actor_role="owner",
+                        actor_provenance="browser_session",
+                    )
+            except BaseException as exc:  # asserted below
+                errors[bucket].append(exc)
+
+        published = write("# P\n\nLive.")
+        decide(published.review_item_id, "approve", "approve")
+        d1, _d2, d3 = (write(f"# D{number}\n\nDraft.") for number in (1, 2, 3))
+
+        import backend.services.context_lifecycle as lifecycle
+
+        original_apply = lifecycle.apply_context_rejection
+
+        def paused_apply(session, page, plan):
+            rejection_holds_page.set()
+            assert release_rejection.wait(timeout=10)
+            return original_apply(session, page, plan)
+
+        monkeypatch.setattr(lifecycle, "apply_context_rejection", paused_apply)
+        reject = threading.Thread(
+            target=decide, args=(d1.review_item_id, "reject", "reject")
+        )
+        approve = threading.Thread(
+            target=decide, args=(d3.review_item_id, "approve", "approve")
+        )
+        reject.start()
+        assert rejection_holds_page.wait(timeout=10)
+        approve.start()
+        release_rejection.set()
+        reject.join(timeout=10)
+        approve.join(timeout=10)
+
+        assert not reject.is_alive() and not approve.is_alive()
+        assert errors["reject"] == []
+        assert len(errors["approve"]) == 1
+        assert isinstance(errors["approve"][0], ReadValidationError)
+        with session_factory() as session:
+            page = session.get(ContextPage, published.page_id)
+            assert page.current_published_version_id == published.draft_version_id
+            assert page.latest_draft_version_id is None
+            assert session.get(ReviewItem, d3.review_item_id).status == "superseded"
+            assert session.scalar(
+                select(func.count()).select_from(ReviewDecision).where(
+                    ReviewDecision.review_item_id == d3.review_item_id
+                )
+            ) == 0
+    finally:
+        drop_reflected_postgres_metadata(engine)
+        engine.dispose()
+
+
+@pytest.mark.xdist_group("postgres")
+@pytest.mark.skipif(
+    _postgres_url() is None,
+    reason="requires the dedicated PostgreSQL migration test database",
+)
 def test_postgres_ghost_close_and_decision_share_page_then_review_lock_order():
     """A decision holding the page cannot deadlock with ghost closure."""
 

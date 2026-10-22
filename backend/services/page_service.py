@@ -76,8 +76,11 @@ from backend.services.context_editing import (
     apply_operations_with_block_map,
 )
 from backend.services.context_lifecycle import (
+    RejectedDraftRestart,
     apply_context_publication,
     project_context_version,
+    record_metadata_snapshot,
+    rejected_draft_restart,
 )
 from backend.services.context_media_legacy_cutover import (
     LegacyMediaCutoverConflictError,
@@ -2023,6 +2026,13 @@ class PageService:
                     body=version.body_md,
                     needs_review=True,
                 )
+                if result.change_set_id is not None:
+                    record_metadata_snapshot(
+                        session,
+                        change_set_id=result.change_set_id,
+                        page=page,
+                        version=version,
+                    )
                 refresh_page_links(session, page=page, version=version)
                 return self._payload_from_page(
                     session,
@@ -3303,36 +3313,33 @@ class PageService:
                     self._require_named_open_edit(
                         session, page, editing_version_id, actor_kind, actor_id
                     )
-                current = self._require_page_version(
-                    session,
-                    page,
-                    self._editable_version_id_for_actor(
-                        session, page, actor_kind, actor_id
-                    ),
+                editable_version_id = self._editable_version_id_for_actor(
+                    session, page, actor_kind, actor_id
                 )
+                # A rejection can leave no head at all; a session continuing
+                # from its rejected draft is then resolved before failing.
+                current = (
+                    None
+                    if editable_version_id is None and session_version_id is not None
+                    else self._require_page_version(session, page, editable_version_id)
+                )
+                resume_parent: RejectedDraftRestart | None = None
                 if session_version_id is not None:
                     session_version = self._require_page_version(
                         session,
                         page,
                         session_version_id,
                     )
-                    if current.id != session_version.id:
-                        session_reviews = self._context_reviews_for_version(
-                            session=session,
-                            page=page,
-                            version=session_version,
-                        )
-                        can_resume_rejected_session = (
-                            session_version.version_status == "draft"
-                            and session_version.graph_status == "linear"
-                            and session_version.created_by_actor_kind == actor_kind
+                    if current is None or current.id != session_version.id:
+                        rejected_restart = (
+                            rejected_draft_restart(session, page, session_version)
+                            if session_version.created_by_actor_kind == actor_kind
                             and session_version.created_by_actor_id == actor_id
-                            and any(
-                                review.status == "rejected"
-                                for review in session_reviews
-                            )
+                            else None
                         )
-                        if not can_resume_rejected_session:
+                        if rejected_restart is None and current is None:
+                            raise PageNotFoundError("page version not found")
+                        if rejected_restart is None:
                             disclosed_version_id, disclosed_content_hash = (
                                 self._disclosable_version_fields(
                                     current, actor_kind, actor_id
@@ -3342,12 +3349,13 @@ class PageService:
                                 server_version_id=disclosed_version_id,
                                 server_content_hash=disclosed_content_hash,
                             )
-                        # Rejection deliberately restores the visible page head to
-                        # the published snapshot. The submitting session may still
-                        # continue from its exact rejected bytes, but only by
-                        # forking a successor below; the resolved review and its
+                        # Rejection retires the session's draft and returns the
+                        # page head below it. The submitting session may still
+                        # continue from its exact rejected bytes, but only as a
+                        # successor on that head; the resolved review and its
                         # immutable version are never rewritten.
                         current = session_version
+                        resume_parent = rejected_restart
                 same_actor_draft = (
                     current.version_status in ("editing", "draft")
                     and current.graph_status == "linear"
@@ -3531,7 +3539,11 @@ class PageService:
                     version = self._insert_version(
                         session,
                         page_id=page.id,
-                        parent_version_id=current.id,
+                        parent_version_id=(
+                            resume_parent.parent_version_id
+                            if resume_parent is not None
+                            else current.id
+                        ),
                         body_md=body_md,
                         content_hash=new_hash,
                         actor_kind=actor_kind,
@@ -3801,6 +3813,13 @@ class PageService:
             version=version,
             patch=metadata_patch,
         )
+        if result.change_set_id is not None:
+            record_metadata_snapshot(
+                session,
+                change_set_id=result.change_set_id,
+                page=page,
+                version=version,
+            )
         refresh_page_links(session, page=page, version=version)
         for unresolved_review in unresolved_reviews:
             supersede_review_with_lineage(

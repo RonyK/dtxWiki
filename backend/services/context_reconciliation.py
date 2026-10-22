@@ -221,8 +221,8 @@ def load_verified_reconciliation_manifest(
         or original_head.workspace_id != page.workspace_id
         or base.page_id != page.id
         or original_head.page_id != page.id
-        or base.graph_status != "linear"
-        or original_head.graph_status != "linear"
+        or not _lineage_row(base)
+        or not _lineage_row(original_head)
         or branch.workspace_id != page.workspace_id
         or branch.page_id != page.id
         or branch.parent_version_id != base.id
@@ -512,6 +512,15 @@ def project_reconciliation_detail(
     )
 
 
+def _lineage_row(version: ContextPageVersion) -> bool:
+    """A version of the page's own line: live, or a submitted draft that left
+    it (published past, or retired by a rejection) and stays readable."""
+
+    return version.graph_status == "linear" or (
+        version.graph_status == "discarded" and version.version_status == "draft"
+    )
+
+
 def _lineage_distance(
     session: Session,
     *,
@@ -542,10 +551,18 @@ def _lineage_distance(
             )
         }
         session.info[cache_key] = lineage
+    # Count the head's advance from where it meets the original head's history.
+    # That is the original head itself unless a rejection retired it and
+    # rolled the head back below it (an advance of 0 at the rollback point).
+    history: set[UUID] = set()
+    history_id: UUID | None = ancestor.id
+    while history_id is not None and history_id not in history:
+        history.add(history_id)
+        history_id = (lineage.get(history_id) or (None, None))[0]
     distance = 0
     cursor_id = descendant.id
     seen: set[UUID] = set()
-    while cursor_id != ancestor.id:
+    while cursor_id not in history:
         if cursor_id in seen:
             raise ReadValidationError(
                 "reconciliation head lineage contains a cycle",
@@ -560,6 +577,13 @@ def _lineage_distance(
             )
         cursor_id = cursor[0]
         distance += 1
+    original_head_graph = (lineage.get(ancestor.id) or (None, None))[1]
+    if cursor_id != ancestor.id and original_head_graph == "linear":
+        # The original head is still live, yet the head does not descend from it.
+        raise ReadValidationError(
+            "reconciliation head lineage is invalid",
+            error_code="reconcile_target_invalid",
+        )
     return distance
 
 

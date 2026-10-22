@@ -636,6 +636,10 @@ class ReviewDecisionRequest(InputRequest):
     # current single "Request changes" button keeps working until the routing
     # picker ships in the T15 frontend.
     audience_kind: Literal["chat_owner", "requester", "workspace_editors"] | None = None
+    # Reject only: the impact_fingerprint of the previewed rejection. When the
+    # impact changed before the decision, the server refuses with 409
+    # review_decision_impact_changed instead of rejecting more than was shown.
+    expected_impact_fingerprint: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def require_request_changes_reason(self) -> "ReviewDecisionRequest":
@@ -649,6 +653,11 @@ class ReviewDecisionRequest(InputRequest):
         # not allowed on approve/reject.
         if self.decision_type != "request_changes" and self.audience_kind is not None:
             raise ValueError("audience_kind is only allowed when requesting changes")
+        if (
+            self.decision_type != "reject"
+            and self.expected_impact_fingerprint is not None
+        ):
+            raise ValueError("expected_impact_fingerprint is only allowed on reject")
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -699,6 +708,11 @@ class ReviewContentTarget(BaseModel):
     can_diff: bool = False
     unavailable_reason: str | None = None
     is_current_candidate: bool | None = None
+    # Set when the candidate was written on an earlier, still unpublished
+    # draft: comparing against it shows this draft's own change, while the
+    # baseline above shows what publishing it would change.
+    draft_parent_version_id: UUID | None = None
+    draft_parent_version_no: int | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -719,8 +733,20 @@ class ReviewActionCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReviewVersionRef(BaseModel):
+    version_id: UUID
+    version_no: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ReviewRejectEffect(BaseModel):
-    effect: Literal["restore_published", "hide_unpublished", "no_head_change"]
+    effect: Literal[
+        "restore_published",
+        "hide_unpublished",
+        "no_head_change",
+        "restore_previous_draft",
+    ]
     document_id: UUID | None = None
     candidate_version_id: UUID | None = None
     candidate_version_no: int | None = None
@@ -728,6 +754,33 @@ class ReviewRejectEffect(BaseModel):
     published_version_no: int | None = None
     visible_sibling_review_ids: list[UUID] = Field(default_factory=list)
     visible_sibling_count: int = Field(default=0, ge=0)
+    # Later drafts written on top of the candidate, oldest first. Rejecting the
+    # candidate rejects them too; their open reviews are settled with it.
+    cascaded_versions: list[ReviewVersionRef] = Field(default_factory=list)
+    visible_cascaded_review_ids: list[UUID] = Field(default_factory=list)
+    cascaded_review_count: int = Field(default=0, ge=0)
+    # restore_previous_draft: the earlier draft that becomes the edit head.
+    resulting_draft_version_id: UUID | None = None
+    resulting_draft_version_no: int | None = None
+    # That draft has no open review left, so rejecting opens a new one for it.
+    restores_review: bool = False
+    # Before a first publication, the earlier draft's page metadata could not
+    # be restored (it predates per-draft metadata), so the current values stay.
+    metadata_kept: bool = False
+    # Set when the rejection cannot run, e.g. a private edit sits on top.
+    blocked_reason: Literal["private_edit_in_progress"] | None = None
+    # Binds a confirmation to exactly this impact (see ReviewDecisionRequest).
+    impact_fingerprint: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewSettlement(BaseModel):
+    """Why a superseded review was closed, and by which decided review."""
+
+    reason_code: str
+    by_review_item_id: UUID | None = None
+    by_version_no: int | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -793,6 +846,7 @@ class ReviewItemDetail(BaseModel):
     decisions: list[ReviewDecisionPayload]
     published_version_id: UUID | None = None
     superseded_review_count: int = 0
+    settlement: ReviewSettlement | None = None
     reconciliation_available: bool = False
     reconciliation_page_id: UUID | None = None
     reconciliation_version_id: UUID | None = None

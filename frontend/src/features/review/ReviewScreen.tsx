@@ -62,6 +62,7 @@ import {
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { i18n } from "../../shared/i18n";
 import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
+import { formatVersionRange } from "../../shared/lib/versionRange";
 
 import { ReviewEvidencePanel } from "./ReviewEvidencePanel";
 
@@ -108,6 +109,7 @@ type PendingReviewDecision = {
   reviewId: string;
   decision: ReviewDecisionType;
   reason: string | null;
+  expectedImpactFingerprint?: string | null;
 };
 
 const LIFECYCLE_TABS: ReviewLifecycleTab[] = [
@@ -134,6 +136,7 @@ const REVIEW_DECISION_SUMMARY_DEFAULTS = {
   context_update_workflow_sequence_incomplete:
     "Context update draft requires review because the workflow sequence is incomplete",
   context_ingress_requires_review: "Ask capture requires review",
+  context_draft_restored_after_rejection: "Draft restored after a later draft was rejected",
 } as const;
 // Ask capture reviews used to store their raw reason codes as the summary prose.
 const LEGACY_INGRESS_REASON_SUMMARY = /^(low_confidence|page_type_decision)(,(low_confidence|page_type_decision))*$/;
@@ -227,6 +230,10 @@ export function ReviewScreen() {
   const [settledReviewStates, setSettledReviewStates] = useState<Record<string, string>>({});
   const [completedReview, setCompletedReview] = useState<ReviewItem | null>(null);
   const [detachedReview, setDetachedReview] = useState<ReviewItem | null>(null);
+  const [rejectDialogKey, setRejectDialogKey] = useState<{ reviewId: string; key: string } | null>(null);
+  const onRejectDialogChange = useCallback((reviewId: string, key: string | null) => {
+    setRejectDialogKey(key ? { reviewId, key } : null);
+  }, []);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [uncertainDecisions, setUncertainDecisions] = useState<Record<string, PendingReviewDecision | null>>({});
   const focusReviewRef = useRef<string | null>(null);
@@ -316,6 +323,7 @@ export function ReviewScreen() {
     if (bulkRunRef.current !== null) setBulkStopped(true);
     setCompletedReview(null);
     setDetachedReview(null);
+    setRejectDialogKey(null);
     setRefreshFailed(false);
   }, [workspaceContext?.selectedId, activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations]);
 
@@ -353,6 +361,7 @@ export function ReviewScreen() {
   ]);
 
   useEffect(() => {
+    setRejectDialogKey(null);
     if (bulkRunRef.current === null) return;
     bulkOperationRef.current += 1;
     setBulkDialog(null);
@@ -620,9 +629,7 @@ export function ReviewScreen() {
       if (!await recoverDecision(pending, key, generation)) {
         if (generation !== loadMoreGenerationRef.current) return;
         setError(null);
-        const receipt = await decideReview(pending.workspaceId, pending.reviewId,
-          pending.decision, pending.reason, { decision_id: pending.decisionId,
-            ...(pending.audienceKind ? { audience_kind: pending.audienceKind } : {}) });
+        const receipt = await sendReviewDecision(pending);
         storeDecisionReceipt(receipt, key, generation);
       }
       if (generation !== loadMoreGenerationRef.current) return;
@@ -644,6 +651,7 @@ export function ReviewScreen() {
     decision: ReviewDecisionType,
     audienceKind?: ReviewAudienceKind,
     reasonOverride?: string,
+    expectedImpactFingerprint?: string | null,
   ): Promise<DecisionResult> {
     const selected = reviewForCurrentParam();
     const reason = (reasonOverride ?? decisionReason).trim();
@@ -661,7 +669,7 @@ export function ReviewScreen() {
     const at = order.indexOf(selected.id);
     setNextReviewOrder({ after: order.slice(at + 1), before: order.slice(0, Math.max(at, 0)) });
     const pending: PendingReviewDecision = { decisionId: crypto.randomUUID(), audienceKind, workspaceId, reviewId: selected.id, decision,
-      reason: reason || null };
+      reason: reason || null, ...(decision === "reject" ? { expectedImpactFingerprint } : {}) };
     const key = draftKey;
     setBusyId(selected.id);
     setError(null);
@@ -671,11 +679,33 @@ export function ReviewScreen() {
         // Save before POST so navigation/reload cannot enable a duplicate POST
         // when the response is lost after the server commits.
         if (key) setPendingDecision(key, pending);
-        receipt = await decideReview(workspaceId, selected.id, decision, reason || null,
-          { decision_id: pending.decisionId, ...(audienceKind ? { audience_kind: audienceKind } : {}) });
+        receipt = await sendReviewDecision(pending);
       } catch (exc) {
         if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
           if (key) setPendingDecision(key, null);
+          if (decision === "reject" && exc.body.error_code === "review_decision_impact_changed") {
+            // Keep the current detail mounted while refreshing its impact so
+            // the confirmation dialog and the reviewer's reason stay open.
+            const detailKey = selectedDetailKey;
+            const selectionGeneration = reviewSelectionGenerationRef.current;
+            for (const [cachedKey, review] of detailCacheRef.current) {
+              if (review.workspace_id === workspaceId && review.id === selected.id) detailCacheRef.current.delete(cachedKey);
+            }
+            try {
+              const fresh = await getReview(workspaceId, selected.id);
+              if (fresh.workspace_id !== workspaceId || fresh.id !== selected.id) throw new Error("Review mismatch");
+              if (generation === loadMoreGenerationRef.current && selectionGeneration === reviewSelectionGenerationRef.current && detailKey) {
+                detailCacheRef.current.set(detailKey, fresh);
+                detailCacheRef.current.set(JSON.stringify([workspaceId, fresh.id, fresh.updated_at, fresh.status]), fresh);
+                setSelectedDetail({ key: detailKey, review: fresh, error: null });
+                setDetachedReview(listedReview ? null : fresh);
+              }
+            } catch (error) {
+              if (generation === loadMoreGenerationRef.current && selectionGeneration === reviewSelectionGenerationRef.current && detailKey) {
+                setSelectedDetail({ key: detailKey, review: null, error: reviewErrorMessage(error, t("errors.restore")) });
+              }
+            }
+          }
           throw exc;
         }
         if (generation !== loadMoreGenerationRef.current) return "unknown";
@@ -1099,10 +1129,12 @@ export function ReviewScreen() {
     }
   }
 
-  async function submitDecision(decision: ReviewDecisionType): Promise<DecisionResult> {
+  async function submitDecision(decision: ReviewDecisionType, expectedImpactFingerprint?: string | null): Promise<DecisionResult> {
     try {
-      return await runDecision(decision);
+      return await runDecision(decision, undefined, undefined, expectedImpactFingerprint);
     } catch (exc) {
+      if (decision === "reject" && exc instanceof ApiError
+        && ["review_decision_impact_changed", "review_reject_blocked_by_private_edit"].includes(exc.body.error_code)) throw exc;
       setError(reviewErrorMessage(exc, t("errors.decide")));
       return "failed";
     }
@@ -1678,7 +1710,7 @@ export function ReviewScreen() {
             {selectedReview ? (
               <>
                 <ReviewDetail
-                  key={reviewContentKey(selectedReview)}
+                  key={rejectDialogKey?.reviewId === selectedReview.id ? rejectDialogKey.key : reviewContentKey(selectedReview)}
                   workspaceId={state.workspaceId}
                   decisionSaved={completedReview?.id === selectedReview.id}
                   nextDisabled={refreshFailed || refreshing || Boolean(busyId) || bulkBusy || Boolean(uncertainDecision) || (state.reviews.length === 0 && state.nextCursor === null)}
@@ -1690,6 +1722,8 @@ export function ReviewScreen() {
                   canEditDirectly={state.canEditDirectly}
                   decisionReason={decisionReason}
                   onDecision={submitDecision}
+                  onOpenReview={setReviewParam}
+                  onRejectDialogChange={onRejectDialogChange}
                   onEditDirectly={() => void editDirectly(selectedReview)}
                   onReasonChange={setDecisionReason}
                   onRouteChanges={(audienceKind, reason) =>
@@ -2426,6 +2460,8 @@ function ReviewDetail({
   canEditDirectly,
   onReasonChange,
   onDecision,
+  onOpenReview,
+  onRejectDialogChange,
   onEditDirectly,
   onRouteChanges,
 }: {
@@ -2441,7 +2477,9 @@ function ReviewDetail({
   decisionsBlocked: boolean;
   canEditDirectly: boolean;
   onReasonChange: (reason: string) => void;
-  onDecision: (decision: ReviewDecisionType) => Promise<DecisionResult>;
+  onDecision: (decision: ReviewDecisionType, expectedImpactFingerprint?: string | null) => Promise<DecisionResult>;
+  onOpenReview: (reviewId: string) => void;
+  onRejectDialogChange: (reviewId: string, key: string | null) => void;
   onEditDirectly: () => void;
   onRouteChanges: (
     audienceKind: ReviewAudienceKind,
@@ -2518,6 +2556,8 @@ function ReviewDetail({
   const reasonTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [rejectBlockedByResponse, setRejectBlockedByResponse] = useState(false);
+  const rejectBlocked = rejectBlockedByResponse || review.reject_effect?.blocked_reason === "private_edit_in_progress";
   const [routingOpen, setRoutingOpen] = useState(false);
   const [routingAudience, setRoutingAudience] =
     useState<ReviewAudienceKind>("requester");
@@ -2541,6 +2581,8 @@ function ReviewDetail({
   const targetTitle = reviewTargetTitle(review, t);
   const decisionSummary = localizedDecisionSummary(review, t);
   const riskInsight = reviewRiskInsight(review);
+  const settlement = review.status === "superseded" ? review.settlement : null;
+  const decidingReviewId = settlement?.by_review_item_id;
 
   function handleReject() {
     if (!canReject) {
@@ -2550,6 +2592,8 @@ function ReviewDetail({
     // an explicit confirm Dialog instead of submitting on the first click. The
     // decision reason stays optional — only the confirm is required.
     setRejectError(null);
+    setRejectBlockedByResponse(false);
+    onRejectDialogChange(review.id, reviewContentKey(review));
     setRejectOpen(true);
   }
 
@@ -2564,18 +2608,28 @@ function ReviewDetail({
   const closeReject = useCallback(() => {
     if (!busy) {
       setRejectOpen(false);
+      onRejectDialogChange(review.id, null);
     }
-  }, [busy]);
+  }, [busy, onRejectDialogChange, review.id]);
 
   async function confirmReject() {
     // The busy re-entry guard mirrors the routing dialog: the inline button is
     // disabled while submitting, but a stale double-submit is still bounced.
-    if (busy) {
+    if (actionBusy || rejectBlocked) {
       return;
     }
-    const result = await onDecision("reject");
-    if (result === "saved") setRejectOpen(false);
-    else setRejectError(t(result === "unknown" ? "workflow.decisionOutcomeUnknown" : "workflow.decisionFailedKeepDraft"));
+    setRejectError(null);
+    try {
+      const result = await onDecision("reject", review.reject_effect?.impact_fingerprint);
+      if (result === "saved") {
+        setRejectOpen(false);
+        onRejectDialogChange(review.id, null);
+      }
+      else setRejectError(t(result === "unknown" ? "workflow.decisionOutcomeUnknown" : "workflow.decisionFailedKeepDraft"));
+    } catch (exc) {
+      if (exc instanceof ApiError && exc.body.error_code === "review_reject_blocked_by_private_edit") setRejectBlockedByResponse(true);
+      setRejectError(reviewErrorMessage(exc, t("errors.decide")));
+    }
   }
 
   function openRoutingDialog() {
@@ -2767,6 +2821,17 @@ function ReviewDetail({
           })}
         </StatusBanner>
       ) : null}
+      {settlement ? (
+        <StatusBanner tone="info" action={decidingReviewId ? (
+          <button className="icon-button" onClick={() => onOpenReview(decidingReviewId)} type="button">
+            {t(settlement.by_version_no == null ? "workflow.settlement.openDecidingReview" : "workflow.settlement.openReview", { version: settlement.by_version_no })}
+          </button>
+        ) : undefined}>
+          {t(`workflow.settlement.${settlement.reason_code}`, {
+            version: settlement.by_version_no ?? "—", defaultValue: t("workflow.settlement.generic"),
+          })}
+        </StatusBanner>
+      ) : null}
       {isReconciliation && (hasReconciliationProvenance || reconciliationChatHref) ? (
         <section className="review-reconciliation-provenance">
           <h3>
@@ -2927,7 +2992,7 @@ function ReviewDetail({
             <FormField htmlFor={`${rejectTitleId}-reason`} label={t("detail.reasonLabel")} hint={decisionReasonHint}>
               <textarea {...textInputLimit(2000, false)} id={`${rejectTitleId}-reason`} value={decisionReason} onChange={(event) => onReasonChange(event.currentTarget.value)} />
             </FormField>
-            {rejectError ? <StatusBanner tone="warning">{rejectError}</StatusBanner> : null}
+            {rejectBlocked || rejectError ? <StatusBanner tone="warning">{rejectBlocked ? t("workflow.reasons.review_reject_blocked_by_private_edit") : rejectError}</StatusBanner> : null}
             <div className="dialog-actions">
               <button
                 className="icon-button"
@@ -2939,7 +3004,7 @@ function ReviewDetail({
               </button>
               <button
                 className="icon-button danger"
-                disabled={actionBusy}
+                disabled={actionBusy || rejectBlocked}
                 onClick={() => void confirmReject()}
                 type="button"
               >
@@ -3704,11 +3769,47 @@ function pendingGroupPageId(group: ReviewRailGroup): string | null {
 function ReviewRejectImpact({ review }: { review: ReviewItem }) {
   const { t } = useTranslation("review");
   const effect = review.reject_effect;
+  const candidate = effect?.candidate_version_no ?? "—";
+  const resulting = effect?.resulting_draft_version_no ?? "—";
   return (
     <div className="evidence-box review-reject-impact">
       <strong>{reviewTargetTitle(review, t)}</strong>
       <p>{effect?.candidate_version_no != null ? t("workflow.rejectCandidate", { version: effect.candidate_version_no }) : t("workflow.rejectReviewOnly")}</p>
-      <p>{effect ? t(`workflow.rejectEffects.${effect.effect}`, { version: effect.published_version_no ?? "—" }) : t("workflow.rejectEffectUnavailable")}</p>
+      {!effect ? <p>{t("workflow.rejectEffectUnavailable")}</p> : effect.effect === "no_head_change" ? (
+        <p>{t("workflow.rejectEffects.no_head_change")}</p>
+      ) : (
+        <ul className="review-bulk-outcome-list">
+          <li>
+            <StatusPill compact status="rejected" tone="danger" label={t("actions.reject")} />
+            <span>{t("workflow.rejectImpact.candidate", { version: candidate })}</span>
+          </li>
+          {effect.cascaded_versions?.length ? (
+            <li>
+              <StatusPill compact status="rejected" tone="danger" label={t("workflow.rejectImpact.cascadedLabel")} />
+              <span>{t("workflow.rejectImpact.cascaded", {
+                versions: formatVersionRange(effect.cascaded_versions.map((version) => version.version_no), t),
+                version: candidate,
+              })}{effect.cascaded_review_count > 0 ? t("workflow.rejectImpact.cascadedReviews", { count: effect.cascaded_review_count }) : ""}</span>
+            </li>
+          ) : null}
+          {effect.effect === "restore_previous_draft" ? (
+            <li>
+              <StatusPill compact status="draft" tone="info" label={t("workflow.rejectImpact.editHeadLabel")} />
+              <span>{t("workflow.rejectEffects.restore_previous_draft", { version: resulting })}{" "}
+                {t(effect.restores_review ? "workflow.rejectImpact.reviewReopens" : "workflow.rejectImpact.reviewStaysOpen", { version: resulting })}</span>
+            </li>
+          ) : null}
+          {effect.published_version_no != null || effect.effect === "hide_unpublished" ? (
+            <li>
+              <StatusPill compact status="published" tone="ok" label={t("workflow.rejectImpact.publishedLabel")} />
+              <span>{effect.effect === "hide_unpublished"
+                ? t("workflow.rejectEffects.hide_unpublished")
+                : t("workflow.rejectImpact.published", { version: effect.published_version_no })}</span>
+            </li>
+          ) : null}
+        </ul>
+      )}
+      {effect?.metadata_kept ? <StatusBanner tone="warning">{t("workflow.rejectImpact.metadataKept", { version: resulting })}</StatusBanner> : null}
       {effect && effect.visible_sibling_count > 0 ? <p>{t("workflow.rejectSiblingImpact", { count: effect.visible_sibling_count })}</p> : null}
     </div>
   );
@@ -3754,6 +3855,14 @@ function reviewSelectionError(error: unknown, t: TFunction): string {
     return reviewOutcomeReason(error.body.error_code, error.displayMessage, t);
   }
   return reviewErrorMessage(error, t("errors.bulkPreview"));
+}
+
+function sendReviewDecision(pending: PendingReviewDecision): Promise<ReviewItem> {
+  return decideReview(pending.workspaceId, pending.reviewId, pending.decision, pending.reason, {
+    decision_id: pending.decisionId,
+    ...(pending.audienceKind ? { audience_kind: pending.audienceKind } : {}),
+    ...(pending.decision === "reject" ? { expected_impact_fingerprint: pending.expectedImpactFingerprint } : {}),
+  });
 }
 
 function readPendingReviewDecision(key: string): PendingReviewDecision | null {

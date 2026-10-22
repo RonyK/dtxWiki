@@ -319,7 +319,11 @@ export async function decideReview(
   reviewItemId: string,
   decision_type: ReviewDecisionType,
   decision_reason?: string | null,
-  options: { audience_kind?: ReviewAudienceKind; decision_id?: string } = {},
+  options: {
+    audience_kind?: ReviewAudienceKind;
+    decision_id?: string;
+    expected_impact_fingerprint?: string | null;
+  } = {},
 ) {
   const response = await apiRequest<{ data: ReviewItem }>(
     `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decision`,
@@ -329,6 +333,10 @@ export async function decideReview(
         decision_type,
         decision_reason: decision_reason || null,
         ...(options.decision_id ? { decision_id: options.decision_id } : {}),
+        // Reject only: binds the decision to the impact the dialog showed.
+        ...(options.expected_impact_fingerprint
+          ? { expected_impact_fingerprint: options.expected_impact_fingerprint }
+          : {}),
         // Only include audience_kind when routing a request_changes decision;
         // omitting it preserves the server default for approve/reject.
         ...(options.audience_kind

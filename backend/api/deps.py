@@ -194,6 +194,8 @@ def status_code_for_read_error(exc: ReadServiceError) -> int:
         "stale_context_draft",
         "idempotency_key_conflict",
         "decision_id_conflict",
+        "review_decision_impact_changed",
+        "review_reject_blocked_by_private_edit",
     }:
         return 409
     if exc.error_code == "operation_outcome_unknown":

@@ -241,8 +241,13 @@ function ExactContextContent({
   const content = group.content!;
   const documentId = group.document!.document_id!;
   const candidateId = content.candidate_version_id!;
-  const baselineKind = content.baseline_kind;
-  const baselineId = content.baseline_version_id ?? null;
+  const hasDraftParent = content.is_current_candidate === true
+    && Boolean(content.draft_parent_version_id) && content.draft_parent_version_no != null;
+  const [comparisonMode, setComparisonMode] = useState<"parent" | "published">("parent");
+  const useDraftParent = hasDraftParent && comparisonMode === "parent";
+  const baselineKind = useDraftParent ? "parent" : content.baseline_kind;
+  const baselineId = (useDraftParent ? content.draft_parent_version_id : content.baseline_version_id) ?? null;
+  const baselineVersionNo = useDraftParent ? content.draft_parent_version_no : content.baseline_version_no;
   const canCompare = content.can_diff && (
     (baselineKind === "empty" && baselineId === null)
       || ((baselineKind === "published" || baselineKind === "parent")
@@ -250,7 +255,7 @@ function ExactContextContent({
   );
   const [tab, setTab] = useState<ContentTab>(canCompare ? "comparison" : "original");
   const [reload, setReload] = useState(0);
-  const requestKey = `${workspaceId}:${group.key}:${reload}`;
+  const requestKey = JSON.stringify([workspaceId, group.key, baselineKind, baselineId, baselineVersionNo, reload]);
   const [result, setResult] = useState<{
     key: string;
     original: ReadResult<PagePayload>;
@@ -299,7 +304,7 @@ function ExactContextContent({
           && (diff.from_version_id ?? null) === (baselineKind === "empty" ? null : baselineId)
           && diff.baseline === (baselineKind === "empty" ? "empty" : "version")
           && (content.candidate_version_no == null || diff.to_version_no === content.candidate_version_no)
-          && (content.baseline_version_no == null || diff.from_version_no === content.baseline_version_no);
+          && (baselineVersionNo == null || diff.from_version_no === baselineVersionNo);
         setResult((previous) => previous?.key === requestKey ? {
           ...previous,
           comparison: matches ? { status: "ready", data: diff }
@@ -320,10 +325,10 @@ function ExactContextContent({
   }, [
     baselineId,
     baselineKind,
+    baselineVersionNo,
     canCompare,
     candidateId,
     content.candidate_version_no,
-    content.baseline_version_no,
     documentId,
     requestKey,
     workspaceId,
@@ -339,19 +344,21 @@ function ExactContextContent({
     [candidateId, documentId, workspaceId],
   );
   const version = content.candidate_version_no;
-  const baselineLabel = baselineKind === "empty"
-    ? t("content.emptyBaseline", { defaultValue: "Empty document" })
-    : baselineKind === "published"
-      ? t("content.publishedBaseline", {
-          version: content.baseline_version_no ?? "?",
-          defaultValue: "Current published version v{{version}}",
-        })
-      : baselineKind === "parent"
-        ? t("content.parentBaseline", {
-            version: content.baseline_version_no ?? "?",
-            defaultValue: "Parent version v{{version}}",
+  const baselineLabel = useDraftParent
+    ? t("content.draftParentBaseline", { version: baselineVersionNo })
+    : baselineKind === "empty"
+      ? t("content.emptyBaseline", { defaultValue: "Empty document" })
+      : baselineKind === "published"
+        ? t("content.publishedBaseline", {
+            version: baselineVersionNo ?? "?",
+            defaultValue: "Current published version v{{version}}",
           })
-        : t("content.unavailableBaseline", { defaultValue: "Comparison baseline unavailable" });
+        : baselineKind === "parent"
+          ? t("content.parentBaseline", {
+              version: baselineVersionNo ?? "?",
+              defaultValue: "Parent version v{{version}}",
+            })
+          : t("content.unavailableBaseline", { defaultValue: "Comparison baseline unavailable" });
   const candidateLabel = version == null
     ? t("content.reviewVersionUnknown", { defaultValue: "Review version" })
     : t("content.reviewVersion", { version, defaultValue: "Review version v{{version}}" });
@@ -372,6 +379,18 @@ function ExactContextContent({
       <div className="review-content-heading">
         <h4>{t("content.title", { defaultValue: "Change content" })}</h4>
         <p>{baselineLabel} → {candidateLabel}</p>
+        {hasDraftParent ? (
+          <div className="diff-viewer-mode-toggle" role="group" aria-label={t("content.comparisonMode")}>
+            <button aria-pressed={comparisonMode === "parent"} onClick={() => setComparisonMode("parent")} type="button">
+              {t("content.draftChange", { parent: content.draft_parent_version_no, candidate: version })}
+            </button>
+            <button aria-pressed={comparisonMode === "published"} onClick={() => setComparisonMode("published")} type="button">
+              {t(content.baseline_kind === "empty" ? "content.publishingEmptyChange" : "content.publishingChange", {
+                baseline: content.baseline_version_no ?? "?", candidate: version,
+              })}
+            </button>
+          </div>
+        ) : null}
       </div>
       {tab === "comparison" && original.status === "unavailable" ? (
         <StatusBanner tone="warning">
@@ -517,6 +536,8 @@ function groupEvidenceOperations(review: ReviewItem): EvidenceGroup[] {
       content?.baseline_kind,
       content?.baseline_version_id,
       content?.baseline_version_no,
+      content?.draft_parent_version_id,
+      content?.draft_parent_version_no,
       content?.can_read,
       content?.can_diff,
       content?.unavailable_reason,

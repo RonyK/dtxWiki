@@ -265,8 +265,8 @@ def test_migration_preserves_rejected_restartable_draft_after_unrelated_publish(
     alone.
 
     Demoting it anyway would flip ``graph_status`` to ``discarded``. Restart
-    would still nominally succeed (``_is_restartable_rejected_version`` only
-    checks ``version_status``), but the discarded ancestor would then
+    of such a legacy draft parents on the draft itself
+    (``rejected_draft_restart``), so the discarded ancestor would then
     permanently refuse EVERY future publish built on it
     (``assert_context_publish_candidate`` walks the parent chain and
     requires every ancestor to stay ``linear``) -- silently and
@@ -316,13 +316,16 @@ def test_migration_preserves_rejected_restartable_draft_after_unrelated_publish(
         )
         assert rejected.status == "rejected"
 
-    with page_service.session_factory() as session:
+    with page_service.session_factory.begin() as session:
         page = session.get(ContextPage, published.id)
         rejected_row = session.get(ContextPageVersion, rejected_draft_id)
         assert page is not None and rejected_row is not None
         assert page.latest_draft_version_id is None
         assert rejected_row.version_status == "draft"
-        assert rejected_row.graph_status == "linear"
+        # A rejection now retires the draft. Rows rejected before that stayed
+        # draft/linear, and that legacy shape is what the migration must keep.
+        assert rejected_row.graph_status == "discarded"
+        rejected_row.graph_status = "linear"
 
     # Ordinary, UNRELATED later edit -- not a restart of the rejected draft
     # -- forks straight from the still-published head and gets published,
@@ -441,10 +444,10 @@ def test_restart_after_reject_publishes_cleanly_with_no_intervening_publish(
 ):
     """Companion to the test above, isolating the ordinary case: reject then
     restart immediately, with nothing else published on the page in
-    between. `_restart_rejected_draft` parents the new draft on the
-    rejected version, whose own parent is still the current published head
-    here (nothing moved it), so the restarted draft's ancestor chain
-    reaches the head directly and publish succeeds -- proving the
+    between. The rejection retires the draft, and the restart parents the
+    new draft on the head the rejection left -- the current published head
+    here (nothing moved it) -- so its ancestor chain reaches the head
+    directly and publish succeeds -- proving the
     reject-then-restart recovery path works end to end, not merely that the
     row keeps a `linear` label.
     """

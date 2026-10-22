@@ -8451,6 +8451,10 @@ export interface components {
             candidate_version_id?: string | null;
             /** Candidate Version No */
             candidate_version_no?: number | null;
+            /** Draft Parent Version Id */
+            draft_parent_version_id?: string | null;
+            /** Draft Parent Version No */
+            draft_parent_version_no?: number | null;
             /** Is Current Candidate */
             is_current_candidate?: boolean | null;
             /**
@@ -8611,6 +8615,8 @@ export interface components {
              * @enum {string}
              */
             decision_type: "approve" | "reject" | "request_changes";
+            /** Expected Impact Fingerprint */
+            expected_impact_fingerprint?: string | null;
         };
         /**
          * ReviewDocumentTarget
@@ -8765,6 +8771,7 @@ export interface components {
             risk_signals?: {
                 [key: string]: unknown;
             } | null;
+            settlement?: components["schemas"]["ReviewSettlement"] | null;
             /** Status */
             status: string;
             /**
@@ -8809,21 +8816,48 @@ export interface components {
         };
         /** ReviewRejectEffect */
         ReviewRejectEffect: {
+            /** Blocked Reason */
+            blocked_reason?: "private_edit_in_progress" | null;
             /** Candidate Version Id */
             candidate_version_id?: string | null;
             /** Candidate Version No */
             candidate_version_no?: number | null;
+            /**
+             * Cascaded Review Count
+             * @default 0
+             */
+            cascaded_review_count: number;
+            /** Cascaded Versions */
+            cascaded_versions?: components["schemas"]["ReviewVersionRef"][];
             /** Document Id */
             document_id?: string | null;
             /**
              * Effect
              * @enum {string}
              */
-            effect: "restore_published" | "hide_unpublished" | "no_head_change";
+            effect: "restore_published" | "hide_unpublished" | "no_head_change" | "restore_previous_draft";
+            /** Impact Fingerprint */
+            impact_fingerprint?: string | null;
+            /**
+             * Metadata Kept
+             * @default false
+             */
+            metadata_kept: boolean;
             /** Published Version Id */
             published_version_id?: string | null;
             /** Published Version No */
             published_version_no?: number | null;
+            /**
+             * Restores Review
+             * @default false
+             */
+            restores_review: boolean;
+            /** Resulting Draft Version Id */
+            resulting_draft_version_id?: string | null;
+            /** Resulting Draft Version No */
+            resulting_draft_version_no?: number | null;
+            /** Visible Cascaded Review Ids */
+            visible_cascaded_review_ids?: string[];
             /**
              * Visible Sibling Count
              * @default 0
@@ -8916,6 +8950,18 @@ export interface components {
             data: components["schemas"]["ReviewSelectionPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /**
+         * ReviewSettlement
+         * @description Why a superseded review was closed, and by which decided review.
+         */
+        ReviewSettlement: {
+            /** By Review Item Id */
+            by_review_item_id?: string | null;
+            /** By Version No */
+            by_version_no?: number | null;
+            /** Reason Code */
+            reason_code: string;
+        };
         /** ReviewStatusByRiskBreakdown */
         ReviewStatusByRiskBreakdown: {
             changes_requested: components["schemas"]["ReviewStatusRiskBreakdown"];
@@ -8939,6 +8985,16 @@ export interface components {
              * @default 0
              */
             medium: number;
+        };
+        /** ReviewVersionRef */
+        ReviewVersionRef: {
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version No */
+            version_no: number;
         };
         /** SearchCapabilities */
         SearchCapabilities: {
