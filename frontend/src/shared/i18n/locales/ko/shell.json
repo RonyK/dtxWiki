@@ -420,6 +420,8 @@
     "changesUnavailable": "변경 내용을 볼 수 없음",
     "failedChanges": "변경 내용을 불러오지 못했습니다",
     "compareTwo": "두 버전 비교",
+    "scrollGraph": "히스토리 그래프 좌우 이동",
+    "scrollGraphHelp": "좌우로 밀거나 방향키로 이동하세요.",
     "firstVersion": "첫 버전",
     "parentHidden": "이전 버전을 볼 권한이 없습니다",
     "parentMissing": "이전 버전을 사용할 수 없습니다",

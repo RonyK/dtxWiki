@@ -420,6 +420,8 @@
     "changesUnavailable": "Changes unavailable",
     "failedChanges": "Failed to load changes",
     "compareTwo": "Compare two versions",
+    "scrollGraph": "Scroll history graph",
+    "scrollGraphHelp": "Swipe or use the left and right arrow keys.",
     "firstVersion": "First version",
     "parentHidden": "Previous version is not visible",
     "parentMissing": "Previous version is unavailable",

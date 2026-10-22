@@ -270,6 +270,74 @@ export const ThreeWayFork = {
   ),
 };
 
+// A busy same-base fork: fourteen siblings need fourteen distinct lanes.
+// The reader must preserve every dot and edge even when they need more
+// horizontal space than the usual gutter. The count and loaded page can be
+// changed together to inspect an older-page transition without changing the
+// already loaded rows' lane positions.
+export const ManySiblings = {
+  args: { siblingCount: 14, loadedSiblings: 14, includeRoot: true },
+  render: ({
+    siblingCount = 14,
+    loadedSiblings = 14,
+    includeRoot = true,
+  }: {
+    siblingCount?: number;
+    loadedSiblings?: number;
+    includeRoot?: boolean;
+  } = {}) => {
+    const headNo = siblingCount + 1;
+    const loaded = Math.min(siblingCount, loadedSiblings);
+    const versions = Array.from({ length: loaded }, (_, index) => {
+      const versionNo = headNo - index;
+      return historyVersion(
+        `version-${versionNo}`,
+        versionNo,
+        index === 0 ? "current_draft" : "alternative_draft",
+        {
+          version_status: "draft",
+          prior_version_id: "version-1",
+          is_draft_head: index === 0,
+          is_visible_head: index === 0,
+          is_alternative: index !== 0,
+          actor_display_name: "리뷰 작성자",
+          lines_added: 1,
+          lines_removed: 0,
+        },
+      );
+    });
+    if (includeRoot && loaded === siblingCount) {
+      versions.push(
+        historyVersion("version-1", 1, "published_snapshot", {
+          version_status: "published_snapshot",
+          is_current_published: true,
+          actor_display_name: "리뷰 작성자",
+          lines_added: 1,
+          lines_removed: 0,
+        }),
+      );
+    }
+    return (
+      <ReaderColumn>
+        <ContextHistory
+          {...baseProps}
+          detail={detail({
+            current_version_id: `version-${headNo}`,
+            current_published_version_id: "version-1",
+            latest_draft_version_id: `version-${headNo}`,
+            visible_version_id: `version-${headNo}`,
+          })}
+          history={{
+            ...history(versions),
+            next_cursor:
+              loaded < siblingCount || !includeRoot ? "older-page" : null,
+          }}
+        />
+      </ReaderColumn>
+    );
+  },
+};
+
 // First page of a longer history: v5's parent v3 and v4's parent v1 are not
 // loaded yet. Both edges keep their lanes, dashed, to the end of the list
 // instead of stopping in their own row -- a stub that stops would sit right

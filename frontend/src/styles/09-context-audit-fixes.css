@@ -296,10 +296,77 @@
   content: none;
 }
 
-/* Pitch, dot size, and gutter width are computed together per page
-   (historyLaneMetrics) so the widest lane always lands inside the gutter, and
-   the SVG curve coordinates agree with these boxes. --history-lane-pad is the
-   one value both sides hardcode. */
+/* The canvas keeps every lane at a readable size; only its viewport is
+   bounded. One native scrollbar moves all rows together while the cards
+   retain their width. Ordinary graphs need no scroll control. */
+.history-graph {
+  min-width: 0;
+}
+
+.history-graph-scroll-controls {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.history-graph-scroll {
+  width: var(--history-lane-gutter);
+  min-height: 44px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  /* Give pointer users a visible thumb even with native overlay scrollbars. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) var(--surface-subtle);
+}
+
+/* Fallback for engines without scrollbar-width, as on the Library PDF pane. */
+.history-graph-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.history-graph-scroll::-webkit-scrollbar-track {
+  background: var(--surface-subtle);
+}
+
+.history-graph-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+
+.history-graph-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-muted);
+  background-clip: content-box;
+}
+
+.history-graph-scroll:focus-visible {
+  outline: 2px solid var(--reader-accent, var(--context));
+  outline-offset: 2px;
+}
+
+.history-graph-scroll-track {
+  width: var(--history-lane-canvas);
+  height: 28px;
+}
+
+.history-graph-scroll-track > span {
+  position: sticky;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: var(--history-lane-gutter);
+  height: 28px;
+  font-size: 18px;
+}
+
+/* Pitch, dot size, canvas width and SVG coordinates agree. Padding leaves
+   room for the outer dot and its shadow at both ends of the scroll range. */
 .history-graph-list {
   --history-lane-pad: 7px;
   /* Vertical anchors derived from the dot, so a shrunken dot keeps its lines
@@ -338,6 +405,15 @@
   min-height: 74px;
   overflow-x: clip;
   overflow-y: visible;
+}
+
+.history-graph-lanes {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--history-lane-canvas);
+  transform: translateX(calc(0px - var(--history-lane-offset, 0px)));
 }
 
 .history-graph-node,
