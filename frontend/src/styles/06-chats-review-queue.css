@@ -122,6 +122,13 @@
   min-width: 0;
 }
 
+/* Only the title gives way: a multi-word suffix ("and more") would otherwise
+   shrink to its longest word and wrap onto a second line. */
+.mcp-chat-card-artifacts > .artifact-more {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .mcp-chat-card-artifacts svg {
   flex: 0 0 auto;
   color: var(--context);
