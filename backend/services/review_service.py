@@ -30,7 +30,6 @@ from backend.repositories.workspace_scoped import (
     select_in_workspace,
     select_in_workspace_by_ids,
 )
-from backend.schemas.common import EnvelopeWarning
 from backend.schemas.context_write import (
     PublishContextPageRequest,
     ReviewActionAvailability,
@@ -59,7 +58,6 @@ from backend.schemas.mcp.review_tools import (
     SubmitRevisionForReviewResult,
 )
 from backend.services.actor_visible_read import (
-    actor_can_read_agent_page,
     context_page_visible,
     context_version_is_visible,
 )
@@ -826,6 +824,7 @@ class ReviewService:
             actor_user_id=actor_user_id,
             actor_role=actor_role,
             actor=actor,
+            include_decision_preflight=True,
         )
         if not is_editor:
             detail = detail.model_copy(
@@ -1164,11 +1163,14 @@ class ReviewService:
         actor_id: str | None,
         actor_kind: str,
         actor_provenance: str,
+        publication_checks: bool = True,
     ) -> str | None:
         """Read-only approval gates used by both previews and actual decisions.
 
         The publication service still owns its transaction-time media, topology
         and objective-floor checks. This early projection cannot waive them.
+        ``publication_checks=False`` skips the body scans a decision repeats in
+        the publication writer, which reports each refusal's own error code.
         """
         common = self._action_unavailable_reason(
             session,
@@ -1210,6 +1212,8 @@ class ReviewService:
                 )
             except ReadServiceError:
                 return "stale_candidate"
+            if not publication_checks:
+                return None
             if body_error_findings(version.body_md):
                 return "publication_blocked"
             try:
@@ -1316,11 +1320,14 @@ class ReviewService:
         actor: ActorContext,
         actor_role: str,
         lock: bool = False,
+        publication_checks: bool = True,
     ) -> ReviewApprovalPreflight:
         """Snapshot an approval and its full internal same-candidate effect.
 
         ``lock=True`` takes the same page -> review locks as apply_decision;
         callers compare their signed impact fingerprint before any mutation.
+        Executions pass ``publication_checks=False``: the publication writer
+        re-runs the body scans in the same transaction.
         """
         actor = replace(
             actor,
@@ -1364,6 +1371,7 @@ class ReviewService:
             actor_id=actor.actor_id,
             actor_kind=actor.actor_kind,
             actor_provenance=actor.provenance,
+            publication_checks=publication_checks,
         )
         context = (
             self._approval_supersession_context(
@@ -1854,6 +1862,8 @@ class ReviewService:
             raise ReadValidationError("this actor cannot decide this review")
 
         if request.decision_type == "approve":
+            # Body scans stay with the publication writer below, which refuses
+            # with each defect's own code (lint warnings, legacy media 409, ...).
             unavailable = self._approval_unavailable_reason(
                 session,
                 review,
@@ -1863,6 +1873,7 @@ class ReviewService:
                 actor_id=actor_id,
                 actor_kind=actor_kind,
                 actor_provenance=actor_provenance,
+                publication_checks=False,
             )
             if (
                 unavailable == "stale_candidate"
@@ -1873,38 +1884,6 @@ class ReviewService:
                 )
             if unavailable == "activation_not_allowed":
                 raise ScopeDeniedError(APPROVAL_UNAVAILABLE_REASONS[unavailable])
-            if (
-                unavailable == "publication_blocked"
-                and review.review_type == "context_update"
-            ):
-                context = self._approval_supersession_context(
-                    session, review, change_set
-                )
-                if context is not None:
-                    from backend.services.lint.rules_format import (
-                        body_error_findings,
-                        body_relative_message,
-                    )
-
-                    candidate_body = context[1].body_md
-                    findings = body_error_findings(candidate_body)
-                    if findings:
-                        # Keep the publication writer's actionable refusal;
-                        # availability's general reason is not a replacement
-                        # for the defect and its editor-relative coordinates.
-                        raise RejectedByPolicyError(
-                            "cannot publish a draft whose body has a format error",
-                            warnings=[
-                                EnvelopeWarning(
-                                    code="lint_publish_blocked",
-                                    message="Not published. " + body_relative_message(
-                                        finding.suggested_action or finding.rule_id,
-                                        candidate_body,
-                                    ),
-                                )
-                                for finding in findings
-                            ],
-                        )
             if unavailable is not None:
                 raise RejectedByPolicyError(
                     APPROVAL_UNAVAILABLE_REASONS[unavailable],
@@ -2203,6 +2182,7 @@ class ReviewService:
         actor_kind: str,
         actor_id: str,
         actor: ActorContext | None = None,
+        actor_role: str | None = None,
     ) -> ReviewItemDetail:
         # Release a claim. Only the holder may release a live claim; a stale or
         # absent claim is a no-op (idempotent). Releasing someone else's live
@@ -2232,7 +2212,7 @@ class ReviewService:
             session,
             review,
             actor_user_id=actor_uuid,
-            actor_role="editor",
+            actor_role=actor_role or "editor",
             actor=actor,
         )
 
@@ -3003,7 +2983,15 @@ class ReviewService:
         actor_user_id: UUID | None = None,
         actor_role: str | None = None,
         actor: ActorContext | None = None,
+        *,
+        include_decision_preflight: bool = False,
     ) -> ReviewItemDetail:
+        """Project one review; ``actions``/``reject_effect`` only on request.
+
+        Those run the approval preflight (lint and media scans of the whole
+        candidate body), so only the single-review read computes them. Lists
+        and write responses, some inside locked transactions, return None.
+        """
         if actor is not None and actor_role is not None:
             # REST list callers historically passed their default-workspace
             # actor alongside a separately authorized target role. Bind both
@@ -3045,22 +3033,24 @@ class ReviewService:
             workspace_id=review.workspace_id,
             resource_id=review.change_set_id,
         )
-        actions = self._action_capabilities(
-            session,
-            review,
-            change_set,
-            actor_user_id=actor_user_id,
-            actor_role=actor_role,
-            actor=actor,
-            evidence=evidence,
-        )
-        reject_effect = self._reject_effect(
-            session,
-            review,
-            change_set,
-            actor,
-            allowed=actions.reject.allowed,
-        )
+        actions = reject_effect = None
+        if include_decision_preflight:
+            actions = self._action_capabilities(
+                session,
+                review,
+                change_set,
+                actor_user_id=actor_user_id,
+                actor_role=actor_role,
+                actor=actor,
+                evidence=evidence,
+            )
+            reject_effect = self._reject_effect(
+                session,
+                review,
+                change_set,
+                actor,
+                allowed=actions.reject.allowed,
+            )
         chat_owner_available = (
             change_set is not None
             and self._resolve_chat_owner(session, change_set) is not None
@@ -3336,6 +3326,10 @@ class ReviewService:
                     or not operation.diff_ref
                     or content.candidate_version_id is not None
                 )
+            ) or (
+                # Document-less metadata (a feedback-only capture) is returned
+                # only after its own target authorized this actor.
+                document is None and content.mode == "metadata_only"
             )
             all_visible = all_visible and visible
             projected.append(
@@ -3534,146 +3528,6 @@ def _hydrated_actor_display_name(
         return "System"
     return actor_kind.replace("_", " ").title()
 
-
-def _operation_target_metadata(
-    session: Session,
-    operation: ChangeOperation,
-    workspace_id: UUID,
-    actor: ActorContext | None = None,
-    *,
-    allow_archived_context: bool = False,
-) -> dict[str, str | int | None]:
-    target_title: str | None = None
-    target_slug: str | None = None
-    target_version_no: int | None = None
-
-    def _agent_meta(page) -> tuple[str | None, str | None]:
-        # A sensitive (memory/agent_guide) or archived Agent page's title/slug is
-        # owner-only; redact it for a reviewer who cannot read the page. LEAK-03:
-        # a caller with no actor at all gets the redacted form too (fail closed).
-        if page is None or page.workspace_id != workspace_id:
-            return None, None
-        if (
-            actor is None
-            or page.lifecycle_status == "archived"
-            or not actor_can_read_agent_page(page, actor)
-        ):
-            return None, None
-        return page.title, page.slug
-
-    if operation.target_type in ("context_page", "context_page_version"):
-        version_id = _context_version_id_for_operation(operation)
-        version = (
-            get_in_workspace(
-                session,
-                ContextPageVersion,
-                workspace_id=workspace_id,
-                resource_id=version_id,
-            )
-            if version_id is not None
-            else None
-        )
-        if (
-            version is not None
-            and operation.target_type == "context_page"
-            and version.page_id != operation.target_id
-        ):
-            version = None
-        page_id = (
-            operation.target_id
-            if operation.target_type == "context_page"
-            else version.page_id
-            if version is not None
-            else None
-        )
-        metadata = _review_context_target_metadata(
-            page=(
-                get_in_workspace(
-                    session,
-                    ContextPage,
-                    workspace_id=workspace_id,
-                    resource_id=page_id,
-                )
-                if page_id is not None
-                else None
-            ),
-            version=version,
-            actor=actor,
-            workspace_id=workspace_id,
-            allow_archived=allow_archived_context,
-        )
-        target_title = metadata["target_title"]
-        target_slug = metadata["target_slug"]
-        target_version_no = metadata["target_version_no"]
-    elif operation.target_type == "agent_page":
-        target_title, target_slug = _agent_meta(
-            get_in_workspace(
-                session,
-                AgentPage,
-                workspace_id=workspace_id,
-                resource_id=operation.target_id,
-            )
-        )
-    elif operation.target_type == "agent_page_version":
-        version = get_in_workspace(
-            session,
-            AgentPageVersion,
-            workspace_id=workspace_id,
-            resource_id=operation.target_id,
-        )
-        if version is not None:
-            target_title, target_slug = _agent_meta(
-                get_in_workspace(
-                    session,
-                    AgentPage,
-                    workspace_id=workspace_id,
-                    resource_id=version.agent_page_id,
-                )
-            )
-            target_version_no = version.version_no
-
-    if target_version_no is None and operation.diff_ref:
-        target_version_no = _version_no_for_diff_ref(
-            session,
-            operation.diff_ref,
-            workspace_id=workspace_id,
-        )
-    return {
-        "target_title": target_title,
-        "target_slug": target_slug,
-        "target_version_no": target_version_no,
-    }
-
-
-def _version_no_for_diff_ref(
-    session: Session,
-    diff_ref: str,
-    *,
-    workspace_id: UUID,
-) -> int | None:
-    kind, _, raw_id = diff_ref.partition(":")
-    if not raw_id:
-        return None
-    target_id = parse_uuid_or_none(raw_id)
-    if target_id is None:
-        return None
-    if kind == "context_page_version":
-        version = get_in_workspace(
-            session,
-            ContextPageVersion,
-            workspace_id=workspace_id,
-            resource_id=target_id,
-        )
-        return version.version_no if version is not None else None
-    if kind == "agent_page_version":
-        version = get_in_workspace(
-            session,
-            AgentPageVersion,
-            workspace_id=workspace_id,
-            resource_id=target_id,
-        )
-        return version.version_no if version is not None else None
-    return None
 
 
 def _revision_content_hash(

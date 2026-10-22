@@ -559,7 +559,7 @@ def test_review_context_target_metadata_fails_closed_without_actor(session_facto
 def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
     session_factory,
 ):
-    # LEAK-03: _operation_target_metadata's sensitive-AgentPage redaction is
+    # LEAK-03: the review target projector's sensitive-AgentPage redaction is
     # keyed on the actor threaded through apply_decision -> _detail ->
     # _evidence. The idempotent reject-retry branch (apply_decision, when
     # review.status is already "rejected") used to call self._detail(...)
@@ -654,6 +654,14 @@ def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
         token_kind="session",
         user_id=editor_id,
     )
+
+    with session_factory.begin() as session:
+        released = review_service.release_review(
+            session=session, workspace_id=workspace_id, review_item_id=review_id,
+            actor_kind="human", actor_id=str(owner_id), actor=owner,
+            actor_role="owner",
+        )
+    assert released.evidence.operations[0].target_title == "Sensitive Recall Notes"
 
     with session_factory.begin() as session:
         first = review_service.apply_decision(

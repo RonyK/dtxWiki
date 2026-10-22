@@ -78,6 +78,8 @@
 .review-document-group-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--ink-muted); }
 .review-document-group-footer .icon-button { min-height: 30px; font-size: 12px; }
 .review-document-group .review-row-shell { border-radius: var(--radius-control); }
+.review-document-group .review-row,
+.review-document-group .review-row-select input { scroll-margin-block-start: calc(var(--review-group-header-height, 88px) + 8px); }
 .review-document-group .review-row { border: 1px solid transparent; border-radius: var(--radius-control); background: var(--surface); }
 .review-document-group .review-row-shell + .review-row-shell .review-row:not(.active) { border-top-color: var(--border); }
 .review-row-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
@@ -135,7 +137,11 @@
   .review-document-group-check,
   .review-group-collapse,
   .review-document-group-footer .icon-button,
-  .review-group-controls .text-button { min-height: 44px; min-width: 44px; }
+  .review-group-controls .text-button,
+  .review-group-title-toggle,
+  .review-active-filters .text-button,
+  .review-recovery-actions .icon-button,
+  .review-bulk-outcomes .icon-button { min-height: 44px; min-width: 44px; }
   .review-detail-header { top: -16px; grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .review-action-bar { display: flex; flex-wrap: wrap; justify-content: flex-start; }
   .review-action-bar .icon-button { min-height: 44px; }

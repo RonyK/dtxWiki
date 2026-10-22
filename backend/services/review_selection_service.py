@@ -189,7 +189,7 @@ class ReviewSelectionService:
             )
         return claims
 
-    def _target_ids(
+    def target_ids(
         self,
         session: Session,
         workspace_id: UUID,
@@ -249,7 +249,7 @@ class ReviewSelectionService:
         actor: ActorContext,
         actor_role: str,
     ) -> ReviewSelectionPayload:
-        target_ids = self._target_ids(session, workspace_id, request, actor, actor_role)
+        target_ids = self.target_ids(session, workspace_id, request, actor, actor_role)
         entries: list[list[Any]] = []
         items: list[ReviewSelectionItem] = []
         visible_impact: set[UUID] = set()
@@ -290,15 +290,13 @@ class ReviewSelectionService:
                 actor=actor,
                 actor_role=actor_role,
             )
-            redundant = preflight.eligible and review_id in visible_impact
             signature = self._fingerprint(preflight)
             if preflight.eligible:
-                eligible_count += int(not redundant)
-                if not redundant:
-                    representative_ids.add(review_id)
-                    visible_impact.update(preflight.visible_superseded_review_ids)
-                    for sibling_id in preflight.visible_superseded_review_ids:
-                        covered_by[sibling_id] = (review_id, preflight, signature)
+                eligible_count += 1
+                representative_ids.add(review_id)
+                visible_impact.update(preflight.visible_superseded_review_ids)
+                for sibling_id in preflight.visible_superseded_review_ids:
+                    covered_by[sibling_id] = (review_id, preflight, signature)
             entries.append(
                 [
                     str(review_id),
@@ -311,10 +309,9 @@ class ReviewSelectionService:
                 ReviewSelectionItem(
                     id=review_id,
                     eligible=preflight.eligible,
-                    will_auto_settle=redundant,
                     auto_settled_review_item_ids=(
                         sorted(preflight.visible_superseded_review_ids, key=str)
-                        if preflight.eligible and not redundant
+                        if preflight.eligible
                         else []
                     ),
                     reason_code=preflight.reason_code,
@@ -431,6 +428,7 @@ class ReviewSelectionService:
                         actor=actor,
                         actor_role=actor_role,
                         lock=not dry_run,
+                        publication_checks=dry_run,
                     )
                     metadata = {
                         "target_title": preflight.target_title,

@@ -68,8 +68,7 @@
   font-size: 12px;
 }
 
-.review-evidence-operations,
-.review-operation-diagnostics {
+.review-evidence-operations {
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -79,14 +78,12 @@
   list-style: none;
 }
 
-.review-evidence-operations li,
-.review-operation-diagnostics li {
+.review-evidence-operations li {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.review-evidence-operations strong,
-.review-operation-diagnostics strong {
+.review-evidence-operations strong {
   color: var(--ink-muted);
   font-size: 12px;
   font-weight: 600;
@@ -152,36 +149,10 @@
   width: 100%;
 }
 
-.review-evidence-diagnostics {
-  min-width: 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.review-evidence-diagnostics > summary {
-  color: var(--ink-muted);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.review-evidence-diagnostics > summary:focus-visible {
-  outline: 2px solid var(--info);
-  outline-offset: 2px;
-}
-
-.review-evidence-diagnostics dl {
-  margin-block: 10px;
-}
-
-.review-evidence-diagnostics dd,
-.review-evidence-diagnostics code {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 1024px), (any-pointer: coarse) {
-  .review-document-open {
+  .review-document-open,
+  .review-content-failure .icon-button,
+  .review-content-tabpanel .status-banner .icon-button {
     min-height: 44px;
   }
 }

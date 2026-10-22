@@ -3360,11 +3360,11 @@ def decide_reviews_bulk(
                         svc.review,
                         get_container_from_app(http_request).settings.effective_session_secret,
                     )
-                    target_ids = selection.create(
+                    target_ids = selection.target_ids(
                         session, workspace_id,
                         ReviewSelectionRequest(filters=filters),
-                        actor=actor, actor_role=access.role,
-                    ).review_item_ids
+                        actor, access.role,
+                    )
                 else:
                     target_ids = svc.review.bulk_review_ids(
                         session=session,
@@ -3442,6 +3442,7 @@ def decide_reviews_bulk(
                 preflight = svc.review.approval_preflight(
                     session, workspace_id, review_item_id,
                     actor=actor, actor_role=access.role, lock=True,
+                    publication_checks=False,
                 )
                 if not preflight.eligible:
                     skipped.append({
@@ -3704,6 +3705,7 @@ def release_review(
                     actor_kind=actor.actor_kind,
                     actor_id=actor.actor_id,
                     actor=scoped_actor,
+                    actor_role=access.role,
                 )
             }
     except ReadServiceError as exc:

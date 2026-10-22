@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.feedback import FeedbackItem
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
@@ -23,6 +24,7 @@ from backend.repositories.workspace_scoped import get_in_workspace, select_in_wo
 from backend.schemas.context_write import ReviewContentTarget, ReviewDocumentTarget
 from backend.services.actor_visible_read import (
     actor_can_read_agent_page,
+    actor_can_read_feedback,
     agent_page_visible,
     agent_version_is_visible,
     context_page_visible,
@@ -82,6 +84,18 @@ def project_review_target(
         return _library_target(session, operation, workspace_id, actor)
     if operation.target_type == "workspace_tree_node":
         return _context_placement_target(session, operation, workspace_id, actor)
+    if operation.target_type == "feedback":
+        # A feedback-only capture has no document; its summary is feedback
+        # content, readable exactly where feedback itself is.
+        feedback = get_in_workspace(
+            session, FeedbackItem,
+            workspace_id=workspace_id, resource_id=operation.target_id,
+        )
+        if feedback is None or not actor_can_read_feedback(actor):
+            return None, ReviewContentTarget(
+                mode="unavailable", unavailable_reason="target_unavailable"
+            )
+        return None, ReviewContentTarget(mode="metadata_only")
     return None, ReviewContentTarget(
         mode="unsupported",
         unavailable_reason="unsupported_target",
@@ -114,7 +128,7 @@ def _context_placement_target(
         or node.node_kind != "page_ref"
         or node.target_kind != "context_page"
         or node.target_id is None
-        or node.id not in TreeReadService.visible_node_ids(session, [node], actor)
+        or not TreeReadService.node_visible_to_actor(session, node, actor)
     ):
         return _unavailable("context")
     associated = session.scalars(select_in_workspace(
@@ -258,31 +272,39 @@ def _context_target(
             and version.graph_status == "linear"
         ),
     )
-    parent = (
+    # Approving the current candidate publishes it over the live version (or
+    # makes the first one), so that is its baseline even when its parent is an
+    # unapproved draft of a revision chain. Any other version shows its parent.
+    baseline_id = (
+        page.current_published_version_id
+        if content.is_current_candidate
+        else version.parent_version_id
+    )
+    baseline = (
         get_in_workspace(
             session,
             ContextPageVersion,
             workspace_id=workspace_id,
-            resource_id=version.parent_version_id,
+            resource_id=baseline_id,
         )
-        if version.parent_version_id is not None
+        if baseline_id is not None
         else None
     )
-    if version.parent_version_id is None:
+    if baseline_id is None:
         content.baseline_kind = "empty"
         content.can_diff = True
     elif (
-        parent is not None
-        and parent.page_id == page.id
-        and context_version_is_visible(parent, actor)
+        baseline is not None
+        and baseline.page_id == page.id
+        and context_version_is_visible(baseline, actor)
     ):
         content.baseline_kind = (
             "published"
-            if parent.version_status in {"published_snapshot", "superseded_snapshot"}
+            if baseline.id == page.current_published_version_id
             else "parent"
         )
-        content.baseline_version_id = parent.id
-        content.baseline_version_no = parent.version_no
+        content.baseline_version_id = baseline.id
+        content.baseline_version_no = baseline.version_no
         content.can_diff = True
     else:
         content.unavailable_reason = "baseline_unavailable"
@@ -290,7 +312,9 @@ def _context_target(
         # Same lexical body extraction and input ceiling as PageService.diff_versions.
         from backend.services.page_service import PAGE_DIFF_MAX_INPUT_CHARS
 
-        old_body = "" if parent is None else parse_page_frontmatter(parent.body_md).body
+        old_body = (
+            "" if baseline is None else parse_page_frontmatter(baseline.body_md).body
+        )
         new_body = parse_page_frontmatter(version.body_md).body
         if len(old_body) + len(new_body) > PAGE_DIFF_MAX_INPUT_CHARS:
             content.can_diff = False

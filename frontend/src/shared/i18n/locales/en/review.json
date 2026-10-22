@@ -135,7 +135,6 @@
     "selectReview": "Select {{title}}",
     "approveSelected": "Approve selected",
     "confirmTitle": "Review bulk approval",
-    "confirmBody": "{{count}} reviews are eligible to approve under the current filters. Items that can no longer be approved are skipped and listed in the result.",
     "confirmApproveCount": "Approve {{count}}",
     "approving": "Approving",
     "approvalImpact_one": "1 other review for the same candidate will also be automatically settled.",
@@ -399,7 +398,9 @@
     "queueComplete": "No reviews remain under these filters.",
     "retrySameDecision": "Retry the same decision",
     "currentCandidate": "Current candidate",
-    "olderCandidate": "Older draft"
+    "olderCandidate": "Older draft",
+    "retryDetail": "Retry review detail",
+    "bulkStopped": "Processing stopped after {{processed}} of {{total}} reviews. Confirmed results are preserved. Reload the queue before previewing the remaining items."
   },
   "document": {
     "targets": "Review targets",
@@ -419,12 +420,11 @@
     "reviewVersion": "Review version v{{version}}",
     "reviewVersionUnknown": "Review version",
     "metadataOperation": "This review concerns the metadata changes described above.",
-    "refreshReview": "Refresh review",
     "unsupported": "Review version content and comparison are not supported for this target.",
     "candidateUnavailable": "The reviewed version is unavailable. Check the review's current state and access.",
     "noEvidence": "No change evidence is available for this review.",
     "emptyBaseline": "Empty document",
-    "publishedBaseline": "Published baseline v{{version}}",
+    "publishedBaseline": "Current published version v{{version}}",
     "parentBaseline": "Parent version v{{version}}",
     "originalUnavailable": "The exact review version could not be loaded. Refresh its content before approving.",
     "tabsAria": "Review version content",
@@ -448,14 +448,6 @@
     "readUnavailable": "This version or its access is no longer available.",
     "loadFailed": "Could not load this review version.",
     "retry": "Reload content",
-    "diagnostics": "Change evidence details",
-    "citationSkipped": "Citation call skipped",
-    "yes": "Yes",
-    "no": "No",
-    "citationNotValidation": "This records whether citation calls were skipped; it is not a citation accuracy verdict.",
-    "sectionUnavailable": "The evidence does not provide a section location; document actions open the whole document.",
-    "operationId": "Operation ID",
-    "targetType": "Target type",
-    "diffReference": "Change reference"
+    "unavailableBaseline": "Comparison baseline unavailable"
   }
 }

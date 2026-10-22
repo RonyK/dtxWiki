@@ -48,8 +48,6 @@ type ReviewEvidencePanelProps = {
   workspaceId: string;
   review: ReviewItem;
   onContentStateChange?: (state: ReviewEvidenceContentState) => void;
-  onRefreshReview?: () => void;
-  showDiagnostics?: boolean;
 };
 
 /**
@@ -61,8 +59,6 @@ export function ReviewEvidencePanel({
   workspaceId,
   review,
   onContentStateChange,
-  onRefreshReview,
-  showDiagnostics = false,
 }: ReviewEvidencePanelProps) {
   const { t } = useTranslation("review");
   const groups = useMemo(
@@ -97,6 +93,14 @@ export function ReviewEvidencePanel({
     <section className="review-evidence-panel" aria-label={t("document.targets", {
       defaultValue: "Review targets",
     })}>
+      {review.evidence?.reason && groups.some((group) =>
+        !group.document && group.content?.mode === "metadata_only",
+      ) ? (
+        <p className="review-content-notice">
+          <strong>{t("evidence.reason", { defaultValue: "Reason" })}</strong>{" "}
+          {review.evidence.reason}
+        </p>
+      ) : null}
       {groups.length === 0 ? (
         <StatusBanner tone="info">
           {t("content.noEvidence", {
@@ -107,12 +111,10 @@ export function ReviewEvidencePanel({
         <ReviewDocumentEvidence
           group={group}
           key={group.key}
-          onRefreshReview={onRefreshReview}
           onStatusChange={onGroupStatusChange}
           workspaceId={workspaceId}
         />
       ))}
-      {showDiagnostics && review.evidence ? <EvidenceDiagnostics review={review} /> : null}
     </section>
   );
 }
@@ -121,16 +123,15 @@ function ReviewDocumentEvidence({
   group,
   workspaceId,
   onStatusChange,
-  onRefreshReview,
 }: {
   group: EvidenceGroup;
   workspaceId: string;
   onStatusChange: (key: string, status: ContentStatus) => void;
-  onRefreshReview?: () => void;
 }) {
   const { t } = useTranslation("review");
   const headingId = useId();
   const document = group.document;
+  const metadataOnly = !document && group.content?.mode === "metadata_only";
   // A normalized redaction is authoritative, including a deliberately null title.
   const title = document
     ? document.title ?? t("document.unavailableTitle", { defaultValue: "Review target" })
@@ -159,9 +160,9 @@ function ReviewDocumentEvidence({
                 <span aria-hidden="true" className={`lc-dot-${document.document_kind}`} />
                 {kindLabels[document.document_kind]}
               </span>
-            ) : (
+            ) : !metadataOnly ? (
               <span>{t("document.kind.unknown", { defaultValue: "Target type unavailable" })}</span>
-            )}
+            ) : null}
             {versionNo != null ? (
               <span>{t("content.reviewVersion", {
                 version: versionNo,
@@ -185,11 +186,11 @@ function ReviewDocumentEvidence({
             {t("document.openCurrent", { defaultValue: "Open current document" })}
             <ExternalLink aria-hidden="true" size={15} />
           </a>
-        ) : (
+        ) : !metadataOnly ? (
           <span className="review-document-unavailable">
             {t("document.openUnavailable", { defaultValue: "Current document unavailable" })}
           </span>
-        )}
+        ) : null}
       </header>
       <ul className="review-evidence-operations">
         {group.operations.map((operation) => (
@@ -212,12 +213,7 @@ function ReviewDocumentEvidence({
           workspaceId={workspaceId}
         />
       ) : (
-        <StatusBanner tone="info" action={onRefreshReview ? (
-          <button className="icon-button" onClick={onRefreshReview} type="button">
-            <RefreshCcw aria-hidden="true" size={14} />
-            {t("content.refreshReview", { defaultValue: "Refresh review" })}
-          </button>
-        ) : undefined}>
+        <StatusBanner tone="info">
           {group.content?.mode === "unsupported"
             ? t("content.unsupported", {
                 defaultValue: "Review version content and comparison are not supported for this target.",
@@ -348,12 +344,14 @@ function ExactContextContent({
     : baselineKind === "published"
       ? t("content.publishedBaseline", {
           version: content.baseline_version_no ?? "?",
-          defaultValue: "Published baseline v{{version}}",
+          defaultValue: "Current published version v{{version}}",
         })
-      : t("content.parentBaseline", {
-          version: content.baseline_version_no ?? "?",
-          defaultValue: "Parent version v{{version}}",
-        });
+      : baselineKind === "parent"
+        ? t("content.parentBaseline", {
+            version: content.baseline_version_no ?? "?",
+            defaultValue: "Parent version v{{version}}",
+          })
+        : t("content.unavailableBaseline", { defaultValue: "Comparison baseline unavailable" });
   const candidateLabel = version == null
     ? t("content.reviewVersionUnknown", { defaultValue: "Review version" })
     : t("content.reviewVersion", { version, defaultValue: "Review version v{{version}}" });
@@ -373,7 +371,7 @@ function ExactContextContent({
     <section className="review-version-content" aria-label={candidateLabel}>
       <div className="review-content-heading">
         <h4>{t("content.title", { defaultValue: "Change content" })}</h4>
-        {canCompare ? <p>{baselineLabel} → {candidateLabel}</p> : <p>{candidateLabel}</p>}
+        <p>{baselineLabel} → {candidateLabel}</p>
       </div>
       {tab === "comparison" && original.status === "unavailable" ? (
         <StatusBanner tone="warning">
@@ -496,69 +494,6 @@ function ContentError({ reason, onRetry }: { reason: ReadFailure; onRetry: () =>
   );
 }
 
-function EvidenceDiagnostics({ review }: { review: ReviewItem }) {
-  const { t } = useTranslation("review");
-  const evidence = review.evidence!;
-  return (
-    <details className="review-evidence-diagnostics">
-      <summary>{t("content.diagnostics", { defaultValue: "Change evidence details" })}</summary>
-      <dl className="detail-list">
-        <div>
-          <dt>{t("evidence.changeStatus", { defaultValue: "Change status" })}</dt>
-          <dd>{domainLabel("review", "changeSetStatus", evidence.change_set_status, t)}</dd>
-        </div>
-        <div>
-          <dt>{t("evidence.reason", { defaultValue: "Reason" })}</dt>
-          <dd>{evidence.reason ?? t("evidence.none", { defaultValue: "none" })}</dd>
-        </div>
-        <div>
-          <dt>{t("detail.trigger", { defaultValue: "Trigger" })}</dt>
-          <dd>{domainLabel("review", "triggerType", evidence.trigger_type, t)}</dd>
-        </div>
-        <div>
-          <dt>{t("content.citationSkipped", { defaultValue: "Citation call skipped" })}</dt>
-          <dd>{evidence.cite_call_skipped
-            ? t("content.yes", { defaultValue: "Yes" })
-            : t("content.no", { defaultValue: "No" })}</dd>
-        </div>
-      </dl>
-      <p className="review-content-notice">
-        {t("content.citationNotValidation", {
-          defaultValue: "This records whether citation calls were skipped; it is not a citation accuracy verdict.",
-        })}
-      </p>
-      <p className="review-content-notice">
-        {t("content.sectionUnavailable", {
-          defaultValue: "The evidence does not provide a section location; document actions open the whole document.",
-        })}
-      </p>
-      <ul className="review-operation-diagnostics">
-        {evidence.operations.map((operation) => (
-          <li key={operation.operation_id}>
-            <strong>{domainLabel("review", "operation", operation.operation, t)}</strong>
-            <dl className="detail-list">
-              <div>
-                <dt>{t("content.operationId", { defaultValue: "Operation ID" })}</dt>
-                <dd><code>{operation.operation_id}</code></dd>
-              </div>
-              <div>
-                <dt>{t("content.targetType", { defaultValue: "Target type" })}</dt>
-                <dd><code>{operation.target_type}</code></dd>
-              </div>
-              {operation.diff_ref ? (
-                <div>
-                  <dt>{t("content.diffReference", { defaultValue: "Change reference" })}</dt>
-                  <dd><code>{operation.diff_ref}</code></dd>
-                </div>
-              ) : null}
-            </dl>
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
 function canReadExactContext(group: EvidenceGroup) {
   return group.document?.document_kind === "context"
     && Boolean(group.document.document_id)
@@ -574,7 +509,6 @@ function groupEvidenceOperations(review: ReviewItem): EvidenceGroup[] {
     const content = operation.content ?? null;
     const key = JSON.stringify([
       review.id,
-      review.updated_at,
       document?.document_kind,
       document?.document_id ?? operation.operation_id,
       content?.mode,

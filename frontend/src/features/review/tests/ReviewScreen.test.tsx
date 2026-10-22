@@ -35,6 +35,7 @@ describe("ReviewScreen", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     sessionStorage.clear();
+    reviewFixtures.clear();
     Object.defineProperty(Element.prototype, "scrollTo", { configurable: true, value: vi.fn() });
     vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
       matches: false, media: query, onchange: null,
@@ -100,7 +101,7 @@ describe("ReviewScreen", () => {
   it("reports a localized refresh failure and leaves the loaded queue visible", async () => {
     const user = userEvent.setup();
     let reviewListCalls = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -144,12 +145,13 @@ describe("ReviewScreen", () => {
   it("opens review detail and approves without a reason", async () => {
     let decisionBody: unknown = null;
     let decisionCount = 0;
+    let finishDecision: () => void = () => {};
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: clipboardWrite },
     });
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockReviewFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         // Editor role so the workspace-wide tab count badges render below.
@@ -196,8 +198,11 @@ describe("ReviewScreen", () => {
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/decision`) {
         decisionBody = JSON.parse(String(init?.body));
+        await new Promise<void>(resolve => { finishDecision = resolve; });
         decisionCount += 1;
-        return jsonResponse({ data: { ...reviewItem(), status: "approved" } });
+        const receipt = reviewItem({ status: "approved", updatedAt: "2026-10-22T10:00:00Z" });
+        receipt.evidence!.operations[0].content!.is_current_candidate = false;
+        return jsonResponse({ data: receipt });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -249,7 +254,7 @@ describe("ReviewScreen", () => {
     expect(requestChangesButton).toHaveClass("warning");
     // Reject is now always clickable; a missing reason opens a prompt instead
     // of disabling the button (item 6).
-    expect(rejectButton).toBeEnabled();
+    await waitFor(() => expect(rejectButton).toBeEnabled());
     expect(rejectButton).toHaveClass("danger");
     // The decisions are the detail heading's action cluster, like every other
     // detail screen, not a strip floating below the header.
@@ -264,6 +269,9 @@ describe("ReviewScreen", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     await userEvent.click(approveButton);
+    expect(screen.queryByText(i18n.t("review:workflow.decisionOutcomeUnknown"))).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry the same decision" })).not.toBeInTheDocument();
+    await act(async () => { finishDecision(); });
 
     expect(decisionBody).toEqual({
       decision_type: "approve",
@@ -273,11 +281,15 @@ describe("ReviewScreen", () => {
     // The rail empty state now names the lane it is empty for, so "nothing to
     // review" no longer reads as "nothing anywhere".
     expect(await screen.findByText("No pending items")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(savedDecisionLabel()).closest('[role="status"]')).toHaveFocus());
+    expect(pagesApi.readPage).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("link", { name: "Review" }));
+    expect(screen.queryByText(i18n.t("review:workflow.outsideFilters"))).not.toBeInTheDocument();
   });
 
   it("writes the rail empty state per lane instead of splicing the tab label", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -337,7 +349,7 @@ describe("ReviewScreen", () => {
   });
 
   it("distinguishes same-type queue rows by their target titles", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -432,6 +444,7 @@ describe("ReviewScreen", () => {
         targetVersionNo: 2,
         createdAt: "2026-05-03T00:00:00Z",
       }),
+      reviewItem({ id: "plain", targetTitle: "Plain publish", targetId: "plain-page", createdAt: "2026-05-01T00:00:00Z" }),
     ]);
 
     render(
@@ -454,7 +467,9 @@ describe("ReviewScreen", () => {
       [...document.querySelectorAll(".review-row .review-row-identity strong")].map(
         (badge) => badge.textContent,
       ),
-    ).toEqual(["v3", "v2", "v1", "v9"]);
+    ).toEqual(["v3", "v2", "v1", "v9", "Plain publish"]);
+    expect(screen.queryByRole("region", { name: "Plain publish" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Plain publish · v1" }).closest(".review-document-group")).toBeNull();
   });
 
   it("says only what it can see while more results are still outstanding", async () => {
@@ -554,7 +569,7 @@ describe("ReviewScreen", () => {
   it("keeps old reconciliation branches collapsed until explicitly requested", async () => {
     const user = userEvent.setup();
     const requestedUrls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       requestedUrls.push(url);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -696,7 +711,7 @@ describe("ReviewScreen", () => {
   });
 
   it("does not repeat a summary used as the row title fallback", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -734,7 +749,7 @@ describe("ReviewScreen", () => {
 
   it("rejects without requiring a decision reason", async () => {
     let decisionBody: unknown = null;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockReviewFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -765,7 +780,7 @@ describe("ReviewScreen", () => {
 
     await userEvent.click(await screen.findByText("Publish the selected Context draft"));
     const rejectButton = await screen.findByRole("button", { name: "Reject" });
-    expect(rejectButton).toBeEnabled();
+    await waitFor(() => expect(rejectButton).toBeEnabled());
     // Reject no longer requires a reason, but it is terminal, so the first click
     // opens a confirm dialog rather than submitting. No decision is sent until
     // the reviewer confirms inside the dialog.
@@ -794,7 +809,7 @@ describe("ReviewScreen", () => {
 
   it("cancels the reject confirm without submitting a decision", async () => {
     let decisionRequested = false;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -867,7 +882,7 @@ describe("ReviewScreen", () => {
         },
       ],
     };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -903,7 +918,7 @@ describe("ReviewScreen", () => {
   });
 
   it("labels a changes_requested status pill with the translated copy", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -949,7 +964,7 @@ describe("ReviewScreen", () => {
   });
 
   it("disables reject when the current actor cannot decide", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -981,7 +996,7 @@ describe("ReviewScreen", () => {
 
   it("keeps the lifecycle tabs outside the Filters disclosure", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -1017,8 +1032,8 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
-        <ReviewScreen />
+      <MemoryRouter initialEntries={["/review?review=review-1"]}>
+        <ReviewScreen /><HistoryControls />
       </MemoryRouter>,
     );
 
@@ -1032,7 +1047,8 @@ describe("ReviewScreen", () => {
     ).toBeInTheDocument();
 
     // The results tabpanel is labelled by a tab that is actually mounted.
-    const panel = screen.getByRole("tabpanel");
+    const rail = screen.getByRole("complementary", { name: "Review queue" });
+    const panel = within(rail).getByRole("tabpanel");
     const labelledBy = panel.getAttribute("aria-labelledby") ?? "";
     expect(labelledBy).toBe("review-lifecycle-tab-pending");
     expect(document.getElementById(labelledBy)).toBe(
@@ -1043,13 +1059,17 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("tab", { name: /^Changes requested/ }));
     expect(await screen.findByText("Routed queue item")).toBeInTheDocument();
     expect(filtersToggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+    expect(within(rail).getByRole("tabpanel")).toHaveAttribute(
       "aria-labelledby",
       "review-lifecycle-tab-changes_requested",
     );
     expect(
       document.getElementById("review-lifecycle-tab-changes_requested"),
     ).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "History back" }));
+    await screen.findByRole("heading", { name: "Feedback Target", level: 2 });
+    await user.click(screen.getByRole("button", { name: "History forward" }));
+    await screen.findByText("Routed queue item");
 
     // Audience and Risk stay behind the disclosure.
     expect(screen.queryByRole("radio", { name: /To me/ })).toBeNull();
@@ -1062,7 +1082,7 @@ describe("ReviewScreen", () => {
   it("sends status and risk filters to the server and appends load-more results", async () => {
     const user = userEvent.setup();
     const requestedUrls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       requestedUrls.push(url);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -1132,7 +1152,7 @@ describe("ReviewScreen", () => {
   it("splits the Resolved tab into approved/rejected via a status chip, not the resolved alias (UI-14)", async () => {
     const user = userEvent.setup();
     const requestedUrls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       requestedUrls.push(url);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -1199,7 +1219,7 @@ describe("ReviewScreen", () => {
   it("scopes to 'To me' with a forced changes_requested status filter", async () => {
     const user = userEvent.setup();
     const requestedUrls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       requestedUrls.push(url);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -1263,7 +1283,7 @@ describe("ReviewScreen", () => {
   it("routes request-changes to the chosen audience via the dialog", async () => {
     const user = userEvent.setup();
     let decisionBody: Record<string, unknown> | null = null;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockReviewFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse());
@@ -1320,7 +1340,7 @@ describe("ReviewScreen", () => {
 
   it("disables the chat-owner option when no chat owner is resolvable", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse());
@@ -1360,7 +1380,7 @@ describe("ReviewScreen", () => {
 
   it("keeps the dialog open and warns when the server reports chat_owner_unresolvable", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse());
@@ -1410,52 +1430,27 @@ describe("ReviewScreen", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("keeps a generic routing failure localized inside the open dialog", async () => {
+  it.each(["Reject", "Request changes"])("keeps %s outcome uncertainty localized inside its open dialog", async (action) => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = input.toString();
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceResponse());
-      }
-      if (isReviewCountsUrl(url)) {
-        return jsonResponse({ data: reviewCounts() });
-      }
-      if (isRecentDecisionsUrl(url)) {
-        return jsonResponse(emptyReviewPage());
-      }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`) {
-        return jsonResponse({ data: { items: [reviewItem()], next_cursor: null } });
-      }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/decision`) {
-        throw new Error("raw request req-private-review-routing");
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    });
-
-    render(
-      <MemoryRouter>
-        <ReviewScreen />
-      </MemoryRouter>,
-    );
-
-    await user.click(await screen.findByText("Publish the selected Context draft"));
-    await screen.findByRole("heading", { level: 2, name: "Feedback Target" });
-    await user.click(screen.getByRole("button", { name: "Request changes" }));
+    mockReviewQueue([reviewItem()], null, url => url.endsWith("/decision")
+      ? Promise.reject(new Error("raw request req-private-review-routing")) : undefined);
+    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole("button", { name: action })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: action }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Decision reason"), "Revise");
-    await user.click(within(dialog).getByRole("button", { name: "Request changes" }));
-
-    expect(await screen.findByText(i18n.t("review:workflow.decisionOutcomeUnknown")))
-      .toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Request changes" })).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: action }));
+    expect(await within(dialog).findByText(i18n.t("review:workflow.decisionOutcomeUnknown"))).toBeInTheDocument();
+    expect(within(dialog).queryByText(i18n.t("review:workflow.decisionFailedKeepDraft"))).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: action })).toBeDisabled();
+    expect(within(dialog).getByLabelText("Decision reason")).toHaveValue("Revise");
     expect(within(dialog).queryByText(/req-private-review-routing/)).toBeNull();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("shows per-status queue cards with clickable risk chips and no Approve-current-filter", async () => {
     const user = userEvent.setup();
     let lastReviewsUrl = "";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -1512,7 +1507,7 @@ describe("ReviewScreen", () => {
   });
 
   it("renders recent decisions as keyboard-reachable review links", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -1579,7 +1574,7 @@ describe("ReviewScreen", () => {
   it("localizes a coded recent-decision fallback when target metadata is absent", async () => {
     await i18n.changeLanguage("ko");
     try {
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      mockReviewFetch(async (input) => {
         const url = input.toString();
         if (url === `${BASE}/api/v1/workspaces`) {
           return jsonResponse(workspaceResponse("editor"));
@@ -1636,7 +1631,7 @@ describe("ReviewScreen", () => {
     const user = userEvent.setup();
     let firstRequested = false;
     let releaseFirst: () => void = () => {};
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockReviewFetch((input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return Promise.resolve(jsonResponse(workspaceResponse("editor")));
@@ -1733,7 +1728,7 @@ describe("ReviewScreen", () => {
       new Date("2026-05-30T13:00:00Z").getTime(),
     );
 
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -1792,8 +1787,11 @@ describe("ReviewScreen", () => {
     const user = userEvent.setup();
     let bulkBody: Record<string, unknown> | null = null;
     let approved = false;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const draftKeys = ["review-1", "sibling-1", "sibling-2"].map(id => reviewDraftKey("actor-1", WORKSPACE_ID, id));
+    draftKeys.forEach(key => { sessionStorage.setItem(key, "Private draft"); sessionStorage.setItem(`${key}.pending`, "{}"); });
+    mockReviewFetch(async (input, init) => {
       const url = input.toString();
+      if (url.endsWith("/auth/me")) return jsonResponse({ data: { user_id: "actor-1", email: "review@example.invalid", display_name: "Reviewer", status: "active", is_server_admin: false } });
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
       }
@@ -1831,17 +1829,18 @@ describe("ReviewScreen", () => {
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/decide-bulk`) {
         bulkBody = JSON.parse(String(init?.body));
         approved = true;
-        return jsonResponse({ data: { approved: ["review-1"], skipped: [] } });
+        return jsonResponse({ data: { approved: ["review-1"], skipped: [], auto_settled_review_item_ids: ["sibling-1", "sibling-2"] } });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
 
     render(
-      <MemoryRouter>
-        <ReviewScreen />
-      </MemoryRouter>,
+      <AuthProvider><MemoryRouter>
+        <ReviewScreen /><AuthIdentity />
+      </MemoryRouter></AuthProvider>,
     );
 
+    await screen.findByText("Authenticated actor: actor-1");
     // The bulk bar is present before anything is selected because it hosts the
     // select-all control; the approve action only appears once a selection
     // exists.
@@ -1876,13 +1875,17 @@ describe("ReviewScreen", () => {
       expect(bulkBody).toEqual({
         selection_token: "fixed-selection-token",
         decision_type: "approve",
-        batch_limit: 500,
+        batch_limit: 50,
       }),
     );
+    await waitFor(() => draftKeys.forEach(key => {
+      expect(sessionStorage.getItem(key)).toBeNull();
+      expect(sessionStorage.getItem(`${key}.pending`)).toBeNull();
+    }));
   });
 
   it("restores a review detail URL even when the item is beyond the first page", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const fetchMock = mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -1921,37 +1924,39 @@ describe("ReviewScreen", () => {
     expect(
       screen.getByText("Review detail / Context page publish"),
     ).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("review:workflow.outsideFilters"))).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => input.toString().endsWith("/reviews/review-99"))).toHaveLength(1);
   });
 
-  it("restores a review detail URL for a first-page item", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = input.toString();
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceResponse("editor"));
-      }
-      if (isReviewCountsUrl(url)) {
-        return jsonResponse({ data: reviewCounts({ pending: 1 }) });
-      }
-      if (isRecentDecisionsUrl(url)) {
-        return jsonResponse(emptyReviewPage());
-      }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`) {
-        return jsonResponse({
-          data: { items: [reviewItem({ id: "review-1" })], next_cursor: null },
-        });
-      }
-      throw new Error(`Unexpected request: ${url}`);
+  it("loads selected capabilities once per revision and ignores a late previous selection", async () => {
+    const user = userEvent.setup();
+    const first = reviewItem({ targetTitle: "First detail" });
+    const second = reviewItem({ id: "second", targetTitle: "Second detail", targetId: "second-page" });
+    let finishFirst: (response: Response) => void = () => {};
+    const fetchMock = mockReviewQueue([first, second], null, url => {
+      if (url.endsWith("/reviews/review-1")) return new Promise(resolve => { finishFirst = resolve; });
+      if (url.endsWith("/reviews/second")) return jsonResponse({ data: { ...second,
+        actions: { ...second.actions, reject: { allowed: second.updated_at !== first.updated_at } },
+      } });
+      return undefined;
     });
-
-    render(
-      <MemoryRouter initialEntries={["/review?review=review-1"]}>
-        <ReviewScreen />
-      </MemoryRouter>,
-    );
-
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "Feedback Target" }),
-    ).toBeInTheDocument();
+    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    await screen.findByRole("heading", { name: "First detail", level: 2 });
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Second detail · v1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    await act(async () => { finishFirst(jsonResponse({ data: first })); });
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh reviews" })).toBeEnabled());
+    const reads = () => fetchMock.mock.calls.filter(([input]) => input.toString().endsWith("/reviews/second"));
+    expect(reads()).toHaveLength(1);
+    second.updated_at = "2026-10-22T12:00:00Z";
+    await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
+    expect(reads()).toHaveLength(2);
   });
 
   it("keeps a resolved deep link separate from the pending rail", async () => {
@@ -1962,7 +1967,7 @@ describe("ReviewScreen", () => {
         summary: "Resolved deep link item",
         targetTitle: "Resolved Deep Link Target",
       });
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2122,7 +2127,7 @@ describe("ReviewScreen", () => {
         summary: "Second reconciliation",
       }),
     ];
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+    const fetchMock = mockReviewFetch(
       async (input) => {
         const url = input.toString();
         if (url === `${BASE}/api/v1/workspaces`) {
@@ -2205,8 +2210,10 @@ describe("ReviewScreen", () => {
     expect(screen.getByText(/review_state_changed/)).toBeInTheDocument();
   });
 
-  it("clears the review param when a deep-linked review fails to load", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  it("retains a failed deep link for an explicit detail retry", async () => {
+    const user = userEvent.setup();
+    let retry = false;
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2221,6 +2228,7 @@ describe("ReviewScreen", () => {
         return jsonResponse({ data: { items: [], next_cursor: null } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-404`) {
+        if (retry) return jsonResponse({ data: reviewItem({ id: "review-404" }) });
         return new Response(
           JSON.stringify({
             error_code: "not_found",
@@ -2241,23 +2249,17 @@ describe("ReviewScreen", () => {
       </MemoryRouter>,
     );
 
-    expect(
-      await screen.findByText(
-        "The requested item could not be found.",
-      ),
-    ).toBeInTheDocument();
-    // The stale ?review param is dropped so a refresh does not retry the dead
-    // deep link forever.
-    await waitFor(() =>
-      expect(screen.getByTestId("location-search")).not.toHaveTextContent(
-        "review=",
-      ),
-    );
+    expect(await screen.findByText("The requested item could not be found.")).toBeInTheDocument();
+    expect(screen.getByTestId("location-search")).toHaveTextContent("review=review-404");
+    expect(screen.queryByText(i18n.t("review:workflow.outsideFilters"))).not.toBeInTheDocument();
+    retry = true;
+    await user.click(screen.getByRole("button", { name: i18n.t("review:workflow.retryDetail") }));
+    expect(await screen.findByRole("heading", { name: "Feedback Target", level: 2 })).toBeVisible();
   });
 
   it("shows the resolution timestamp on Resolved rows to match the date grouping", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2315,7 +2317,7 @@ describe("ReviewScreen", () => {
 
   it("returns from review detail to the overview via the Review breadcrumb", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2353,7 +2355,7 @@ describe("ReviewScreen", () => {
   it("lets an editor claim and edit a change directly", async () => {
     const user = userEvent.setup();
     let claimed = false;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockReviewFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2425,7 +2427,7 @@ describe("ReviewScreen", () => {
   it("drops a stale load-more page after the lifecycle filter changes", async () => {
     const user = userEvent.setup();
     let releaseStalePage: () => void = () => {};
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockReviewFetch((input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return Promise.resolve(jsonResponse(workspaceResponse("editor")));
@@ -2526,7 +2528,7 @@ describe("ReviewScreen", () => {
 
     let pendingLoadMoreCalls = 0;
     let resolvedLoadMoreCalls = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2629,7 +2631,7 @@ describe("ReviewScreen", () => {
 
   it("hides workspace-zeroed badges for viewers and shows the personal All count", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("viewer"));
@@ -2737,6 +2739,7 @@ describe("ReviewScreen", () => {
     expect(secondReason).toHaveFocus();
     await user.type(secondReason, "Independent second note");
     expect(secondReason).toHaveValue("Independent second note");
+    await user.click(screen.getByRole("button", { name: "Second draft · v1" }));
     await user.click(screen.getByRole("button", { name: "History back" }));
     await screen.findByRole("heading", { name: "First draft", level: 2 });
     expect(screen.getByLabelText("Decision reason")).toHaveValue("Please keep the first note");
@@ -2764,6 +2767,8 @@ describe("ReviewScreen", () => {
     const selectionBodies: unknown[] = [];
     const decisionBodies: unknown[] = [];
     let changed = false;
+    let finishFailedSnapshot: (response: Response) => void = () => {};
+    let failSnapshot = true;
     const preview = () => selectionPreview(fixed, {
       selection_token: changed ? "reconfirmed-selection-token" : "fixed-selection-token",
       eligible_count: changed ? 0 : 1,
@@ -2780,6 +2785,10 @@ describe("ReviewScreen", () => {
     mockReviewQueue([current, unrelated], "cursor-more", (url, init) => {
       if (url.endsWith("/reviews/selection")) {
         const request = JSON.parse(String(init?.body));
+        if (failSnapshot) {
+          failSnapshot = false;
+          return new Promise(resolve => { finishFailedSnapshot = resolve; });
+        }
         selectionBodies.push(request);
         if (request.review_item_ids?.includes(arrival.id) && request.review_item_ids.includes(unrelated.id)) {
           const multi = [...fixed, arrival, unrelated];
@@ -2825,6 +2834,13 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Expand all" }));
     expect(group.querySelector(".review-document-group-body")).toBeVisible();
     const groupCheck = within(group).getByRole("checkbox", { name: /Select all reviews matching/ });
+    await user.click(within(group).getByRole("checkbox", { name: /^Select Grouped document/ }));
+    expect(groupCheck).toBePartiallyChecked();
+    await user.click(groupCheck);
+    expect(groupCheck).toBePartiallyChecked();
+    await act(async () => { finishFailedSnapshot(new Response("{}", { status: 500 })); });
+    await waitFor(() => expect(groupCheck).toBeEnabled());
+    expect(groupCheck).toBePartiallyChecked();
     await user.click(groupCheck);
     expect(await within(group).findByText("3 selected for this document")).toBeVisible();
     expect(groupCheck).toBeChecked();
@@ -2853,7 +2869,7 @@ describe("ReviewScreen", () => {
     expect(within(dialog).getByText(/Fixed selection: 3 items/)).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Approve 1" }));
     expect(await screen.findByText(i18n.t("review:workflow.bulkChanged"))).toBeVisible();
-    expect(decisionBodies).toEqual([{ selection_token: "fixed-selection-token", decision_type: "approve", batch_limit: 500 }]);
+    expect(decisionBodies).toEqual([{ selection_token: "fixed-selection-token", decision_type: "approve", batch_limit: 50 }]);
     expect(within(group).getByRole("checkbox", { name: /^Select Grouped document · v13 ·/ })).not.toBeChecked();
     await user.click(within(group).getByRole("button", { name: "Approve selection" }));
     const reconfirmed = await screen.findByRole("dialog", { name: "Review bulk approval" });
@@ -2899,15 +2915,19 @@ describe("ReviewScreen", () => {
     const metadata = reviewItem({ id: "metadata", targetId: "metadata-page", targetTitle: "Metadata target", reviewType: "inline_comment", canDecide: false,
       actions: { approve: { allowed: false, reason_code: "claim_conflict" }, reject: { allowed: true }, request_changes: { allowed: false, reason_code: "not_in_audience" }, edit_directly: { allowed: false } },
       content: { mode: "metadata_only", baseline_kind: "unavailable", can_read: false, can_diff: false },
+      document: null, diffSummary: "feedback_only: Proposed title",
     });
-    mockReviewQueue([current, metadata]);
+    mockReviewQueue([current, metadata], null, url => url.endsWith("/decision") ? new Response(JSON.stringify({
+      error_code: "legacy_media_cutover_conflict", message: "Media cutover changed. Refresh this draft before publishing.", warnings: [],
+    }), { status: 409, headers: { "Content-Type": "application/json" } }) : undefined);
     render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Exact candidate", level: 2 });
-    expect(screen.getByText("Approving publishes review version v3.")).toBeVisible();
+    expect(screen.getByText(/Current published version v2 → Review version v3/)).toBeVisible();
+    expect(await screen.findByText("Approving publishes review version v3.")).toBeVisible();
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Request changes" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Request changes" })).toBeEnabled());
     expect(pagesApi.readPage).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", "version-3");
     expect(pagesApi.diffPageVersions).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", "version-2", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const documentLink = screen.getByRole("link", { name: "Open current document: Exact candidate (new tab)" });
@@ -2926,17 +2946,23 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(approve).toBeEnabled());
     expect(await screen.findByText("Exact candidate body")).toBeVisible();
     expect(pagesApi.readPage).toHaveBeenCalledTimes(2); // failed exact read plus explicit retry
+    await user.click(approve);
+    expect(await screen.findByText("Media cutover changed. Refresh this draft before publishing.")).toBeVisible();
+    await waitFor(() => expect(approve).toBeEnabled());
     current.review_type = "inline_comment";
+    current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     current.review_type = "context_update";
+    current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     current.actions!.approve = { allowed: false, reason_code: "claim_conflict" };
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled());
     expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     current.actions!.approve = { allowed: true };
+    current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     expect(await screen.findByText("Approving publishes review version v3.")).toBeVisible();
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
@@ -2945,6 +2971,7 @@ describe("ReviewScreen", () => {
       content: { ...placement.content!, candidate_version_id: "version-2", candidate_version_no: 2 },
     };
     current.evidence!.operations.push(otherCandidate);
+    current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(document.querySelectorAll(".review-evidence-document")).toHaveLength(2));
     expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument();
@@ -2962,29 +2989,43 @@ describe("ReviewScreen", () => {
       ...placement, operation_id: "unsupported-operation", operation: "future_operation",
       diff_summary: "Unsupported target evidence", content: { ...placement.content!, mode: "unsupported" },
     });
+    current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     expect(await screen.findByText(i18n.t("review:content.unsupported"))).toBeVisible();
     expect(document.querySelectorAll(".review-evidence-document")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    for (const [kind, label] of [["parent", "Parent version v2"], ["empty", "Empty document"], ["unavailable", "Comparison baseline unavailable"]] as const) {
+      current.evidence!.operations[0].content!.baseline_kind = kind;
+      current.evidence!.operations[0].content!.baseline_version_id = kind === "parent" ? "version-2" : null;
+      current.evidence!.operations[0].content!.baseline_version_no = kind === "parent" ? 2 : null;
+      current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
+      await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
+      expect(await screen.findByText(`${label} → Review version v3`)).toBeVisible();
+    }
     const reads = vi.mocked(pagesApi.readPage).mock.calls.length;
     await user.click(screen.getByRole("button", { name: "Metadata target · v1" }));
     await screen.findByRole("heading", { name: "Metadata target", level: 2 });
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     expect(screen.getByText(i18n.t("review:workflow.reasons.claim_conflict"))).toBeVisible();
     expect(document.querySelector(".review-publication-notice")).toBeNull();
+    const metadataPanel = within(document.querySelector<HTMLElement>(".review-evidence-panel")!);
+    expect(metadataPanel.getByText("feedback_only: Proposed title")).toBeVisible();
+    expect(metadataPanel.getByText("create cited context draft")).toBeVisible();
+    expect(metadataPanel.queryByText(i18n.t("review:content.unsupported"))).not.toBeInTheDocument();
     expect(pagesApi.readPage).toHaveBeenCalledTimes(reads);
   });
 
   it("keeps a saved receipt locked through queue refresh failure and continues to the next review", async () => {
     const user = userEvent.setup();
-    const current = reviewItem({ targetTitle: "Saved first", targetId: "page-first" });
+    const current = reviewItem({ reviewType: "context_update", targetTitle: "Saved first", targetId: "page-first" });
     const next = reviewItem({ id: "next-review", targetTitle: "Next document", targetId: "page-next" });
     let saved = false;
     let failRefresh = true;
     const decisions: unknown[] = [];
     mockReviewQueue([current, next], null, (url, init) => {
+      if (url.endsWith("/reviews/selection")) return jsonResponse({ data: selectionPreview([current]) });
       if (url.endsWith("/reviews/review-1/decision")) {
         decisions.push(JSON.parse(String(init?.body))); saved = true;
         return jsonResponse({ data: { ...current, status: "approved" } });
@@ -2999,6 +3040,8 @@ describe("ReviewScreen", () => {
     render(<AuthProvider><MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /><AuthIdentity /><LocationDisplay /></MemoryRouter></AuthProvider>);
     await screen.findByText("Authenticated actor: actor-1");
     await screen.findByRole("heading", { name: "Saved first", level: 2 });
+    await user.click(within(within(screen.getByRole("complementary", { name: "Review queue" })).getByRole("region", { name: "Saved first" })).getByRole("checkbox", { name: /Select all reviews matching/ }));
+    await screen.findByText("1 selected for this document");
     await user.click(screen.getByText("Add a decision reason (optional)"));
     await user.type(screen.getByRole("textbox", { name: "Decision reason" }), "Reviewed carefully");
     const key = reviewDraftKey("actor-1", WORKSPACE_ID, current.id);
@@ -3008,6 +3051,7 @@ describe("ReviewScreen", () => {
     expect(screen.getByText(savedDecisionLabel())).toBeVisible();
     expect(document.querySelector(".review-publication-notice")).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve selected" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next review" })).toBeDisabled();
     expect(screen.getByRole("tab", { name: "Pending" })).toBeVisible();
     expect(within(screen.getByRole("complementary", { name: "Review queue" })).queryByRole("button", { name: "Saved first · v1" })).not.toBeInTheDocument();
@@ -3017,6 +3061,7 @@ describe("ReviewScreen", () => {
     failRefresh = false;
     await user.click(screen.getByRole("button", { name: "Reload queue" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Next review" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Next review" })).toHaveFocus();
     expect(screen.getByRole("tab", { name: /Pending.*1/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next review" }));
     await screen.findByRole("heading", { name: "Next document", level: 2 });
@@ -3028,6 +3073,8 @@ describe("ReviewScreen", () => {
   it("recovers uncertain decisions after remount with read-first retries and one decision identity", async () => {
     const user = userEvent.setup();
     const current = reviewItem();
+    const next = reviewItem({ id: "next-loaded", reviewType: "context_update", targetTitle: "Loaded next", targetId: "loaded-page", targetVersionNo: 2 });
+    const older = reviewItem({ id: "older-loaded", reviewType: "context_update", targetTitle: "Loaded next", targetId: "loaded-page", targetVersionNo: 1, createdAt: "2026-05-10T00:00:00Z" });
     const bodies: Array<{ decision_id: string; decision_type: string; decision_reason: string }> = [];
     const events: string[] = [];
     let committed = false;
@@ -3037,18 +3084,19 @@ describe("ReviewScreen", () => {
       audience_kind: null, audience_user_id: null, resulting_review_status: "approved",
       resulting_change_set_status: "applied", created_at: "2026-10-21T11:00:00Z",
     }] });
-    mockReviewQueue([current], null, (url, init) => {
+    const fetchMock = mockReviewQueue([current], null, (url, init) => {
       if (url.endsWith("/reviews/review-1/decision")) {
         bodies.push(JSON.parse(String(init?.body))); events.push(`post-${bodies.length}`);
         if (bodies.length === 2) committed = true;
         return Promise.reject(new Error("private response lost after submit"));
       }
       if (url.endsWith("/reviews/review-1")) {
-        events.push(committed ? "read-receipt" : "read-unconfirmed");
+        if (bodies.length) events.push(committed ? "read-receipt" : "read-unconfirmed");
         // Status and an unrelated actor's ledger entry are not this actor's receipt.
-        return jsonResponse({ data: committed ? receipt() : bodies.length === 1 ? receipt("different-actor") : current });
+        return jsonResponse({ data: committed ? receipt() : bodies.length === 1
+          ? { ...current, decisions: receipt("different-actor").decisions } : current });
       }
-      if (committed && url.includes("/reviews?")) return jsonResponse({ data: { items: [], next_cursor: null } });
+      if (committed && url.includes("/reviews?")) return jsonResponse({ data: { items: [older, next], next_cursor: "not-needed" } });
       return undefined;
     });
     const mount = () => render(<AuthProvider><MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /><AuthIdentity /></MemoryRouter></AuthProvider>);
@@ -3076,11 +3124,61 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry the same decision" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Retry the same decision" }));
     expect(await screen.findByText(savedDecisionLabel())).toBeVisible();
-    expect(events).toEqual(["post-1", "read-unconfirmed", "read-unconfirmed", "post-2", "read-receipt"]);
+    expect(events[0]).toBe("post-1");
+    expect(events[events.indexOf("post-2") - 1]).toBe("read-unconfirmed");
+    expect(events.at(-1)).toBe("read-receipt");
     expect(bodies).toHaveLength(2);
     expect(sessionStorage.getItem(`${key}.pending`)).toBeNull();
     expect(sessionStorage.getItem(key)).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next review" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Next review" }));
+    expect(await screen.findByRole("heading", { name: "Loaded next", level: 2 })).toBeVisible();
+    expect(await screen.findByText("Approving publishes review version v2.")).toBeVisible();
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("cursor=not-needed"))).toBe(false);
+  });
+
+  it.each(["history", "unmount"])("stops bulk continuation after %s and retains confirmed batches", async (interruption) => {
+    const user = userEvent.setup();
+    const items = ["first", "second", "third"].map(id => reviewItem({ id, targetId: id, targetTitle: id }));
+    let batchCalls = 0;
+    let finishBatch: (response: Response) => void = () => {};
+    const fetchMock = mockReviewQueue(items, null, (url) => {
+      if (url.endsWith("/selection")) return jsonResponse({ data: selectionPreview(items) });
+      if (url.endsWith("/decide-bulk")) {
+        batchCalls += 1;
+        if (batchCalls === 2) return new Promise(resolve => { finishBatch = resolve; });
+        return jsonResponse({ data: { approved: ["first"], skipped: [], processed_count: 1,
+          total: 3, remaining_count: 2, next_selection_token: "second-batch", selection_complete: false } });
+      }
+      if (url.includes("/reviews?") && url.includes("risk_level=low")) return jsonResponse({ data: { items: [], next_cursor: null } });
+      return undefined;
+    });
+    const view = render(<MemoryRouter initialEntries={["/review?risk=low", "/review"]}>
+      <ReviewScreen /><HistoryControls />
+    </MemoryRouter>);
+    await user.click(await screen.findByRole("checkbox", { name: "Select all 3 shown" }));
+    await user.click(screen.getByRole("button", { name: "Approve selected" }));
+    const dialog = await screen.findByRole("dialog", { name: "Review bulk approval" });
+    await user.click(within(dialog).getByRole("button", { name: "Approve 3" }));
+    await waitFor(() => expect(batchCalls).toBe(2));
+    if (interruption === "history") {
+      await user.click(screen.getByRole("button", { name: "History back", hidden: true }));
+      await screen.findByText(i18n.t("review:workflow.bulkStopped", { processed: 1, total: 3 }));
+      await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("risk_level=low"))).toBe(true));
+    } else view.unmount();
+    const listCalls = () => fetchMock.mock.calls.filter(([input]) => input.toString().includes("/reviews?"));
+    const beforeRelease = listCalls().length;
+    await act(async () => { finishBatch(jsonResponse({ data: { approved: ["second"], skipped: [],
+      total: 3, remaining_count: 1, next_selection_token: "third-batch", selection_complete: false } })); });
+    if (interruption === "history") {
+      expect(await screen.findByText(i18n.t("review:workflow.bulkStopped", { processed: 2, total: 3 }))).toBeVisible();
+      expect(screen.getByText(/Approved 2 reviews/)).toBeVisible();
+    }
+    expect(batchCalls).toBe(2);
+    expect(listCalls()).toHaveLength(beforeRelease);
+    expect(fetchMock.mock.calls.filter(([input]) => input.toString().endsWith("/decide-bulk"))
+      .map(([, init]) => JSON.parse(String(init?.body)).batch_limit)).toEqual([50, 50]);
   });
 
 });
@@ -3098,6 +3196,34 @@ function PageEditorDestination() {
 function LocationDisplay() {
   const location = useLocation();
   return <p data-testid="location-search">{location.search}</p>;
+}
+
+// Lists and write receipts intentionally omit the detail-only preflight capabilities.
+const reviewFixtures = new Map<string, ReviewItem>();
+function mockReviewFetch(handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = input.toString();
+    let response: Response;
+    try { response = await handler(input, init); }
+    catch (error) {
+      const id = url.match(/\/reviews\/([^/?]+)$/)?.[1];
+      const fixture = id && reviewFixtures.get(id);
+      if (!(error instanceof Error) || !error.message.startsWith("Unexpected request:") || !fixture) throw error;
+      response = jsonResponse({ data: fixture });
+    }
+    if (!response.ok || !url.includes("/reviews")) return response;
+    const body = await response.json();
+    const remember = (item: ReviewItem) => {
+      if (item?.id && item.evidence) reviewFixtures.set(item.id, item);
+      return { ...item, actions: null, reject_effect: null };
+    };
+    if (Array.isArray(body.data?.items)) body.data.items = body.data.items.map(remember);
+    else if (body.data?.id && body.data.evidence) {
+      const stripped = remember(body.data);
+      if (init?.method && init.method !== "GET") body.data = stripped;
+    }
+    return jsonResponse(body);
+  });
 }
 
 function jsonResponse(body: unknown) {
@@ -3134,7 +3260,7 @@ function mockReviewQueue(
   nextCursor: string | null = null,
   override?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined,
 ) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  return mockReviewFetch(async (input, init) => {
     const url = input.toString();
     const custom = override?.(url, init);
     if (custom !== undefined) return custom;
@@ -3334,16 +3460,16 @@ function reviewItem(
           operation: "create_draft",
           diff_summary: overrides.diffSummary ?? null,
           diff_ref: `context_page_version:version-${overrides.targetVersionNo ?? 1}`,
-          document: overrides.document ?? {
+          document: overrides.document === undefined ? {
             document_kind: "context", document_id: overrides.targetId ?? "context-1",
             title: overrides.targetTitle === undefined ? "Feedback Target" : overrides.targetTitle,
             slug: "feedback-target", reader_href: `/context?target=${overrides.targetId ?? "context-1"}`,
             can_open: true, unavailable_reason: null,
-          },
+          } : overrides.document,
           content: overrides.content ?? {
             mode: "context_version", candidate_version_id: `version-${overrides.targetVersionNo ?? 1}`,
             candidate_version_no: overrides.targetVersionNo ?? 1,
-            baseline_kind: (overrides.targetVersionNo ?? 1) > 1 ? "parent" : "empty",
+            baseline_kind: (overrides.targetVersionNo ?? 1) > 1 ? "published" : "empty",
             baseline_version_id: (overrides.targetVersionNo ?? 1) > 1 ? `version-${(overrides.targetVersionNo ?? 1) - 1}` : null,
             baseline_version_no: (overrides.targetVersionNo ?? 1) > 1 ? (overrides.targetVersionNo ?? 1) - 1 : null,
             can_read: true, can_diff: true, unavailable_reason: null, is_current_candidate: true,

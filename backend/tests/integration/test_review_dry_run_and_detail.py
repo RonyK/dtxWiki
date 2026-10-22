@@ -24,6 +24,7 @@ from backend.services import review_selection_service
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import ReadValidationError
 from backend.services.review_service import ReviewService
+from backend.services.tree_projection import TreeProjectionService
 from backend.tests.conftest import authenticate_test_client
 
 
@@ -39,6 +40,10 @@ def _make_client(page_service, *, email="test@example.com") -> TestClient:
     )
     authenticate_test_client(client, email=email)
     return client
+
+
+def _no_section_load(*_args, **_kwargs):
+    raise AssertionError("review evidence loaded a whole tree section")
 
 
 def _current_workspace_id(client: TestClient) -> str:
@@ -196,7 +201,7 @@ def test_get_review_unknown_id_returns_404(page_service):
     "association", ["valid", "different_page", "hidden", "foreign", "ambiguous"]
 )
 def test_ingress_placement_evidence_requires_visible_same_change_exact_candidate(
-    page_service, association,
+    page_service, association, monkeypatch,
 ):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
@@ -248,7 +253,10 @@ def test_ingress_placement_evidence_requires_visible_same_change_exact_candidate
             operation="tree_place",
             diff_summary="placed under Inbox",
         ))
-    response = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}")
+    with monkeypatch.context() as patch:
+        # A placement is decided by its own ancestor chain, never a section load.
+        patch.setattr(TreeProjectionService, "load", _no_section_load)
+        response = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}")
     assert response.status_code == 200, response.text
     evidence = response.json()["data"]["evidence"]
     placement = next(operation for operation in evidence["operations"]

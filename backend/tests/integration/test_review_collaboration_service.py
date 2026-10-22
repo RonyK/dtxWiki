@@ -547,6 +547,10 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
             actor_role="editor",
             actor=_actor(requester, ws.id, "editor"),
         )
+        pending_detail = service.get_review(
+            session, ws.id, review.id, actor_user_id=requester.id,
+            actor_role="editor", actor=_actor(requester, ws.id, "editor"),
+        )
         _request_changes(
             service,
             session,
@@ -570,6 +574,14 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
             actor_role="editor",
             actor=_actor(outsider, ws.id, "editor"),
         )
+        routed_detail = service.get_review(
+            session, ws.id, review.id, actor_user_id=requester.id,
+            actor_role="editor", actor=_actor(requester, ws.id, "editor"),
+        )
+        outsider_detail = service.get_review(
+            session, ws.id, review.id, actor_user_id=outsider.id,
+            actor_role="editor", actor=_actor(outsider, ws.id, "editor"),
+        )
 
     assert pending.items[0].can_decide is True
     assert pending.items[0].can_claim is False
@@ -577,10 +589,12 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
     assert routed.items[0].can_claim is True
     assert outsider_view.items[0].can_decide is False
     assert outsider_view.items[0].can_claim is False
-    assert pending.items[0].actions.approve.allowed is True
-    assert routed.items[0].actions.edit_directly.allowed is True
-    assert outsider_view.items[0].actions.approve.allowed is False
-    assert outsider_view.items[0].actions.approve.reason_code == "not_in_audience"
+    # Rows stay cheap; the single-review read carries the decision preflight.
+    assert pending.items[0].actions is pending.items[0].reject_effect is None
+    assert pending_detail.actions.approve.allowed is True
+    assert routed_detail.actions.edit_directly.allowed is True
+    assert outsider_detail.actions.approve.allowed is False
+    assert outsider_detail.actions.approve.reason_code == "not_in_audience"
 
 
 def test_decision_receipt_replay_preserves_later_round_and_rejects_reuse(
@@ -979,6 +993,12 @@ def test_revision_format_only_is_not_auto_approved(session_factory):
         )
         # the NEW review is a genuine reformat (bytes changed) but must be pending
         assert session.get(ReviewItem, result.new_review_item_id).status == "pending"
+        content = service.get_review(
+            session, ws.id, result.new_review_item_id, actor_user_id=author.id,
+            actor_role="editor", actor=_actor(author, ws.id, "editor"),
+        ).evidence.operations[0].content
+        # Approval publishes the whole revision; the page was never published.
+        assert (content.baseline_kind, content.baseline_version_id) == ("empty", None)
 
 
 def test_revision_noop_is_rejected_not_superseded(session_factory):

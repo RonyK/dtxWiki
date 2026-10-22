@@ -267,7 +267,6 @@ export async function listReviews(
     limit?: number;
     cursor?: string | null;
     include_deferred_reconciliations?: boolean;
-    target_page_id?: string;
   } = {},
 ) {
   const query = encodeQuery(filters);

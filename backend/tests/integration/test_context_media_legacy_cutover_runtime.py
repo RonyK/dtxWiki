@@ -106,6 +106,44 @@ def test_publish_conflict_is_409_and_rolls_back_every_publication_pointer(
         assert rejected.version_status == "draft"
 
 
+def test_review_approval_keeps_the_cutover_conflict(page_service):
+    from backend.models.change import ChangeOperation
+    from backend.models.review import ReviewItem
+    from backend.schemas.context_write import ReviewDecisionRequest
+    from backend.services.review_service import ReviewService
+    from backend.tests.integration.test_review_dry_run_and_detail import (
+        _seed_pending_review,
+    )
+
+    with page_service.session_factory() as session:
+        workspace_id = _workspace(session).id
+    review_id = UUID(_seed_pending_review(page_service, str(workspace_id)))
+    with page_service.session_factory.begin() as session:
+        change_set_id = session.get(ReviewItem, review_id).change_set_id
+        operation = session.scalar(select(ChangeOperation).where(
+            ChangeOperation.change_set_id == change_set_id
+        ))
+        version_id = UUID(operation.diff_ref.split(":")[1])
+        session.get(ContextPageVersion, version_id).body_md = (
+            f"# Cutover approval\n\n![legacy]({_legacy_url(workspace_id)})"
+        )
+
+    with pytest.raises(LegacyMediaCutoverConflictError) as excinfo:
+        with page_service.session_factory.begin() as session:
+            ReviewService().apply_decision(
+                session=session,
+                workspace_id=workspace_id,
+                review_item_id=review_id,
+                request=ReviewDecisionRequest(decision_type="approve"),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+                actor_role="owner",
+                actor_provenance="browser_session",
+            )
+    # Approval surfaces the writer's migration-specific 409, not a generic 403.
+    assert status_code_for_read_error(excinfo.value) == 409
+
+
 def test_read_service_and_mcp_mapping_keep_cutover_conflict_nonretryable(
     session_factory,
 ):
