@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   expect,
+  isNetworkChangeConsoleEcho,
   isTransientNetworkImportError,
   test,
   type APIRequestContext,
@@ -994,8 +995,11 @@ function monitorBrowserFailures(page: Page) {
   let expectedPreviewTeardown: { token: number; workspaceId: string } | null = null;
   let nextExpectedPreviewTeardownToken = 0;
   page.on("console", (message) => {
+    // The requestfailed handler below already skips ERR_NETWORK_CHANGED; its
+    // console echo is the same event and is skipped for the same reason.
     if (
       message.type() === "error" &&
+      !isNetworkChangeConsoleEcho(message.text()) &&
       !isTransientNetworkImportError(page, message.text())
     ) {
       failures.push({ detail: message.text(), kind: "console" });

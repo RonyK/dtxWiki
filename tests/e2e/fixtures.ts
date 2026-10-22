@@ -286,6 +286,19 @@ export function isTransientNetworkImportError(page: Page, message: string) {
   ).blocking;
 }
 
+/**
+ * Chromium reports every resource that fails with ERR_NETWORK_CHANGED twice:
+ * as a `requestfailed` event and again as this console error. The text IS the
+ * transport failure, not something that merely coincides with one, so a
+ * monitor that already treats the `requestfailed` half as transport must treat
+ * this echo the same way. Matched exactly: any other "Failed to load resource"
+ * (an HTTP status, a refused connection) and any message that only mentions
+ * the code stay blocking.
+ */
+export function isNetworkChangeConsoleEcho(message: string): boolean {
+  return message === "Failed to load resource: net::ERR_NETWORK_CHANGED";
+}
+
 async function recoverFromNetworkChange(page: Page) {
   const recoveryControl = page
     .locator(RECOVERY_TEST_IDS.map((id) => `[data-testid="${id}"]`).join(", "))
