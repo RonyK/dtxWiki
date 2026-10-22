@@ -31,6 +31,7 @@ from backend.services.actor_visible_read import (
     context_version_is_visible,
     library_item_visible,
 )
+from backend.services.context_lifecycle import is_publishable_draft
 from backend.utils.page_frontmatter import parse_page_frontmatter
 from backend.utils.uuid import parse_uuid_or_none
 
@@ -266,11 +267,8 @@ def _context_target(
         candidate_version_id=version.id,
         candidate_version_no=version.version_no,
         can_read=True,
-        is_current_candidate=(
-            page.latest_draft_version_id == version.id
-            and version.version_status == "draft"
-            and version.graph_status == "linear"
-        ),
+        # Approving this review would publish exactly this version.
+        is_current_candidate=is_publishable_draft(session, page, version),
     )
     # Approving the current candidate publishes it over the live version (or
     # makes the first one), so that is its baseline even when its parent is an

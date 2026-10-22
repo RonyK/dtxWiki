@@ -970,7 +970,20 @@ class ReviewService:
         review: ReviewItem,
         change_set: ChangeSet,
     ) -> tuple[ContextPage, ContextPageVersion, list[ReviewItem]] | None:
-        """Resolve the exact sibling set a human approval would supersede."""
+        """Resolve the version an approval publishes and the reviews it settles.
+
+        Approval publishes the review's exact version: the latest draft or an
+        earlier linear draft of the same chain (the changes up to it). Open
+        reviews of that version and of its own draft ancestors are settled
+        with it. Newer drafts and versions off this lineage (branched
+        alternatives, other forks) keep their reviews, as does a review that
+        also covers one of them.
+        """
+        from backend.services.context_lifecycle import (
+            is_publishable_draft,
+            live_draft_chain,
+        )
+
         if (
             review.status not in {"pending", CHANGES_REQUESTED_STATUS}
             or review.review_type != "context_update"
@@ -1004,30 +1017,90 @@ class ReviewService:
             if version_id
             else None
         )
-        if (
-            version is None
-            or version.page_id != page.id
-            or page.latest_draft_version_id != version.id
-        ):
+        if version is None or not is_publishable_draft(session, page, version):
             return None
-        pending_reviews = (
-            session.scalars(
-                select(ReviewItem)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(ChangeOperation, ChangeOperation.change_set_id == ChangeSet.id)
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.status.in_(("pending", CHANGES_REQUESTED_STATUS)),
-                    ReviewItem.review_type == "context_update",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref == f"context_page_version:{version.id}",
-                    ReviewItem.id != review.id,
-                )
+        chain_ids = [draft.id for draft in live_draft_chain(session, page)]
+        settled_refs = [
+            f"{prefix}{settled_id}"
+            for settled_id in (
+                chain_ids[chain_ids.index(version.id) :]
+                if version.id in chain_ids
+                else [version.id]
             )
-            .unique()
-            .all()
+        ]
+        change_set_ids = set(
+            session.scalars(
+                select_in_workspace(
+                    ChangeOperation,
+                    workspace_id=page.workspace_id,
+                    criteria=[
+                        ChangeOperation.target_type == "context_page",
+                        ChangeOperation.target_id == page.id,
+                        ChangeOperation.diff_ref.in_(settled_refs),
+                    ],
+                ).with_only_columns(ChangeOperation.change_set_id)
+            ).all()
+        )
+        outside = (
+            session.execute(
+                select_in_workspace(
+                    ChangeOperation,
+                    workspace_id=page.workspace_id,
+                    criteria=[
+                        ChangeOperation.change_set_id.in_(change_set_ids),
+                        ChangeOperation.diff_ref.startswith(prefix),
+                        ChangeOperation.diff_ref.not_in(settled_refs),
+                    ],
+                ).with_only_columns(
+                    ChangeOperation.change_set_id, ChangeOperation.diff_ref
+                )
+            ).all()
+            if change_set_ids
+            else []
+        )
+        if outside:
+            # A review that also covers a version outside this version's own
+            # history (a newer draft, a fork) is not settled by approving it.
+            parents = dict(
+                session.execute(
+                    select_in_workspace(
+                        ContextPageVersion,
+                        workspace_id=page.workspace_id,
+                        criteria=[ContextPageVersion.page_id == page.id],
+                    ).with_only_columns(
+                        ContextPageVersion.id, ContextPageVersion.parent_version_id
+                    )
+                ).all()
+            )
+            history: set[UUID] = set()
+            cursor = page.current_published_version_id
+            while cursor is not None and cursor not in history:
+                history.add(cursor)
+                cursor = parents.get(cursor)
+            change_set_ids -= {
+                change_set_id
+                for change_set_id, diff_ref in outside
+                if parse_uuid_or_none(diff_ref[len(prefix) :]) not in history
+            }
+        pending_reviews = (
+            list(
+                session.scalars(
+                    select_in_workspace(
+                        ReviewItem,
+                        workspace_id=page.workspace_id,
+                        criteria=[
+                            ReviewItem.change_set_id.in_(change_set_ids),
+                            ReviewItem.status.in_(
+                                ("pending", CHANGES_REQUESTED_STATUS)
+                            ),
+                            ReviewItem.review_type == "context_update",
+                            ReviewItem.id != review.id,
+                        ],
+                    )
+                ).all()
+            )
+            if change_set_ids
+            else []
         )
         return page, version, pending_reviews
 
@@ -1209,6 +1282,7 @@ class ReviewService:
                     page=page,
                     version=version,
                     require_latest_draft=True,
+                    allow_chain_ancestor=True,
                 )
             except ReadServiceError:
                 return "stale_candidate"
@@ -2068,6 +2142,7 @@ class ReviewService:
                 ),
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                publish_chain_ancestor=True,
             )
             published_version_id = published.published_version_id
         if (

@@ -37,7 +37,7 @@ test("reads exact evidence, approves a document group, and records the decision 
   await firstGroup.getByRole("button", { name: "Approve selection", exact: true }).click();
   const confirmation = page.getByRole("dialog");
   await expect(confirmation).toContainText("Fixed selection: 3 items");
-  await expect(confirmation).toContainText("2 other reviews for the same candidate");
+  await expect(confirmation).toContainText("2 other reviews of this version or its earlier drafts");
   await confirmation.getByRole("button", { name: "Approve 1", exact: true }).click();
   await expect(confirmation).toBeHidden();
   await expect(firstGroup).toHaveCount(0);

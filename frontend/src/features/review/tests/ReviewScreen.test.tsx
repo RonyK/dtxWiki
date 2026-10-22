@@ -515,12 +515,12 @@ describe("ReviewScreen", () => {
     {
       count: 1,
       copy:
-        "This version will be published; 1 other review for the same candidate will also be settled.",
+        "This version will be published; 1 other review of this version or its earlier drafts will also be settled.",
     },
     {
       count: 2,
       copy:
-        "This version will be published; 2 other reviews for the same candidate will also be settled.",
+        "This version will be published; 2 other reviews of this version or its earlier drafts will also be settled.",
     },
   ])(
     "warns before approval when $count earlier review(s) will be settled",
@@ -563,7 +563,7 @@ describe("ReviewScreen", () => {
     await userEvent.click(await screen.findByRole("button", { name: "No settlement impact · v1" }));
     expect(await screen.findByRole("heading", { level: 2, name: "No settlement impact" }))
       .toBeInTheDocument();
-    expect(screen.queryByText(/other reviews for the same candidate/i)).toBeNull();
+    expect(screen.queryByText(/other reviews of this version/i)).toBeNull();
   });
 
   it("keeps old reconciliation branches collapsed until explicitly requested", async () => {
@@ -1866,7 +1866,7 @@ describe("ReviewScreen", () => {
     const dialog = await screen.findByRole("dialog", { name: "Review bulk approval" });
     expect(
       within(dialog).getAllByText(
-        "2 other reviews for the same candidate will also be automatically settled.",
+        "2 other reviews of this version or its earlier drafts will also be settled.",
       ),
     ).toHaveLength(2); // Global union and the selected document/version row.
     await user.click(within(dialog).getByRole("button", { name: /Approve/ }));
@@ -2864,8 +2864,8 @@ describe("ReviewScreen", () => {
     const dialog = await screen.findByRole("dialog", { name: "Review bulk approval" });
     expect(selectionBodies[1]).toEqual({ review_item_ids: fixed.map(item => item.id) });
     expect(within(dialog).getByText("Eligible for approval")).toBeVisible();
-    expect(within(dialog).getByText("Automatically settled with the same candidate")).toBeVisible();
-    expect(within(dialog).getByText(/older draft and cannot be approved/)).toBeVisible();
+    expect(within(dialog).getByText("Settled with the version being approved")).toBeVisible();
+    expect(within(dialog).getByText(/can't be published as reviewed/)).toBeVisible();
     expect(within(dialog).getByText(/Fixed selection: 3 items/)).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Approve 1" }));
     expect(await screen.findByText(i18n.t("review:workflow.bulkChanged"))).toBeVisible();

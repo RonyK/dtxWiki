@@ -219,6 +219,7 @@ from backend.services.review_selection_service import (
     ReviewSelectionError,
     ReviewSelectionLimitError,
     ReviewSelectionService,
+    order_newest_candidates_first,
 )
 from backend.services.search_service import (
     KEYWORD_LANE_UNAVAILABLE_WARNING,
@@ -3376,6 +3377,11 @@ def decide_reviews_bulk(
                         actor_user_id=actor.user_id,
                         actor_role=access.role,
                     )
+            # A page's newest selected draft is approved first; its earlier
+            # drafts are then settled with it instead of published in turn.
+            target_ids = order_newest_candidates_first(
+                session, workspace_id, list(target_ids)
+            )
     except ReviewSelectionError as exc:
         return _review_selection_error_response(exc)
     except ReadServiceError as exc:

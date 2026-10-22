@@ -3069,7 +3069,11 @@ class ContextWriteService:
         actor_id: str,
         *,
         publish_despite_findings: bool = False,
+        publish_chain_ancestor: bool = False,
     ) -> PublishContextPageResult:
+        # `publish_chain_ancestor` lets review approval publish an earlier
+        # linear draft of the chain (the changes up to the reviewed version)
+        # while newer drafts stay pending; it is never a request field.
         # `publish_despite_findings` is an argument rather than a request field
         # so that only a caller holding a reference to this service can set it.
         # The REST publish route and the review-approval path both bind
@@ -3220,6 +3224,7 @@ class ContextWriteService:
                 page=page,
                 version=version,
                 require_latest_draft=True,
+                allow_chain_ancestor=publish_chain_ancestor,
             )
             if version.version_status != "draft":
                 raise RejectedByPolicyError(
@@ -3295,6 +3300,7 @@ class ContextWriteService:
                 page=page,
                 version=version,
                 require_latest_draft=True,
+                allow_chain_ancestor=publish_chain_ancestor,
             )
 
             change_set = self._create_change_set(

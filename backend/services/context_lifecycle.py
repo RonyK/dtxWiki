@@ -224,12 +224,68 @@ def project_context_version(
     )
 
 
+def live_draft_chain(
+    session: Session, page: ContextPage
+) -> list[ContextPageVersion]:
+    """The linear drafts from the latest draft down to the published head.
+
+    Newest first, the published head itself excluded. Empty when the page has
+    no draft or the chain is broken; branched alternatives are never on it.
+    """
+
+    chain: list[ContextPageVersion] = []
+    version_id = page.latest_draft_version_id
+    while version_id is not None and version_id != page.current_published_version_id:
+        version = get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            resource_id=version_id,
+        )
+        if (
+            version is None
+            or version.page_id != page.id
+            or any(member.id == version.id for member in chain)
+            or version.version_status not in ("draft", "editing")
+            or version.graph_status != "linear"
+        ):
+            return []
+        chain.append(version)
+        version_id = version.parent_version_id
+    return chain if version_id == page.current_published_version_id else []
+
+
+def is_publishable_draft(
+    session: Session, page: ContextPage, version: ContextPageVersion
+) -> bool:
+    """Whether approving ``version`` would publish exactly this draft.
+
+    The latest draft always can. An earlier linear draft can when it lies on
+    the chain between the latest draft and the published head, but not
+    before a first publication: context writes then apply page metadata
+    directly instead of staging it per draft, so it follows the newest one.
+    """
+
+    if (
+        version.page_id != page.id
+        or version.version_status != "draft"
+        or version.graph_status != "linear"
+    ):
+        return False
+    if page.latest_draft_version_id == version.id:
+        return True
+    return page.current_published_version_id is not None and any(
+        member.id == version.id for member in live_draft_chain(session, page)
+    )
+
+
 def assert_context_publish_candidate(
     session: Session,
     *,
     page: ContextPage,
     version: ContextPageVersion,
     require_latest_draft: bool,
+    allow_chain_ancestor: bool = False,
 ) -> None:
     """Reject a stale, branched, discarded, or non-linear publication.
 
@@ -237,14 +293,19 @@ def assert_context_publish_candidate(
     revisions create that shape).  The chain must end at the current published
     head, or at ``None`` for a never-published page.  A historical snapshot,
     cross-page parent, cycle, or alternative anywhere in the chain is stale.
+    ``allow_chain_ancestor`` (review approval only) also accepts one of those
+    earlier linear drafts once the page has been published: it publishes the
+    changes up to that draft and the newer drafts stay on top of it.
     """
 
     if version.page_id != page.id or version.graph_status != "linear":
         raise StaleContextDraftError()
     if require_latest_draft:
-        if (
-            version.version_status != "draft"
-            or page.latest_draft_version_id != version.id
+        if version.version_status != "draft" or (
+            page.latest_draft_version_id != version.id
+            and not (
+                allow_chain_ancestor and is_publishable_draft(session, page, version)
+            )
         ):
             raise StaleContextDraftError()
     elif version.version_status not in {"draft", "published_snapshot"}:
@@ -954,6 +1015,7 @@ def apply_context_publication(
     page: ContextPage,
     version: ContextPageVersion,
     require_latest_draft: bool,
+    allow_chain_ancestor: bool = False,
 ) -> UUID | None:
     """Atomically normalize snapshots and advance every published pointer.
 
@@ -970,11 +1032,21 @@ def apply_context_publication(
         page=page,
         version=version,
         require_latest_draft=require_latest_draft,
+        allow_chain_ancestor=allow_chain_ancestor,
     )
     require_no_visible_legacy_media(
         workspace_id=page.workspace_id,
         body_markdown=version.body_md,
     )
+    # Publishing an earlier draft of the chain leaves the drafts above it
+    # pending; they stay the edit head and build on this version.
+    newer_draft_ids: set[UUID] = set()
+    if allow_chain_ancestor and page.latest_draft_version_id not in (
+        None,
+        version.id,
+    ):
+        chain_ids = [draft.id for draft in live_draft_chain(session, page)]
+        newer_draft_ids = set(chain_ids[: chain_ids.index(version.id)])
     previous_published_version_id = page.current_published_version_id
     previous = (
         get_in_workspace(
@@ -1045,8 +1117,10 @@ def apply_context_publication(
             session.add(ancestor)
             parent_id = ancestor.parent_version_id
     page.current_published_version_id = version.id
-    page.current_version_id = version.id
-    page.latest_draft_version_id = None
+    if page.current_version_id not in newer_draft_ids:
+        page.current_version_id = version.id
+    if not newer_draft_ids:
+        page.latest_draft_version_id = None
     page.lifecycle_status = "published"
     reconcile_public_exposure_after_publication(
         page,

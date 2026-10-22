@@ -460,6 +460,54 @@ def test_group_selection_includes_unloaded_reviews_and_settles_exact_candidate(
         assert page.current_published_version_id is not None
 
 
+def test_selection_approves_newest_selected_draft_and_settles_earlier_one(
+    page_service,
+):
+    client = _make_client(page_service)
+    workspace_id = _current_workspace_id(client)
+    review_id = _seed_pending_review(page_service, workspace_id)
+    with page_service.session_factory.begin() as session:
+        review = session.get(ReviewItem, UUID(review_id))
+        operation = session.scalar(select(ChangeOperation).where(
+            ChangeOperation.change_set_id == review.change_set_id
+        ))
+        page = session.get(ContextPage, operation.target_id)
+        base = session.get(ContextPageVersion, page.latest_draft_version_id)
+        newer = ContextWriteService().update_draft(
+            session=session,
+            workspace_id=UUID(workspace_id),
+            request=UpdateDraftRequest(
+                page_id=page.id,
+                base_version_id=base.id,
+                base_content_hash=base.content_hash,
+                update_mode="full_rewrite",
+                body_markdown="# Dry-run target\n\nNewer body.",
+                reason="newer draft",
+            ),
+            actor_kind="human",
+            actor_id=str(session.scalar(select(User.id).where(
+                User.email == "test@example.com"
+            ))),
+        )
+    page_id, [older] = _seed_same_candidate_reviews(
+        page_service, workspace_id, review_id, 1
+    )
+    newest = str(newer.review_item_id)
+
+    # Listed oldest first, the newest draft still becomes the approval basis.
+    selection = _selection(client, workspace_id, review_item_ids=[older, newest])
+    assert selection["review_item_ids"] == [newest, older]
+    assert selection["eligible_count"] == 1
+    result = _execute_selection(client, workspace_id, selection["selection_token"])
+    assert result.status_code == 200, result.text
+    data = result.json()["data"]
+    assert data["approved"] == [newest]
+    assert data["auto_settled_review_item_ids"] == [older]
+    with page_service.session_factory() as session:
+        page = session.get(ContextPage, UUID(page_id))
+        assert page.current_published_version_id == newer.draft_version_id
+
+
 def test_selection_continuation_keeps_explicit_ids_across_batches(page_service):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)

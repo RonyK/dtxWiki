@@ -16,6 +16,7 @@ from backend.schemas.context_write import (
     UpdateDraftRequest,
     WriteDraftRequest,
 )
+from backend.services.context_lifecycle import audit_context_history
 from backend.services.context_write_service import ContextWriteService
 from backend.services.lint.autofix import safe_normalize_markdown
 from backend.services.page_service import PageNotFoundError, PageService
@@ -682,17 +683,20 @@ def test_approving_latest_draft_publishes_and_only_settles_context_reviews(
         assert lineage.status == "superseded"
 
 
-def test_approving_non_latest_draft_refuses_without_resolving_review(session_factory):
+def test_approving_earlier_draft_publishes_up_to_it_not_newer_or_forked(
+    session_factory,
+):
     write = ContextWriteService()
+    reviews = ReviewService()
     with session_factory.begin() as session:
         workspace = _workspace(session)
         created = write.write_draft(
             session=session,
             workspace_id=workspace.id,
             request=WriteDraftRequest(
-                title="Old approval",
+                title="Chain approval",
                 page_type="overview",
-                body_markdown="# V1\n\nOld.",
+                body_markdown="# V1\n\nFirst.",
                 citations=[],
                 reason="v1",
             ),
@@ -700,50 +704,113 @@ def test_approving_non_latest_draft_refuses_without_resolving_review(session_fac
             actor_id=ACTOR,
             actor_role="owner",
         )
-        base = session.get(ContextPageVersion, created.draft_version_id)
-        workspace.auto_fix_enabled = True
-        latest = write.update_draft(
-            session=session,
+        page_id = created.page_id
+        drafts = [session.get(ContextPageVersion, created.draft_version_id)]
+
+        def add_draft(number):
+            updated = write.update_draft(
+                session=session,
+                workspace_id=workspace.id,
+                request=UpdateDraftRequest(
+                    page_id=page_id,
+                    base_version_id=drafts[-1].id,
+                    base_content_hash=drafts[-1].content_hash,
+                    update_mode="full_rewrite",
+                    body_markdown=f"# V{number}\n\nNewer.",
+                    reason=f"v{number}",
+                ),
+                actor_kind="human",
+                actor_id=ACTOR,
+            )
+            drafts.append(session.get(ContextPageVersion, updated.draft_version_id))
+            return updated.review_item_id
+
+        def approve_reason(review):
+            return reviews.get_review(
+                session, workspace.id, review.id,
+                actor_user_id=ACTOR_UUID, actor_role="owner",
+                actor=_actor(workspace.id, "owner"),
+            ).actions.approve.reason_code
+
+        # Before a first publication page metadata follows the newest write,
+        # so only the latest draft publishes as reviewed; it settles the rest.
+        second = add_draft(2)
+        unpublished = _seed_review(
+            session, workspace.id, page_id, version_id=drafts[0].id
+        )
+        assert approve_reason(unpublished) == "stale_candidate"
+        _approve(session, workspace.id, second)
+        assert unpublished.status == "superseded"
+
+        for number in (3, 4, 5):
+            newest = session.get(ReviewItem, add_draft(number))
+        published, first, middle, latest = drafts[1:]
+        fork = ContextPageVersion(
             workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=created.page_id,
-                base_version_id=base.id,
-                base_content_hash=base.content_hash,
-                update_mode="full_rewrite",
-                body_markdown="# V2\n\nLatest.",
-                reason="v2",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
+            page_id=page_id,
+            parent_version_id=first.id,
+            version_no=6,
+            body_md="# Fork\n\nAlternative.",
+            content_hash="6" * 64,
+            graph_status="branched",
+            actor_type="human",
+            actor_id=ACTOR_UUID,
+            version_status="draft",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR,
         )
-        old_review = _seed_review(
-            session, workspace.id, created.page_id, version_id=created.draft_version_id
+        session.add(fork)
+        session.flush()
+        older, reviewed, forked, spanning = (
+            _seed_review(session, workspace.id, page_id, version_id=version.id)
+            for version in (first, middle, fork, latest)
         )
-        old_change_set = session.get(ChangeSet, old_review.change_set_id)
-        detail = ReviewService().get_review(
-            session, workspace.id, old_review.id,
+        # One change set reviewing both an earlier and a newer draft.
+        session.add(
+            ChangeOperation(
+                workspace_id=workspace.id,
+                change_set_id=spanning.change_set_id,
+                target_type="context_page",
+                target_id=page_id,
+                operation="test",
+                diff_ref=f"context_page_version:{first.id}",
+            )
+        )
+        session.flush()
+        detail = reviews.get_review(
+            session, workspace.id, reviewed.id,
             actor_user_id=ACTOR_UUID, actor_role="owner",
             actor=_actor(workspace.id, "owner"),
         )
-        operation = detail.evidence.operations[0]
-        assert operation.document.can_open is True
-        assert operation.content.candidate_version_id == created.draft_version_id
-        assert operation.content.is_current_candidate is False
-        assert operation.content.can_read is True
-        assert detail.actions.approve.allowed is False
-        assert detail.actions.approve.reason_code == "stale_candidate"
-        assert detail.actions.reject.allowed is True
-        assert detail.reject_effect.effect == "no_head_change"
-        with pytest.raises(
-            ReadValidationError,
-            match="stale or superseded Context review",
-        ):
-            _approve(session, workspace.id, old_review.id)
-        page = session.get(ContextPage, created.page_id)
-        assert page.latest_draft_version_id == latest.draft_version_id
-        assert page.current_published_version_id is None
-        assert old_review.status == "pending"
-        assert old_change_set.status == "draft_created"
+        assert detail.evidence.operations[0].content.is_current_candidate is True
+        assert detail.actions.approve.allowed is True
+        assert detail.superseded_review_count == 1
+        assert approve_reason(forked) == "stale_candidate"
+
+        approved = _approve(session, workspace.id, reviewed.id)
+        page = session.get(ContextPage, page_id)
+        assert approved.published_version_id == middle.id
+        assert approved.superseded_review_count == 1
+        assert (
+            page.current_published_version_id,
+            page.current_version_id,
+            page.latest_draft_version_id,
+        ) == (middle.id, middle.id, latest.id)
+        assert published.version_status == "superseded_snapshot"
+        assert first.graph_status == "discarded"
+        assert older.status == "superseded"
+        assert newest.status == forked.status == spanning.status == "pending"
+        assert not [
+            violation
+            for violation in audit_context_history(session).violations
+            if violation.page_id == page.id
+        ]
+        # The newer draft builds on the version just published; everything
+        # the spanning review covers is now in the approved history.
+        _approve(session, workspace.id, newest.id)
+        assert page.current_published_version_id == latest.id
+        assert page.latest_draft_version_id is None
+        assert (forked.status, spanning.status) == ("pending", "superseded")
 
 
 def test_approving_current_changes_requested_review_publishes_exact_version(

@@ -21,9 +21,14 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.models.change import ChangeOperation
+from backend.models.context import ContextPageVersion
 from backend.models.review import ReviewItem
 from backend.policy.auth import ActorContext
-from backend.repositories.workspace_scoped import select_in_workspace
+from backend.repositories.workspace_scoped import (
+    select_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.schemas.context_write import (
     ReviewBulkDecisionFilters,
     ReviewBulkDecisionPayload,
@@ -43,6 +48,7 @@ from backend.services.review_service import (
     _parse_csv_filter,
     _targets_context_page,
 )
+from backend.utils.uuid import parse_uuid_or_none
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import sessionmaker
@@ -58,6 +64,67 @@ SELECTION_CHANGED_REASON = (
 SELECTION_EXPIRED_REASON = (
     "This review selection has expired. Preview again before approving."
 )
+
+
+def order_newest_candidates_first(
+    session: Session, workspace_id: UUID, review_ids: list[UUID]
+) -> list[UUID]:
+    """Put each Context page's newest reviewed version first.
+
+    Approving the newest selected draft of a page publishes the changes up
+    to it and settles its earlier drafts, instead of publishing each draft
+    in turn. Pages keep their first position and other reviews their order.
+    """
+    if len(review_ids) < 2:
+        return list(review_ids)
+    change_sets = dict(session.execute(
+        select_in_workspace(
+            ReviewItem, workspace_id=workspace_id,
+            criteria=[ReviewItem.id.in_(review_ids)],
+        ).with_only_columns(ReviewItem.id, ReviewItem.change_set_id)
+    ).all())
+    prefix = "context_page_version:"
+    version_by_change_set = {
+        change_set_id: parse_uuid_or_none(diff_ref[len(prefix) :])
+        for change_set_id, diff_ref in session.execute(
+            select_in_workspace(
+                ChangeOperation, workspace_id=workspace_id,
+                criteria=[
+                    ChangeOperation.change_set_id.in_(set(change_sets.values())),
+                    ChangeOperation.target_type == "context_page",
+                    ChangeOperation.diff_ref.startswith(prefix),
+                ],
+            ).with_only_columns(
+                ChangeOperation.change_set_id, ChangeOperation.diff_ref
+            )
+        ).all()
+    }
+    versions = {
+        version_id: (page_id, version_no)
+        for version_id, page_id, version_no in session.execute(
+            select_in_workspace_by_ids(
+                ContextPageVersion, workspace_id=workspace_id,
+                resource_ids={v for v in version_by_change_set.values() if v},
+            ).with_only_columns(
+                ContextPageVersion.id,
+                ContextPageVersion.page_id,
+                ContextPageVersion.version_no,
+            )
+        ).all()
+    }
+    page_rank: dict[UUID, int] = {}
+
+    def key(item: tuple[int, UUID]) -> tuple[int, int, int]:
+        position, review_id = item
+        target = versions.get(
+            version_by_change_set.get(change_sets.get(review_id))
+        )
+        if target is None:
+            return position, 0, position
+        page_id, version_no = target
+        return page_rank.setdefault(page_id, position), -version_no, position
+
+    return [review_id for _, review_id in sorted(enumerate(review_ids), key=key)]
 
 
 class ReviewSelectionError(ReadValidationError):
@@ -249,7 +316,10 @@ class ReviewSelectionService:
         actor: ActorContext,
         actor_role: str,
     ) -> ReviewSelectionPayload:
-        target_ids = self.target_ids(session, workspace_id, request, actor, actor_role)
+        target_ids = order_newest_candidates_first(
+            session, workspace_id,
+            self.target_ids(session, workspace_id, request, actor, actor_role),
+        )
         entries: list[list[Any]] = []
         items: list[ReviewSelectionItem] = []
         visible_impact: set[UUID] = set()
