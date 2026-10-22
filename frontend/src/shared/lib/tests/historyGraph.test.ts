@@ -225,9 +225,10 @@ describe("buildHistoryGraph", () => {
   });
 
   it("derives Agent and Library lineage the History tab draws", () => {
-    // Agent versions carry no parent id: the previous version_no is the
-    // parent, a gap inside the loaded run is a version this reader cannot
-    // see, and a gap below the oldest loaded row is just not loaded yet.
+    // Agent versions record no parent: the previous version_no is linked
+    // only as the previous version, a gap inside the loaded run is a version
+    // this reader cannot see, and a gap below the oldest loaded row is just
+    // not loaded yet.
     const agent = (versionNo: number) =>
       ({ version_id: `a${versionNo}`, version_no: versionNo }) as AgentVersionEntry;
     const agentRows = buildHistoryGraph(

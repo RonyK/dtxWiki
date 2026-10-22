@@ -57,11 +57,16 @@ export type HistoryGraphNode<T> = {
   entry: T;
   id: string;
   versionNo: number;
-  // The version this one was made from. With parentRelation "visible" an id
-  // that no loaded node carries means the parent is older than every loaded
-  // row: the edge then runs to the bottom of the list (I6).
+  // The recorded source, or chronological predecessor when parentKind is
+  // "previous". With parentRelation "visible", an unloaded id continues the
+  // edge to the bottom of the list (I6).
   parentId: string | null;
   parentRelation: PriorRelation;
+  // What parentId claims. "source" (the default): the version this one was
+  // made from. "previous": only the version before it in order, for a surface
+  // that does not record what a version was made from (Agent). The layout
+  // draws both the same; the wording must not present "previous" as ancestry.
+  parentKind?: "source" | "previous";
   // Reconcile merge: the newer version that folded this branch back in.
   mergedIntoId?: string | null;
   // The surface already knows this version is off the main line (an

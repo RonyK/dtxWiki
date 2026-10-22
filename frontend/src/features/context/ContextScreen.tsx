@@ -4,9 +4,12 @@ import {
   Edit,
   FileText,
   Folder,
+  GitMerge,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Share2,
+  Trash2,
 } from "lucide-react";
 import {
   useCallback,
@@ -93,6 +96,7 @@ import {
 } from "../../shared/components/ContentInspectorPanels";
 import { CountChip } from "../../shared/components/CountChip";
 import {
+  HistoryActionButton,
   HistoryCard,
   HistoryChangesButton,
   HistoryChangesUnavailable,
@@ -3823,6 +3827,8 @@ export function ContextHistory({
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
+  // One restore at a time across the whole list, not just per row.
+  const restoring = restoreVersionId !== null;
   const [discardVersionId, setDiscardVersionId] = useState<string | null>(null);
   const [discardCandidate, setDiscardCandidate] = useState<VersionEntry | null>(
     null,
@@ -3850,11 +3856,6 @@ export function ContextHistory({
       historyComplete,
       versionNodes,
     ],
-  );
-  const parentOf = useCallback(
-    (versionId: string) =>
-      versionNodes.find((node) => node.id === versionId)?.parentId ?? null,
-    [versionNodes],
   );
   const loadDiff = useCallback(
     (pair: ComparePair, signal: AbortSignal) =>
@@ -3914,7 +3915,7 @@ export function ContextHistory({
 
   async function restoreVersion(entry: VersionEntry) {
     // Restoring the version you are already on just stacks an identical one.
-    if (entry.is_visible_head || !workspaceId) {
+    if (entry.is_visible_head || !workspaceId || restoring) {
       return;
     }
     const ok = window.confirm(
@@ -4015,64 +4016,71 @@ export function ContextHistory({
       <HistoryCard
         actions={
           <>
-            {canEdit && entry.history_status === "alternative_draft" ? (
-              <button
-                aria-busy={discardVersionId === entry.version_id}
-                className="text-button compact-button danger-action"
-                disabled={discardVersionId === entry.version_id}
-                onClick={() => {
-                  setDiscardCandidate(entry);
-                  setDiscardReason("");
-                }}
-                type="button"
-              >
-                {discardVersionId === entry.version_id
-                  ? t("history.discarding", { defaultValue: "Discarding" })
-                  : t("history.discard", { defaultValue: "Discard" })}
-              </button>
-            ) : null}
             {canEdit &&
             !comparing &&
             !isCurrent &&
             !isVisibleHead &&
             !isLatestDraft &&
             entry.reconciliation_available !== true ? (
-              <button
-                aria-busy={restoreVersionId === entry.version_id}
-                className="text-button compact-button"
-                disabled={restoreVersionId === entry.version_id}
+              <HistoryActionButton
+                accessibleLabel={t("history.restore", {
+                  defaultValue: "Restore this version",
+                })}
+                busy={restoreVersionId === entry.version_id}
+                disabled={restoring}
+                icon={RotateCcw}
+                label={
+                  restoreVersionId === entry.version_id
+                    ? t("history.restoring", { defaultValue: "Restoring" })
+                    : tShell("history.restoreShort", { defaultValue: "Restore" })
+                }
                 onClick={() => void restoreVersion(entry)}
-                type="button"
-              >
-                {restoreVersionId === entry.version_id
-                  ? t("history.restoring", { defaultValue: "Restoring" })
-                  : t("history.restore", {
-                      defaultValue: "Restore this version",
-                    })}
-              </button>
+              />
             ) : null}
             {canEdit &&
             entry.history_status === "alternative_draft" &&
             entry.reconciliation_available === true ? (
-              <button
-                className="text-button compact-button"
+              <HistoryActionButton
+                accessibleLabel={t("reconciliation.open", {
+                  defaultValue: "Reconcile",
+                })}
+                icon={GitMerge}
+                label={t("reconciliation.open", { defaultValue: "Reconcile" })}
                 onClick={() => onReconcile(entry.version_id)}
-                type="button"
-              >
-                {t("reconciliation.open", { defaultValue: "Reconcile" })}
-              </button>
+              />
             ) : null}
             {/* Offered whenever the parent is visible, even when it is on an
                 older page not loaded yet: opening it loads that page. */}
             {priorRelation === "visible" && entry.prior_version_id ? (
               <HistoryChangesButton
-                baseVersionNo={row.parent?.versionNo ?? null}
                 loading={diffLoadingVersionId === entry.version_id}
                 onToggle={() =>
                   comparing ? closeCompareVersion() : onCompare(entry)
                 }
                 open={comparing}
-                versionNo={entry.version_no}
+                row={row}
+              />
+            ) : null}
+            {/* Last in source order and pushed to the right edge, so the
+                buttons every row shares keep the same place whether or not
+                this row can be discarded, and focus order matches the eye. */}
+            {canEdit && entry.history_status === "alternative_draft" ? (
+              <HistoryActionButton
+                accessibleLabel={t("history.discard", {
+                  defaultValue: "Discard",
+                })}
+                busy={discardVersionId === entry.version_id}
+                icon={Trash2}
+                label={
+                  discardVersionId === entry.version_id
+                    ? t("history.discarding", { defaultValue: "Discarding" })
+                    : t("history.discard", { defaultValue: "Discard" })
+                }
+                onClick={() => {
+                  setDiscardCandidate(entry);
+                  setDiscardReason("");
+                }}
+                tone="danger"
               />
             ) : null}
           </>
@@ -4287,7 +4295,6 @@ export function ContextHistory({
           onClose={closeCompareVersion}
           onPairChange={(pair) => onComparePair({ ...pair, origin: "history" })}
           pair={comparePair}
-          parentOf={parentOf}
           publishedEndpoint={
             publishedVersion?.version_id === comparePair.from
               ? "from"

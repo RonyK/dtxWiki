@@ -1,12 +1,15 @@
 import type { AgentVersionEntry } from "../../shared/api/agent";
 import type { HistoryGraphNode } from "../../shared/lib/historyGraph";
 
-// Agent page versions carry no parent link: the backend only ever appends the
-// next version_no of one linear sequence (AgentPageService._next_version_no),
-// so a version was made from the version numbered right before it. A gap in
-// the loaded run is a version this reader may not see; a gap below the oldest
-// loaded row is simply not loaded, which the layout draws as an edge running
-// on to the end of the list.
+// Agent page versions record no parent: a new draft is based on whatever the
+// page's draft or active head is at that moment, and activating an older
+// leftover draft makes that older version the next base. So v3 may well have
+// been made from v1. All the history can say is the order -- each version is
+// linked to the one numbered right before it as its *previous* version
+// (parentKind "previous"), never as what it was made from. A gap in the loaded
+// run is a version this reader may not see; a gap below the oldest loaded row
+// is simply not loaded, which the layout draws as an edge running on to the
+// end of the list.
 export function agentHistoryNodes(
   versions: AgentVersionEntry[],
 ): HistoryGraphNode<AgentVersionEntry>[] {
@@ -21,6 +24,7 @@ export function agentHistoryNodes(
       entry,
       id: entry.version_id,
       versionNo: entry.version_no,
+      parentKind: "previous" as const,
     };
     if (previous) {
       return {

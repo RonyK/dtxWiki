@@ -28,8 +28,8 @@ export function normalizeVersionPair<P extends VersionPair>(
     : { ...pair, from: to.id, to: from.id };
 }
 
-// What a row's Changes action opens: the version against the one it was made
-// from. Null when that parent is not drawn above the row's own lane.
+// What a row's Changes action opens: its recorded source, or its chronological
+// predecessor when parentKind is "previous". Null until that version is loaded.
 export function changesPairFor(
   row: HistoryGraphRow<unknown>,
 ): { from: string; to: string } | null {

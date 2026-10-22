@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import type { PageVersionDiff } from "../api/pages";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import type { VersionPair, VersionRef } from "../lib/historyVersionPair";
+import type { HistoryGraphNode } from "../lib/historyGraph";
+import type { VersionPair } from "../lib/historyVersionPair";
 import { DiffViewerDialog } from "./DiffViewerDialog";
 
 type PassThrough = Pick<
@@ -26,7 +27,7 @@ export function HistoryDiffDialog({
   onClose,
   onPairChange,
   pair,
-  parentOf,
+  restoreDisabled = false,
   versions,
   ...passThrough
 }: PassThrough & {
@@ -37,10 +38,9 @@ export function HistoryDiffDialog({
   // The caller normalizes and decides; this only reports the picked ends.
   onPairChange: (pair: VersionPair) => void;
   pair: VersionPair;
-  // A version's parent, so a parent/child pair is titled as that version's
-  // Changes rather than as a free comparison.
-  parentOf: (versionId: string) => string | null;
-  versions: ReadonlyArray<VersionRef>;
+  // The graph's nodes: a pair that is a version and its parent is titled as
+  // that version's Changes rather than as a free comparison.
+  versions: ReadonlyArray<HistoryGraphNode<unknown>>;
 }) {
   const { t } = useTranslation("shell");
   const narrow = useMediaQuery("(max-width: 720px)");
@@ -52,26 +52,35 @@ export function HistoryDiffDialog({
     ordered.find((version) => version.id === id)?.versionNo;
   const fromNo = versionNoOf(pair.from);
   const toNo = versionNoOf(pair.to);
+  const toNode = versions.find((version) => version.id === pair.to);
   const title =
     pair.from === null || fromNo === undefined
       ? t("diff.changesFirstTitle", {
           defaultValue: "Changes in v{{to}}",
           to: toNo,
         })
-      : parentOf(pair.to) === pair.from
-        ? t("diff.changesTitle", {
-            defaultValue: "Changes in v{{to}} since v{{from}}",
-            from: fromNo,
-            to: toNo,
-          })
-        : t("diff.compareVersionsTitle", {
+      : toNode?.parentId !== pair.from
+        ? t("diff.compareVersionsTitle", {
             defaultValue: "Compare v{{from}} and v{{to}}",
             from: fromNo,
             to: toNo,
-          });
+          })
+        : toNode.parentKind === "previous"
+          ? // Only the order is known (Agent): no ancestry claim.
+            t("diff.changesSincePreviousTitle", {
+              defaultValue: "Changes in v{{to}} since the previous version, v{{from}}",
+              from: fromNo,
+              to: toNo,
+            })
+          : t("diff.changesTitle", {
+              defaultValue: "Changes in v{{to}} since v{{from}}",
+              from: fromNo,
+              to: toNo,
+            });
   return (
     <DiffViewerDialog
       {...passThrough}
+      restoreDisabled={restoreDisabled}
       // Every pair reaching here is normalized oldest-first, so the left
       // column can honestly promise to be the earlier version.
       baseEndpointLabel={t("diff.baseEarlier", {
@@ -95,7 +104,10 @@ export function HistoryDiffDialog({
                 defaultValue: "Earlier version",
               })}
             </span>
+            {/* A restore in flight acts on the pair it started from; the
+                pickers stay put until it settles, like Close does. */}
             <select
+              disabled={restoreDisabled}
               onChange={(event) => {
                 if (event.target.value) {
                   onPairChange({ from: event.target.value, to: pair.to });
@@ -135,6 +147,7 @@ export function HistoryDiffDialog({
               {t("history.laterEndpoint", { defaultValue: "Later version" })}
             </span>
             <select
+              disabled={restoreDisabled}
               onChange={(event) =>
                 onPairChange({ from: pair.from, to: event.target.value })
               }

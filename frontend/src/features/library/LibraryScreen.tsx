@@ -2244,11 +2244,15 @@ function LibraryAddVersionAction({
 }
 
 function LibraryOriginalDownloadAction({
+  compactLabel,
   detail,
   downloadingLabel,
   label,
   originalUrl,
 }: {
+  /** History rows: the short visible label, shown like every other History
+   * action (icon alone on narrow screens). The accessible name stays `label`. */
+  compactLabel?: string;
   detail: LibraryItemDetail;
   /** Overrides the default "Download original file" / "Downloading…" pair --
    * e.g. History's per-row action names the specific version instead. */
@@ -2327,6 +2331,24 @@ function LibraryOriginalDownloadAction({
   const resolvedLabel = status === "downloading"
     ? downloadingLabel ?? t("reader.downloadingOriginal", { defaultValue: "Downloading original file…" })
     : label ?? t("reader.downloadOriginal", { defaultValue: "Download original file" });
+  // The History-row form takes exactly HistoryActionButton's classes, so it
+  // sizes and collapses like every other History action rather than like the
+  // reader toolbar's 44px download button.
+  const triggerClassName = compactLabel
+    ? "text-button compact-button history-action"
+    : "icon-button text-button";
+  const triggerContent = (
+    <>
+      <Download
+        aria-hidden="true"
+        className={compactLabel ? "history-action-icon" : undefined}
+        size={16}
+      />
+      <span className={compactLabel ? "history-action-label" : undefined}>
+        {compactLabel && status !== "downloading" ? compactLabel : resolvedLabel}
+      </span>
+    </>
+  );
 
   return (
     <div className="library-reader-download-action">
@@ -2334,27 +2356,27 @@ function LibraryOriginalDownloadAction({
         <button
           aria-busy={status === "downloading"}
           aria-label={resolvedLabel}
-          className="icon-button text-button"
+          className={triggerClassName}
           disabled={status === "downloading"}
           onClick={() => void downloadOriginal()}
+          title={compactLabel ? resolvedLabel : undefined}
           type="button"
         >
-          <Download size={16} aria-hidden="true" />
-          <span>{resolvedLabel}</span>
+          {triggerContent}
         </button>
       ) : (
         <a
           aria-label={resolvedLabel}
-          className="icon-button text-button"
+          className={triggerClassName}
           download
           href={originalUrl}
           onClick={(event) => {
             if (!confirmOriginalDownload()) event.preventDefault();
           }}
           rel="noreferrer"
+          title={compactLabel ? resolvedLabel : undefined}
         >
-          <Download size={16} aria-hidden="true" />
-          <span>{resolvedLabel}</span>
+          {triggerContent}
         </a>
       )}
       {error ? (
@@ -2428,6 +2450,9 @@ function LibraryHistory({ detail }: { detail: LibraryItemDetail }) {
             actions={
               version.original_download_available && version.original_url ? (
                 <LibraryOriginalDownloadAction
+                  compactLabel={t("reader.history.downloadShort", {
+                    defaultValue: "Download",
+                  })}
                   detail={detail}
                   downloadingLabel={t("reader.history.downloadingVersion", {
                     defaultValue: "Downloading this version…",

@@ -188,7 +188,9 @@
   "history": {
     "noVersionHistory": "No version history yet.",
     "clearSelection": "Clear selection",
+    "clearShort": "Clear",
     "selectVersion": "Select version",
+    "selectShort": "Select",
     "versionUnavailable": "The selected Agent version is unavailable.",
     "failedRestore": "Failed to restore Agent version",
     "restore": "Restore this version",

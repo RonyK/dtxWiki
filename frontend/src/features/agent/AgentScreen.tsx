@@ -2,9 +2,12 @@ import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import type { TFunction } from "i18next";
 import {
   Bot,
+  Eye,
+  EyeOff,
   FileText,
   Power,
   RefreshCw,
+  RotateCcw,
   Settings2,
   ShieldAlert,
   X,
@@ -70,6 +73,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { Dialog } from "../../shared/components/Dialog";
 import {
+  HistoryActionButton,
   HistoryCard,
   HistoryChangesButton,
   HistoryChangesUnavailable,
@@ -2643,6 +2647,9 @@ function AgentHistory({
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
+  // One restore at a time for the whole tab, whichever version or pair is on
+  // screen: every Restore, the dialog's pickers and its Close wait on this.
+  const restoring = restoreVersionId !== null;
   const versions = useMemo(() => history?.versions ?? [], [history?.versions]);
   const versionNodes = useMemo(() => agentHistoryNodes(versions), [versions]);
   const historyGraph = useMemo(
@@ -2700,6 +2707,9 @@ function AgentHistory({
   }, [pair]);
 
   function openPair(candidate: VersionPair) {
+    if (restoring) {
+      return;
+    }
     const normalized = normalizeVersionPair(versionNodes, candidate);
     if (normalized?.from) {
       setPair({ from: normalized.from, to: normalized.to });
@@ -2708,7 +2718,7 @@ function AgentHistory({
 
   async function restoreVersion(version: AgentVersionEntry) {
     // Restoring the version you are already on just stacks an identical one.
-    if (version.is_current) {
+    if (version.is_current || restoring) {
       return;
     }
     const ok = window.confirm(
@@ -2765,45 +2775,50 @@ function AgentHistory({
       <HistoryCard
         actions={
           <>
-            <button
-              className="text-button compact-button"
+            <HistoryActionButton
+              accessibleLabel={
+                selected
+                  ? t("history.clearSelection", {
+                      defaultValue: "Clear selection",
+                    })
+                  : t("history.selectVersion", {
+                      defaultValue: "Select version",
+                    })
+              }
+              icon={selected ? EyeOff : Eye}
+              label={
+                selected
+                  ? t("history.clearShort", { defaultValue: "Clear" })
+                  : t("history.selectShort", { defaultValue: "Select" })
+              }
               onClick={() =>
                 onSelectVersion(selected ? null : version.version_id)
               }
-              type="button"
-            >
-              {selected
-                ? t("history.clearSelection", {
-                    defaultValue: "Clear selection",
-                  })
-                : t("history.selectVersion", {
-                    defaultValue: "Select version",
-                  })}
-            </button>
+            />
             {/* Restoring the version already being read would only stack an
                 identical one, so the current row never offers it. */}
             {canEdit && !open && !version.is_current ? (
-              <button
-                aria-busy={restoreVersionId === version.version_id}
-                className="text-button compact-button"
-                disabled={restoreVersionId === version.version_id}
+              <HistoryActionButton
+                accessibleLabel={t("history.restore", {
+                  defaultValue: "Restore this version",
+                })}
+                busy={restoreVersionId === version.version_id}
+                disabled={restoring}
+                icon={RotateCcw}
+                label={
+                  restoreVersionId === version.version_id
+                    ? t("history.restoring", { defaultValue: "Restoring" })
+                    : tShell("history.restoreShort", { defaultValue: "Restore" })
+                }
                 onClick={() => void restoreVersion(version)}
-                type="button"
-              >
-                {restoreVersionId === version.version_id
-                  ? t("history.restoring", { defaultValue: "Restoring" })
-                  : t("history.restore", {
-                      defaultValue: "Restore this version",
-                    })}
-              </button>
+              />
             ) : null}
             {changes ? (
               <HistoryChangesButton
-                baseVersionNo={row.parent?.versionNo ?? null}
                 loading={loadingVersionId === version.version_id}
                 onToggle={() => (open ? setPair(null) : openPair(changes))}
                 open={open}
-                versionNo={version.version_no}
+                row={row}
               />
             ) : null}
           </>
@@ -2890,11 +2905,7 @@ function AgentHistory({
               : undefined
           }
           pair={pair}
-          parentOf={(versionId) =>
-            versionNodes.find((node) => node.id === versionId)?.parentId ??
-            null
-          }
-          restoreDisabled={restoreVersionId === pair.to}
+          restoreDisabled={restoring}
           versions={versionNodes}
         />
       ) : null}

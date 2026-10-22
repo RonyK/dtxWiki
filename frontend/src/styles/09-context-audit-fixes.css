@@ -632,11 +632,14 @@
   overflow-wrap: anywhere;
 }
 
-/* Ends never touch by accident: the discard action anchors the left edge
-   (`order: -1` plus the auto margin after it), Changes anchors the right
-   (`order: 1`), and whatever restore/reconcile/select buttons exist land
-   between them in source order. `:empty` covers the row with nothing to show
-   (the current head with no parent to measure its changes against). */
+/* Buttons sit in source order from the left -- select, restore/reconcile,
+   Changes -- so a given action is in the same place on every row. The one
+   destructive action, Discard, is rendered last and pushed to the right edge
+   by its auto margin; it must not reorder or displace the shared buttons
+   (an earlier `order: -1` on it shifted every other button right on just the
+   rows that had it, and made focus order disagree with the visual order).
+   `:empty` covers the row with nothing to show (the current head with no
+   parent to measure its changes against). */
 .history-graph-card-content .history-card-actions {
   margin-top: 8px;
   border-top: 1px solid var(--border);
@@ -658,14 +661,18 @@
 }
 
 .history-graph-card-content .history-card-actions .danger-action {
-  order: -1;
-  margin-inline-end: auto;
+  margin-inline-start: auto;
 }
 
-.history-graph-card-content
-  .history-card-actions
-  .history-changes-action {
-  order: 1;
+/* Every History row action (HistoryActionButton, and Library's download in
+   its History-row form) is an icon plus a short label. The full name lives in
+   aria-label and title, so the label can go on narrow screens below. */
+.history-card-actions .history-action {
+  gap: 6px;
+}
+
+.history-action-icon {
+  flex: none;
 }
 
 @media (max-width: 720px) {
@@ -700,6 +707,25 @@
   .history-graph-card-content {
     padding: 8px 10px 10px;
     margin-bottom: 6px;
+  }
+
+  /* Phones: the icon alone, in the 44px square the touch-target floor asks
+     for, so a row's three actions share one line instead of stacking. */
+  .history-card-actions .history-action {
+    justify-content: center;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .history-card-actions .history-action-label {
+    display: none;
+  }
+
+  .history-card-actions .history-action-icon {
+    width: 18px;
+    height: 18px;
   }
 
   /* 260913: the two-column body doesn't have room for both the summary

@@ -1191,6 +1191,18 @@ describe("ContextScreen", () => {
     expect(
       within(panel).getAllByRole("button", { name: "Discard" }),
     ).toHaveLength(1);
+    // Discard comes after the buttons every row shares, so a row that can be
+    // discarded keeps Restore and Changes where every other row has them.
+    // (Visible text is the short label; the full names are the accessible
+    // names the rest of this suite queries by.)
+    const discardActions = within(panel)
+      .getByRole("button", { name: "Discard" })
+      .closest(".history-card-actions") as HTMLElement;
+    expect(
+      Array.from(discardActions.querySelectorAll("button")).map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Restore", "Changes", "Discard"]);
   });
 
   it("discards a preserved alternative with an explicit reason", async () => {

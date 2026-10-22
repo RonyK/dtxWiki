@@ -188,7 +188,9 @@
   "history": {
     "noVersionHistory": "아직 버전 기록이 없습니다.",
     "clearSelection": "선택 해제",
+    "clearShort": "선택 해제",
     "selectVersion": "버전 선택",
+    "selectShort": "선택",
     "versionUnavailable": "선택한 Agent 버전을 사용할 수 없습니다.",
     "failedRestore": "Agent 버전 복원 실패",
     "restore": "이 버전 복원",
