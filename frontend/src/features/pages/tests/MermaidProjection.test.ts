@@ -155,26 +155,6 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
         expect(nodeWithSequenceClass).not.toHaveAttribute("stroke");
         expect(nodeWithSequenceClass).not.toHaveAttribute("stroke-width");
       }
-      if (diagramType === "sequence") {
-        const numberMarker = svg?.querySelector('marker[id$="-sequencenumber"]');
-        expect(numberMarker?.querySelector("circle")).toBeInTheDocument();
-        const badgeCarriers = connectors.filter((element) =>
-          element.getAttribute("marker-start")?.includes(`#${numberMarker?.id}`),
-        );
-        expect(badgeCarriers).toHaveLength(3);
-        expect(
-          badgeCarriers.every((element) =>
-            Number(element.getAttribute("stroke-width")) > 0),
-        ).toBe(true);
-        const numbers = Array.from(svg?.querySelectorAll("text.sequenceNumber") ?? []);
-        expect(numbers).toHaveLength(badgeCarriers.length);
-        expect(
-          numbers.every((element) => {
-            const fill = getComputedStyle(element).fill || element.getAttribute("fill");
-            return ["white", "#fff", "#ffffff", "rgb(255, 255, 255)"].includes(fill ?? "");
-          }),
-        ).toBe(true);
-      }
       expect(document.querySelector("body > svg")).toBeNull();
     },
     // This case deliberately drives the real Mermaid parser, layout engines and
@@ -297,6 +277,60 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
         return Boolean(stroke) && stroke !== "none";
       }),
     ).toBe(true);
+  }, 60_000);
+
+  // Sequence diagrams keep most of their chrome in the stylesheet, and Mermaid
+  // stamps placeholder attributes that stylesheet overrode. Each assertion is
+  // a part that rendered wrong once it was stripped: invisible autonumber
+  // badges, activation bars in note yellow, solid frames, black heads, an
+  // outlined highlight block and an outlined actor name.
+  it("restores the sequence chrome the stylesheet painted", async () => {
+    const sequence = await renderRealMermaid(
+      [
+        "sequenceDiagram",
+        "  autonumber",
+        "  actor U as User",
+        "  participant F as Frontend",
+        "  U->>+F: Open",
+        "  alt cached",
+        "    F-->>U: Hit",
+        "  else fresh",
+        "    F--xU: Miss",
+        "  end",
+        "  rect rgb(240, 240, 255)",
+        "    F-\\\\U: Stick half-arrow",
+        "  end",
+        "  deactivate F",
+      ].join(String.fromCharCode(10)),
+    );
+    const attributes = (selector: string, name: string) =>
+      Array.from(sequence.querySelectorAll(selector)).map((element) =>
+        element.getAttribute(name));
+
+    const badgeWidths = attributes('line[marker-start$="-sequencenumber)"]', "stroke-width");
+    expect(badgeWidths).toHaveLength(4);
+    expect(badgeWidths.every((width) => width === "2")).toBe(true);
+    expect(attributes("text.sequenceNumber", "fill")).toEqual(
+      badgeWidths.map(() => "#fff"),
+    );
+
+    expect(attributes("rect.activation0", "fill")).toEqual(["#f4f4f4"]);
+    expect(attributes("rect.activation0", "stroke")).toEqual(["#666"]);
+
+    const frameDashes = attributes("line.loopLine", "stroke-dasharray");
+    expect(frameDashes.length).toBeGreaterThan(0);
+    expect(frameDashes.every((dash) => dash === "2, 2")).toBe(true);
+    expect(attributes("line.loopLine", "stroke-width").every((width) => width === "2"))
+      .toBe(true);
+
+    const headStrokes = attributes("marker path, marker circle", "stroke");
+    expect(headStrokes.length).toBeGreaterThan(0);
+    expect(headStrokes.every((stroke) => stroke === "#64748b")).toBe(true);
+
+    expect(attributes('rect.rect[fill="rgb(240, 240, 255)"]', "stroke"))
+      .toEqual(["none"]);
+    // Top and bottom copies of the actor figure.
+    expect(attributes("text.actor-man", "stroke")).toEqual(["none", "none"]);
   }, 60_000);
 
   // Both halves in one case on purpose: the hollow/filled split IS the UML
