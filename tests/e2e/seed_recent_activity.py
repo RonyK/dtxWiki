@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -48,7 +49,17 @@ def main() -> None:
         if workspace is None or user is None:
             raise RuntimeError("Create the browser user and workspace first")
         user.display_name = USER_NAME
-        now = datetime.now(UTC)
+        # A real <=5-minute group can cross the viewer's midnight while all
+        # members still share the UTC date required by the grouping contract.
+        # Keep every fixture event in the past, including just after midnight.
+        real_now = datetime.now(UTC)
+        local_end = real_now.astimezone(ZoneInfo("Asia/Seoul")).replace(
+            hour=0, minute=1, second=0, microsecond=0
+        )
+        if local_end + timedelta(minutes=1) > real_now:
+            local_end -= timedelta(days=1)
+        read_end = local_end.astimezone(UTC)
+        now = read_end + timedelta(minutes=1)
         client = MCPClient(
             workspace_id=workspace_id,
             name=MCP_NAME,
@@ -100,7 +111,11 @@ def main() -> None:
         session.flush()
         for index in range(5):
             failed = index == 0
-            at = now - timedelta(seconds=20 if failed else index * 60)
+            at = (
+                now - timedelta(seconds=20)
+                if failed
+                else read_end - timedelta(minutes=index - 1)
+            )
             call = MCPToolCall(
                 workspace_id=workspace_id,
                 client_id=client.id,

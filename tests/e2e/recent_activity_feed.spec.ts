@@ -2,8 +2,11 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page, type TestInfo } from "./fixtures";
+import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures";
 import { backendBaseUrl, currentWorkspace, e2ePassword } from "./auth";
+
+// The seeded group spans local midnight without crossing its UTC date.
+test.use({ timezoneId: "Asia/Seoul" });
 
 type Seed = { page_id: string; review_id: string; page_title: string; review_title: string; user_name: string; mcp_name: string };
 
@@ -17,16 +20,54 @@ async function setup(page: Page, info: TestInfo): Promise<Seed & { workspaceId: 
   return { ...seed, workspaceId: workspace.id };
 }
 
+async function expectDisjoint(first: Locator, second: Locator) {
+  const a = await first.boundingBox();
+  const b = await second.boundingBox();
+  expect(a).not.toBeNull();
+  expect(b).not.toBeNull();
+  const width = Math.max(0, Math.min(a!.x + a!.width, b!.x + b!.width) - Math.max(a!.x, b!.x));
+  const height = Math.max(0, Math.min(a!.y + a!.height, b!.y + b!.height) - Math.max(a!.y, b!.y));
+  expect(width * height, "activity content and controls must not overlap").toBeLessThan(.1);
+}
+
+async function expandTechnicalGroup(group: Locator) {
+  const technical = group.locator(":scope > .activity-entry__layout .activity-entry__technical");
+  await technical.locator("summary").click();
+  await expect(technical).toHaveAttribute("open", "");
+  const toggle = group.locator(".activity-read-group__toggle");
+  await expectDisjoint(technical.locator("dl"), toggle);
+  await toggle.click();
+  await expect(group.locator(".activity-read-group__list > li")).toHaveCount(4);
+  const members = group.locator(".activity-read-group__members");
+  await expectDisjoint(technical, members);
+  await expectDisjoint(toggle, members);
+  const member = group.locator(".activity-read-group__list > li").first();
+  const memberTechnical = member.locator(".activity-entry__technical");
+  await memberTechnical.locator("summary").click();
+  await expect(memberTechnical).toHaveAttribute("open", "");
+  await expectDisjoint(memberTechnical.locator("dl"), member.locator(".activity-entry__title-link"));
+  await expectDisjoint(memberTechnical.locator("dl"), member.locator(".activity-entry__times"));
+}
+
 async function metrics(page: Page) {
   return page.locator(".activity-feed-entry").evaluateAll(entries => ({
     overflow: document.documentElement.scrollWidth - innerWidth,
     rows: entries.filter(e => e.getClientRects().length).map(entry => {
       const identity = entry.querySelector(".activity-entry__identity")!;
       const type = identity.querySelector<HTMLElement>(".activity-entry__type")!;
-      const actor = identity.querySelector<HTMLElement>(".activity-actor-disclosure");
+      // Expanded group members do not repeat the group's actor.
+      const rendered = identity.querySelector<HTMLElement>(".activity-actor-disclosure");
+      const actor = rendered?.getClientRects().length ? rendered : null;
       const chip = actor?.querySelector<HTMLElement>(".activity-actor-split,.activity-actor-pill");
       const heading = entry.querySelector<HTMLElement>(".activity-entry__heading");
       const title = entry.querySelector<HTMLElement>(".activity-entry__title-link");
+      const status = entry.querySelector<HTMLElement>(".activity-entry__trailing > .activity-action-badge,.activity-entry__review-link");
+      const times = entry.querySelector<HTMLElement>(".activity-entry__times");
+      const statusBox = status?.getBoundingClientRect();
+      const timeBox = times?.getBoundingClientRect();
+      const footerOverlap = statusBox && timeBox
+        ? Math.max(0, Math.min(statusBox.right, timeBox.right) - Math.max(statusBox.left, timeBox.left))
+          * Math.max(0, Math.min(statusBox.bottom, timeBox.bottom) - Math.max(statusBox.top, timeBox.top)) : 0;
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = 1;
       const ctx = canvas.getContext("2d")!;
@@ -56,6 +97,9 @@ async function metrics(page: Page) {
         chipHeight: chip?.getBoundingClientRect().height,
         actorHeight: actor?.getBoundingClientRect().height, actorWidth: actor?.getBoundingClientRect().width,
         titleHeight: title?.getBoundingClientRect().height,
+        footerOverlap,
+        controlHeights: [...entry.querySelectorAll<HTMLElement>(".activity-entry__review-link,.activity-entry__fallback > a,.activity-entry__technical > summary,.activity-read-group__toggle,.activity-read-group__collapse,.activity-read-group__retry")]
+          .filter(target => target.getClientRects().length).map(target => target.getBoundingClientRect().height),
         titleFont: heading ? getComputedStyle(heading).fontSize : null,
         // Firefox's float32 document coordinates can differ by 0.00003px at
         // an identical CSS boundary. Compare physical pixels and retain the
@@ -112,11 +156,11 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   await expect(names).toHaveCount(0);
-  await group.locator(".activity-read-group__toggle").click();
-  await expect(group.locator(".activity-read-group__list > li")).toHaveCount(4);
+  await expandTechnicalGroup(group);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
   const expanded = await metrics(page);
   expect(expanded.overflow).toBe(0);
+  expect(expanded.rows.flatMap(row => row.controlHeights).every(height => height >= 24)).toBeTruthy();
   expect(expanded.rows.every(row => row.typeFirst && row.overlap === 0)).toBeTruthy();
   expect(expanded.rows.every(row => row.chipToTitle === null || Math.abs(row.chipToTitle - 4) < .1)).toBeTruthy();
   const expandedPath = info.outputPath("expanded-read-group.png");
@@ -157,6 +201,9 @@ for (const language of ["en", "ko"]) {
       for (const route of ["/dashboard?period=all", "/activity?period=all&kind=workspace", "/activity/history?period=all&kind=workspace"]) {
         await page.goto(route);
         await expect(page.locator('[data-entry-type="read_group"]')).toHaveCount(1);
+        const range = page.locator('[data-entry-type="read_group"] .activity-entry__time-range');
+        await expect(range).toContainText(/\d{4}-\d{2}-\d{2} 23:58/);
+        await expect(range).toContainText(/\d{4}-\d{2}-\d{2} 00:01/);
         const measurement = await metrics(page);
         expect(measurement.overflow).toBe(0);
         expect(measurement.rows.every(row => row.typeFirst && row.typeWeight === "700" && row.typeFont === "11px")).toBeTruthy();
@@ -164,14 +211,20 @@ for (const language of ["en", "ko"]) {
         expect(measurement.rows.every(row => row.typeContrast >= 4.5 && row.badgeContrasts.every(ratio => ratio >= 4.5))).toBeTruthy();
         expect(measurement.rows.every(row => row.actorGap === null || Math.abs(row.actorGap - 8) < .1)).toBeTruthy();
         expect(measurement.rows.every(row => row.chipToTitle === null || Math.abs(row.chipToTitle - 4) < .1)).toBeTruthy();
-        expect(measurement.rows.every(row => row.actorHeight === undefined || (row.actorHeight >= 44 && row.actorWidth! >= 44))).toBeTruthy();
+        expect(measurement.rows.every(row => row.actorHeight === undefined || (row.actorHeight === 24 && row.actorWidth! >= 24))).toBeTruthy();
         expect(measurement.rows.every(row => row.chipHeight === undefined || row.chipHeight === 22)).toBeTruthy();
-        expect(measurement.rows.every(row => row.titleHeight === undefined || row.titleHeight >= 44)).toBeTruthy();
-        expect(measurement.rows.every(row => row.overlap === 0)).toBeTruthy();
+        expect(measurement.rows.every(row => row.titleHeight === undefined || row.titleHeight >= 24)).toBeTruthy();
+        expect(measurement.rows.every(row => row.overlap === 0 && row.footerOverlap < .1)).toBeTruthy();
+        expect(measurement.rows.flatMap(row => row.controlHeights).every(height => height >= 24)).toBeTruthy();
         expect(measurement.rows.flatMap(row => row.labels).every(label => label.nowrap === "nowrap" && label.ellipsis === "ellipsis")).toBeTruthy();
         evidence.push({ language, width, route, ...measurement });
         const prefix = `${language}-${width}-${route.split('?')[0].replaceAll('/', '-')}`;
         await page.locator('[data-entry-type="read_group"]').screenshot({ path: info.outputPath(`${prefix}-light.png`) });
+        if (language === "en" && width === 1440 && route.startsWith("/dashboard")) {
+          const group = page.locator('[data-entry-type="read_group"]');
+          await expandTechnicalGroup(group);
+          await group.screenshot({ path: info.outputPath(`${prefix}-expanded-details.png`) });
+        }
         await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
         const dark = await metrics(page);
         expect(dark.overflow).toBe(0);
@@ -214,14 +267,28 @@ test.describe("touch activity disclosures", () => {
     await page.addInitScript(() => localStorage.setItem("dtxwiki.uiLanguage", "ko"));
     await page.goto("/dashboard?period=all");
     const group = page.locator('[data-entry-type="read_group"]');
+    await expect(group).toBeVisible();
+    const targets = await metrics(page);
+    expect(targets.rows.every(row => row.actorHeight === undefined || row.actorHeight === 24)).toBeTruthy();
+    expect(targets.rows.flatMap(row => row.controlHeights).every(height => height >= 24)).toBeTruthy();
     await group.locator(".activity-actor-disclosure").tap();
     const names = page.getByRole("dialog");
     await expect(names).toContainText(seed.mcp_name);
     await expect(names).toContainText(seed.user_name);
     await names.getByRole("button").tap();
     await expect(names).toHaveCount(0);
+    // A failed member lookup exposes the retry control in the same compact
+    // row; retry then reaches the real backend rather than a success fixture.
+    await page.route("**/activity/read-group?*", route => route.fulfill({
+      status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Temporarily unavailable" }),
+    }), { times: 1 });
     await group.locator(".activity-read-group__toggle").tap();
+    const retry = group.locator(".activity-read-group__retry");
+    await expect(retry).toBeVisible();
+    expect((await retry.boundingBox())!.height).toBe(24);
+    await retry.tap();
     await expect(group.locator(".activity-read-group__list > li")).toHaveCount(4);
+    expect((await group.locator(".activity-read-group__collapse").boundingBox())!.height).toBe(24);
     await group.locator(".activity-read-group__collapse").tap();
     await expect(group.locator(".activity-read-group__members")).toBeHidden();
     await page.locator(".activity-entry__review-link").tap();

@@ -1,5 +1,5 @@
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
-import { X } from "lucide-react";
+import { Cog, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -171,11 +171,14 @@ export function ActivityActorBadge({ actor }: { actor: ActivityItem["actor"] }) 
       >
         {actor.actor_kind === "mcp_client" ? (
           <span className="activity-actor-split">
-            {owner && <span className="activity-actor-split__owner"><span>{owner}</span></span>}
+            {owner && <span className="activity-actor-split__owner"><UserRound className="activity-actor-icon" aria-hidden="true" size={12} /><span>{owner}</span></span>}
             <span className="activity-actor-split__ai"><span>{name}</span></span>
           </span>
         ) : (
           <span className="activity-actor-pill" data-actor={actor.actor_kind === "agent" || actor.actor_kind === "system" ? actor.actor_kind : "human"}>
+            {actor.actor_kind === "system"
+              ? <Cog className="activity-actor-icon" aria-hidden="true" size={12} />
+              : actor.actor_kind !== "agent" && <UserRound className="activity-actor-icon" aria-hidden="true" size={12} />}
             <span>{name}</span>
           </span>
         )}

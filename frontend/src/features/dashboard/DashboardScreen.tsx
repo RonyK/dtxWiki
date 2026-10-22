@@ -372,7 +372,7 @@ export function DashboardScreen() {
               ) : null}
             </div>
           ) : (
-            <div className="operations-list">
+            <div className="operations-list activity-feed-list">
               {preview.map((entry) => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}
             </div>
           )}

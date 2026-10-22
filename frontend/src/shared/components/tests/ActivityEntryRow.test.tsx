@@ -25,10 +25,16 @@ describe("shared activity entry", () => {
     const { container } = show(entry());
     const identity = container.querySelector(".activity-entry__identity")!;
     expect(identity.firstElementChild).toHaveTextContent("Context");
+    expect(identity.firstElementChild).toHaveAttribute("data-kind", "context");
+    expect(identity.firstElementChild?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(identity.lastElementChild?.tagName).toBe("BUTTON");
     expect(screen.getByRole("link", { name: "Read Guide" })).toHaveAttribute("href", "/context?target=page-1");
     expect(container.querySelectorAll("a a, a button, button a, button button")).toHaveLength(0);
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
+  });
+  it.each([["human", "lucide-user-round"], ["system", "lucide-cog"]] as const)("marks a %s actor with its own glyph on the shared neutral chip", (actor_kind, glyph) => {
+    const { container } = show(entry({ actor: { actor_kind, display_name: "Actor", actor_id: "actor-1", is_current_user: false } }));
+    expect(container.querySelector(`.activity-actor-pill[data-actor="${actor_kind}"] svg.${glyph}`)).not.toBeNull();
   });
   it("shows both full names by focus/click and closes with Escape without navigating", async () => {
     const user = userEvent.setup();
@@ -187,6 +193,8 @@ describe("repeated read disclosure", () => {
     const member = entry({ id: "member-1" }).event;
     const load = vi.fn().mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce([member]);
     const { container } = show(grouped, load);
+    // A same-day group range drops the repeated date.
+    expect(container.querySelector(".activity-entry__time-range")?.textContent).toMatch(/^\d{2}:\d{2} – \d{2}:\d{2}$/);
     expect(load).not.toHaveBeenCalled();
     const expand = screen.getByRole("button", { name: "Expand 4 original events" });
     await user.click(expand);

@@ -598,32 +598,36 @@
   margin-top: 0;
 }
 
-/* Identity pill: who did this. A single tone for human/agent/system; split in
-   two for an MCP actor (see .activity-actor-split below). */
+/* Identity pill: who did this. People and the system are neutral and told
+   apart by their glyph; color stays with sections (type icons), the AI half of
+   an MCP actor and status. Tokens come from the shared palette as-is. */
 .activity-actor-pill {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   height: 22px;
   padding: 0 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--av-tone) 15%, var(--surface));
-  color: color-mix(in srgb, var(--av-tone) 62%, var(--ink));
+  background: var(--av-bg);
+  color: var(--av-ink);
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.activity-actor-pill[data-actor="human"] {
-  --av-tone: var(--context);
+.activity-actor-pill[data-actor="human"],
+.activity-actor-pill[data-actor="system"] {
+  --av-bg: var(--surface-active);
+  --av-ink: var(--ink);
+  padding-left: 7px;
 }
 
 .activity-actor-pill[data-actor="agent"] {
-  --av-tone: var(--library);
+  --av-bg: var(--library-soft);
+  --av-ink: var(--library-text);
 }
 
-.activity-actor-pill[data-actor="system"] {
-  --av-tone: var(--ink-muted);
-}
+.activity-actor-icon { flex: none; color: var(--ink-muted); }
 
 /* An MCP client's identity is two facts, not one: who granted the access, and
    which registered AI ran under it. Splitting one pill in half (rather than
@@ -642,18 +646,19 @@
 .activity-actor-split__owner {
   display: inline-flex;
   align-items: center;
-  padding: 0 9px 0 10px;
-  background: color-mix(in srgb, var(--context) 15%, var(--surface));
-  color: color-mix(in srgb, var(--context) 62%, var(--ink));
+  gap: 4px;
+  padding: 0 9px 0 7px;
+  background: var(--surface-active);
+  color: var(--ink);
 }
 
 .activity-actor-split__ai {
   display: inline-flex;
   align-items: center;
   padding: 0 10px 0 9px;
-  border-left: 1px solid color-mix(in srgb, var(--agent) 32%, var(--border));
-  background: color-mix(in srgb, var(--agent) 16%, var(--surface));
-  color: color-mix(in srgb, var(--agent) 62%, var(--ink));
+  border-left: 1px solid var(--border-strong);
+  background: var(--agent-soft);
+  color: var(--agent-text);
 }
 
 /* An MCP client with no owner on record (legacy key, deleted user) has only
@@ -1618,54 +1623,70 @@ a.search-disambiguation-candidate:hover {
   flex: 1;
 }
 
-/* Shared Dashboard / Activity feed. Identity, navigation and disclosure are
-   separate targets; the visible chip ends 4px above the title line box. */
-.activity-feed-entry {
-  min-width: 0;
+/* Shared Dashboard / Activity feed. One list surface; each entry is a row grid
+   with the meta line (type -> actor | status) above the title (| time), the
+   description, and one line of secondary controls. The wrappers keep their
+   DOM roles but give up their boxes, so every part takes a cell of the row.
+   Visible spacing follows the plan (chip -> title 4px, title -> description
+   4px); row targets stay 24px for pointer and touch input. */
+.activity-feed-list {
+  gap: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
 }
+.activity-feed-list > .activity-feed-entry + .activity-feed-entry { border-top: 1px solid var(--border); }
+.activity-feed-list > .activity-feed-entry:first-child { border-top-left-radius: 9px; border-top-right-radius: 9px; }
+.activity-feed-list > .activity-feed-entry:last-child { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
 
-.activity-entry__layout {
+.activity-feed-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px 16px;
-  padding: 16px 20px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  column-gap: 16px;
   min-width: 0;
+  padding: 16px 20px;
+  background: var(--surface);
 }
+.activity-feed-entry :is(.activity-entry__layout, .activity-entry__body, .activity-entry__trailing, .activity-entry__review-footer, .activity-read-group) { display: contents; }
 
-.activity-entry__layout--review { grid-template-columns: minmax(0, 1fr); }
-.activity-entry__body { min-width: 0; }
 .activity-entry__identity {
+  grid-column: 1 / 4;
+  grid-row: 1;
   display: flex;
   align-items: flex-end;
   gap: 8px;
   min-width: 0;
+  min-height: 24px;
 }
-.activity-entry__identity:has(.activity-actor-disclosure) { min-height: 44px; margin-top: -12px; }
 .activity-entry__type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex: 0 0 auto;
   max-width: 45%;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   padding-bottom: 3px;
   color: var(--activity-type-ink, #475569);
   font-size: 11px;
   line-height: 16px;
   font-weight: 700;
 }
+.activity-entry__type > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Section icons repeat the sidebar's glyph and palette color for the type. */
+.activity-entry__type-icon { flex: none; color: var(--activity-type-icon, var(--ink-muted)); }
+.activity-entry__type[data-kind="context"] { --activity-type-icon: var(--context); }
+.activity-entry__type[data-kind="library"] { --activity-type-icon: var(--library); }
+.activity-entry__type[data-kind="agent"] { --activity-type-icon: var(--agent); }
+.activity-entry__type[data-kind="review"] { --activity-type-icon: var(--review); }
 
 .activity-actor-disclosure {
   display: inline-flex;
   align-items: flex-end;
   flex: 0 1 auto;
-  min-width: 44px;
+  min-width: 24px;
   max-width: 100%;
-  height: 44px;
+  height: 24px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -1675,7 +1696,8 @@ a.search-disambiguation-candidate:hover {
   text-align: start;
 }
 .activity-actor-disclosure :is(.activity-actor-pill, .activity-actor-split) { min-width: 0; max-width: 100%; }
-.activity-actor-disclosure .activity-actor-pill { padding-inline: 9px; }
+.activity-actor-disclosure .activity-actor-pill { padding-right: 9px; }
+.activity-actor-disclosure .activity-actor-pill[data-actor="agent"] { padding-left: 9px; }
 .activity-actor-disclosure .activity-actor-pill > span {
   min-width: 0;
   max-width: 14ch;
@@ -1687,10 +1709,11 @@ a.search-disambiguation-candidate:hover {
   display: flex;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: calc(14ch + 18px);
-  padding-inline: 9px;
+  max-width: calc(14ch + 30px);
+  padding-right: 9px;
 }
-.activity-actor-disclosure .activity-actor-split__ai { max-width: calc(12ch + 18px); }
+.activity-actor-disclosure .activity-actor-split__ai { max-width: calc(12ch + 18px); padding-left: 9px; }
+.activity-actor-disclosure .activity-actor-split__ai:only-child { padding-left: 10px; }
 .activity-actor-disclosure :is(.activity-actor-split__owner, .activity-actor-split__ai) > span {
   min-width: 0;
   overflow: hidden;
@@ -1718,24 +1741,39 @@ a.search-disambiguation-candidate:hover {
 .activity-actor-popover dd:last-child, .activity-entry__technical dd:last-child { margin-bottom: 0; }
 
 .activity-entry__title-link, .activity-entry__plain-title {
+  grid-column: 1 / 4;
+  grid-row: 2;
   display: grid;
   align-content: start;
   gap: 4px;
   max-width: 100%;
-  padding-top: 4px;
+  margin-top: 4px;
   color: var(--ink);
   font-size: 14px;
   line-height: 22px;
-  font-weight: 650;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
-.activity-entry__title-link { width: fit-content; min-height: 44px; border-radius: 5px; }
+.activity-entry__title-link { width: fit-content; min-height: 24px; border-radius: 5px; }
 .activity-entry__heading { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .activity-entry__heading > svg { flex: none; margin-top: 4px; }
 .activity-entry__description { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 18px; font-weight: 400; }
-.activity-entry__trailing { display: grid; justify-items: end; align-content: start; gap: 8px; padding-top: 8px; min-width: 0; }
-.activity-entry__times { display: grid; justify-items: end; gap: 4px; color: var(--ink-muted); font-size: 11px; line-height: 16px; }
-.activity-entry__time-range { max-width: 150px; text-align: end; overflow-wrap: anywhere; }
+.activity-entry__times {
+  grid-column: 4;
+  grid-row: 2 / span 2;
+  display: grid;
+  justify-items: end;
+  align-self: start;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+.activity-entry__time-range { max-width: 100%; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; text-align: end; }
+.activity-entry__time-range > time { white-space: nowrap; }
 .activity-action-badge {
   --activity-action-tone: var(--ink-soft);
   display: inline-flex;
@@ -1753,6 +1791,7 @@ a.search-disambiguation-candidate:hover {
   font-weight: 600;
   white-space: nowrap;
 }
+.activity-entry__trailing > .activity-action-badge { grid-column: 4; grid-row: 1; justify-self: end; align-self: end; }
 .activity-action-badge svg { flex: none; }
 .activity-action-badge[data-action="edited"] { --activity-action-tone: #1d4ed8; }
 .activity-action-badge[data-action="created"] { --activity-action-tone: #0f766e; }
@@ -1762,26 +1801,42 @@ a.search-disambiguation-candidate:hover {
 .activity-action-badge[data-action="reviewed"] { --activity-action-tone: #0e7490; }
 .activity-action-badge[data-action="failed"] { --activity-action-tone: #b91c1c; }
 .activity-action-badge:is([data-action="pending"], [data-action="partial"], [data-action="accepted"]) { --activity-action-tone: #92400e; }
-.activity-entry__review-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; margin-top: 8px; }
-.activity-entry__review-link { display: inline-flex; align-items: center; flex: none; min-height: 44px; border-radius: 5px; }
-.activity-entry__fallback { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 18px; }
+/* A pending review's link takes the status cell every other row uses. */
+.activity-entry__review-link { grid-column: 4; grid-row: 1; justify-self: end; align-self: end; display: inline-flex; align-items: center; min-height: 24px; border-radius: 5px; }
+.activity-entry__fallback { grid-column: 1 / 4; grid-row: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 18px; }
 .activity-entry__fallback > span, .activity-entry__fallback > a { display: inline-flex; align-items: center; gap: 5px; }
-.activity-entry__fallback > a { min-height: 44px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); }
-.activity-entry__technical { margin-top: 4px; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
-.activity-entry__technical > summary { width: fit-content; min-height: 44px; align-content: center; cursor: pointer; border-radius: 5px; }
-.activity-entry__technical > dl { padding: 8px 12px; border-radius: 6px; background: var(--surface-subtle); overflow-wrap: anywhere; }
+.activity-entry__fallback > a { min-height: 24px; border-radius: 5px; color: var(--activity-link-ink, var(--context)); }
+/* Secondary controls share one quiet line under the title block. */
+.activity-entry__technical { grid-column: 1; grid-row: 4; margin-top: 8px; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
+.activity-entry__technical > summary { width: fit-content; min-height: 24px; line-height: 24px; cursor: pointer; border-radius: 5px; }
+.activity-entry__technical[open] { grid-column: 1 / -1; }
+.activity-entry__technical > dl { margin-top: 6px; padding: 8px 12px; border-radius: 6px; background: var(--surface-subtle); overflow-wrap: anywhere; }
 
 .activity-read-group__toggle, .activity-read-group__collapse, .activity-read-group__retry {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 0 8px;
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 8px;
   border: 0; border-radius: 5px; background: transparent; color: var(--activity-link-ink, var(--context)); font-size: 12px; line-height: 18px; cursor: pointer;
 }
-.activity-read-group__toggle { margin: 0 12px 8px; }
-.activity-read-group__members { margin: 0 20px 16px; padding-left: 12px; border-left: 2px solid var(--border); }
+.activity-read-group__toggle { grid-column: 2; grid-row: 4; justify-self: start; margin-top: 8px; padding: 0; }
+.activity-feed-entry:not(:has(> .activity-entry__layout .activity-entry__technical)) .activity-read-group__toggle { grid-column: 1; }
+/* Open details occupy the full row; the group's own controls follow them.
+   Scope the match to this entry so nested member details do not move it. */
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__toggle { grid-column: 1 / -1; grid-row: 5; }
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 6; }
+/* Expanded members: an inset panel (no left bar). Members share the group's
+   actor, target and action, so each repeats neither chip nor badge. */
+.activity-read-group__members { grid-column: 1 / -1; grid-row: 5; margin: 12px 0 0; padding: 4px 0; border-radius: 8px; background: var(--surface-subtle); }
 .activity-read-group__members[hidden] { display: none; }
-.activity-read-group__message { padding: 8px 0; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
-.activity-read-group__list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.activity-read-group__list .activity-feed-entry { border: 0; background: var(--surface-subtle); }
-.activity-read-group__list .activity-entry__layout { padding: 12px; }
+.activity-read-group__message { padding: 8px 16px; color: var(--ink-soft); font-size: 12px; line-height: 18px; }
+.activity-read-group__list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.activity-read-group__list .activity-feed-entry { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; padding: 8px 16px; background: var(--surface-subtle); }
+.activity-read-group__list li + li .activity-feed-entry { border-top: 1px solid var(--border); }
+.activity-read-group__list :is(.activity-entry__identity, .activity-action-badge) { display: none; }
+.activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1; grid-row: 1; margin: 0; font-size: 13px; line-height: 20px; font-weight: 500; }
+.activity-read-group__list .activity-entry__technical { grid-column: 2; grid-row: 1; margin: 0; }
+.activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; margin-top: 6px; }
+.activity-read-group__list .activity-entry__times { grid-column: 3; grid-row: 1; margin: 0; }
+.activity-read-group__list .activity-entry__fallback { grid-column: 1 / -1; grid-row: 2; }
+.activity-read-group__collapse { margin: 0 8px; }
 
 .activity-feed-panel { min-width: 0; }
 .activity-feed-counts { color: var(--ink-soft); font-size: 12px; line-height: 18px; }
@@ -1802,23 +1857,42 @@ a.search-disambiguation-candidate:hover {
 }
 
 @media (max-width: 700px) {
-  .activity-entry__layout { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 8px; }
-  .activity-entry__trailing { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 0; }
-  .activity-entry__time-range { max-width: 180px; }
-  .activity-read-group__members { margin-inline: 16px; }
-  .activity-read-group__toggle { margin-inline: 8px; }
-  .activity-read-group__list .activity-entry__layout { padding: 12px; }
+  .activity-feed-entry { padding: 14px 16px; column-gap: 12px; }
+  .activity-entry__identity,
+  .activity-entry__title-link,
+  .activity-entry__plain-title,
+  .activity-entry__fallback { grid-column: 1 / -1; }
+  /* A wrapped title keeps its chevron after the last word. */
+  .activity-entry__heading { display: inline; }
+  .activity-entry__heading > svg { display: inline; vertical-align: -2px; margin: 0 0 0 4px; }
+  /* The plan's mobile footer: status on the left, time on the right. */
+  .activity-entry__trailing > .activity-action-badge,
+  .activity-entry__review-link { grid-column: 1 / 3; grid-row: 6; justify-self: start; align-self: center; margin-top: 8px; }
+  .activity-entry__times { grid-column: 3 / -1; grid-row: 6; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; justify-self: end; align-self: center; gap: 0 8px; margin-top: 8px; }
+  .activity-read-group__members,
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 7; }
+  /* Cross-date ranges need their own line; short same-day ranges keep the
+     compact status/time footer above. Whole timestamp ends wrap as a unit. */
+  .activity-entry__times[data-range-spans-days] { grid-column: 1 / -1; grid-row: 7; width: 100%; margin-top: 4px; }
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__times[data-range-spans-days]) > .activity-read-group > .activity-read-group__members { grid-row: 8; }
+  .activity-read-group__list .activity-feed-entry { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; padding: 8px 12px; }
+  .activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1 / -1; }
+  .activity-read-group__list .activity-entry__technical { grid-column: 1; grid-row: 2; }
+  .activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; }
+  .activity-read-group__list .activity-entry__times { grid-column: 2; grid-row: 2; align-self: center; }
 }
 
 /* Component-scoped dark context. The application has no global dark-theme
    switch; these tokens cover both the feed surface and its portaled names.
-   Actor chips retain A's 700 weight and original purple/amber/teal tones. */
+   Actor chips keep their 700 weight; the neutral person/system chip uses the
+   dark --surface-active below. */
 [data-theme="dark"] .activity-feed-panel,
 [data-theme="dark"] .activity-actor-popover {
   color-scheme: dark;
   --surface: #111827;
   --surface-subtle: #192438;
   --surface-hover: #243247;
+  --surface-active: #2b3a52;
   --border: #42516a;
   --border-strong: #64748b;
   --ink: #f1f5f9;
