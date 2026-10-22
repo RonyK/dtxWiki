@@ -1945,44 +1945,80 @@
   pointer-events: none;
 }
 
+/* DECISION (2026-10-23, user-directed -- do not make it hoverable again):
+   the row tooltip is a read-only label that never takes the pointer, wherever
+   it opens. The inverted dark style, unlike the white menu and popover cards
+   that hold controls, is what tells users it cannot be reached.
+   - Placement: beside the rail, so it covers no other row. A drawer with no
+     room beside it falls back below or above its row (useTreeRowTooltip).
+   - Moving the pointer onto it leaves the row and closes it; a downward
+     sweep always reaches the next row, and the wheel always scrolls the rail.
+   - Accepted trade-off: pointer-magnifier users cannot move onto its text
+     (WCAG 1.4.13 hoverable, failure F95). Keyboard focus still opens it and
+     Escape closes it.
+   History: 3a001f1e made it pointer-transparent below the row; d81de271
+   moved it beside the rail for a review and briefly made it hoverable there,
+   which this decision reverses. */
 .tree-row-tooltip {
   position: fixed;
   z-index: 80;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
   max-width: min(320px, calc(100vw - 16px));
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .tree-row-tooltip-content {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  max-height: calc(100dvh - 18px);
-  overflow-y: auto;
+  gap: 2px;
+  padding: 6px 9px;
 }
 
-/* The transparent hit area joins the row and popup without a hover timeout.
- * Keep it outside the scrolling surface so the six-pixel gap is enterable. */
-.tree-row-tooltip::before {
-  content: "";
+/* The popup cannot be scrolled, so a long title ends in an ellipsis. The hook
+   lowers the line count when the side the popup opens on is short. */
+.tree-row-tooltip-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--tree-tooltip-title-lines, 4);
+  overflow: hidden;
+  font-weight: 600;
+}
+
+.tree-row-tooltip-status {
+  color: color-mix(in srgb, var(--surface) 78%, var(--ink));
+}
+
+/* The hook slides the arrow along the edge facing the row to the row's
+   middle; each placement pins it to that edge. */
+.tree-row-tooltip-arrow {
   position: absolute;
-  left: -1px;
-  right: -1px;
-  bottom: 100%;
-  height: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: inherit;
+  transform: rotate(45deg);
 }
 
-.tree-row-tooltip[data-placement^="top"]::before {
-  top: 100%;
-  bottom: auto;
+.tree-row-tooltip[data-placement^="right"] .tree-row-tooltip-arrow {
+  left: -4px;
+}
+
+.tree-row-tooltip[data-placement^="left"] .tree-row-tooltip-arrow {
+  right: -4px;
+}
+
+.tree-row-tooltip[data-placement^="bottom"] .tree-row-tooltip-arrow {
+  top: -4px;
+}
+
+.tree-row-tooltip[data-placement^="top"] .tree-row-tooltip-arrow {
+  bottom: -4px;
 }
 
 body:has(.tree-node-menu) .tree-row-tooltip {

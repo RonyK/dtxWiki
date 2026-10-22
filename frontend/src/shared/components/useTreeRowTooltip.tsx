@@ -1,4 +1,4 @@
-import { autoUpdate, computePosition, flip, hide, offset, shift, size } from "@floating-ui/dom";
+import { arrow, autoUpdate, computePosition, flip, hide, offset, shift, size } from "@floating-ui/dom";
 import type { MouseEvent } from "react";
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -8,6 +8,9 @@ import type { TreeNodePayload } from "../api/workspace";
 import { treeNodeStatusDescription } from "./treeNodeStatus";
 
 type TooltipOwner = { element: HTMLElement; nodeId: string; direction: "ltr" | "rtl" };
+
+// Matches the CSS default of --tree-tooltip-title-lines.
+const TITLE_MAX_LINES = 4;
 
 // A focused row in another rail must not leave a second popup behind when a
 // pointer or keyboard user starts reading a different row.
@@ -49,6 +52,7 @@ export function useTreeRowTooltip({
   const [owner, setOwner] = useState<TooltipOwner | null>(null);
   const ownerRef = useRef<TooltipOwner | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
+  const arrowRef = useRef<HTMLSpanElement | null>(null);
   const pointerWithinRef = useRef(false);
   const pointerPositionRef = useRef({ x: 0, y: 0 });
   const suppressionReleaseRef = useRef<(() => void) | null>(null);
@@ -79,10 +83,12 @@ export function useTreeRowTooltip({
     setOwner((current) => current?.element === element ? current : next);
   }
 
+  // DECISION (2026-10-23, user-directed -- do not add the popup back): the
+  // tooltip never takes the pointer (see .tree-row-tooltip in
+  // 04-knowledge.css), so only the owner row is the hover region. Moving the
+  // pointer onto the popup leaves the row and closes it.
   function pointerWithin(target: EventTarget | null) {
-    return target instanceof Node && Boolean(
-      ownerRef.current?.element.contains(target) || popupRef.current?.contains(target),
-    );
+    return target instanceof Node && Boolean(ownerRef.current?.element.contains(target));
   }
 
   function leave(event: MouseEvent<HTMLElement>) {
@@ -120,18 +126,31 @@ export function useTreeRowTooltip({
         dismiss();
         return;
       }
+      // The whole row is the reference, so a deeply indented row whose title
+      // is clipped still keeps its popup while the row itself is visible.
       void computePosition(owner.element, popup, {
-        placement: "bottom-start",
+        // Beside the rail, so it covers no other row. A drawer with no room
+        // beside it falls back below or above its row.
+        placement: owner.direction === "rtl" ? "left-start" : "right-start",
         strategy: "fixed",
         middleware: [
-          offset(6), flip({ padding: 8 }),
+          offset(8),
+          flip({ padding: 8, crossAxis: false, fallbackPlacements: ["bottom-start", "top-start"] }),
+          // Before size, so a popup beside the rail may use the full height.
+          shift({ padding: 8 }),
           size({ padding: 8, apply: ({ availableHeight, elements }) => {
             // A full title can be taller than either side of its row. Keep
-            // the popup beside its owner and let its content scroll to fit.
-            const content = elements.floating.querySelector<HTMLElement>(".tree-row-tooltip-content");
-            if (content) content.style.maxHeight = `${Math.max(0, availableHeight - 2)}px`;
+            // the popup beside its owner by dropping title lines, which then
+            // end in an ellipsis, until the rest of the popup fits.
+            const titleText = elements.floating.querySelector<HTMLElement>(".tree-row-tooltip-title");
+            const lineHeight = titleText ? Number.parseFloat(getComputedStyle(titleText).lineHeight) : NaN;
+            if (!titleText || !(lineHeight > 0)) return;
+            const chrome = elements.floating.getBoundingClientRect().height - titleText.getBoundingClientRect().height;
+            const lines = Math.min(TITLE_MAX_LINES, Math.max(1, Math.floor((availableHeight - chrome) / lineHeight)));
+            elements.floating.style.setProperty("--tree-tooltip-title-lines", String(lines));
           } }),
-          shift({ padding: 8 }), hide({ strategy: "referenceHidden" }),
+          ...(arrowRef.current ? [arrow({ element: arrowRef.current, padding: 6 })] : []),
+          hide({ strategy: "referenceHidden" }),
         ],
       }).then(({ x, y, placement, middlewareData }) => {
         if (disposed || currentRevision !== revision) return;
@@ -142,6 +161,12 @@ export function useTreeRowTooltip({
         popup.style.left = `${x}px`;
         popup.style.top = `${y}px`;
         popup.dataset.placement = placement;
+        // The arrow slides along the popup edge facing the row; CSS pins it to
+        // that edge per placement.
+        if (arrowRef.current) {
+          arrowRef.current.style.left = middlewareData.arrow?.x != null ? `${middlewareData.arrow.x}px` : "";
+          arrowRef.current.style.top = middlewareData.arrow?.y != null ? `${middlewareData.arrow.y}px` : "";
+        }
       });
     };
     // Tracks scrollable ancestors, viewport resize, row/content resize, layout
@@ -159,7 +184,7 @@ export function useTreeRowTooltip({
     const handlePointerMove = (event: globalThis.PointerEvent) => {
       pointerPositionRef.current = { x: event.clientX, y: event.clientY };
       // WebKit can omit mouseleave when expanding a row replaces its hovered
-      // chevron SVG. The next real target reconciles row and popup ownership.
+      // chevron SVG. The next real target reconciles row ownership.
       pointerWithinRef.current = pointerWithin(event.target);
       if (!pointerWithinRef.current && !owner.element.contains(document.activeElement)) dismiss();
     };
@@ -210,14 +235,13 @@ export function useTreeRowTooltip({
         role="tooltip"
         dir={owner.direction}
         className="tree-row-tooltip"
-        data-placement="bottom-start"
-        style={{ left: Math.max(8, rect.left), top: rect.bottom + 6 }}
-        onMouseEnter={() => { pointerWithinRef.current = true; }}
-        onMouseLeave={leave}
+        data-placement="right-start"
+        style={{ left: rect.right + 8, top: rect.top }}
       >
+        <span ref={arrowRef} className="tree-row-tooltip-arrow" aria-hidden="true" />
         <div className="tree-row-tooltip-content">
-          <strong>{node.title}</strong>
-          {status ? <span>{status}</span> : null}
+          <strong className="tree-row-tooltip-title">{node.title}</strong>
+          {status ? <span className="tree-row-tooltip-status">{status}</span> : null}
         </div>
       </div>, document.body,
     ) : null,
