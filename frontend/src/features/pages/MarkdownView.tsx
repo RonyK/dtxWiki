@@ -1554,13 +1554,27 @@ function normalizeMermaidSvgDimensions(root: Element) {
 
 function normalizeMermaidSvgTypography(root: Element) {
   setMermaidSvgTypography(root);
+  const isSequence = mermaidDiagramFamily(root) === "sequence";
 
   for (const element of Array.from(root.querySelectorAll("text, tspan"))) {
-    setMermaidSvgTypography(element);
+    let fontSize = MERMAID_FONT_SIZE;
+    if (isSequence && element.matches("text.sequenceNumber")) {
+      // Mermaid shrinks long numbers to fit a fixed-size badge. Keep those
+      // renderer sizes while normalizing the font family with other labels.
+      const badgeFontSize = element.getAttribute("font-size") ?? "";
+      const size = Number.parseFloat(badgeFontSize);
+      if (
+        /^\d+(?:\.\d+)?px$/.test(badgeFontSize) &&
+        size > 0 && size <= Number.parseFloat(MERMAID_FONT_SIZE)
+      ) {
+        fontSize = badgeFontSize;
+      }
+    }
+    setMermaidSvgTypography(element, fontSize);
   }
 }
 
-function setMermaidSvgTypography(element: Element) {
+function setMermaidSvgTypography(element: Element, fontSize = MERMAID_FONT_SIZE) {
   const style = (element as SVGElement).style;
   const preservedFontProperties = [
     "font-style",
@@ -1584,9 +1598,9 @@ function setMermaidSvgTypography(element: Element) {
     }
   }
   element.setAttribute("font-family", MERMAID_FONT_FAMILY);
-  element.setAttribute("font-size", MERMAID_FONT_SIZE);
+  element.setAttribute("font-size", fontSize);
   style.setProperty("font-family", MERMAID_FONT_FAMILY);
-  style.setProperty("font-size", MERMAID_FONT_SIZE);
+  style.setProperty("font-size", fontSize);
 }
 
 function removeMermaidInlineStyleProperties(
@@ -1640,6 +1654,8 @@ const MERMAID_CONNECTOR_STROKE = "#64748b";
 const MERMAID_SEQUENCE_MESSAGE_CLASSES = new Set(["messageLine0", "messageLine1"]);
 const MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH = "1.5";
 const MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH = "2";
+// The restored badge has a 24px diameter; leave 2px inside each edge.
+const MERMAID_SEQUENCE_NUMBER_TEXT_LENGTH = "20";
 
 // Mermaid 11.16.1 neutral-theme values for the sequence chrome its stylesheet
 // painted. Actors and lifelines already carry Mermaid's own greys as
@@ -1652,6 +1668,8 @@ const MERMAID_SEQUENCE_ACTIVATION_CLASSES = new Set([
 ]);
 const MERMAID_SEQUENCE_ACTIVATION_FILL = "#f4f4f4";
 const MERMAID_SEQUENCE_ACTIVATION_STROKE = "#666";
+const MERMAID_SEQUENCE_ACTOR_FILL = "#eee";
+const MERMAID_SEQUENCE_ACTOR_STROKE = "#d4d4d4";
 const MERMAID_SEQUENCE_FRAME_STROKE = "#d4d4d4";
 const MERMAID_SEQUENCE_FRAME_STROKE_WIDTH = "2";
 const MERMAID_SEQUENCE_FRAME_DASHARRAY = "2, 2";
@@ -1701,17 +1719,35 @@ const MERMAID_SEQUENCE_FALLBACK_RULES: MermaidFallbackRule[] = [
   },
   {
     applies: (element) => element.matches("text.sequenceNumber"),
-    apply: (element) => setSvgAttributeIfMissing(element, "fill", "#fff"),
+    apply: (element) => {
+      setSvgAttributeIfMissing(element, "fill", "#fff");
+      // Inter's digits are wider than Mermaid's sans-serif digits. Even the
+      // renderer's reduced font sizes can overflow with four or more digits.
+      if ((element.textContent?.length ?? 0) > 3) {
+        setSvgAttributeIfMissing(element, "textLength", MERMAID_SEQUENCE_NUMBER_TEXT_LENGTH);
+        setSvgAttributeIfMissing(element, "lengthAdjust", "spacingAndGlyphs");
+      }
+    },
   },
   {
-    // Every sequence marker is a message head or an autonumber badge, which
-    // the stylesheet drew in the signal colour. Two hard-code black instead:
+    // Sequence message heads, control-participant heads, and autonumber
+    // badges use the connector colour. Two hard-code black instead:
     // the crosshead (`#000000`, which that stylesheet overrode) and the stick
     // half-arrows (`black`, close to Mermaid's dark signal but not to ours).
     applies: (element) =>
       MERMAID_MARKER_SHAPE_TAGS.has(element.localName.toLowerCase()) &&
       element.closest("marker") !== null,
     apply: (element) => element.setAttribute("stroke", MERMAID_CONNECTOR_STROKE),
+  },
+  {
+    applies: (element) => element.matches("g.actor"),
+    apply: (element) => {
+      // Queue and database bodies are plain paths that inherit `.actor`
+      // styles. Restore the group so their bodies do not default to black,
+      // and keep inline group styles ahead of the fallback attributes.
+      setSvgAttributeIfMissing(element, "fill", MERMAID_SEQUENCE_ACTOR_FILL);
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_ACTOR_STROKE);
+    },
   },
   {
     applies: (element) =>

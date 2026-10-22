@@ -6,10 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { MarkdownView } from "../MarkdownView";
 
 const REAL_MERMAID_FIXTURES = [
-  [
-    "flowchart",
-    "flowchart LR\n  A[Alpha] --> B[Beta]\n  class A messageLine0",
-  ],
+  ["flowchart", "flowchart LR\n  A[Alpha] --> B[Beta]"],
   [
     "sequence",
     "sequenceDiagram\n  autonumber\n  participant A as Alpha\n  participant B as Beta\n  A->>B: Hello\n  B-->>A: Reply\n  A-->>A: Self call",
@@ -85,7 +82,7 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
 
   it.each(REAL_MERMAID_FIXTURES)(
     "renders %s with positive intrinsic SVG geometry",
-    async (diagramType, source) => {
+    async (_diagramType, source) => {
       const { container } = render(
         createElement(MarkdownView, {
           body: `\`\`\`mermaid\n${source}\n\`\`\``,
@@ -122,7 +119,12 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
       expect(height).toBeGreaterThan(0);
       expect(textElements.length).toBeGreaterThan(0);
       expect(
-        textElements.every((element) => element.getAttribute("font-size") === "13px"),
+        textElements.filter((element) => !element.matches(".sequenceNumber"))
+          .every((element) => element.getAttribute("font-size") === "13px"),
+      ).toBe(true);
+      expect(
+        textElements.filter((element) => element.matches(".sequenceNumber"))
+          .every((element) => element.getAttribute("font-size") === "12px"),
       ).toBe(true);
       expect(
         textElements.every((element) =>
@@ -149,12 +151,6 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
           return !stroke || stroke === "none" || stroke === "transparent";
         }).map((element) => element.outerHTML),
       ).toEqual([]);
-      if (diagramType === "flowchart") {
-        const nodeWithSequenceClass = svg?.querySelector("g.node.messageLine0");
-        expect(nodeWithSequenceClass).toBeInTheDocument();
-        expect(nodeWithSequenceClass).not.toHaveAttribute("stroke");
-        expect(nodeWithSequenceClass).not.toHaveAttribute("stroke-width");
-      }
       expect(document.querySelector("body > svg")).toBeNull();
     },
     // This case deliberately drives the real Mermaid parser, layout engines and
@@ -222,8 +218,12 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
   // label; asserting only the flowchart half is what shipped the ER bug.
   it("centres node labels only for the family whose stylesheet does", async () => {
     const flowchart = await renderRealMermaid(
-      "flowchart LR\n  A[Alpha] --> B[Beta]",
+      "flowchart LR\n  A[Alpha] --> B[Beta]\n  class A messageLine0",
     );
+    const nodeWithSequenceClass = flowchart.querySelector("g.node.messageLine0");
+    expect(nodeWithSequenceClass).toBeInTheDocument();
+    expect(nodeWithSequenceClass).not.toHaveAttribute("stroke");
+    expect(nodeWithSequenceClass).not.toHaveAttribute("stroke-width");
     const flowchartLabels = Array.from(flowchart.querySelectorAll("text"))
       .filter((text) => text.closest(".node"));
     expect(flowchartLabels.length).toBeGreaterThan(0);
@@ -288,9 +288,11 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
     const sequence = await renderRealMermaid(
       [
         "sequenceDiagram",
-        "  autonumber",
+        "  autonumber 999",
         "  actor U as User",
         "  participant F as Frontend",
+        '  participant Q@{ "type": "queue", "alias": "Queue" }',
+        '  participant D@{ "type": "database", "alias": "Database" }',
         "  U->>+F: Open",
         "  alt cached",
         "    F-->>U: Hit",
@@ -298,6 +300,7 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
         "    F--xU: Miss",
         "  end",
         "  rect rgb(240, 240, 255)",
+        "    autonumber 100000",
         "    F-\\\\U: Stick half-arrow",
         "  end",
         "  deactivate F",
@@ -313,6 +316,33 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
     expect(attributes("text.sequenceNumber", "fill")).toEqual(
       badgeWidths.map(() => "#fff"),
     );
+    expect(attributes("text.sequenceNumber", "font-size"))
+      .toEqual(["12px", "9px", "9px", "7px"]);
+    const badgeNumbers = Array.from(sequence.querySelectorAll("text.sequenceNumber"));
+    expect(badgeNumbers.map((number) => number.textContent))
+      .toEqual(["999", "1000", "1001", "100000"]);
+    expect(badgeNumbers.map((number) => (number as SVGElement).style.fontSize))
+      .toEqual(["12px", "9px", "9px", "7px"]);
+    expect(attributes("text.sequenceNumber", "textLength"))
+      .toEqual([null, "20", "20", "20"]);
+    expect(attributes("text.sequenceNumber", "lengthAdjust"))
+      .toEqual([null, "spacingAndGlyphs", "spacingAndGlyphs", "spacingAndGlyphs"]);
+    const regularLabels = Array.from(sequence.querySelectorAll("text:not(.sequenceNumber), tspan"));
+    expect(regularLabels.length).toBeGreaterThan(0);
+    expect(regularLabels.every((label) => label.getAttribute("font-size") === "13px"))
+      .toBe(true);
+
+    // Queue and database shapes use unclassified paths inside CSS-painted
+    // actor groups. Check both mirrored copies so neither loses its fill.
+    const pathActors = Array.from(sequence.querySelectorAll("g.actor.actor-top, g.actor.actor-bottom"));
+    expect(pathActors).toHaveLength(4);
+    expect(pathActors.filter((actor) => actor.matches(".actor-top"))).toHaveLength(2);
+    expect(pathActors.flatMap((actor) => Array.from(actor.querySelectorAll("path"))))
+      .toHaveLength(6);
+    expect(pathActors.every((actor) => actor.getAttribute("fill") === "#eee"))
+      .toBe(true);
+    expect(pathActors.every((actor) => actor.getAttribute("stroke") === "#d4d4d4"))
+      .toBe(true);
 
     expect(attributes("rect.activation0", "fill")).toEqual(["#f4f4f4"]);
     expect(attributes("rect.activation0", "stroke")).toEqual(["#666"]);
