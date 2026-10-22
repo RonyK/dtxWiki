@@ -1264,7 +1264,12 @@ describe("MarkdownView", () => {
       svg: [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80">',
         "<style>.messageLine0{stroke:#334155;fill:none;}</style>",
-        '<line class="messageLine0" x1="0" y1="0" x2="20" y2="20" />',
+        // Mermaid 11.16.1 stamps stroke="none" and leaves colour to the
+        // stylesheet stripped above; without the overwrite only arrowheads show.
+        '<line class="messageLine0" x1="0" y1="0" x2="20" y2="20"',
+        ' stroke-width="2" stroke="none" style="fill: none;" />',
+        '<line class="messageLine1" x1="0" y1="40" x2="20" y2="40"',
+        ' stroke-width="2" stroke="none" style="stroke-dasharray: 3, 3; fill: none;" />',
         '<text font-size="16px" font-family="serif"',
         ' style="font:italic 700 16px serif;text-anchor:start">',
         '<tspan font-size="18px" style="font-size:18px">Sequence label</tspan>',
@@ -1282,10 +1287,16 @@ describe("MarkdownView", () => {
     expect(await screen.findByText("Sequence label")).toBeInTheDocument();
     const diagram = document.querySelector(".mermaid-diagram");
     expect(diagram?.querySelector("style")).not.toBeInTheDocument();
-    expect(diagram?.querySelector("line.messageLine0"))
-      .toHaveAttribute("stroke", "#64748b");
-    expect(diagram?.querySelector("line.messageLine0"))
-      .toHaveAttribute("fill", "none");
+    for (const selector of ["line.messageLine0", "line.messageLine1"]) {
+      const line = diagram?.querySelector(selector);
+      expect(line).toHaveAttribute("stroke", "#64748b");
+      expect(line).toHaveAttribute("stroke-width", "1.5");
+      expect(line).toHaveAttribute("fill", "none");
+    }
+    expect(
+      (diagram?.querySelector("line.messageLine1") as SVGElement).style
+        .getPropertyValue("stroke-dasharray"),
+    ).toBe("3, 3");
     const svg = diagram?.querySelector(".mermaid-diagram-svg > svg");
     const text = diagram?.querySelector("text");
     const tspan = diagram?.querySelector("tspan");

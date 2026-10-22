@@ -1654,13 +1654,22 @@ const MERMAID_MARKER_SHAPE_TAGS = new Set([
   "rect",
 ]);
 
+// Sequence message lines (solid `messageLine0`, dotted `messageLine1`) are the
+// one connector Mermaid 11.16.1 ships with `stroke="none"` as an attribute,
+// leaving the colour to its `.messageLine0/1` stylesheet rule. Once that rule
+// is stripped, the fill-if-missing connector rule keeps the `none`, and only
+// the arrowhead markers stay visible. So these alone get their stroke
+// overwritten, at the stylesheet's 1.5 width. Other `stroke="none"` attributes
+// (gantt axis text, wardley markers) are intentional and stay untouched.
+const MERMAID_SEQUENCE_MESSAGE_CLASSES = new Set(["messageLine0", "messageLine1"]);
+
 function mermaidMarkerFill(marker: Element, isEntityRelationship: boolean) {
   // ER hollows out every cardinality end at once: its stylesheet overrides
   // the shared base with `.marker { fill: none !important }`.
   if (isEntityRelationship) {
     return "none";
   }
-  const classes = (marker.getAttribute("class") ?? "").split(/s+/);
+  const classes = (marker.getAttribute("class") ?? "").split(/\s+/);
   const id = marker.getAttribute("id") ?? "";
   const hollow = MERMAID_HOLLOW_MARKER_WORDS.some(
     (word) => classes.includes(word) || id.includes(word),
@@ -1712,6 +1721,14 @@ function applyMermaidFallbackStyles(root: Element) {
     ) {
       setSvgAttributeIfMissing(element, "fill", "#f8fafc");
       setSvgAttributeIfMissing(element, "stroke", "#334155");
+    }
+    if (
+      className
+        .split(/\s+/)
+        .some((name) => MERMAID_SEQUENCE_MESSAGE_CLASSES.has(name))
+    ) {
+      element.setAttribute("stroke", "#64748b");
+      element.setAttribute("stroke-width", "1.5");
     }
     if (
       ["line", "polyline"].includes(tagName) ||
