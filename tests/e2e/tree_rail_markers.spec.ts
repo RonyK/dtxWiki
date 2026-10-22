@@ -45,15 +45,17 @@ type Fixture = {
 
 const RECENT_MS = 72 * 60 * 60 * 1000;
 const VIEWPORTS = [
-  { key: "desktop-280px-rail", width: 1280, height: 900 },
-  { key: "mobile-390px", width: 390, height: 844 },
+  { key: "desktop-280px-rail", width: 1280, height: 900, tooltipBesideRail: true },
+  // The drawer leaves no room beside it, so the tooltip opens below or above
+  // and lets the pointer through to the rows it covers.
+  { key: "mobile-390px", width: 390, height: 844, tooltipBesideRail: false },
 ] as const;
 // Firefox DOMRect rounding is below 1/65536 CSS px.
 const GEOMETRY_EPSILON = 0.001;
 
 test.describe("TreeRail document states and personal favorites @cross-browser", () => {
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.key}: status tooltip lets the pointer through to the rows underneath, dismisses with Escape, and follows native scrolling`, async ({ page }, testInfo) => {
+    test(`${viewport.key}: status tooltip leaves a downward sweep to the next row, is hoverable beside the rail, dismisses with Escape, and follows native scrolling`, async ({ page }, testInfo) => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
       await authenticatePage(page, testInfo, `tree-tooltip-${viewport.key}`);
@@ -86,22 +88,48 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       await page.mouse.move(viewport.width - 1, 1);
       await row.hover();
       await expect(tooltip).toBeVisible();
-      // The popup covers the rows next to its owner but is pointer-transparent:
-      // moving onto it hovers the row underneath instead of holding it open.
-      // A wheel over it reaches that row's rail for the same reason, so this
-      // hit test also guards the rail scrolling stopping on the popup.
+      const ownerBox = (await row.boundingBox())!;
       const popupBox = (await tooltip.boundingBox())!;
-      const through = { x: popupBox.x + 16, y: popupBox.y + popupBox.height / 2 };
-      await page.mouse.move(through.x, through.y);
-      const underneath = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)
-        ?.closest(".tree-row")?.querySelector(".tree-row-title")?.textContent ?? "", through);
-      expect(underneath).not.toBe("");
-      expect(underneath).not.toBe(title);
-      await expect(tooltip).toHaveCount(1);
-      await expect(tooltip).toContainText(underneath);
-      await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-pointer-passthrough`, { animations: "disabled" });
-      await page.keyboard.press("Escape");
-      await expect(tooltip).toHaveCount(0);
+      const beside = popupBox.x >= ownerBox.x + ownerBox.width;
+      expect(beside).toBe(viewport.tooltipBesideRail);
+      if (beside) {
+        // Pointer-magnifier users must reach the popup's text (WCAG 1.4.13):
+        // crossing the gap from the row onto the popup keeps it open.
+        const y = ownerBox.y + ownerBox.height / 2;
+        const edge = ownerBox.x + ownerBox.width;
+        for (const x of [edge - 1, (edge + popupBox.x) / 2, popupBox.x + 16]) {
+          await page.mouse.move(x, y);
+          await expect(tooltip).toHaveCount(1);
+          await expect(tooltip).toContainText(title);
+        }
+        await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-pointer-handoff`, { animations: "disabled" });
+        await page.keyboard.press("Escape");
+        await expect(tooltip).toHaveCount(0);
+        // It covers no other row, so a downward sweep reaches the next row.
+        const rows = rail.locator(".tree-row");
+        const ownerId = await row.getAttribute("data-node-id");
+        const next = rows.nth(await rows.evaluateAll((elements, id) =>
+          elements.findIndex((element) => element.getAttribute("data-node-id") === id), ownerId) + 1);
+        await row.hover();
+        await expect(tooltip).toContainText(title);
+        await next.hover();
+        await expect(tooltip).toHaveCount(1);
+        await expect(tooltip).toContainText(await next.locator(".tree-row-title").innerText());
+      } else {
+        // Below or above, the popup covers the next rows but lets the pointer
+        // through: moving onto it hovers the row underneath instead.
+        const through = { x: popupBox.x + 16, y: popupBox.y + popupBox.height / 2 };
+        await page.mouse.move(through.x, through.y);
+        const underneath = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)
+          ?.closest(".tree-row")?.querySelector(".tree-row-title")?.textContent ?? "", through);
+        expect(underneath).not.toBe("");
+        expect(underneath).not.toBe(title);
+        await expect(tooltip).toHaveCount(1);
+        await expect(tooltip).toContainText(underneath);
+        await evidenceScreenshot(page, testInfo, `${viewport.key}-tooltip-pointer-passthrough`, { animations: "disabled" });
+        await page.keyboard.press("Escape");
+        await expect(tooltip).toHaveCount(0);
+      }
 
       // Native PageDown scrolls the focused row out of the rail without any
       // pointer movement. A tooltip belonging to that clipped row must close.

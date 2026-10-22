@@ -1,5 +1,4 @@
 import { arrow, autoUpdate, computePosition, flip, hide, offset, shift, size } from "@floating-ui/dom";
-import type { VirtualElement } from "@floating-ui/dom";
 import type { MouseEvent } from "react";
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -10,11 +9,6 @@ import { treeNodeStatusDescription } from "./treeNodeStatus";
 
 type TooltipOwner = { element: HTMLElement; nodeId: string; direction: "ltr" | "rtl" };
 
-// The popup's text starts at the row title's text: the cross-axis offset
-// cancels the content's inline padding (.tree-row-tooltip-content), and the
-// arrow points at the title's first glyphs, half this anchor width in.
-const TOOLTIP_TEXT_INSET = 9;
-const TITLE_ANCHOR_WIDTH = 14;
 // Matches the CSS default of --tree-tooltip-title-lines.
 const TITLE_MAX_LINES = 4;
 
@@ -89,11 +83,15 @@ export function useTreeRowTooltip({
     setOwner((current) => current?.element === element ? current : next);
   }
 
-  // The popup is transparent to the pointer (CSS pointer-events: none), so
-  // only the owner row counts. Sweeping down the rail reaches the next row and
-  // the wheel scrolls the rail instead of stopping on the popup.
+  // Beside the rail, the popup and its bridge belong to the hover region, so
+  // pointer-magnifier users can move onto its text (WCAG 1.4.13); there it
+  // covers no other row. The narrow-drawer fallback below or above is
+  // pointer-transparent (CSS), so it never becomes a target and a downward
+  // sweep reaches the next row.
   function pointerWithin(target: EventTarget | null) {
-    return target instanceof Node && Boolean(ownerRef.current?.element.contains(target));
+    return target instanceof Node && Boolean(
+      ownerRef.current?.element.contains(target) || popupRef.current?.contains(target),
+    );
   }
 
   function leave(event: MouseEvent<HTMLElement>) {
@@ -120,19 +118,6 @@ export function useTreeRowTooltip({
     }
     let disposed = false;
     let revision = 0;
-    // The row's vertical extent with the title's leading edge: the popup opens
-    // beside the whole row, but starts (and points) where the title starts.
-    const anchor: VirtualElement = {
-      contextElement: owner.element,
-      getBoundingClientRect: () => {
-        const row = owner.element.getBoundingClientRect();
-        const title = owner.element.querySelector(".tree-row-title");
-        if (!title) return row;
-        const text = title.getBoundingClientRect();
-        const start = owner.direction === "rtl" ? text.right - TITLE_ANCHOR_WIDTH : text.left;
-        return new DOMRect(start, row.top, TITLE_ANCHOR_WIDTH, row.height);
-      },
-    };
     const update = () => {
       const currentRevision = ++revision;
       if (!owner.element.isConnected) {
@@ -144,11 +129,18 @@ export function useTreeRowTooltip({
         dismiss();
         return;
       }
-      void computePosition(anchor, popup, {
-        placement: "bottom-start",
+      // The whole row is the reference, so a deeply indented row whose title
+      // is clipped still keeps its popup while the row itself is visible.
+      void computePosition(owner.element, popup, {
+        // Beside the rail, outside the rows. A drawer with no room beside it
+        // falls back below or above its row, where it lets the pointer through.
+        placement: owner.direction === "rtl" ? "left-start" : "right-start",
         strategy: "fixed",
         middleware: [
-          offset({ mainAxis: 8, crossAxis: -TOOLTIP_TEXT_INSET }), flip({ padding: 8 }),
+          offset(8),
+          flip({ padding: 8, crossAxis: false, fallbackPlacements: ["bottom-start", "top-start"] }),
+          // Before size, so a popup beside the rail may use the full height.
+          shift({ padding: 8 }),
           size({ padding: 8, apply: ({ availableHeight, elements }) => {
             // A full title can be taller than either side of its row. Keep
             // the popup beside its owner by dropping title lines, which then
@@ -160,7 +152,6 @@ export function useTreeRowTooltip({
             const lines = Math.min(TITLE_MAX_LINES, Math.max(1, Math.floor((availableHeight - chrome) / lineHeight)));
             elements.floating.style.setProperty("--tree-tooltip-title-lines", String(lines));
           } }),
-          shift({ padding: 8 }),
           ...(arrowRef.current ? [arrow({ element: arrowRef.current, padding: 6 })] : []),
           hide({ strategy: "referenceHidden" }),
         ],
@@ -173,7 +164,12 @@ export function useTreeRowTooltip({
         popup.style.left = `${x}px`;
         popup.style.top = `${y}px`;
         popup.dataset.placement = placement;
-        if (arrowRef.current && middlewareData.arrow?.x != null) arrowRef.current.style.left = `${middlewareData.arrow.x}px`;
+        // The arrow slides along the popup edge facing the row; CSS pins it to
+        // that edge per placement.
+        if (arrowRef.current) {
+          arrowRef.current.style.left = middlewareData.arrow?.x != null ? `${middlewareData.arrow.x}px` : "";
+          arrowRef.current.style.top = middlewareData.arrow?.y != null ? `${middlewareData.arrow.y}px` : "";
+        }
       });
     };
     // Tracks scrollable ancestors, viewport resize, row/content resize, layout
@@ -242,8 +238,10 @@ export function useTreeRowTooltip({
         role="tooltip"
         dir={owner.direction}
         className="tree-row-tooltip"
-        data-placement="bottom-start"
-        style={{ left: Math.max(8, rect.left), top: rect.bottom + 8 }}
+        data-placement="right-start"
+        style={{ left: rect.right + 8, top: rect.top }}
+        onMouseEnter={() => { pointerWithinRef.current = true; }}
+        onMouseLeave={leave}
       >
         <span ref={arrowRef} className="tree-row-tooltip-arrow" aria-hidden="true" />
         <div className="tree-row-tooltip-content">
