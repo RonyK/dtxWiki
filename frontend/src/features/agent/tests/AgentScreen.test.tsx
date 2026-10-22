@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -103,10 +103,10 @@ describe("AgentScreen", () => {
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
         data: {
-          // Two versions: the active one (which offers neither Compare nor
-          // Restore, since both would act on the version already being read)
-          // and a superseded one that does. A single-version timeline would
-          // make the editor/viewer restore assertion below vacuous.
+          // Two versions: the active one (which offers no Restore, since that
+          // would act on the version already being read) and a superseded one
+          // that does. A single-version timeline would make the editor/viewer
+          // restore assertion below vacuous.
           versions: [
             {
               version_id: "version-1",
@@ -1598,8 +1598,9 @@ describe("AgentScreen", () => {
     ).toHaveLength(2);
   });
 
-  it("compares and restores Agent history versions in a diff modal", async () => {
+  it("shows a version's Changes since the previous version and holds one restore from the diff modal", async () => {
     let restored = false;
+    const restoreResponse = deferredResponse();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
@@ -1614,8 +1615,8 @@ describe("AgentScreen", () => {
           data: [
             {
               ...agentPage("agent-1", "persona", "Default Persona"),
-              current_active_version_id: "version-2",
-              latest_draft_version_id: restored ? "version-3" : null,
+              current_active_version_id: "version-3",
+              latest_draft_version_id: restored ? "version-4" : null,
             },
           ],
         });
@@ -1629,11 +1630,11 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: {
             ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nCurrent"),
-            current_active_version_id: "version-2",
+            current_active_version_id: "version-3",
             version_info: {
               ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
-              version_id: "version-2",
-              version_no: 2,
+              version_id: "version-3",
+              version_no: 3,
             },
           },
         });
@@ -1642,12 +1643,12 @@ describe("AgentScreen", () => {
         return jsonResponse({
           data: {
             ...agentDetail("agent-1", "persona", "Default Persona", "# Persona\n\nOriginal"),
-            current_active_version_id: "version-2",
-            latest_draft_version_id: "version-3",
+            current_active_version_id: "version-3",
+            latest_draft_version_id: "version-4",
             version_info: {
               ...agentDetail("agent-1", "persona", "Default Persona", "").version_info,
-              version_id: "version-3",
-              version_no: 3,
+              version_id: "version-4",
+              version_no: 4,
               version_status: "draft",
             },
           },
@@ -1659,13 +1660,12 @@ describe("AgentScreen", () => {
       ) {
         return jsonResponse({
           data: {
-            versions: restored
-              ? [
-                  agentVersion("version-3", 3, "draft"),
-                  agentVersion("version-2", 2, "active_snapshot"),
-                  agentVersion("version-1", 1, "superseded_snapshot"),
-                ]
-              : [agentVersion("version-1", 1, "superseded_snapshot")],
+            versions: [
+              ...(restored ? [agentVersion("version-4", 4, "draft")] : []),
+              agentVersion("version-3", 3, "active_snapshot"),
+              agentVersion("version-2", 2, "superseded_snapshot"),
+              agentVersion("version-1", 1, "superseded_snapshot"),
+            ],
             changesets: [],
             review_decisions: [],
             diffs: null,
@@ -1693,15 +1693,7 @@ describe("AgentScreen", () => {
         init?.method === "POST"
       ) {
         restored = true;
-        return jsonResponse({
-          data: {
-            agent_page_id: "agent-1",
-            draft_version_id: "version-3",
-            change_set_id: "change-restore",
-            review_item_id: null,
-            next_action: "owner_activation_required",
-          },
-        });
+        return restoreResponse.promise;
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1716,46 +1708,73 @@ describe("AgentScreen", () => {
     await userEvent.click(screen.getByRole("tab", { name: /History/ }));
 
     const historyPanel = screen.getByRole("tabpanel", { name: /History/ });
+    const versionTwo = within(historyPanel).getByText("v2").closest(".history-card") as HTMLElement;
+    expect(versionTwo.tagName).toBe("LI");
+    // The first version has nothing before it, so it offers no Changes.
     const versionOne = within(historyPanel).getByText("v1").closest(".history-card") as HTMLElement;
-    expect(versionOne.tagName).toBe("LI");
-    // The active version (v2) is not itself in this timeline, so nothing is
-    // hidden here -- every listed version is a meaningful comparison. The
-    // current-version case is covered separately below.
-    await userEvent.click(within(versionOne).getByRole("button", { name: "Compare" }));
-    const dialog = await screen.findByRole("dialog", { name: "Compare Agent v1 with current" });
+    expect(within(versionOne).queryByRole("button", { name: /Show changes/ })).toBeNull();
+    // Agent versions record no parent -- v2 may have been made from any
+    // earlier head -- so the row names v1 only as the previous version.
+    expect(versionTwo).toHaveTextContent("Previous version: v1");
+    expect(versionTwo).not.toHaveTextContent("Continues from");
+    await userEvent.click(
+      within(versionTwo).getByRole("button", {
+        name: "Show changes in v2 since the previous version, v1",
+      }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Changes in v2 since the previous version, v1",
+    });
     expect(within(dialog).getByText("v1 -> v2")).toBeInTheDocument();
-    expect(within(dialog).getByRole("columnheader", { name: "Previous" }))
+    // Same oldest-first column labels as Context's History.
+    expect(within(dialog).getByRole("columnheader", { name: "Base version (earlier)" }))
       .toBeInTheDocument();
-    expect(within(dialog).getByRole("columnheader", { name: "Current" }))
+    expect(within(dialog).getByRole("columnheader", { name: "Compared version (later)" }))
       .toBeInTheDocument();
-    expect(within(dialog).queryByRole("columnheader", { name: "Base version (earlier)" }))
-      .not.toBeInTheDocument();
-    expect(within(dialog).queryByRole("columnheader", { name: "Compared version (later)" }))
-      .not.toBeInTheDocument();
     expect(within(dialog).getByText("Original")).toBeInTheDocument();
     expect(within(dialog).getAllByText("Current").length).toBeGreaterThan(0);
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Restore this version" }));
 
     expect(confirm).toHaveBeenCalledWith(
-      "Restore Agent v1 as a new draft? The active version stays unchanged.",
+      "Restore Agent v2 as a new draft? The active version stays unchanged.",
+    );
+    const restoreCalls = () =>
+      fetchMock.mock.calls.filter(
+        (call) =>
+          call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/restore`,
+      );
+    await waitFor(() => expect(restoreCalls()).toHaveLength(1));
+    expect(JSON.parse(String(restoreCalls()[0][1]?.body))).toEqual({
+      version_id: "version-2",
+    });
+
+    // While that restore is in flight the lock holds whatever the pickers
+    // say: moving the later end used to re-enable Restore and Close, letting
+    // a second restore start before the first finished.
+    const later = within(dialog).getByRole("combobox", { name: "Later version" });
+    expect(later).toBeDisabled();
+    expect(within(dialog).getByRole("combobox", { name: "Earlier version" })).toBeDisabled();
+    fireEvent.change(later, { target: { value: "version-3" } });
+    expect(dialog).toHaveAccessibleName("Changes in v2 since the previous version, v1");
+    expect(within(dialog).getByRole("button", { name: "Restoring" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Close diff" })).toBeDisabled();
+
+    restoreResponse.resolve(
+      jsonResponse({
+        data: {
+          agent_page_id: "agent-1",
+          draft_version_id: "version-4",
+          change_set_id: "change-restore",
+          review_item_id: null,
+          next_action: "owner_activation_required",
+        },
+      }),
     );
     await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(
-          (call) =>
-            call[0] ===
-            `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/restore`,
-        ),
-      ).toBe(true),
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
-    const restoreCall = fetchMock.mock.calls.find(
-      (call) =>
-        call[0] === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1/restore`,
-    );
-    expect(JSON.parse(String(restoreCall?.[1]?.body))).toEqual({
-      version_id: "version-1",
-    });
+    expect(restoreCalls()).toHaveLength(1);
   });
 
   it("loads the selected Agent history version and returns to the active head", async () => {
@@ -1993,22 +2012,33 @@ describe("AgentScreen", () => {
     const v2 = within(panel).getByText("v2").closest(".history-card") as HTMLElement;
     const v1 = within(panel).getByText("v1").closest(".history-card") as HTMLElement;
 
-    // v3 is the active version this reader is showing, so comparing it with
-    // "current" would diff it against itself and open an empty dialog, and
-    // restoring it would stack an identical version. Both are dropped there.
+    // v3 is the active version this reader is showing: it still has its own
+    // Changes (against v2), but restoring it would only stack an identical
+    // version, so that action is dropped there.
     const v3 = within(panel).getByText("v3").closest(".history-card") as HTMLElement;
-    expect(within(v3).queryByRole("button", { name: "Compare" })).toBeNull();
     expect(within(v3).queryByRole("button", { name: "Restore this version" })).toBeNull();
-    expect(within(v2).getByRole("button", { name: "Compare" })).toBeInTheDocument();
 
-    await userEvent.click(within(v2).getByRole("button", { name: "Compare" }));
-    await userEvent.click(within(v1).getByRole("button", { name: "Compare" }));
+    await userEvent.click(
+      within(v3).getByRole("button", {
+        name: "Show changes in v3 since the previous version, v2",
+      }),
+    );
+    await userEvent.click(
+      within(v2).getByRole("button", {
+        name: "Show changes in v2 since the previous version, v1",
+      }),
+    );
+    expect(within(v1).queryByRole("button", { name: /Show changes/ })).toBeNull();
 
     newerSelectionDiff.resolve(jsonResponse({
-      data: versionDiff("version-1", 1, "Second selection"),
+      data: {
+        ...versionDiff("version-1", 1, "Second selection"),
+        to_version_id: "version-2",
+        to_version_no: 2,
+      },
     }));
     const dialog = await screen.findByRole("dialog", {
-      name: "Compare Agent v1 with current",
+      name: "Changes in v2 since the previous version, v1",
     });
     expect(dialog).toHaveTextContent("Second selection");
 

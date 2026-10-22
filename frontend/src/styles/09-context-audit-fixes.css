@@ -296,10 +296,77 @@
   content: none;
 }
 
-/* Pitch, dot size, and gutter width are computed together per page
-   (historyLaneMetrics) so the widest lane always lands inside the gutter, and
-   the SVG curve coordinates agree with these boxes. --history-lane-pad is the
-   one value both sides hardcode. */
+/* The canvas keeps every lane at a readable size; only its viewport is
+   bounded. One native scrollbar moves all rows together while the cards
+   retain their width. Ordinary graphs need no scroll control. */
+.history-graph {
+  min-width: 0;
+}
+
+.history-graph-scroll-controls {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.history-graph-scroll {
+  width: var(--history-lane-gutter);
+  min-height: 44px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  /* Give pointer users a visible thumb even with native overlay scrollbars. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) var(--surface-subtle);
+}
+
+/* Fallback for engines without scrollbar-width, as on the Library PDF pane. */
+.history-graph-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.history-graph-scroll::-webkit-scrollbar-track {
+  background: var(--surface-subtle);
+}
+
+.history-graph-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+
+.history-graph-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-muted);
+  background-clip: content-box;
+}
+
+.history-graph-scroll:focus-visible {
+  outline: 2px solid var(--reader-accent, var(--context));
+  outline-offset: 2px;
+}
+
+.history-graph-scroll-track {
+  width: var(--history-lane-canvas);
+  height: 28px;
+}
+
+.history-graph-scroll-track > span {
+  position: sticky;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: var(--history-lane-gutter);
+  height: 28px;
+  font-size: 18px;
+}
+
+/* Pitch, dot size, canvas width and SVG coordinates agree. Padding leaves
+   room for the outer dot and its shadow at both ends of the scroll range. */
 .history-graph-list {
   --history-lane-pad: 7px;
   /* Vertical anchors derived from the dot, so a shrunken dot keeps its lines
@@ -340,10 +407,20 @@
   overflow-y: visible;
 }
 
+.history-graph-lanes {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--history-lane-canvas);
+  transform: translateX(calc(0px - var(--history-lane-offset, 0px)));
+}
+
 .history-graph-node,
 .history-graph-line,
 .history-graph-pass-line,
-.history-graph-incoming-line {
+.history-graph-incoming-line,
+.history-graph-stub {
   position: absolute;
   display: block;
   pointer-events: none;
@@ -367,12 +444,26 @@
   box-shadow: 0 0 0 1px var(--border-strong);
 }
 
-.history-graph-line {
-  top: var(--history-lane-line-top);
-  bottom: -1px;
+/* Every edge segment is a 2px line in the lane historyGraph.ts gave it
+   (--history-segment-lane), wearing the colour of the lane that edge travels
+   in. The lane is per segment, never "the parent's lane": routing an edge
+   down its parent's lane is exactly what drew a same-base fork through its
+   sibling's dot (see the HISTORY GRAPH CONTRACT in shared/lib/historyGraph.ts).
+
+   Vertical extents, top to bottom of a row:
+     .history-graph-incoming-line  top boundary -> node centre
+     .history-graph-line           node -> bottom boundary (the edge leaving)
+     .history-graph-pass-line      top boundary -> bottom boundary (passing by)
+   Each overshoots the row by 1px so neighbouring rows' segments overlap
+   instead of leaving a hairline between cards. */
+.history-graph-line,
+.history-graph-pass-line,
+.history-graph-incoming-line,
+.history-graph-stub {
   left: calc(
-    var(--history-lane) * var(--history-lane-pitch, 18px) +
-      var(--history-lane-pad) + var(--history-lane-dot, 12px) / 2 - 1px
+    var(--history-segment-lane, var(--history-lane)) *
+      var(--history-lane-pitch, 18px) + var(--history-lane-pad) +
+      var(--history-lane-dot, 12px) / 2 - 1px
   );
   width: 2px;
   background: color-mix(
@@ -382,21 +473,9 @@
   );
 }
 
-/* Edges may cross more than one newest-first row. Continue the parent's lane
-   through every intervening row and join it to the parent node from above;
-   otherwise a real branch looks like disconnected per-row decoration. */
-.history-graph-pass-line,
-.history-graph-incoming-line {
-  left: calc(
-    var(--history-segment-lane) * var(--history-lane-pitch, 18px) +
-      var(--history-lane-pad) + var(--history-lane-dot, 12px) / 2 - 1px
-  );
-  width: 2px;
-  background: color-mix(
-    in srgb,
-    var(--history-lane-tint, var(--reader-accent, var(--context))) 60%,
-    var(--border)
-  );
+.history-graph-line {
+  top: var(--history-lane-line-top);
+  bottom: -1px;
 }
 
 .history-graph-pass-line {
@@ -409,28 +488,43 @@
   height: calc(var(--history-lane-node-centre) + 1px);
 }
 
-.history-graph-curve {
+/* A lane change happens only inside a fixed-height zone (--history-lane-bend,
+   set from HISTORY_LANE_BEND): at the bottom of the row directly above the
+   edge's target (`|/`), or right below a merge node where the second-parent
+   edge departs into its own lane (`|\`). The straight part of the segment
+   stops where that zone starts, so line and curve meet in one stroke. */
+.history-graph-before-bend {
+  bottom: calc(var(--history-lane-bend, 24px) - 1px);
+}
+
+.history-graph-after-departure {
+  top: calc(
+    var(--history-lane-line-top) + var(--history-lane-bend, 24px) - 1px
+  );
+}
+
+.history-graph-bend,
+.history-graph-departure {
   position: absolute;
-  top: var(--history-lane-line-top);
   right: 0;
   left: 0;
-  /* An <svg> is a replaced element: with a viewBox but no explicit
-     width/height, "top + bottom + height:auto" does NOT stretch it between
-     those insets the way it would a plain div -- the UA instead derives
-     height from the viewBox's intrinsic aspect ratio, which produced a
-     ~47px-tall curve regardless of the row's real (often 150px+) height and
-     left the branch line dangling in empty space. An explicit height forces
-     the box itself to fill the row -- its own top, plus the row's -1px
-     overshoot at the bottom, matching .history-graph-line above;
-     preserveAspectRatio="none" then stretches the path to match. */
-  height: calc(100% + 1px - var(--history-lane-line-top));
   display: block;
   width: 100%;
+  height: var(--history-lane-bend, 24px);
   overflow: visible;
   pointer-events: none;
 }
 
-.history-graph-curve path {
+.history-graph-bend {
+  bottom: -1px;
+}
+
+.history-graph-departure {
+  top: var(--history-lane-line-top);
+}
+
+.history-graph-bend path,
+.history-graph-departure path {
   fill: none;
   stroke: color-mix(
     in srgb,
@@ -442,17 +536,11 @@
   vector-effect: non-scaling-stroke;
 }
 
-/* The reconcile merge edge (git-merge second parent) shares the curve slot
-   with the branch-out curve -- a merge version's row carries both at once --
-   and needs no colour rule of its own: the element carries the tint of the
-   lane it lands on, so the whole merged branch (its dot, its line, the curve
-   that opened it, and this one that closes it) reads as one colour. Its
-   landing stub and pass-through segments are the same shapes a lineage edge
-   uses, so they are plain .history-graph-incoming-line/-pass-line. */
-
-.history-graph-row[data-parent-relation="hidden"] .history-graph-line,
-.history-graph-row[data-parent-relation="missing"] .history-graph-line,
-.history-graph-row[data-parent-relation="older"] .history-graph-line {
+/* An edge whose parent is older than every loaded row keeps its lane, dashed,
+   down to the end of the list (where Load older continues it) -- it never
+   stops short and so can never be read as joining the next node in that
+   lane. */
+.history-graph-unresolved {
   background: repeating-linear-gradient(
     to bottom,
     var(--border-strong) 0 4px,
@@ -460,17 +548,27 @@
   );
 }
 
-/* Scoped off the merge curve: these relations describe whether THIS row's own
-   parent is resolvable, which says nothing about a merge edge that happens to
-   share the row -- and they would otherwise outrank the merge stroke above. */
-.history-graph-row[data-parent-relation="hidden"]
-  .history-graph-curve:not(.history-graph-merge-curve) path,
-.history-graph-row[data-parent-relation="missing"]
-  .history-graph-curve:not(.history-graph-merge-curve) path,
-.history-graph-row[data-parent-relation="older"]
-  .history-graph-curve:not(.history-graph-merge-curve) path {
-  stroke: var(--border-strong);
-  stroke-dasharray: 4 4;
+/* Hidden or missing parent: a short dashed drop ending in a tick, well inside
+   the row (the row is at least 74px tall), so the lane below stays empty and
+   no unrelated version can read as this one's parent. */
+.history-graph-stub {
+  top: var(--history-lane-line-top);
+  height: 14px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--border-strong) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.history-graph-stub::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -3px;
+  width: 8px;
+  height: 2px;
+  background: var(--border-strong);
 }
 
 /* No touch override for .context-version-tag-tip here. It used to force the
@@ -510,38 +608,43 @@
 }
 
 .history-parent-relation,
-.history-compare-unavailable {
+.history-changes-unavailable {
   color: var(--ink-muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
-/* 260913: this used to live in the actions row as a stand-in for the Compare
-   button it replaces there. Moved beside the parent-relation text it
-   explains -- both answer "what can I compare this to" -- so the actions
-   row holds only buttons now. */
-.history-compare-unavailable {
+/* 260913: this used to live in the actions row as a stand-in for the
+   Changes button it replaces there. Moved beside the parent-relation text it
+   explains -- both answer "what is this version's change measured against" --
+   so the actions row holds only buttons now. */
+.history-changes-unavailable {
   display: block;
 }
 
 /* Card internals (260913 design feedback): one emphasized row, two split
-   rows, never a flat button list. Scoped entirely under
-   `.history-graph-card-content` -- `.history-card-title`,
-   `.history-card-author` and `.history-card-actions` are shared with
-   Agent/Library's own flat `.history-card` lists, which keep their current
-   look untouched. */
+   rows, never a flat button list. Scoped under `.history-graph-card-content`,
+   which every History tab (Context, Agent, Library) now renders through the
+   shared HistoryGraphList/HistoryCard, so the three read the same. */
+/* Wraps because the lane gutter beside the card is as wide as the history's
+   real concurrency: with three live forks on a 390px phone the unwrapped row
+   pushed a long state pill ("Current published snapshot") past the card's
+   right edge. Narrowing the gutter by sharing lanes is not the fix (see the
+   HISTORY GRAPH CONTRACT in shared/lib/historyGraph.ts); letting the pill take
+   its own line is. */
 .history-graph-card-content .history-card-title {
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-family: inherit;
 }
 
-.context-history-version {
+.history-card-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 15px;
   font-weight: 700;
 }
 
-.context-history-delta {
+.history-card-delta {
   display: inline-flex;
   gap: 6px;
   margin-left: auto;
@@ -550,7 +653,7 @@
   font-size: 12px;
 }
 
-.context-history-card-body {
+.history-card-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
@@ -558,7 +661,7 @@
   margin-top: 4px;
 }
 
-.context-history-card-summary {
+.history-card-summary {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -605,15 +708,28 @@
   overflow-wrap: anywhere;
 }
 
-/* Ends never touch by accident: the discard action anchors the left edge
-   (`order: -1` plus the auto margin after it), Compare anchors the right
-   (`order: 1`), and whatever restore/reconcile buttons exist land between
-   them in source order. `:empty` covers the row with nothing to show (the
-   current head with no prior version to compare against). */
+/* Buttons sit in source order from the left -- select, restore/reconcile,
+   Changes -- so a given action is in the same place on every row. The one
+   destructive action, Discard, is rendered last and pushed to the right edge
+   by its auto margin; it must not reorder or displace the shared buttons
+   (an earlier `order: -1` on it shifted every other button right on just the
+   rows that had it, and made focus order disagree with the visual order).
+   `:empty` covers the row with nothing to show (the current head with no
+   parent to measure its changes against). */
 .history-graph-card-content .history-card-actions {
   margin-top: 8px;
   border-top: 1px solid var(--border);
   padding-top: 8px;
+}
+
+.history-graph-row.is-selected {
+  background: none;
+  box-shadow: none;
+}
+
+.history-graph-row.is-selected .history-graph-card-content {
+  background: var(--surface-active);
+  box-shadow: inset 3px 0 0 var(--reader-accent, var(--context));
 }
 
 .history-graph-card-content .history-card-actions:empty {
@@ -621,14 +737,18 @@
 }
 
 .history-graph-card-content .history-card-actions .danger-action {
-  order: -1;
-  margin-inline-end: auto;
+  margin-inline-start: auto;
 }
 
-.history-graph-card-content
-  .history-card-actions
-  .context-history-compare-action {
-  order: 1;
+/* Every History row action (HistoryActionButton, and Library's download in
+   its History-row form) is an icon plus a short label. The full name lives in
+   aria-label and title, so the label can go on narrow screens below. */
+.history-card-actions .history-action {
+  gap: 6px;
+}
+
+.history-action-icon {
+  flex: none;
 }
 
 @media (max-width: 720px) {
@@ -665,12 +785,31 @@
     margin-bottom: 6px;
   }
 
+  /* Phones: the icon alone, in the 44px square the touch-target floor asks
+     for, so a row's three actions share one line instead of stacking. */
+  .history-card-actions .history-action {
+    justify-content: center;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .history-card-actions .history-action-label {
+    display: none;
+  }
+
+  .history-card-actions .history-action-icon {
+    width: 18px;
+    height: 18px;
+  }
+
   /* 260913: the two-column body doesn't have room for both the summary
      text and the author block's fixed-width content (avatar + name +
      timestamp, which does not wrap) below ~390px -- found as a real
      Firefox-only horizontal-overflow failure, not a hypothetical. Stack
      instead of sharing the row once there is no room to share. */
-  .context-history-card-body {
+  .history-card-body {
     grid-template-columns: minmax(0, 1fr);
   }
 

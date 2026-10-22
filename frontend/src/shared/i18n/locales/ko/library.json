@@ -198,6 +198,7 @@
       "conversionReady": "문서 변환을 완료했습니다.",
       "sourceVersion": "원본 파일 버전입니다.",
       "downloadVersion": "이 버전 다운로드",
+      "downloadShort": "다운로드",
       "downloadingVersion": "이 버전 다운로드 중…",
       "sourceUnavailable": "원본 파일이 보존되어 있지 않습니다."
     },

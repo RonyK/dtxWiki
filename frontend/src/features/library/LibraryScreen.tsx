@@ -13,6 +13,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -69,6 +70,8 @@ import {
   MoveTreeNodeDialog,
   RenameTreeNodeDialog,
 } from "../../shared/components/TreeNodeActionDialogs";
+import { HistoryCard } from "../../shared/components/HistoryCard";
+import { HistoryGraphList } from "../../shared/components/HistoryGraphList";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RecentItemsList } from "../../shared/components/RecentItemsList";
@@ -89,8 +92,10 @@ import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
+import { buildHistoryGraph } from "../../shared/lib/historyGraph";
 import { isAbortError } from "../../shared/lib/abortError";
 import { createUuidV4 } from "../../shared/lib/uuidV4";
+import { libraryHistoryNodes } from "./libraryHistory";
 import {
   UploadQueue,
   type ResilientUploadQueueStatus,
@@ -2239,11 +2244,15 @@ function LibraryAddVersionAction({
 }
 
 function LibraryOriginalDownloadAction({
+  compactLabel,
   detail,
   downloadingLabel,
   label,
   originalUrl,
 }: {
+  /** History rows: the short visible label, shown like every other History
+   * action (icon alone on narrow screens). The accessible name stays `label`. */
+  compactLabel?: string;
   detail: LibraryItemDetail;
   /** Overrides the default "Download original file" / "Downloading…" pair --
    * e.g. History's per-row action names the specific version instead. */
@@ -2322,6 +2331,24 @@ function LibraryOriginalDownloadAction({
   const resolvedLabel = status === "downloading"
     ? downloadingLabel ?? t("reader.downloadingOriginal", { defaultValue: "Downloading original file…" })
     : label ?? t("reader.downloadOriginal", { defaultValue: "Download original file" });
+  // The History-row form takes exactly HistoryActionButton's classes, so it
+  // sizes and collapses like every other History action rather than like the
+  // reader toolbar's 44px download button.
+  const triggerClassName = compactLabel
+    ? "text-button compact-button history-action"
+    : "icon-button text-button";
+  const triggerContent = (
+    <>
+      <Download
+        aria-hidden="true"
+        className={compactLabel ? "history-action-icon" : undefined}
+        size={16}
+      />
+      <span className={compactLabel ? "history-action-label" : undefined}>
+        {compactLabel && status !== "downloading" ? compactLabel : resolvedLabel}
+      </span>
+    </>
+  );
 
   return (
     <div className="library-reader-download-action">
@@ -2329,27 +2356,27 @@ function LibraryOriginalDownloadAction({
         <button
           aria-busy={status === "downloading"}
           aria-label={resolvedLabel}
-          className="icon-button text-button"
+          className={triggerClassName}
           disabled={status === "downloading"}
           onClick={() => void downloadOriginal()}
+          title={compactLabel ? resolvedLabel : undefined}
           type="button"
         >
-          <Download size={16} aria-hidden="true" />
-          <span>{resolvedLabel}</span>
+          {triggerContent}
         </button>
       ) : (
         <a
           aria-label={resolvedLabel}
-          className="icon-button text-button"
+          className={triggerClassName}
           download
           href={originalUrl}
           onClick={(event) => {
             if (!confirmOriginalDownload()) event.preventDefault();
           }}
           rel="noreferrer"
+          title={compactLabel ? resolvedLabel : undefined}
         >
-          <Download size={16} aria-hidden="true" />
-          <span>{resolvedLabel}</span>
+          {triggerContent}
         </a>
       )}
       {error ? (
@@ -2393,9 +2420,18 @@ function libraryUploadRetryMetadata(exc: unknown) {
 // version" click, and no History-driven version selection anywhere in the
 // reader. A row is a plain container (never itself interactive) so it can
 // hold its own independent download button without nesting one interactive
-// control inside another.
+// control inside another. Library has no version diff, so unlike Context and
+// Agent a row offers no Changes action; the lane graph and card are the same.
 function LibraryHistory({ detail }: { detail: LibraryItemDetail }) {
   const { t } = useTranslation("library");
+  const historyGraph = useMemo(
+    () =>
+      buildHistoryGraph(libraryHistoryNodes(detail.versions), {
+        headCandidateIds: [detail.current_version?.id],
+        complete: true,
+      }),
+    [detail.current_version?.id, detail.versions],
+  );
   if (detail.versions.length === 0) {
     return (
       <div className="wiki-empty">
@@ -2404,48 +2440,19 @@ function LibraryHistory({ detail }: { detail: LibraryItemDetail }) {
     );
   }
   return (
-    <div className="history-timeline" data-accent="library">
-      {detail.versions.map((version) => {
-        const current = detail.current_version?.id === version.id;
+    <HistoryGraphList
+      accent="library"
+      graph={historyGraph}
+      renderCard={(row) => {
+        const version = row.entry;
         return (
-          <div
-            aria-current={current ? "page" : undefined}
-            className="history-card"
-            data-tone={
-              version.processing_status === "ready" ? "published" : "draft"
-            }
-            key={version.id}
-          >
-            <div className="history-card-title">
-              <span>v{version.version_no}</span>
-                <StatusPill
-                  status={version.processing_status}
-                  tone={libraryStatusTone(version.processing_status)}
-                  label={domainLabel(
-                    "library",
-                    "processingStatus",
-                    version.processing_status,
-                  )}
-                  compact
-                />
-            </div>
-            <div className="history-card-desc">
-              {libraryVersionHistorySummary(version, t)}
-            </div>
-            <div className="history-card-meta">
-              <span title={version.content_hash}>
-                {version.content_hash.slice(0, 12)}
-              </span>
-              <time
-                dateTime={version.created_at}
-                title={formatVersionTimestamp(version.created_at, "long")}
-              >
-                {formatVersionTimestamp(version.created_at)}
-              </time>
-            </div>
-            <div className="history-card-actions">
-              {version.original_download_available && version.original_url ? (
+          <HistoryCard
+            actions={
+              version.original_download_available && version.original_url ? (
                 <LibraryOriginalDownloadAction
+                  compactLabel={t("reader.history.downloadShort", {
+                    defaultValue: "Download",
+                  })}
                   detail={detail}
                   downloadingLabel={t("reader.history.downloadingVersion", {
                     defaultValue: "Downloading this version…",
@@ -2461,12 +2468,44 @@ function LibraryHistory({ detail }: { detail: LibraryItemDetail }) {
                     defaultValue: "The original file is no longer retained.",
                   })}
                 </span>
-              )}
-            </div>
-          </div>
+              )
+            }
+            author={
+              <span className="history-card-meta">
+                <span title={version.content_hash}>
+                  {version.content_hash.slice(0, 12)}
+                </span>
+                <time
+                  dateTime={version.created_at}
+                  title={formatVersionTimestamp(version.created_at, "long")}
+                >
+                  {formatVersionTimestamp(version.created_at)}
+                </time>
+              </span>
+            }
+            description={libraryVersionHistorySummary(version, t)}
+            row={row}
+            status={
+              <StatusPill
+                status={version.processing_status}
+                tone={libraryStatusTone(version.processing_status)}
+                label={domainLabel(
+                  "library",
+                  "processingStatus",
+                  version.processing_status,
+                )}
+                compact
+              />
+            }
+          />
         );
+      }}
+      rowView={(row) => ({
+        ariaCurrent:
+          detail.current_version?.id === row.node.id ? "page" : undefined,
+        tone: row.entry.processing_status === "ready" ? "published" : "draft",
       })}
-    </div>
+    />
   );
 }
 

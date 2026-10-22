@@ -203,6 +203,7 @@ export async function diffAgentPageVersions(
   agentPageId: string,
   fromVersionId: string,
   toVersionId: string,
+  options: { signal?: AbortSignal } = {},
 ) {
   const query = new URLSearchParams({
     from_version_id: fromVersionId,
@@ -210,6 +211,7 @@ export async function diffAgentPageVersions(
   });
   const response = await apiRequest<{ data: PageVersionDiff }>(
     `/api/v1/workspaces/${workspaceId}/agent/pages/${agentPageId}/diff?${query.toString()}`,
+    { signal: options.signal },
   );
   return response.data;
 }

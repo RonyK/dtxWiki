@@ -540,10 +540,10 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
         await expect(v1).toBeVisible();
         await expect(latest).toBeVisible();
 
-        // Row-level Compare buttons always carry an aria-label. Restore and
-        // discard actions do not, so this proves v1 has no predecessor action.
+        // The first version has nothing to measure its changes against, so
+        // it offers no Changes action.
         await expect(
-          v1.locator(".history-card-actions button[aria-label]"),
+          v1.locator(".history-card-actions .history-changes-action"),
         ).toHaveCount(0);
         const latestCompare = latest.locator(
           `.history-card-actions button[aria-label*="v2"][aria-label*="v1"]`,
