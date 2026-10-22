@@ -16,10 +16,11 @@ import { RelativeTime } from "./RelativeTime";
 const TYPE_ICONS: Record<string, LucideIcon> = { context: FileText, library: Library, agent: Bot, review: ListChecks, mcp: MessagesSquare };
 
 /** A same-day group range drops the repeated date: "16:46 – 16:49". */
-function rangeEnds(first: string, last: string): [string, string] {
+function rangeEnds(first: string, last: string): { from: string; to: string; spansDays: boolean } {
   const from = formatVersionTimestamp(first);
   const to = formatVersionTimestamp(last);
-  return from.slice(0, 10) === to.slice(0, 10) ? [from.slice(11), to.slice(11)] : [from, to];
+  const spansDays = from.slice(0, 10) !== to.slice(0, 10);
+  return { from: spansDays ? from : from.slice(11), to: spansDays ? to : to.slice(11), spansDays };
 }
 
 export function ActivityEntryRow({ entry, query = DEFAULT_ACTIVITY_QUERY, loadGroup }: {
@@ -46,9 +47,9 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
   const descriptionId = useId();
   const presentation = presentActivityFeedEvent(event, count);
   const navigation = activityNavigation(event, query);
-  const [rangeFrom, rangeTo] = rangeEnds(firstOccurredAt, lastOccurredAt);
+  const { from: rangeFrom, to: rangeTo, spansDays } = rangeEnds(firstOccurredAt, lastOccurredAt);
   const TypeIcon = TYPE_ICONS[presentation.typeKey];
-  const times = <div className="activity-entry__times">
+  const times = <div className="activity-entry__times" data-range-spans-days={count > 1 && spansDays ? true : undefined}>
     <RelativeTime value={lastOccurredAt} locale={i18n.language} />
     {count > 1 && <span className="activity-entry__time-range" aria-label={t("feed.group.timeRange")}>
       <time dateTime={firstOccurredAt} title={formatVersionTimestamp(firstOccurredAt, "long")}>{rangeFrom}</time>

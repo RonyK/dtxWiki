@@ -41,12 +41,11 @@ describe("Shared activity feed geometry", () => {
     expect(title).toMatch(/gap:\s*4px;/);
   });
 
-  it("provides 24px pointer targets and 32px touch targets without adding row height", () => {
+  it("keeps compact row targets at 24px without adding row height", () => {
     const actor = rule(".activity-actor-disclosure");
     expect(actor).toMatch(/min-width:\s*24px;/);
     expect(actor).toMatch(/height:\s*24px;/);
     expect(rule(".activity-entry__title-link")).toMatch(/min-height:\s*24px;/);
-    expect(css).toMatch(/@media \(pointer: coarse\) \{\s*\.activity-actor-disclosure \{ height: 32px; margin-top: -8px; \}/);
     expect(rule(".activity-feed-see-all")).toMatch(/min-height:\s*44px;/);
   });
 

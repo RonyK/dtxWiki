@@ -1628,8 +1628,7 @@ a.search-disambiguation-candidate:hover {
    description, and one line of secondary controls. The wrappers keep their
    DOM roles but give up their boxes, so every part takes a cell of the row.
    Visible spacing follows the plan (chip -> title 4px, title -> description
-   4px); targets are 24px for a pointer and 32px for touch, drawn into the
-   surrounding padding rather than added to the row height. */
+   4px); row targets stay 24px for pointer and touch input. */
 .activity-feed-list {
   gap: 0;
   border: 1px solid var(--border);
@@ -1765,13 +1764,16 @@ a.search-disambiguation-candidate:hover {
   display: grid;
   justify-items: end;
   align-self: start;
+  min-width: 0;
+  max-width: 100%;
   margin-top: 4px;
   color: var(--ink-muted);
   font-size: 12px;
   line-height: 22px;
   white-space: nowrap;
 }
-.activity-entry__time-range { font-size: 11px; line-height: 16px; }
+.activity-entry__time-range { max-width: 100%; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; text-align: end; }
+.activity-entry__time-range > time { white-space: nowrap; }
 .activity-action-badge {
   --activity-action-tone: var(--ink-soft);
   display: inline-flex;
@@ -1816,6 +1818,10 @@ a.search-disambiguation-candidate:hover {
 }
 .activity-read-group__toggle { grid-column: 2; grid-row: 4; justify-self: start; margin-top: 8px; padding: 0; }
 .activity-feed-entry:not(:has(> .activity-entry__layout .activity-entry__technical)) .activity-read-group__toggle { grid-column: 1; }
+/* Open details occupy the full row; the group's own controls follow them.
+   Scope the match to this entry so nested member details do not move it. */
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__toggle { grid-column: 1 / -1; grid-row: 5; }
+.activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 6; }
 /* Expanded members: an inset panel (no left bar). Members share the group's
    actor, target and action, so each repeats neither chip nor badge. */
 .activity-read-group__members { grid-column: 1 / -1; grid-row: 5; margin: 12px 0 0; padding: 4px 0; border-radius: 8px; background: var(--surface-subtle); }
@@ -1827,9 +1833,10 @@ a.search-disambiguation-candidate:hover {
 .activity-read-group__list :is(.activity-entry__identity, .activity-action-badge) { display: none; }
 .activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1; grid-row: 1; margin: 0; font-size: 13px; line-height: 20px; font-weight: 500; }
 .activity-read-group__list .activity-entry__technical { grid-column: 2; grid-row: 1; margin: 0; }
+.activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; margin-top: 6px; }
 .activity-read-group__list .activity-entry__times { grid-column: 3; grid-row: 1; margin: 0; }
 .activity-read-group__list .activity-entry__fallback { grid-column: 1 / -1; grid-row: 2; }
-.activity-read-group__collapse { min-height: 32px; margin: 0 8px; }
+.activity-read-group__collapse { margin: 0 8px; }
 
 .activity-feed-panel { min-width: 0; }
 .activity-feed-counts { color: var(--ink-soft); font-size: 12px; line-height: 18px; }
@@ -1849,14 +1856,6 @@ a.search-disambiguation-candidate:hover {
   .activity-read-group__retry:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 
-/* Touch: 32px targets extend into the row padding and gaps around them. */
-@media (pointer: coarse) {
-  .activity-actor-disclosure { height: 32px; margin-top: -8px; }
-  .activity-entry__technical > summary,
-  .activity-read-group__toggle { min-height: 32px; margin-bottom: -4px; }
-  .activity-entry__technical, .activity-read-group__toggle { margin-top: 4px; }
-}
-
 @media (max-width: 700px) {
   .activity-feed-entry { padding: 14px 16px; column-gap: 12px; }
   .activity-entry__identity,
@@ -1869,11 +1868,17 @@ a.search-disambiguation-candidate:hover {
   /* The plan's mobile footer: status on the left, time on the right. */
   .activity-entry__trailing > .activity-action-badge,
   .activity-entry__review-link { grid-column: 1 / 3; grid-row: 6; justify-self: start; align-self: center; margin-top: 8px; }
-  .activity-entry__times { grid-column: 3 / -1; grid-row: 6; display: flex; align-items: baseline; justify-self: end; align-self: center; gap: 8px; margin-top: 8px; }
-  .activity-read-group__members { grid-row: 7; }
+  .activity-entry__times { grid-column: 3 / -1; grid-row: 6; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; justify-self: end; align-self: center; gap: 0 8px; margin-top: 8px; }
+  .activity-read-group__members,
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__technical[open]) > .activity-read-group > .activity-read-group__members { grid-row: 7; }
+  /* Cross-date ranges need their own line; short same-day ranges keep the
+     compact status/time footer above. Whole timestamp ends wrap as a unit. */
+  .activity-entry__times[data-range-spans-days] { grid-column: 1 / -1; grid-row: 7; width: 100%; margin-top: 4px; }
+  .activity-feed-entry:has(> .activity-entry__layout .activity-entry__times[data-range-spans-days]) > .activity-read-group > .activity-read-group__members { grid-row: 8; }
   .activity-read-group__list .activity-feed-entry { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; padding: 8px 12px; }
   .activity-read-group__list :is(.activity-entry__title-link, .activity-entry__plain-title) { grid-column: 1 / -1; }
   .activity-read-group__list .activity-entry__technical { grid-column: 1; grid-row: 2; }
+  .activity-read-group__list .activity-entry__technical[open] { grid-column: 1 / -1; grid-row: 3; }
   .activity-read-group__list .activity-entry__times { grid-column: 2; grid-row: 2; align-self: center; }
 }
 
