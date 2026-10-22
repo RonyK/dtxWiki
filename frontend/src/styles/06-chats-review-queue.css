@@ -569,30 +569,28 @@
   grid-auto-rows: 1fr;
 }
 
+/* The title keeps the top line to itself and the pills sit at the bottom, so
+   the slack a shorter card gets from the shared row height falls between
+   them in every card alike. */
 .mcp-artifact-strip--grouped .mcp-artifact-chip {
+  align-items: stretch;
   max-width: none;
+}
+
+.mcp-artifact-strip--grouped .mcp-artifact-chip-icon {
+  align-self: start;
+}
+
+.mcp-artifact-strip--grouped .mcp-artifact-chip-body {
+  align-content: space-between;
 }
 
 .mcp-artifact-strip--grouped .mcp-artifact-chip-meta {
   gap: 4px;
 }
 
-/* The title wins the line: when it and the time do not fit together, the
-   time wraps under the title instead of truncating it. */
-.mcp-artifact-chip-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 8px;
-  row-gap: 2px;
-  min-width: 0;
-}
-
-.mcp-artifact-chip-heading strong {
-  min-width: 0;
-}
-
-.mcp-artifact-chip-heading small {
+/* The last-seen time closes the pill row, right-aligned. */
+.mcp-artifact-strip--grouped .mcp-artifact-chip-meta small {
   margin-left: auto;
 }
 

@@ -389,31 +389,41 @@ describe("ChatsDetailScreen", () => {
         occurrence_count: 3,
         last_occurred_at: "2026-05-27T09:03:00Z",
       },
-      {
-        ...referenced,
-        id: "artifact-link-3",
-        resource_id: "page-2",
-        artifact_title: "Session policy",
-        navigation_path: "/context?target=page-2",
-        occurrence_count: 1,
-      },
       referenced,
       { ...referenced, id: "artifact-link-4", verb: "search_match", occurrence_count: 1 },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        ...referenced,
+        id: `artifact-link-other-${index}`,
+        resource_id: `page-other-${index}`,
+        artifact_title: `Other policy ${index + 1}`,
+        navigation_path: `/context?target=page-other-${index}`,
+        occurrence_count: 1,
+      })),
     ];
     renderWithDetail({
       [`${BASE}/api/v1/workspaces`]: workspaceResponse(),
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/mcp-chats/chat-1`]: chatResponse(detail),
     });
 
-    // Four rows, two artifacts -> the chip counts artifacts, pluralized.
-    expect(await screen.findByText("2 artifacts")).toBeInTheDocument();
+    // Twelve rows, ten artifacts -> the chip and the preview limit count
+    // artifacts, not rows.
+    expect(await screen.findByText("10 artifacts")).toBeInTheDocument();
     await openSection(user, /Linked artifacts/);
-    const cards = document.querySelectorAll(".mcp-artifact-strip--grouped .mcp-artifact-chip");
-    expect([...cards].map((card) => card.querySelector("strong")?.textContent))
-      .toEqual(["Authentication policy", "Session policy"]);
-    // Authoring first, then reading, then search exposure; repeats as ×N.
-    expect([...cards[0].querySelectorAll(".status-pill")].map((pill) => pill.textContent))
+    const cards = () => document.querySelectorAll(".mcp-artifact-strip--grouped .mcp-artifact-chip");
+    expect(cards()).toHaveLength(8);
+    await user.click(screen.getByRole("button", { name: "Show all 10 artifacts" }));
+    expect(cards()).toHaveLength(10);
+    const [first] = cards();
+    expect(first.querySelector("strong")).toHaveTextContent("Authentication policy");
+    // Authoring first, then reading, then search exposure; repeats as ×N,
+    // spoken as words, and a single link has no count rather than "1 links".
+    const pills = [...first.querySelectorAll(".status-pill")];
+    expect(pills.map((pill) => pill.textContent))
       .toEqual(["Edited ×3", "Referenced ×2", "Search match"]);
+    expect(pills[2].getAttribute("title")).toMatch(/^Search match · \d{4}-\d{2}-\d{2} /);
+    expect(first).toHaveAccessibleName(
+      /^Authentication policy, Edited 3 links, Referenced 2 links, Search match, \d{4}-\d{2}-\d{2} /,
+    );
   });
 
   it("renders search matches as muted outputs without treating them as inputs", async () => {

@@ -36,6 +36,7 @@ import {
   readMcpChat,
   unarchiveMcpChat,
   updateMcpChatTitle,
+  type McpChatArtifactLink,
   type McpChatDetail,
   type McpChatTimelineItem,
 } from "../../shared/api/operations";
@@ -766,6 +767,22 @@ function MetaItem({ className, label, value }: { className?: string; label: stri
 
 const ARTIFACT_PREVIEW_LIMIT = 8;
 
+/**
+ * "Edited · 3 links" -- the count only when the verb repeated, matching the
+ * pill's "×N". A single link therefore never reads "1 links" (the en string
+ * has no singular form).
+ */
+function artifactVerbCount(
+  link: McpChatArtifactLink,
+  t: TFunction<"chats">,
+  separator: string,
+) {
+  const verb = artifactVerbLabel(link.verb, t);
+  return link.occurrence_count > 1
+    ? `${verb}${separator}${t("detail.artifactLinks", { count: link.occurrence_count })}`
+    : verb;
+}
+
 function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
   const { t } = useTranslation("chats");
   const [open, setOpen] = usePersistedOpen(ARTIFACTS_OPEN_KEY, false);
@@ -810,22 +827,25 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
             ?? t(`labels.artifactKind.${latest.resource_kind}`, {
               defaultValue: t("labels.artifactKind.unknown"),
             });
+          const lastSeen = formatVersionTimestamp(latest.last_occurred_at);
           return (
             <Link
+              // Spoken as words ("Edited 3 links"), never the visual "×3".
+              aria-label={[
+                title,
+                ...links.map((link) => artifactVerbCount(link, t, " ")),
+                lastSeen,
+              ].join(", ")}
               className="mcp-artifact-chip"
               data-kind={latest.resource_kind}
               key={key}
-              title={title}
               to={artifactNavigationPath(latest)}
             >
               <span className="mcp-artifact-chip-icon" aria-hidden="true">
                 {iconForArtifactKind(latest.resource_kind)}
               </span>
               <span className="mcp-artifact-chip-body">
-                <span className="mcp-artifact-chip-heading">
-                  <strong>{title}</strong>
-                  <small>{formatVersionTimestamp(latest.last_occurred_at)}</small>
-                </span>
+                <strong title={title}>{title}</strong>
                 <span className="mcp-artifact-chip-meta">
                   {links.map((link) => {
                     const verb = artifactVerbLabel(link.verb, t);
@@ -834,11 +854,12 @@ function ArtifactsSection({ chat }: { chat: McpChatDetail }) {
                         key={link.verb}
                         status={link.verb}
                         label={link.occurrence_count > 1 ? `${verb} ×${link.occurrence_count}` : verb}
-                        title={`${verb} · ${t("detail.artifactLinks", { count: link.occurrence_count })} · ${formatVersionTimestamp(link.last_occurred_at)}`}
+                        title={`${artifactVerbCount(link, t, " · ")} · ${formatVersionTimestamp(link.last_occurred_at)}`}
                         compact
                       />
                     );
                   })}
+                  <small>{lastSeen}</small>
                 </span>
               </span>
             </Link>
