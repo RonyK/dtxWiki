@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
-from backend.services import server_admin_service
+from backend.services import server_admin_service, update_check_service
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.user_admin_service import UserAdminService
 
@@ -198,6 +198,11 @@ def test_deployment_status_requires_authentication(page_service):
     # No signup/login: anonymous request must be rejected.
     response = client.get("/api/v1/admin/deployment")
     assert response.status_code in {401, 403}
+    for headers in ({}, {"Authorization": "Bearer bearer-only-cannot-check-updates"}):
+        response = client.post(
+            "/api/v1/admin/deployment/update-check", json={}, headers=headers
+        )
+        assert response.status_code == 401
 
 
 def test_deployment_status_forbidden_for_non_server_admin(page_service):
@@ -207,3 +212,74 @@ def test_deployment_status_forbidden_for_non_server_admin(page_service):
     )
     response = client.get("/api/v1/admin/deployment")
     assert response.status_code == 403, response.text
+    response = client.post(
+        "/api/v1/admin/deployment/update-check", json={"force": True}
+    )
+    assert response.status_code == 403, response.text
+
+
+def test_deployment_release_check_cache_only_get_and_explicit_post(
+    page_service, monkeypatch, tmp_path
+):
+    calls = []
+    private_url = "https://operator:private-secret@idx/simple"
+
+    def fetch(index_url, channel):
+        calls.append((index_url, channel))
+        return "0.2.0"
+
+    monkeypatch.setattr(update_check_service, "_fetch_latest", fetch)
+    monkeypatch.setattr(update_check_service, "default_data_dir", lambda: tmp_path)
+    client = make_client(
+        page_service, app_version="0.1.0", update_index_url=private_url
+    )
+    initial = client.get("/api/v1/admin/deployment")
+    assert initial.status_code == 200
+    assert initial.json()["data"]["check_status"] == "not_checked"
+    assert calls == []
+    response = client.post("/api/v1/admin/deployment/update-check", json={})
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data == {
+        "current_version": "0.1.0", "latest_version": "0.2.0",
+        "update_available": True, "check_status": "succeeded",
+        "checked_at": data["checked_at"], "stale": False, "source": "configured_index",
+    }
+    assert data["checked_at"] is not None
+    assert calls == [(private_url, "stable")]
+    assert "private-secret" not in response.text
+    cached = client.get("/api/v1/admin/deployment").json()["data"]
+    assert {key: cached[key] for key in data} == data
+    assert len(calls) == 1
+    assert client.post(
+        "/api/v1/admin/deployment/update-check", json={"force": False}
+    ).status_code == 200
+    assert len(calls) == 1
+    assert client.post(
+        "/api/v1/admin/deployment/update-check", json={"force": True}
+    ).status_code == 200
+    assert len(calls) == 2
+    assert client.post(
+        "/api/v1/admin/deployment/update-check", json={"unknown": True}
+    ).status_code == 422
+
+
+def test_deployment_release_check_disabled_makes_no_request(
+    page_service, monkeypatch, tmp_path
+):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("disabled notifier must not fetch")
+
+    monkeypatch.setattr(update_check_service, "_fetch_latest", forbidden)
+    monkeypatch.setattr(update_check_service, "default_data_dir", lambda: tmp_path)
+    client = make_client(page_service, no_update_notifier=True, update_index_url=None)
+    response = client.post(
+        "/api/v1/admin/deployment/update-check", json={"force": True}
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["check_status"] == "disabled"
+    assert data["source"] == "pypi"
+    assert data["latest_version"] is None
+    assert data["checked_at"] is None
+    assert data["update_available"] is False

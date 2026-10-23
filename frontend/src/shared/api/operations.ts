@@ -525,14 +525,25 @@ export type DeploymentHealthComponents =
   components["schemas"]["HealthComponents"];
 
 export type DeploymentStatus = components["schemas"]["DeploymentStatus"];
+export type DeploymentUpdateStatus =
+  components["schemas"]["DeploymentUpdateStatus"];
 
 // Read-only instance deployment state for the system (server-admin) settings
 // tab. Workspace-independent: it describes the whole dtxWiki server. The app
 // cannot mutate /etc, so this returns status + copyable `dtxwiki config set`
 // commands rather than an editable form.
-export async function getDeploymentStatus() {
+export async function getDeploymentStatus(signal?: AbortSignal) {
   const response = await apiRequest<{ data: DeploymentStatus }>(
     "/api/v1/admin/deployment",
+    { signal },
+  );
+  return response.data;
+}
+
+export async function checkDeploymentUpdate(force: boolean, signal?: AbortSignal) {
+  const response = await apiRequest<{ data: DeploymentUpdateStatus }>(
+    "/api/v1/admin/deployment/update-check",
+    { method: "POST", body: JSON.stringify({ force }), signal },
   );
   return response.data;
 }

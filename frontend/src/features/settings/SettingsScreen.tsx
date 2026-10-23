@@ -116,6 +116,7 @@ import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { LintRulesSection } from "./LintRulesSection";
 import { LabsSection } from "./LabsSection";
+import { DeploymentUpdateCard } from "./DeploymentUpdateCard";
 import { AdminJobsSection } from "./AdminJobsSection";
 import { AdminUserRecoverySection } from "./AdminUserRecoverySection";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
@@ -4124,12 +4125,13 @@ function DeploymentSection() {
     [],
   );
   const { data, error } = useAsyncLoad<DeploymentStatus>(
-    () => getDeploymentStatus(),
+    (signal) => getDeploymentStatus(signal),
     [],
     {
       errorMessage: t("setup.loadError", {
         defaultValue: "Failed to load deployment status",
       }),
+      signalAware: true,
     },
   );
 
@@ -4332,13 +4334,12 @@ function DeploymentSection() {
 
   return (
     <section className="feature-section">
-      <StatusBanner tone="info">
-        {t("setup.systemScopeNote", {
-          defaultValue:
-            "These are dtxWiki SERVER settings — they apply to the whole instance " +
-            "(all workspaces), not just this workspace. Server admins only.",
-        })}
-      </StatusBanner>
+      <DeploymentUpdateCard
+        initialStatus={data}
+        renderCommand={(command, label) => (
+          <CommandBlock command={command} label={label} />
+        )}
+      />
       <StatusBanner tone="info">
         {t("setup.subtitle", {
           defaultValue:
@@ -4346,17 +4347,6 @@ function DeploymentSection() {
             "on the server — the app cannot edit /etc itself.",
         })}
       </StatusBanner>
-      {data.update_available ? (
-        <StatusBanner tone="info">
-          {t("setup.updateAvailable", {
-            defaultValue:
-              "dtxWiki {{latest}} is available (current {{current}}). " +
-              "Run 'dtxwiki update' on the server to upgrade.",
-            latest: data.latest_version ?? "",
-            current: data.current_version ?? "",
-          })}
-        </StatusBanner>
-      ) : null}
       {!data.https_configured ? (
         <StatusBanner tone="warning">
           {t("setup.tlsNotReady", {

@@ -9,7 +9,7 @@ app process cannot mutate ``/etc`` under the systemd sandbox, so it returns the
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Annotated
 from uuid import UUID
 
@@ -44,7 +44,11 @@ from backend.schemas.context_media import (
     ContextMediaDeleteResponse,
     ContextMediaOrphanListResponse,
 )
-from backend.schemas.deployment import DeploymentStatusResponse
+from backend.schemas.deployment import (
+    DeploymentStatusResponse,
+    DeploymentUpdateCheckRequest,
+    DeploymentUpdateStatusResponse,
+)
 from backend.schemas.jobs import (
     AdminJobListResponse,
     JobQueueSummaryResponse,
@@ -108,7 +112,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
         latest_delivery_attempt_at=outbox_status.latest_attempt_at,
     )
     # Cache-only + fail-open: never block this request on the package index.
-    update_info = update_check_service.check_for_update(settings, allow_network=False)
+    update_status = update_check_service.get_update_status(settings)
     return {
         "public_base_url": settings.public_base_url,
         "mcp_url": deployment_service.mcp_url(settings),
@@ -165,9 +169,7 @@ def deployment_status_data(request: Request, session_factory) -> dict:
             }
             for item in suggestions
         ],
-        "current_version": settings.app_version,
-        "latest_version": update_info.latest_version if update_info else None,
-        "update_available": bool(update_info and update_info.update_available),
+        **asdict(update_status),
     }
 
 
@@ -188,6 +190,27 @@ def admin_deployment_status(
     """
 
     return {"data": deployment_status_data(request, session_factory)}
+
+
+@router.post(
+    "/deployment/update-check",
+    response_model=DeploymentUpdateStatusResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_deployment_update_check(
+    request: Request,
+    body: DeploymentUpdateCheckRequest,
+    _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+):
+    """Check the package index for a release without applying any update."""
+
+    return {
+        "data": asdict(
+            update_check_service.get_update_status(
+                request.app.state.settings, force=body.force, allow_network=True
+            )
+        )
+    }
 
 
 @router.get(

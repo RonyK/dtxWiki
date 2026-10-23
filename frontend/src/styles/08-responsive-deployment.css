@@ -430,6 +430,130 @@
 }
 
 /* Settings > Setup (read-only deployment status + reconfigure commands) */
+.deployment-configuration-card.deployment-update-card {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.deployment-update-versions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.deployment-update-versions > div {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 12px;
+  min-width: 0;
+}
+
+.deployment-update-versions dt {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.deployment-update-versions dd {
+  margin: 6px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.deployment-update-check {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.deployment-update-check .meta-line,
+.deployment-update-message {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.deployment-install-guide {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+.deployment-install-guide > label {
+  font-weight: 700;
+}
+
+.deployment-install-guide > select {
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.deployment-install-instructions {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.deployment-install-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.deployment-install-steps {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding-left: 24px;
+  min-width: 0;
+  list-style: decimal outside;
+}
+
+.deployment-install-steps > li {
+  padding-left: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deployment-install-steps h3 {
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+
+.deployment-install-steps p {
+  margin: 0 0 8px;
+}
+
+.deployment-install-steps .command-block {
+  margin: 10px 0;
+  min-width: 0;
+}
+
+.deployment-install-steps .command-block-header {
+  flex-wrap: wrap;
+}
+
+.deployment-install-steps .policy-snippet {
+  min-height: 0;
+  height: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.deployment-install-steps .command-block-header .icon-button,
+.deployment-update-check > button {
+  min-height: 44px;
+}
+
 .deployment-status-list {
   display: grid;
   gap: 8px;

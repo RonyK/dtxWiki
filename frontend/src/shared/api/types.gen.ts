@@ -129,6 +129,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/deployment/update-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Deployment Update Check
+         * @description Check the package index for a release without applying any update.
+         */
+        post: operations["admin_deployment_update_check_api_v1_admin_deployment_update_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/jobs": {
         parameters: {
             query?: never;
@@ -5282,6 +5302,14 @@ export interface components {
             app_mode: string;
             /** Behind Proxy */
             behind_proxy: boolean;
+            /**
+             * Check Status
+             * @default not_checked
+             * @enum {string}
+             */
+            check_status: "not_checked" | "succeeded" | "failed" | "disabled";
+            /** Checked At */
+            checked_at?: string | null;
             /** Current Version */
             current_version?: string | null;
             /** Env File Hint */
@@ -5308,6 +5336,17 @@ export interface components {
             public_base_url: string | null;
             recovery: components["schemas"]["RecoveryConfigurationStatus"];
             signup: components["schemas"]["SignupConfigurationStatus"];
+            /**
+             * Source
+             * @default pypi
+             * @enum {string}
+             */
+            source: "pypi" | "configured_index";
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
             /** Suggested Commands */
             suggested_commands: components["schemas"]["SuggestedCommand"][];
             /** Tls Mode */
@@ -5321,6 +5360,50 @@ export interface components {
         /** DeploymentStatusResponse */
         DeploymentStatusResponse: {
             data: components["schemas"]["DeploymentStatus"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** DeploymentUpdateCheckRequest */
+        DeploymentUpdateCheckRequest: {
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+        };
+        /** DeploymentUpdateStatus */
+        DeploymentUpdateStatus: {
+            /**
+             * Check Status
+             * @default not_checked
+             * @enum {string}
+             */
+            check_status: "not_checked" | "succeeded" | "failed" | "disabled";
+            /** Checked At */
+            checked_at?: string | null;
+            /** Current Version */
+            current_version?: string | null;
+            /** Latest Version */
+            latest_version?: string | null;
+            /**
+             * Source
+             * @default pypi
+             * @enum {string}
+             */
+            source: "pypi" | "configured_index";
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
+             * Update Available
+             * @default false
+             */
+            update_available: boolean;
+        };
+        /** DeploymentUpdateStatusResponse */
+        DeploymentUpdateStatusResponse: {
+            data: components["schemas"]["DeploymentUpdateStatus"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** DiscardContextEditRequest */
@@ -10409,6 +10492,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentStatusResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_deployment_update_check_api_v1_admin_deployment_update_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentUpdateCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentUpdateStatusResponse"];
                 };
             };
             /** @description Unauthorized */

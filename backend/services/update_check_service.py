@@ -1,21 +1,22 @@
 """Check whether a newer dtxWiki release is available.
 
-Source seam: a private PEP 503 *simple* index NOW (parse the ``dtxwiki/`` listing),
-PyPI JSON LATER (a no-op switch — just clear ``DTXWIKI_UPDATE_INDEX_URL``).
-
-Always fail-open and non-blocking: any network/parse error returns the cached
-value or ``None`` and never raises, so neither ``dtxwiki info`` nor server
-startup can be broken by a flaky index. Results are cached for 24h.
+Uses PyPI JSON, or a configured private PEP 503 *simple* index. Network and
+parse errors fail open; explicit checks have a bounded request timeout. Results
+are cached for 24h, and deployment-status reads never access the network.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import httpx
 
@@ -41,6 +42,81 @@ class UpdateInfo:
     update_available: bool
     channel: str
     index_url: str | None
+
+
+@dataclass(frozen=True)
+class UpdateStatus:
+    current_version: str
+    latest_version: str | None
+    update_available: bool
+    check_status: Literal["not_checked", "succeeded", "failed", "disabled"]
+    checked_at: datetime | None
+    stale: bool
+    source: Literal["pypi", "configured_index"]
+
+
+def get_update_status(
+    settings: Settings,
+    *,
+    force: bool = False,
+    allow_network: bool = False,
+    data_dir: Path | None = None,
+    now=time.time,
+) -> UpdateStatus:
+    """Describe the last successful check and optionally refresh it.
+
+    Unlike the CLI's compatibility API below, stale or failed checks never
+    recommend an update. A failed attempt preserves the successful cache and
+    its timestamp; failure history belongs to the current response only.
+    """
+
+    source = "configured_index" if settings.update_index_url else "pypi"
+    if settings.no_update_notifier:
+        return UpdateStatus(
+            settings.app_version, None, False, "disabled", None, False, source
+        )
+
+    cache_path = _cache_path(data_dir)
+    cached = _read_cache(cache_path)
+    if cached is not None and not _cache_matches(cached, settings):
+        cached = None
+    # A future success timestamp is not reliable evidence for the admin UI.
+    if cached is not None and cached["checked_epoch"] > now():
+        cached = None
+    latest = cached["latest"] if cached is not None else None
+    checked_at = (
+        datetime.fromtimestamp(cached["checked_epoch"], UTC) if cached else None
+    )
+    stale = cached is not None and not _is_fresh(cached, now)
+    status: Literal["not_checked", "succeeded", "failed", "disabled"] = (
+        "succeeded" if cached is not None else "not_checked"
+    )
+
+    if allow_network and (force or cached is None or stale):
+        fetched = _fetch_latest(settings.update_index_url, settings.update_channel)
+        if fetched is None:
+            status = "failed"
+        else:
+            latest = fetched
+            checked_epoch = now()
+            checked_at = datetime.fromtimestamp(checked_epoch, UTC)
+            stale = False
+            status = "succeeded"
+            _write_cache(cache_path, settings, fetched, lambda: checked_epoch)
+
+    return UpdateStatus(
+        current_version=settings.app_version,
+        latest_version=latest,
+        update_available=(
+            status == "succeeded"
+            and not stale
+            and versioning.is_newer(latest, settings.app_version)
+        ),
+        check_status=status,
+        checked_at=checked_at,
+        stale=stale,
+        source=source,
+    )
 
 
 def check_for_update(
@@ -178,42 +254,99 @@ def _cache_path(data_dir: Path | None) -> Path:
 
 def _read_cache(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
+    if not isinstance(cached, dict):
+        return None
+    latest = cached.get("latest")
+    if not isinstance(latest, str):
+        return None
+    parsed_latest = versioning.parse_version(latest)
+    if parsed_latest is None:
+        return None
+    channel = cached.get("channel")
+    if not isinstance(channel, str) or channel not in {"stable", "prerelease"}:
+        return None
+    if channel == "stable" and parsed_latest.is_prerelease:
+        return None
+    checked = cached.get("checked_epoch")
+    if isinstance(checked, bool) or not isinstance(checked, (int, float)):
+        return None
+    try:
+        if not math.isfinite(checked):
+            return None
+        datetime.fromtimestamp(checked, UTC)
+    except (ValueError, OverflowError, OSError):
+        return None
+    if "source_fingerprint" in cached:
+        fingerprint = cached["source_fingerprint"]
+        if not isinstance(fingerprint, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", fingerprint
+        ):
+            return None
+    elif "index_url" not in cached or (
+        cached["index_url"] is not None and not isinstance(cached["index_url"], str)
+    ):
+        return None
+    return cached
 
 
 def _write_cache(path: Path, settings: Settings, latest: str, now) -> None:
+    temporary: Path | None = None
     try:
+        checked = now()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
+        # Readers see either the previous complete value or this complete value.
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(
                 {
                     "latest": latest,
                     "channel": settings.update_channel,
-                    "index_url": settings.update_index_url,
-                    "checked_epoch": now(),
-                    "checked_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                }
-            ),
-            encoding="utf-8",
-        )
+                    "source_fingerprint": _source_fingerprint(settings),
+                    "checked_epoch": checked,
+                    "checked_utc": datetime.fromtimestamp(checked, UTC).isoformat(),
+                },
+                stream,
+            )
+        temporary.replace(path)
     except OSError:
         pass
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _is_fresh(cached: dict, now) -> bool:
     checked = cached.get("checked_epoch")
-    if not isinstance(checked, (int, float)):
+    if isinstance(checked, bool) or not isinstance(checked, (int, float)):
         return False
-    age = now() - checked
+    try:
+        if not math.isfinite(checked):
+            return False
+        age = now() - checked
+    except OverflowError:
+        return False
     return 0 <= age < CACHE_TTL_SEC  # future-dated (clock skew) -> treat as stale
 
 
 def _cache_matches(cached: dict, settings: Settings) -> bool:
     """True if the cache was written for the current channel + index."""
 
-    return (
-        cached.get("channel") == settings.update_channel
-        and cached.get("index_url") == settings.update_index_url
-    )
+    if cached.get("channel") != settings.update_channel:
+        return False
+    if "source_fingerprint" in cached:
+        return cached["source_fingerprint"] == _source_fingerprint(settings)
+    # Read legacy caches until the next successful refresh replaces their URL.
+    return cached.get("index_url") == settings.update_index_url
+
+
+def _source_fingerprint(settings: Settings) -> str:
+    source = settings.update_index_url or PYPI_JSON_URL
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
