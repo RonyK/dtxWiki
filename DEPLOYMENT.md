@@ -935,8 +935,9 @@ DB의 명시적 워크스페이스 설정이 환경변수보다 우선하며 재
 
 외부 PC (Linux / Windows) 의 Claude Code / Codex CLI / Gemini CLI / Google Antigravity
 등록은 dtxWiki의 **Settings → MCP access**에서 해당 앱의 설정 안내를 확인합니다.
-Claude Code와 Codex의 연결 예시는
-[README의 Connect your AI tool](README.md#4-connect-your-ai-tool)을 참고하세요.
+Claude Code와 Codex의 키 발급·등록·연결 확인은
+[README의 MCP 클라이언트 연결하기](README.ko.md#mcp-clients)를 참고하세요
+([English](README.md#mcp-clients)).
 앱과 OS에 따라 설정 파일 위치가 다르므로 화면에 표시된 명령을 연결할 PC에서 실행합니다.
 Codex의 기본 사용자 설정 파일은 Linux/macOS에서 `~/.codex/config.toml`, Windows에서
 `%USERPROFILE%\.codex\config.toml`입니다.
@@ -945,6 +946,8 @@ Antigravity release evidence는 `agy mcp list`의 등록 inventory, `/mcp`의 cl
 증명하지 않습니다.
 
 ---
+
+<a id="mcp-workspace-access"></a>
 
 ## MCP credential의 허용 workspace 집합
 
