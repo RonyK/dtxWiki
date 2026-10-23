@@ -3198,13 +3198,9 @@ class PageService:
         self,
         input: BodyInput,
         ctx: WriteContext,
-        *,
-        transitional_skip_fixes: bool = False,
     ) -> PreparedBody:
         try:
-            return self.body_preparer.prepare(
-                input, ctx, transitional_skip_fixes=transitional_skip_fixes
-            )
+            return self.body_preparer.prepare(input, ctx)
         except MarkdownMediaPolicyError as exc:
             raise PageMediaPolicyError(str(exc), reason_code=exc.reason_code) from exc
 
@@ -3450,7 +3446,6 @@ class PageService:
                     tags=tags,
                     aliases=aliases,
                     actor_provenance=actor_provenance,
-                    is_stale=is_stale,
                 )
                 if is_stale:
                     return self._autosave_persist_alternative(
@@ -3716,7 +3711,6 @@ class PageService:
         actor_kind: str,
         actor_id: str,
         actor_provenance: str,
-        is_stale: bool,
     ) -> PreparedBody:
         workspace = self._workspace_for(session, page.workspace_id)
         return self._prepare_body(
@@ -3743,11 +3737,6 @@ class PageService:
                 page=page,
                 version=current,
                 session=session,
-            ),
-            # TRANSITIONAL(R6): ordinary browser autosaves keep their
-            # existing formatting policy until R6.
-            transitional_skip_fixes=(
-                not is_stale and actor_provenance not in AI_PROVENANCES
             ),
         )
 

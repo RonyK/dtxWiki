@@ -68,7 +68,7 @@ def _replace_base():
 def test_all_body_writers_preserve_golden_persisted_bytes(
     page_service, session_factory, mcp_default_actor
 ):
-    """R4 W1-W12, including intentional browser/patch/ingress skip paths."""
+    """R4 W1-W12 golden, with the intentional R5/R6 policy changes applied."""
     service = ContextWriteService()
     reader = mcp_default_actor(scopes=("read", "draft-write"))
     with session_factory() as session:
@@ -109,8 +109,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
         )
         _assert_stored(session_factory, updated.version_id, expected, f"W3 {suffix}")
 
-        # W4: a normal browser autosave preserves authored bytes even with
-        # Auto-fix enabled; the AI provenance of the same command opts in.
+        # W4: browser and AI autosaves use the same Workspace Auto-fix policy.
         for provenance in ("browser_session", "mcp_client"):
             editing = page_service.create_page_first(
                 workspace_slug="default",
@@ -135,12 +134,11 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             _assert_stored(
                 session_factory,
                 saved.version_id,
-                RAW if provenance == "browser_session" else expected,
+                expected,
                 f"W4 {suffix} {provenance}",
             )
 
-        # W5: both stale-base alternative paths normalize, including browser
-        # autosave, whose ordinary successful path deliberately skips it.
+        # W5: both stale-base alternative paths use the same Workspace policy.
         for writer in ("update", "autosave"):
             base = _published(page_service, f"w5-{suffix}-{writer}")
             _advance(page_service, base)

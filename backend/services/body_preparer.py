@@ -61,10 +61,8 @@ class BodyPreparer:
         self,
         input: BodyInput,
         ctx: WriteContext,
-        *,
-        transitional_skip_fixes: bool = False,
     ) -> PreparedBody:
-        return self._prepare(input, ctx, skip_fixes=transitional_skip_fixes)
+        return self._prepare(input, ctx)
 
     def preview(self, markdown: str, ctx: WriteContext) -> PreparedBody:
         # "Format now" is an explicit request even when save-time fixing is off.
@@ -75,7 +73,6 @@ class BodyPreparer:
         input: BodyInput,
         ctx: WriteContext,
         *,
-        skip_fixes: bool = False,
         preview: bool = False,
     ) -> PreparedBody:
         body = input.body_md
@@ -101,8 +98,6 @@ class BodyPreparer:
         )
         fixes: list[str] = []
         for module in self.registry.fixers_for_save(policy, preview=preview):
-            if skip_fixes:
-                continue
             result = module.fixer.fix(body, lint_ctx)
             body = result.body
             fixes.extend(result.fixes)
