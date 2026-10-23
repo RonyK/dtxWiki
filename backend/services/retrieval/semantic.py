@@ -266,7 +266,7 @@ class SemanticRetriever:
             if body_md is not None
             else None
         )
-        return RankedResult(
+        result = RankedResult(
             # Public search identity is the document. The chunk remains in
             # source_ref/heading_path as provenance, so multiple matching
             # chunks collapse without losing the evidence location (F-2/R-15).
@@ -290,3 +290,5 @@ class SemanticRetriever:
             },
             entity_ref=entity_ref.source_ref(),
         )
+        result._summary_markdown = body_md
+        return result

@@ -51,6 +51,7 @@ from backend.services.retrieval.keyword import (
 )
 from backend.services.retrieval.protocol import Retriever
 from backend.services.search_query import QueryPlan
+from backend.services.search_result_metadata import enrich_search_result_metadata
 
 # Re-exported for backward-compatible imports (api/read.py imports these names
 # from this module). The canonical definitions live in retrieval.keyword.
@@ -357,6 +358,8 @@ class SearchService:
         # set (especially for semantic mode), never a full-corpus COUNT.
         offset = _decode_search_cursor(cursor)
         window = ranked[offset : offset + limit]
+        if session is not None:
+            enrich_search_result_metadata(session, workspace_id, window, actor)
         next_offset = offset + limit
         has_more = len(ranked) > next_offset
         permission_note = restricted_library_permission_note(actor)
@@ -795,7 +798,7 @@ def _ranked_context_page(
         slug=page.slug,
         version_id=version.id,
     )
-    return RankedResult(
+    result = RankedResult(
         id=page.id,
         type=EntityKind.CONTEXT_PAGE.value,
         title=page.title,
@@ -803,7 +806,6 @@ def _ranked_context_page(
         matched_name=matched_name,
         score=score,
         citation_available=True,
-        stale=page.lifecycle_status == "stale",
         archived=False,
         concept_path=context_concept_path(page.slug),
         concept_type=page.page_type,
@@ -812,6 +814,8 @@ def _ranked_context_page(
         match_reason=match_reason,
         entity_ref=entity_ref.source_ref(),
     )
+    result._summary_markdown = version.body_md
+    return result
 
 
 def _page_matches_context_filters(

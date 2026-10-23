@@ -91,14 +91,22 @@ def _add_library_item(session, workspace_id, *, uri, title, trust_level="unknown
 
 
 def test_derive_nav_description_skips_headings_and_truncates():
-    assert (
-        derive_nav_description("# Title\n\nFirst para.\n\nSecond.") == "First para."
-    )
+    assert derive_nav_description("# Title\n\nFirst para.\n\nSecond.") == "First para."
     assert derive_nav_description("") is None
     assert derive_nav_description("# only heading") is None
     long = "word " * 100
     out = derive_nav_description(long, max_length=20)
     assert out is not None and len(out) <= 20 and out.endswith("…")
+    assert (
+        derive_nav_description(
+            "# Title\n\n- 상태: draft\n  wrapped metadata\n- 담당자: owner\n\n"
+            "1. checklist\n2) another item\n\n"
+            "**Status**: approved\nUpdated: today\n\n"
+            "Actual subject paragraph.\n\nLater prose."
+        )
+        == "Actual subject paragraph."
+    )
+    assert derive_nav_description("# Title\n\n- list only\n- no prose") is None
 
 
 def test_derive_nav_description_is_frontmatter_aware():
@@ -170,9 +178,7 @@ def test_render_context_concept_has_frontmatter_and_body(session_factory):
         page = _add_context_page(
             session, workspace_id, slug="api", title="API", body="# API\n\nThe body."
         )
-        version = session.get(
-            ContextPageVersion, page.current_published_version_id
-        )
+        version = session.get(ContextPageVersion, page.current_published_version_id)
         doc = render_context_concept(page, version, workspace_slug="default")
     assert doc.startswith("---\n")
     assert "type: concept" in doc
@@ -226,9 +232,7 @@ def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
 def test_index_restricted_library_filtered_by_actor(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _add_library_item(
-            session, workspace_id, uri="https://x/open", title="Open Doc"
-        )
+        _add_library_item(session, workspace_id, uri="https://x/open", title="Open Doc")
         _add_library_item(
             session,
             workspace_id,

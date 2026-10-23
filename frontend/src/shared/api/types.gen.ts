@@ -8341,6 +8341,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Location */
+            location?: string[] | null;
             /** Match Reason */
             match_reason?: ("exact_id" | "exact_slug" | "exact_title" | "exact_alias" | "trigram" | "keyword" | "semantic" | "hybrid" | "associative") | null;
             /** Matched Name */
@@ -8357,9 +8359,12 @@ export interface components {
             } | null;
             /**
              * Stale
+             * @deprecated
              * @default false
              */
             stale: boolean;
+            /** Summary */
+            summary?: string | null;
             /** Title */
             title: string;
             /**

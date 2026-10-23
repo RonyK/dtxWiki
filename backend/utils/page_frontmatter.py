@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -454,6 +455,7 @@ def derive_nav_description(
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     prose: list[str] = []
     in_fence = False
+    skipped_paragraph = False
     for line in body.split("\n"):
         stripped = line.strip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -464,10 +466,26 @@ def derive_nav_description(
         if not stripped:
             if prose:
                 break  # first prose paragraph complete
+            skipped_paragraph = False
             continue
-        if stripped.startswith(("#", "---", "|", ">")):
+        # Lists and metadata blocks describe the document's administration,
+        # rather than its subject. Skip their continuation lines as well.
+        structural = stripped.startswith(("#", "---", "|", ">"))
+        metadata = re.match(
+            r"^(?:[-+*]\s+|\d+[.)]\s+|"
+            r"(?:\*\*|__)?(?:status|state|date|created|updated|author|owner|"
+            r"title|type|tags|aliases|version|document|source|"
+            r"상태|문서\s*상태|날짜|작성일|갱신일|작성자|담당자|소유자|유형|버전|출처)"
+            r"(?:\*\*|__)?\s*[:：])",
+            stripped,
+            re.IGNORECASE,
+        )
+        if structural or metadata:
             if prose:
                 break  # a structural line ends the paragraph
+            skipped_paragraph = bool(metadata)
+            continue
+        if skipped_paragraph:
             continue
         prose.append(stripped)
     if not prose:

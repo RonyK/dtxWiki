@@ -117,7 +117,12 @@ def test_non_sqlite_guards_skip_raw_sql_but_keep_workflow_lanes(monkeypatch):
         "_search_feedback",
         lambda **_kwargs: [workflow_result],
     )
-    monkeypatch.setattr(retriever, "_search_changes", lambda **_kwargs: [])
+    change_result = workflow_result.model_copy(
+        update={"id": uuid4(), "type": "change_set", "title": "Workflow change"}
+    )
+    monkeypatch.setattr(
+        retriever, "_search_changes", lambda **_kwargs: [change_result]
+    )
 
     anonymous_results = retriever.retrieve(
         session=session,
@@ -128,7 +133,7 @@ def test_non_sqlite_guards_skip_raw_sql_but_keep_workflow_lanes(monkeypatch):
         limit=5,
         actor=None,
     )
-    authorized_results = retriever.retrieve(
+    authorized_all_results = retriever.retrieve(
         session=session,
         workspace_id=workspace_id,
         query="workflow",
@@ -137,6 +142,20 @@ def test_non_sqlite_guards_skip_raw_sql_but_keep_workflow_lanes(monkeypatch):
         limit=5,
         actor=_owner(workspace_id),
     )
+    # The all scope excludes audit material on every dialect. Explicit audit
+    # scopes keep their permission gates and work without SQLite FTS support.
+    for scope, expected in (("feedback", workflow_result), ("change", change_result)):
+        for actor in (None, _owner(workspace_id)):
+            audit_results = retriever.retrieve(
+                session=session,
+                workspace_id=workspace_id,
+                query="workflow",
+                scope=scope,
+                filters=SearchFilters(),
+                limit=5,
+                actor=actor,
+            )
+            assert audit_results == ([] if actor is None else [expected])
     trigram = SearchService()._trigram_lane(
         session=session,
         workspace_id=uuid4(),
@@ -147,7 +166,7 @@ def test_non_sqlite_guards_skip_raw_sql_but_keep_workflow_lanes(monkeypatch):
     )
 
     assert anonymous_results == []
-    assert authorized_results == [workflow_result]
+    assert authorized_all_results == []
     assert trigram == []
 
 

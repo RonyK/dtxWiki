@@ -778,6 +778,21 @@
             "title": "Id",
             "type": "string"
           },
+          "location": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
           "match_reason": {
             "anyOf": [
               {
@@ -850,8 +865,21 @@
           },
           "stale": {
             "default": false,
+            "deprecated": true,
             "title": "Stale",
             "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
           },
           "title": {
             "title": "Title",
