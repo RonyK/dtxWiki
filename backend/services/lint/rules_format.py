@@ -18,7 +18,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion
-from backend.services.lint.base import LintFindingDraft, register_rule
+from backend.services.lint.base import LintFindingDraft, LintModule
 from backend.utils.markdown_fence import fence_opener, is_fence_closer
 
 _FRONTMATTER_DELIMS = {"---", "..."}
@@ -502,8 +502,14 @@ class _MermaidBlockRule:
         return findings
 
 
-register_rule(_HeadingHierarchyRule())
-register_rule(_CodeFenceBalanceRule())
-register_rule(_TableWellformedRule())
-register_rule(_ImageRefRule())
-register_rule(_MermaidBlockRule())
+MODULE = LintModule(
+    "format",
+    900,
+    (
+        _HeadingHierarchyRule(),
+        _CodeFenceBalanceRule(),
+        _TableWellformedRule(),
+        _ImageRefRule(),
+        _MermaidBlockRule(),
+    ),
+)

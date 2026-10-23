@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
-from backend.services.lint.base import LintFindingDraft, register_rule
+from backend.services.lint.base import LintFindingDraft, LintModule
 
 _TARGETS = frozenset({"context_page"})
 
@@ -127,5 +127,11 @@ class _BrokenSlugLinkRule:
         return list(collapsed.values())
 
 
-register_rule(_UnresolvedLinkRule())
-register_rule(_BrokenSlugLinkRule())
+MODULE = LintModule(
+    "links",
+    100,
+    (
+        _UnresolvedLinkRule(),
+        _BrokenSlugLinkRule(),
+    ),
+)

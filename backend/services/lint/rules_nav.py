@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from backend.models.context import ContextPage
 from backend.models.tree import WorkspaceTreeNode
-from backend.services.lint.base import LintFindingDraft, register_rule
+from backend.services.lint.base import LintFindingDraft, LintModule
 
 
 def _draft(rule_id, severity, target_type, target_id, message, message_args=None):
@@ -163,6 +163,12 @@ class _UnreachableRule:
         ]
 
 
-register_rule(_FanoutExceededRule())
-register_rule(_MissingSummaryRule())
-register_rule(_UnreachableRule())
+MODULE = LintModule(
+    "nav",
+    400,
+    (
+        _FanoutExceededRule(),
+        _MissingSummaryRule(),
+        _UnreachableRule(),
+    ),
+)

@@ -1,9 +1,4 @@
-"""Lint plugin engine package.
-
-Public API lives in :mod:`backend.services.lint.base`. Rule plugin modules are
-imported here so they self-register into the registry whenever the package is
-imported.
-"""
+"""Explicit lint rule contracts and registry."""
 
 from uuid import UUID
 
@@ -13,21 +8,11 @@ from backend.services.lint.base import (
     LINT_LAYERS,
     LINT_SEVERITIES,
     LintFindingDraft,
+    LintModule,
+    LintPolicy,
     LintRule,
-    all_rules,
-    enabled_rules,
-    get_rule,
-    known_rule_ids,
-    register_rule,
 )
-
-from . import (
-    rules_format,  # noqa: F401  (self-registers format rules)
-    rules_knowledge,  # noqa: F401  (self-registers knowledge rules)
-    rules_links,  # noqa: F401  (self-registers link-integrity rules)
-    rules_metadata,  # noqa: F401  (registers externally-fed rule metadata)
-    rules_nav,  # noqa: F401  (self-registers navigation rules)
-)
+from backend.services.lint.registry import LintRegistry
 
 
 def page_format_warnings_for_body(
@@ -36,6 +21,7 @@ def page_format_warnings_for_body(
     page: object,
     body: str | None,
     *,
+    registry: LintRegistry,
     policy: dict | None = None,
 ) -> list[str]:
     """Non-blocking format-layer lint messages for a SPECIFIC body of ``page``.
@@ -49,7 +35,7 @@ def page_format_warnings_for_body(
     if not body:
         return []
     messages: list[str] = []
-    for rule in enabled_rules(policy, layer="format", target_type="context_page"):
+    for rule in registry.enabled(policy, layer="format", target_type="context_page"):
         for draft in rule.check(
             session=session, workspace_id=workspace_id, target=page, body=body
         ):
@@ -61,11 +47,9 @@ __all__ = [
     "LINT_LAYERS",
     "LINT_SEVERITIES",
     "LintFindingDraft",
+    "LintModule",
+    "LintPolicy",
+    "LintRegistry",
     "LintRule",
-    "all_rules",
-    "enabled_rules",
-    "get_rule",
-    "known_rule_ids",
     "page_format_warnings_for_body",
-    "register_rule",
 ]

@@ -1,7 +1,6 @@
 import pytest
 
-from backend.services.lint import base
-from backend.services.lint.base import LintFindingDraft, enabled_rules, register_rule
+from backend.services.lint import LintFindingDraft, LintModule, LintPolicy, LintRegistry
 
 
 class _Dummy:
@@ -33,10 +32,11 @@ class _Dummy:
 
 def test_enabled_rules_respects_policy_and_defaults():
     rules = [_Dummy("t.a", default_enabled=True), _Dummy("t.b", default_enabled=False)]
+    registry = LintRegistry((LintModule("test", 0, tuple(rules)),))
     # No policy -> fall back to default_enabled.
-    assert {r.rule_id for r in enabled_rules(None, rules=rules)} == {"t.a"}
+    assert {r.rule_id for r in registry.enabled(None)} == {"t.a"}
     # Policy overrides both defaults.
-    flipped = enabled_rules({"t.a": False, "t.b": True}, rules=rules)
+    flipped = registry.enabled({"t.a": False, "t.b": True})
     assert {r.rule_id for r in flipped} == {"t.b"}
 
 
@@ -46,31 +46,93 @@ def test_enabled_rules_filters_layer_and_target_type():
         _Dummy("t.kb", layer="knowledge"),
         _Dummy("t.lib", applies_to=frozenset({"library_item"})),
     ]
-    assert {r.rule_id for r in enabled_rules(None, rules=rules, layer="knowledge")} == {
-        "t.kb"
-    }
+    registry = LintRegistry((LintModule("test", 0, tuple(rules)),))
+    assert {r.rule_id for r in registry.enabled(None, layer="knowledge")} == {"t.kb"}
     # t.lib only applies to library_item, so it is excluded for context_page.
-    ctx = enabled_rules(None, rules=rules, target_type="context_page")
+    ctx = registry.enabled(None, target_type="context_page")
     assert {r.rule_id for r in ctx} == {"t.fmt", "t.kb"}
 
 
-def test_register_rule_dedup_and_layer_validation():
-    register_rule(_Dummy("t.unique.dedup"))
-    try:
-        with pytest.raises(ValueError, match="duplicate"):
-            register_rule(_Dummy("t.unique.dedup"))
-        with pytest.raises(ValueError, match="unknown lint layer"):
-            register_rule(_Dummy("t.badlayer", layer="bogus"))
-    finally:
-        base._REGISTRY.pop("t.unique.dedup", None)
+def test_registry_dedup_and_layer_validation():
+    with pytest.raises(ValueError, match="duplicate"):
+        LintRegistry(
+            (
+                LintModule(
+                    "test",
+                    0,
+                    (
+                        _Dummy("t.unique.dedup"),
+                        _Dummy("t.unique.dedup"),
+                    ),
+                ),
+            )
+        )
+    with pytest.raises(ValueError, match="unknown lint layer"):
+        LintRegistry((LintModule("test", 0, (_Dummy("t.badlayer", layer="bogus"),)),))
 
 
-def test_register_rule_rejects_empty_applies_to_and_nonbool_default():
-    # J2: an empty applies_to would register but never run; a non-bool
-    # default_enabled is a typo — both fail fast at registration.
+def test_registry_rejects_empty_applies_to_and_nonbool_default():
+    # An empty target set would silently exclude a rule; a non-bool default is
+    # a configuration typo. Both fail while the registry is assembled.
     with pytest.raises(ValueError, match="applies_to"):
-        register_rule(_Dummy("t.empty", applies_to=frozenset()))
+        LintRegistry(
+            (LintModule("test", 0, (_Dummy("t.empty", applies_to=frozenset()),)),)
+        )
     with pytest.raises(ValueError, match="default_enabled"):
-        register_rule(_Dummy("t.nonbool", default_enabled="yes"))
-    assert "t.empty" not in base._REGISTRY
-    assert "t.nonbool" not in base._REGISTRY
+        LintRegistry(
+            (LintModule("test", 0, (_Dummy("t.nonbool", default_enabled="yes"),)),)
+        )
+
+
+def test_builtin_registry_and_container_module_injection_preserve_publication_floor():
+    from types import SimpleNamespace
+
+    from backend.app.container import assemble
+    from backend.app.settings import Settings
+
+    builtin = LintRegistry.builtin()
+    assert builtin is not LintRegistry.builtin()
+    assert builtin.rule_ids() == {
+        "md.heading_hierarchy",
+        "md.code_fence_balance",
+        "md.table_wellformed",
+        "md.image_ref",
+        "md.mermaid_block",
+        "kb.orphan_page",
+        "kb.missing_backlink",
+        "kb.duplicate_concept",
+        "kb.term_collision",
+        "link.unresolved",
+        "link.broken-slug",
+        "maintenance.nav_summary_suggestion",
+        "maintenance.coverage_gap_verdict",
+        "maintenance.page_meta_suggestion",
+        "maintenance.import_batch_classification",
+        "maintenance.stale_contradiction_verdict",
+        "maintenance.golden_query_candidates",
+        "kb.hot_path_unmaterialized",
+        "kb.semantic_near_duplicate",
+        "kb.misplaced_page",
+        "kb.dependent_maybe_stale",
+        "nav.fanout_exceeded",
+        "nav.missing_summary",
+        "nav.unreachable",
+    }
+    extra = _Dummy("test.injected", default_enabled=False)
+    container = assemble(Settings(), lint_modules=(LintModule("test", 1000, (extra,)),))
+    services = container.get_services()
+    registry = services.lint_registry
+    assert registry.rule(extra.rule_id) is extra
+    assert services.lint.lint_registry is registry
+    assert services.settings_svc.lint_registry is registry
+    assert services.domain_read.lint_registry is registry
+    assert extra.rule_id not in builtin.rule_ids()
+    policy = LintPolicy(SimpleNamespace(lint_policy={"md.code_fence_balance": False}))
+    assert "md.code_fence_balance" in {
+        rule.rule_id for rule in registry.enabled(policy)
+    }
+    assert extra.rule_id not in {rule.rule_id for rule in registry.enabled(policy)}
+    with pytest.raises(ValueError, match="duplicate lint rule_id"):
+        LintRegistry(
+            (*builtin.modules, LintModule("duplicate", 1, (builtin.rules()[0],)))
+        )

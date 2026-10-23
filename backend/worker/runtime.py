@@ -42,7 +42,6 @@ from backend.services.job_hints import (
 )
 from backend.services.job_queue import DEFAULT_JOB_MAX_ATTEMPTS, JobQueueService
 from backend.services.library_service import LibraryCandidateInput, LibraryService
-from backend.services.lint_service import LintService
 from backend.services.mail_delivery import EmailDeliveryService
 from backend.worker.registry import JobHandler, get_handler, register
 
@@ -1776,7 +1775,7 @@ class OneShotWorker:
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
         run_id = job.target_ref.get("lint_run_id")
-        result = LintService().execute_queued_run(
+        result = self._services.lint.execute_queued_run(
             session,
             workspace_id=job.workspace_id,
             run_id=UUID(str(run_id)) if run_id else None,

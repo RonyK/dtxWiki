@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import exists, func, select
 
 from backend.models.context import ContextPage, PageLink, PageNameIndex
-from backend.services.lint.base import LintFindingDraft, register_rule
+from backend.services.lint.base import LintFindingDraft, LintModule
 
 _TARGETS = frozenset({"context_page"})
 
@@ -204,7 +204,13 @@ class _TermCollisionRule:
         ]
 
 
-register_rule(_OrphanPageRule())
-register_rule(_MissingBacklinkRule())
-register_rule(_DuplicateConceptRule())
-register_rule(_TermCollisionRule())
+MODULE = LintModule(
+    "knowledge",
+    200,
+    (
+        _OrphanPageRule(),
+        _MissingBacklinkRule(),
+        _DuplicateConceptRule(),
+        _TermCollisionRule(),
+    ),
+)

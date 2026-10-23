@@ -18,7 +18,7 @@ from backend.schemas.lint import (
     LintFindingDecisionRequest,
     LintRunCreateRequest,
 )
-from backend.services.lint import base
+from backend.services.lint import LintModule, LintRegistry
 from backend.services.lint.base import LintFindingDraft
 from backend.services.lint_service import LintService
 from backend.services.read_errors import ReadValidationError
@@ -780,7 +780,7 @@ def test_metadata_only_finding_survives_runtime_reconciliation(session_factory):
         session.flush()
         runtime_policy = {
             rule.rule_id: False
-            for rule in base.all_rules()
+            for rule in LintRegistry.builtin().rules()
             if getattr(rule, "runtime_checkable", True)
         }
 
@@ -890,7 +890,9 @@ def test_missing_backlink_rule_batches_many_outbound_targets(
         workspace_id = _ws(session)
         source_page = session.get(ContextPage, source.id)
         rule = next(
-            item for item in base.all_rules() if item.rule_id == "kb.missing_backlink"
+            item
+            for item in LintRegistry.builtin().rules()
+            if item.rule_id == "kb.missing_backlink"
         )
         query_count = 0
 
@@ -1119,27 +1121,27 @@ def test_finding_id_lookup_still_honors_the_disabled_rule_policy_gate(session_fa
 
     rule = _Toggleable()
     rule.fires = True
-    base.register_rule(rule)
-    try:
-        svc = LintService()
-        request = LintRunCreateRequest(lint_scope="workspace", trigger_type="manual")
-        with session_factory.begin() as session:
-            wsid = _ws(session)
-            _page(session, wsid, slug="policy-gated-link")
-            svc.run_lint(session, wsid, request, "human", "t", rules=[rule])
-            finding = session.scalar(
-                select(LintFinding).where(LintFinding.rule_id == "test.toggle")
-            )
-            assert svc.list_findings(session, wsid, finding_id=finding.id).findings
+    registry = LintRegistry(
+        (
+            *LintRegistry.builtin().modules,
+            LintModule("test", 1000, (rule,)),
+        )
+    )
+    svc = LintService(lint_registry=registry)
+    request = LintRunCreateRequest(lint_scope="workspace", trigger_type="manual")
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        _page(session, wsid, slug="policy-gated-link")
+        svc.run_lint(session, wsid, request, "human", "t", rules=[rule])
+        finding = session.scalar(
+            select(LintFinding).where(LintFinding.rule_id == "test.toggle")
+        )
+        assert svc.list_findings(session, wsid, finding_id=finding.id).findings
 
-            session.get(Workspace, wsid).lint_policy = {"test.toggle": False}
-            session.flush()
+        session.get(Workspace, wsid).lint_policy = {"test.toggle": False}
+        session.flush()
 
-            assert (
-                svc.list_findings(session, wsid, finding_id=finding.id).findings == []
-            )
-    finally:
-        base._REGISTRY.pop("test.toggle", None)
+        assert svc.list_findings(session, wsid, finding_id=finding.id).findings == []
 
 
 def test_run_lint_does_not_resurrect_dismissed_finding(session_factory):
@@ -1244,29 +1246,36 @@ def test_run_lint_tombstones_removed_near_duplicate_verdict_findings(session_fac
 
 
 def test_list_findings_layer_filter(session_factory):
-    base.register_rule(_FmtRule())
-    base.register_rule(_KbRule())
-    try:
-        lint = LintService()
-        with session_factory.begin() as session:
-            wsid = _ws(session)
-            _page(session, wsid, slug="layerp")
-            lint.create_run(
-                session,
-                wsid,
-                LintRunCreateRequest(lint_scope="workspace", trigger_type="manual"),
-                "human",
-                "t",
-            )
-            fmt = lint.list_findings(session, wsid, layer="format")
-            kb = lint.list_findings(session, wsid, layer="knowledge")
-        fmt_ids = {f.rule_id for f in fmt.findings}
-        kb_ids = {f.rule_id for f in kb.findings}
-        assert "test.fmt" in fmt_ids and "test.kb" not in fmt_ids
-        assert "test.kb" in kb_ids and "test.fmt" not in kb_ids
-    finally:
-        base._REGISTRY.pop("test.fmt", None)
-        base._REGISTRY.pop("test.kb", None)
+    registry = LintRegistry(
+        (
+            *LintRegistry.builtin().modules,
+            LintModule(
+                "test",
+                1000,
+                (
+                    _FmtRule(),
+                    _KbRule(),
+                ),
+            ),
+        )
+    )
+    lint = LintService(lint_registry=registry)
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        _page(session, wsid, slug="layerp")
+        lint.create_run(
+            session,
+            wsid,
+            LintRunCreateRequest(lint_scope="workspace", trigger_type="manual"),
+            "human",
+            "t",
+        )
+        fmt = lint.list_findings(session, wsid, layer="format")
+        kb = lint.list_findings(session, wsid, layer="knowledge")
+    fmt_ids = {f.rule_id for f in fmt.findings}
+    kb_ids = {f.rule_id for f in kb.findings}
+    assert "test.fmt" in fmt_ids and "test.kb" not in fmt_ids
+    assert "test.kb" in kb_ids and "test.fmt" not in kb_ids
 
 
 def _api_client(page_service):
@@ -1299,8 +1308,7 @@ def test_lint_run_and_findings_api_smoke(page_service):
     assert fetched_run.json()["data"]["id"] == run_id
 
     findings = client.get(
-        f"/api/v1/workspaces/{wsid}/lint/findings"
-        "?layer=format&page=1&page_size=20"
+        f"/api/v1/workspaces/{wsid}/lint/findings?layer=format&page=1&page_size=20"
     )
     assert findings.status_code == 200
     findings_data = findings.json()["data"]
@@ -1313,8 +1321,7 @@ def test_lint_run_and_findings_api_smoke(page_service):
     assert findings_data["next_cursor"] is None
 
     mixed_modes = client.get(
-        f"/api/v1/workspaces/{wsid}/lint/findings"
-        "?page=1&page_size=20&limit=50"
+        f"/api/v1/workspaces/{wsid}/lint/findings?page=1&page_size=20&limit=50"
     )
     assert mixed_modes.status_code == 422
     assert mixed_modes.json()["error_code"] == "validation_failed"

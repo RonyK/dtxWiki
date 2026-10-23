@@ -3,10 +3,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-import backend.services.lint  # noqa: F401
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
 from backend.models.workspace import Workspace
-from backend.services.lint import base
+from backend.services.lint import LintRegistry
 from backend.services.page_service import refresh_page_links
 
 pytestmark = pytest.mark.integration
@@ -42,8 +41,10 @@ def _page(session, workspace_id, slug, body):
 
 
 def _check(session, rule_id, page):
-    return base.get_rule(rule_id).check(
-        session=session, workspace_id=page.workspace_id, target=page
+    return (
+        LintRegistry.builtin()
+        .rule(rule_id)
+        .check(session=session, workspace_id=page.workspace_id, target=page)
     )
 
 

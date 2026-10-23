@@ -94,7 +94,7 @@ from backend.services.library_canonical import (
     library_original_download_available,
     list_canonical_library_artifacts,
 )
-from backend.services.lint import page_format_warnings_for_body
+from backend.services.lint import LintRegistry, page_format_warnings_for_body
 from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
@@ -232,7 +232,11 @@ class DomainReadService:
         tree_read_service: TreeReadService | None = None,
         *,
         library_blob_repository_factory: LibraryBlobRepositoryFactory | None = None,
+        lint_registry: LintRegistry | None = None,
     ) -> None:
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else LintRegistry.builtin()
+        )
         self.tree_read_service = tree_read_service or TreeReadService()
         # Doc §3-D: History's per-version download button needs a
         # server-authoritative "is the original still retrievable" answer,
@@ -1045,6 +1049,7 @@ class DomainReadService:
                 workspace_id,
                 page,
                 version.body_md if version is not None else None,
+                registry=self.lint_registry,
                 policy=lint_policy,
             )
             # F1: surface the open review for this page's CURRENT pending draft so
@@ -1096,6 +1101,7 @@ class DomainReadService:
                         workspace_id,
                         page,
                         draft_version.body_md,
+                        registry=self.lint_registry,
                         policy=lint_policy,
                     )
         return {
