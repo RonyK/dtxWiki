@@ -12,6 +12,7 @@ import {
 import { i18n } from "../../../shared/i18n";
 import { ReviewScreen } from "../ReviewScreen";
 import * as pagesApi from "../../../shared/api/pages";
+import { ApiError } from "../../../shared/api/client";
 import type { ReviewEvidenceOperation, ReviewItem, ReviewSelection } from "../../../shared/api/operations";
 import { AuthProvider, useOptionalAuth } from "../../../shared/auth/AuthContext";
 import { reviewDraftKey } from "../../../shared/lib/reviewDraftStorage";
@@ -814,6 +815,7 @@ describe("ReviewScreen", () => {
     Object.assign(current.evidence!.operations[0].content!, {
       baseline_version_id: "version-1", baseline_version_no: 1,
       draft_parent_version_id: "version-2", draft_parent_version_no: 2,
+      can_diff: false, unavailable_reason: "diff_too_large",
     });
     current.reject_effect = {
       ...current.reject_effect!, effect: "restore_previous_draft",
@@ -822,22 +824,40 @@ describe("ReviewScreen", () => {
       cascaded_versions: [7, 4, 6, 5].map(version => ({ version_id: `version-${version}`, version_no: version })),
       visible_cascaded_review_ids: ["later-review"], cascaded_review_count: 2,
       visible_sibling_count: 1, impact_fingerprint: "impact-first",
+      blocked_reason: "private_edit_in_progress",
     };
+    // The private edit can end without changing this review's list revision.
+    const ready: ReviewItem = { ...current, reject_effect: {
+      ...current.reject_effect, blocked_reason: null, impact_fingerprint: "impact-ready",
+    } };
     const updated: ReviewItem = {
-      ...current,
+      ...ready,
       evidence: { ...current.evidence!, operations: current.evidence!.operations.map(operation => ({ ...operation, diff_summary: "Updated draft evidence" })) },
       reject_effect: {
-        ...current.reject_effect, restores_review: true, impact_fingerprint: "impact-updated",
+        ...ready.reject_effect!, restores_review: true, impact_fingerprint: "impact-updated",
         cascaded_versions: [...current.reject_effect.cascaded_versions!, { version_id: "version-9", version_no: 9 }],
       },
     };
     const decisionBodies: Array<Record<string, unknown>> = [];
     let detailCalls = 0;
+    let finishCancelledRefresh: () => void = () => {};
+    let finishReadyRefresh: () => void = () => {};
     let finishImpactRefresh: () => void = () => {};
     mockReviewQueue([current], null, (url, init) => {
       if (url.endsWith("/reviews/review-1")) {
         detailCalls += 1;
-        return detailCalls === 1 ? jsonResponse({ data: current }) : new Promise<Response>(resolve => {
+        if ([1, 3].includes(detailCalls)) return jsonResponse({ data: current });
+        if (detailCalls === 2) return new Promise<Response>(resolve => {
+          finishCancelledRefresh = () => resolve(jsonResponse({ data: ready }));
+        });
+        if (detailCalls === 4) return new Promise<Response>(resolve => {
+          finishReadyRefresh = () => resolve(jsonResponse({ data: ready }));
+        });
+        if (detailCalls === 5) return new Response(JSON.stringify({
+          error_code: "review_detail_unavailable", message: "Could not recheck the rejection impact", warnings: [],
+        }), { status: 503, headers: { "Content-Type": "application/json" } });
+        if (detailCalls === 6) return jsonResponse({ data: ready });
+        return new Promise<Response>(resolve => {
           finishImpactRefresh = () => resolve(jsonResponse({ data: updated }));
         });
       }
@@ -866,17 +886,49 @@ describe("ReviewScreen", () => {
     await user.click(published);
     expect(published).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Current published version v1 → Review version v3")).toBeVisible();
-    await waitFor(() => expect(pagesApi.diffPageVersions).toHaveBeenLastCalledWith(
-      WORKSPACE_ID, "exact-page", "version-1", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    ));
+    expect(screen.getByText(i18n.t("review:content.tooLarge"))).toBeVisible();
+    expect(vi.mocked(pagesApi.diffPageVersions).mock.calls.some(([, , from]) => from === "version-1")).toBe(false);
+    // The parent gets its own bounded API request; its actual size error is
+    // handled independently of the published baseline's preflight flag.
+    vi.mocked(pagesApi.diffPageVersions).mockRejectedValueOnce(new ApiError(413, {
+      error_code: "page_diff_too_large", message: "Too large", request_id: "review-parent-diff", warnings: [],
+    }));
     await user.click(parent);
     await waitFor(() => expect(pagesApi.diffPageVersions).toHaveBeenLastCalledWith(
       WORKSPACE_ID, "exact-page", "version-2", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
+    expect(await screen.findByText(i18n.t("review:content.tooLarge"))).toBeVisible();
     expect(screen.queryByText(i18n.t("review:content.versionMismatch"))).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Reject" }));
-    const dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
+    let dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
+    await waitFor(() => expect(detailCalls).toBe(2));
+    expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+    await user.type(within(dialog).getByRole("textbox", { name: "Decision reason" }), "Keep this reason");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
+    await waitFor(() => expect(detailCalls).toBe(3));
+    await act(async () => { finishCancelledRefresh(); });
+    expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+    expect(within(dialog).getByText(i18n.t("review:workflow.reasons.review_reject_blocked_by_private_edit"))).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(detailCalls).toBe(4));
+    const reason = within(dialog).getByRole("textbox", { name: "Decision reason" });
+    reason.focus();
+    await act(async () => { finishReadyRefresh(); });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Reject" })).toBeEnabled());
+    expect(reason).toHaveValue("Keep this reason");
+    expect(reason).toHaveFocus();
+    // A subsequent failed read must not authorize the previously ready impact.
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
+    expect(await within(dialog).findByText("Could not recheck the rejection impact")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+    expect(decisionBodies).toHaveLength(0);
+    await user.click(within(dialog).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Reject" })).toBeEnabled());
     expect(within(dialog).getByText("Layered draft")).toBeVisible();
     expect(within(dialog).getByText("Review version v3")).toBeVisible();
     expect(within(dialog).getByText("v3 · this review")).toBeVisible();
@@ -888,20 +940,22 @@ describe("ReviewScreen", () => {
     expect(within(dialog).getByText("Published")).toBeVisible();
     expect(within(dialog).getByText("v1 stays published")).toBeVisible();
     expect(within(dialog).getByText(i18n.t("review:workflow.rejectSiblingImpact", { count: 1 }))).toBeVisible();
-    await user.type(within(dialog).getByRole("textbox", { name: "Decision reason" }), "Keep this reason");
+    expect(within(dialog).getByRole("textbox", { name: "Decision reason" })).toHaveValue("Keep this reason");
     await user.click(within(dialog).getByRole("button", { name: "Reject" }));
     expect(decisionBodies[0]).toEqual({
       decision_type: "reject", decision_reason: "Keep this reason", decision_id: expect.any(String),
-      expected_impact_fingerprint: "impact-first",
+      expected_impact_fingerprint: "impact-ready",
     });
-    await waitFor(() => expect(detailCalls).toBe(2));
+    await waitFor(() => expect(detailCalls).toBe(7));
     expect(dialog).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Rejecting" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+    within(dialog).getByRole("textbox", { name: "Decision reason" }).focus();
     await act(async () => { finishImpactRefresh(); });
     expect(await within(dialog).findByText("The rejection's impact changed while you were confirming. Check the updated impact and reject again.")).toBeVisible();
     expect(within(dialog).getByText("v4–v7, v9 (5 versions) · later drafts written on v3 (2 reviews settled)")).toBeVisible();
     expect(within(dialog).getByText("Returns to v2. Its review was already closed, so a new review opens.")).toBeVisible();
     expect(within(dialog).getByRole("textbox", { name: "Decision reason" })).toHaveValue("Keep this reason");
+    expect(within(dialog).getByRole("textbox", { name: "Decision reason" })).toHaveFocus();
     await user.click(within(dialog).getByRole("button", { name: "Reject" }));
     expect(decisionBodies).toHaveLength(2);
     expect(decisionBodies[1]).toEqual({

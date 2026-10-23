@@ -1,6 +1,7 @@
 import base64
 import json
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -83,6 +84,7 @@ from backend.services.review_approval import (
     ReviewApprovalPreflight,
 )
 from backend.services.review_risk_policy import (
+    RISK_ORDER,
     auto_approve_by_risk_entries,
     normalized_review_policy,
 )
@@ -1293,8 +1295,7 @@ class ReviewService:
                             criteria=[
                                 ChangeOperation.target_type == "context_page",
                                 ChangeOperation.target_id == page.id,
-                                ChangeOperation.diff_ref
-                                == f"{prefix}{destination.id}",
+                                ChangeOperation.diff_ref == f"{prefix}{destination.id}",
                             ],
                         ).with_only_columns(ChangeOperation.change_set_id)
                     ),
@@ -1342,7 +1343,6 @@ class ReviewService:
         page: ContextPage,
         destination: ContextPageVersion,
         rejected: ContextPageVersion,
-        risk_level: str,
         actor_kind: str,
         actor_id: str,
     ) -> ReviewItem:
@@ -1357,6 +1357,7 @@ class ReviewService:
             f"v{destination.version_no} became the edit head again after "
             f"v{rejected.version_no} was rejected"
         )
+        risk = self._restored_draft_risk(session, page, destination)
         restore_set = ChangeSet(
             workspace_id=page.workspace_id,
             reason=reason,
@@ -1364,7 +1365,7 @@ class ReviewService:
             actor_type=actor_kind,
             actor_id=parse_uuid_or_none(actor_id),
             status="draft_created",
-            risk_level=risk_level,
+            risk_level=risk["risk_level"],
         )
         session.add(restore_set)
         session.flush()
@@ -1383,7 +1384,7 @@ class ReviewService:
             change_set_id=restore_set.id,
             review_type="context_update",
             status="pending",
-            risk_level=risk_level,
+            **risk,
             decision_summary="Draft restored after a later draft was rejected",
             decision_summary_code="context_draft_restored_after_rejection",
         )
@@ -1404,6 +1405,95 @@ class ReviewService:
             },
         )
         return restored
+
+    @staticmethod
+    def _restored_draft_risk(
+        session: Session, page: ContextPage, destination: ContextPageVersion
+    ) -> dict[str, object]:
+        """Carry the restored version's own review evidence, never its child's.
+
+        Several reviews may speak for the same version. Keep the greatest
+        recorded risk and every mandatory human-review veto. Missing evidence
+        cannot establish that automation is safe.
+        """
+
+        source_sets = select_in_workspace(
+            ChangeOperation,
+            workspace_id=page.workspace_id,
+            criteria=[
+                ChangeOperation.target_type == "context_page",
+                ChangeOperation.target_id == page.id,
+                ChangeOperation.diff_ref == f"context_page_version:{destination.id}",
+            ],
+        ).with_only_columns(ChangeOperation.change_set_id)
+        source_match = ReviewItem.change_set_id.in_(source_sets)
+        if destination.change_set_id is not None:
+            source_match = or_(
+                source_match, ReviewItem.change_set_id == destination.change_set_id
+            )
+        sources = list(
+            session.scalars(
+                select_in_workspace(
+                    ReviewItem,
+                    workspace_id=page.workspace_id,
+                    criteria=[
+                        source_match,
+                        ReviewItem.review_type == "context_update",
+                    ],
+                ).order_by(ReviewItem.created_at, ReviewItem.id)
+            ).all()
+        )
+
+        def complete(source: ReviewItem) -> bool:
+            return (
+                source.risk_level in RISK_ORDER
+                and bool(source.risk_policy_version)
+                and bool(source.risk_resolution_summary)
+                and isinstance(source.risk_signals, dict)
+                and isinstance(source.risk_signals.get("human_review_required"), bool)
+                and isinstance(source.risk_policy_snapshot, dict)
+                and {
+                    "preset",
+                    "policy_version",
+                    "default",
+                    "review_required_from_risk",
+                }
+                <= source.risk_policy_snapshot.keys()
+            )
+
+        source = max(
+            sources,
+            key=lambda item: (RISK_ORDER.get(item.risk_level, 2), complete(item)),
+            default=None,
+        )
+        signals = (
+            deepcopy(source.risk_signals)
+            if source is not None and isinstance(source.risk_signals, dict)
+            else {}
+        )
+        for flag in ("human_review_required", "caller_needs_review", "lint_error"):
+            signals[flag] = any(
+                bool((item.risk_signals or {}).get(flag))
+                for item in sources
+                if isinstance(item.risk_signals, dict)
+            )
+        if not sources or any(not complete(item) for item in sources):
+            signals["human_review_required"] = True
+        return {
+            "risk_level": source.risk_level
+            if source is not None and source.risk_level in RISK_ORDER
+            else "high",
+            "risk_policy_version": source.risk_policy_version if source else None,
+            "risk_resolution_summary": (
+                source.risk_resolution_summary if source else None
+            ),
+            "risk_signals": signals,
+            "risk_policy_snapshot": (
+                deepcopy(source.risk_policy_snapshot)
+                if source is not None and isinstance(source.risk_policy_snapshot, dict)
+                else None
+            ),
+        }
 
     @staticmethod
     def _open_reviews_within(
@@ -1609,11 +1699,13 @@ class ReviewService:
         elif review.review_type == "agent_page_activation":
             operation = session.scalar(
                 select_in_workspace(
-                    ChangeOperation, workspace_id=review.workspace_id,
-                    criteria=[ChangeOperation.change_set_id == change_set.id,
-                              ChangeOperation.target_type == "agent_page"],
-                )
-                .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
+                    ChangeOperation,
+                    workspace_id=review.workspace_id,
+                    criteria=[
+                        ChangeOperation.change_set_id == change_set.id,
+                        ChangeOperation.target_type == "agent_page",
+                    ],
+                ).order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
             )
             version_id = (
                 operation_version_id(operation, "agent_page") if operation else None
@@ -1735,7 +1827,8 @@ class ReviewService:
             siblings = list(
                 session.scalars(
                     select_in_workspace_by_ids(
-                        ReviewItem, workspace_id=workspace_id,
+                        ReviewItem,
+                        workspace_id=workspace_id,
                         resource_ids=[sibling.id for sibling in siblings],
                     )
                     .order_by(ReviewItem.id)
@@ -1745,10 +1838,10 @@ class ReviewService:
             )
         operations = session.scalars(
             select_in_workspace(
-                ChangeOperation, workspace_id=workspace_id,
+                ChangeOperation,
+                workspace_id=workspace_id,
                 criteria=[ChangeOperation.change_set_id == review.change_set_id],
-            )
-            .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
+            ).order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
         ).all()
         primary = next(
             (
@@ -2057,7 +2150,8 @@ class ReviewService:
         }
         patches = session.scalars(
             select_in_workspace(
-                ChangeOperation, workspace_id=page.workspace_id,
+                ChangeOperation,
+                workspace_id=page.workspace_id,
                 criteria=[
                     ChangeOperation.target_type == "context_page",
                     ChangeOperation.target_id == page.id,
@@ -2134,7 +2228,9 @@ class ReviewService:
                     "decision_id requires an authenticated UUID actor"
                 )
             existing = get_in_workspace(
-                session, ReviewDecision, workspace_id=workspace_id,
+                session,
+                ReviewDecision,
+                workspace_id=workspace_id,
                 resource_id=request.decision_id,
             )
             if existing is not None:
@@ -2406,7 +2502,6 @@ class ReviewService:
                     page=page,
                     destination=plan.destination,
                     rejected=version,
-                    risk_level=review.risk_level,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                 )
@@ -3100,7 +3195,9 @@ class ReviewService:
         review_item_id: UUID,
     ) -> None:
         review = get_in_workspace(
-            session, ReviewItem, workspace_id=workspace_id,
+            session,
+            ReviewItem,
+            workspace_id=workspace_id,
             resource_id=review_item_id,
         )
         if review is None:
@@ -3113,7 +3210,8 @@ class ReviewService:
             return
         target = session.scalar(
             select_in_workspace(
-                ChangeOperation, workspace_id=workspace_id,
+                ChangeOperation,
+                workspace_id=workspace_id,
                 criteria=[
                     ChangeOperation.change_set_id == review.change_set_id,
                     ChangeOperation.target_type == target_type,
@@ -3127,7 +3225,8 @@ class ReviewService:
         model = ContextPage if target_type == "context_page" else AgentPage
         session.scalar(
             select_in_workspace(
-                model, workspace_id=workspace_id,
+                model,
+                workspace_id=workspace_id,
                 criteria=[model.id == target.target_id],
             )
             .execution_options(populate_existing=True)
@@ -3351,7 +3450,7 @@ class ReviewService:
             (
                 member
                 for member in (plan.retired if plan is not None else ())
-                if member.id != version.id
+                if member.version_no > version.version_no
                 and context_version_is_visible(member, actor)
             ),
             key=lambda member: member.version_no,
@@ -3745,14 +3844,14 @@ class ReviewService:
             return None
         operations = session.scalars(
             select_in_workspace(
-                ChangeOperation, workspace_id=change_set.workspace_id,
+                ChangeOperation,
+                workspace_id=change_set.workspace_id,
                 criteria=[
                     ChangeOperation.change_set_id == change_set.id,
                     # Recorded draft metadata is bookkeeping, not a change.
                     ChangeOperation.operation != "metadata_snapshot",
                 ],
-            )
-            .order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
+            ).order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
         ).all()
         projected = []
         all_visible = bool(operations)
@@ -3974,7 +4073,6 @@ def _hydrated_actor_display_name(
     if actor_kind == "system":
         return "System"
     return actor_kind.replace("_", " ").title()
-
 
 
 def _revision_content_hash(

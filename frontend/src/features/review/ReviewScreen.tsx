@@ -423,6 +423,28 @@ export function ReviewScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDetailKey, detailReload, completedReview?.id, workspaceIsCurrent, setState, t]);
 
+  async function reloadRejectDetail(reviewId: string, signal: AbortSignal): Promise<ReviewItem | null> {
+    if (!workspaceIsCurrent || !state?.workspaceId || !selectedDetailKey || reviewParam !== reviewId) return null;
+    const workspaceId = state.workspaceId;
+    const detailKey = selectedDetailKey;
+    const generation = loadMoreGenerationRef.current;
+    const selectionGeneration = reviewSelectionGenerationRef.current;
+    const fresh = await getReview(workspaceId, reviewId, signal);
+    if (signal.aborted || !mountedRef.current
+      || generation !== loadMoreGenerationRef.current || selectionGeneration !== reviewSelectionGenerationRef.current
+      || searchParamsRef.current.get("review") !== reviewId
+      || (activeWorkspaceRef.current && activeWorkspaceRef.current !== workspaceId)) return null;
+    if (fresh.workspace_id !== workspaceId || fresh.id !== reviewId) throw new Error("Review mismatch");
+    for (const [key, cached] of detailCacheRef.current) {
+      if (cached.workspace_id === workspaceId && cached.id === reviewId) detailCacheRef.current.delete(key);
+    }
+    detailCacheRef.current.set(detailKey, fresh);
+    detailCacheRef.current.set(JSON.stringify([workspaceId, fresh.id, fresh.updated_at, fresh.status]), fresh);
+    setSelectedDetail({ key: detailKey, review: fresh, error: null });
+    setDetachedReview(listedReview ? null : fresh);
+    return fresh;
+  }
+
   // All selection commands update the parameter; the effect above owns state.
   function setReviewParam(reviewId: string | null) {
     focusReviewRef.current = reviewId;
@@ -683,29 +705,6 @@ export function ReviewScreen() {
       } catch (exc) {
         if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
           if (key) setPendingDecision(key, null);
-          if (decision === "reject" && exc.body.error_code === "review_decision_impact_changed") {
-            // Keep the current detail mounted while refreshing its impact so
-            // the confirmation dialog and the reviewer's reason stay open.
-            const detailKey = selectedDetailKey;
-            const selectionGeneration = reviewSelectionGenerationRef.current;
-            for (const [cachedKey, review] of detailCacheRef.current) {
-              if (review.workspace_id === workspaceId && review.id === selected.id) detailCacheRef.current.delete(cachedKey);
-            }
-            try {
-              const fresh = await getReview(workspaceId, selected.id);
-              if (fresh.workspace_id !== workspaceId || fresh.id !== selected.id) throw new Error("Review mismatch");
-              if (generation === loadMoreGenerationRef.current && selectionGeneration === reviewSelectionGenerationRef.current && detailKey) {
-                detailCacheRef.current.set(detailKey, fresh);
-                detailCacheRef.current.set(JSON.stringify([workspaceId, fresh.id, fresh.updated_at, fresh.status]), fresh);
-                setSelectedDetail({ key: detailKey, review: fresh, error: null });
-                setDetachedReview(listedReview ? null : fresh);
-              }
-            } catch (error) {
-              if (generation === loadMoreGenerationRef.current && selectionGeneration === reviewSelectionGenerationRef.current && detailKey) {
-                setSelectedDetail({ key: detailKey, review: null, error: reviewErrorMessage(error, t("errors.restore")) });
-              }
-            }
-          }
           throw exc;
         }
         if (generation !== loadMoreGenerationRef.current) return "unknown";
@@ -1724,6 +1723,7 @@ export function ReviewScreen() {
                   onDecision={submitDecision}
                   onOpenReview={setReviewParam}
                   onRejectDialogChange={onRejectDialogChange}
+                  onReloadRejectDetail={reloadRejectDetail}
                   onEditDirectly={() => void editDirectly(selectedReview)}
                   onReasonChange={setDecisionReason}
                   onRouteChanges={(audienceKind, reason) =>
@@ -2462,6 +2462,7 @@ function ReviewDetail({
   onDecision,
   onOpenReview,
   onRejectDialogChange,
+  onReloadRejectDetail,
   onEditDirectly,
   onRouteChanges,
 }: {
@@ -2480,6 +2481,7 @@ function ReviewDetail({
   onDecision: (decision: ReviewDecisionType, expectedImpactFingerprint?: string | null) => Promise<DecisionResult>;
   onOpenReview: (reviewId: string) => void;
   onRejectDialogChange: (reviewId: string, key: string | null) => void;
+  onReloadRejectDetail: (reviewId: string, signal: AbortSignal) => Promise<ReviewItem | null>;
   onEditDirectly: () => void;
   onRouteChanges: (
     audienceKind: ReviewAudienceKind,
@@ -2557,6 +2559,11 @@ function ReviewDetail({
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [rejectBlockedByResponse, setRejectBlockedByResponse] = useState(false);
+  const [rejectPreviewState, setRejectPreviewState] = useState<"unverified" | "loading" | "ready">("unverified");
+  const rejectChecking = rejectPreviewState === "loading";
+  const rejectPreviewReady = rejectPreviewState === "ready";
+  const rejectReadRef = useRef<AbortController | null>(null);
+  useEffect(() => () => rejectReadRef.current?.abort(), []);
   const rejectBlocked = rejectBlockedByResponse || review.reject_effect?.blocked_reason === "private_edit_in_progress";
   const [routingOpen, setRoutingOpen] = useState(false);
   const [routingAudience, setRoutingAudience] =
@@ -2585,7 +2592,7 @@ function ReviewDetail({
   const decidingReviewId = settlement?.by_review_item_id;
 
   function handleReject() {
-    if (!canReject) {
+    if (!canReject || rejectReadRef.current) {
       return;
     }
     // Reject is terminal (it removes the item from the queue), so gate it behind
@@ -2595,6 +2602,35 @@ function ReviewDetail({
     setRejectBlockedByResponse(false);
     onRejectDialogChange(review.id, reviewContentKey(review));
     setRejectOpen(true);
+    void reloadRejectPreview();
+  }
+
+  async function reloadRejectPreview(preservedError: string | null = null) {
+    rejectReadRef.current?.abort();
+    const controller = new AbortController();
+    rejectReadRef.current = controller;
+    setRejectPreviewState("loading");
+    setRejectError(preservedError);
+    try {
+      const fresh = await onReloadRejectDetail(review.id, controller.signal);
+      if (controller.signal.aborted || rejectReadRef.current !== controller) return;
+      if (!fresh) {
+        setRejectError(t("errors.restore"));
+        setRejectPreviewState("unverified");
+        return;
+      }
+      setRejectBlockedByResponse(false);
+      setRejectPreviewState("ready");
+    } catch (error) {
+      if (!controller.signal.aborted && rejectReadRef.current === controller) {
+        setRejectError(reviewErrorMessage(error, t("errors.restore")));
+        setRejectPreviewState("unverified");
+      }
+    } finally {
+      if (!controller.signal.aborted && rejectReadRef.current === controller) {
+        rejectReadRef.current = null;
+      }
+    }
   }
 
   // Stable identities: Dialog's focus-management effect keys on onClose, so an
@@ -2607,6 +2643,9 @@ function ReviewDetail({
   }, [busy]);
   const closeReject = useCallback(() => {
     if (!busy) {
+      rejectReadRef.current?.abort();
+      rejectReadRef.current = null;
+      setRejectPreviewState("unverified");
       setRejectOpen(false);
       onRejectDialogChange(review.id, null);
     }
@@ -2615,7 +2654,7 @@ function ReviewDetail({
   async function confirmReject() {
     // The busy re-entry guard mirrors the routing dialog: the inline button is
     // disabled while submitting, but a stale double-submit is still bounced.
-    if (actionBusy || rejectBlocked) {
+    if (!canReject || rejectBlocked || rejectReadRef.current || !rejectPreviewReady) {
       return;
     }
     setRejectError(null);
@@ -2628,7 +2667,10 @@ function ReviewDetail({
       else setRejectError(t(result === "unknown" ? "workflow.decisionOutcomeUnknown" : "workflow.decisionFailedKeepDraft"));
     } catch (exc) {
       if (exc instanceof ApiError && exc.body.error_code === "review_reject_blocked_by_private_edit") setRejectBlockedByResponse(true);
-      setRejectError(reviewErrorMessage(exc, t("errors.decide")));
+      const message = reviewErrorMessage(exc, t("errors.decide"));
+      if (exc instanceof ApiError && exc.body.error_code === "review_decision_impact_changed") {
+        await reloadRejectPreview(message);
+      } else setRejectError(message);
     }
   }
 
@@ -2989,10 +3031,14 @@ function ReviewDetail({
               })}
             </p>
             <ReviewRejectImpact review={review} />
+            {rejectChecking ? <p role="status">{t("reject.checkingImpact")}</p> : null}
             <FormField htmlFor={`${rejectTitleId}-reason`} label={t("detail.reasonLabel")} hint={decisionReasonHint}>
               <textarea {...textInputLimit(2000, false)} id={`${rejectTitleId}-reason`} value={decisionReason} onChange={(event) => onReasonChange(event.currentTarget.value)} />
             </FormField>
-            {rejectBlocked || rejectError ? <StatusBanner tone="warning">{rejectBlocked ? t("workflow.reasons.review_reject_blocked_by_private_edit") : rejectError}</StatusBanner> : null}
+            {rejectBlocked || rejectError ? <StatusBanner tone="warning" action={
+              <button className="icon-button" disabled={busy || decisionsBlocked || rejectChecking}
+                onClick={() => void reloadRejectPreview()} type="button">{t("reject.recheckImpact")}</button>
+            }>{rejectBlocked ? t("workflow.reasons.review_reject_blocked_by_private_edit") : rejectError}</StatusBanner> : null}
             <div className="dialog-actions">
               <button
                 className="icon-button"
@@ -3004,7 +3050,7 @@ function ReviewDetail({
               </button>
               <button
                 className="icon-button danger"
-                disabled={actionBusy || rejectBlocked}
+                disabled={!canReject || rejectBlocked || rejectChecking || !rejectPreviewReady}
                 onClick={() => void confirmReject()}
                 type="button"
               >

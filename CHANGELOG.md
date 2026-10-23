@@ -85,6 +85,11 @@
   the draft below them. Earlier drafts and branched alternatives are untouched.
   A reject confirmation whose impact changed meanwhile is refused with 409
   `review_decision_impact_changed`.
+- Preserve restored drafts' mandatory human-review conditions and first-publish
+  metadata across page-first submissions and authenticated autosaves. Restart
+  rejected content only while its surviving head is unchanged, refresh rejection
+  previews when confirming, and compare draft parents independently of the
+  published version's diff limit.
 - Select the Context publish replay audit by version and change-set identity.
 - Persist changes to nested workspace settings policies.
 - Prevent Settings draft resets from overwriting the user's first edit.

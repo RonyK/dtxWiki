@@ -23,7 +23,7 @@ from backend.services.context_lifecycle import (
 )
 from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
-from backend.services.read_errors import StaleContextDraftError
+from backend.services.read_errors import StaleBaseVersionError, StaleContextDraftError
 from backend.services.review_service import ReviewService
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
@@ -246,38 +246,17 @@ def test_core_schema_migration_normalizes_only_same_page_published_pointer_linea
         assert orphan_row.version_status == "published_snapshot"
 
 
-def test_migration_preserves_rejected_restartable_draft_after_unrelated_publish(
+def test_migration_preserves_legacy_rejection_and_refuses_stale_restart(
     page_service,
 ):
-    """CTX-02 completion (post-3f40a6c7 adversarial-review finding).
+    """Migration retains rejected evidence even after the live head advances.
 
-    ``_demote_pre_publish_orphan_drafts``'s ``version_no`` heuristic cannot
-    tell a true pre-fix orphan from a REJECTED-and-not-yet-restarted review
-    draft: rejecting a review deliberately clears ``latest_draft_version_id``
-    while leaving the rejected version ``draft``/``linear``
-    (``review_service.py``'s ``decide_review``, so ``update_draft``'s
-    ``restart_after_reject`` path can fork a fresh draft from it later) --
-    exactly the pointer-unset-plus-linear-draft shape this function sweeps
-    up. If ANY unrelated edit on the same page gets published before the
-    rejected draft is restarted -- ordinary, frequent activity, nothing
-    exotic -- the rejected draft's ``version_no`` falls behind the new head
-    and becomes indistinguishable from true dead history by ``version_no``
-    alone.
-
-    Demoting it anyway would flip ``graph_status`` to ``discarded``. Restart
-    of such a legacy draft parents on the draft itself
-    (``rejected_draft_restart``), so the discarded ancestor would then
-    permanently refuse EVERY future publish built on it
-    (``assert_context_publish_candidate`` walks the parent chain and
-    requires every ancestor to stay ``linear``) -- silently and
-    irreversibly breaking the documented reject-then-restart recovery path,
-    not just this one publish attempt.
-
-    Also proves a second, even more common failure this same gap caused:
-    without the fix, the bare EXISTENCE of an unrestarted rejected draft --
-    with no second publish needed at all -- already fails
-    ``alembic upgrade head`` (``latest_draft_unset_with_live_draft``), since
-    that preflight count has no ``version_no`` floor.
+    Before rejection retired drafts, a rejected draft stayed linear with no
+    latest-draft pointer. Its lower version number after an unrelated publish
+    does not make it a pre-publication orphan. Migration must preserve that
+    history and permit its preflight to pass. A subsequent write still checks
+    the current head: these stale bytes cannot start a new draft on it without
+    reconciliation, and the refusal must precede any new version or review.
     """
 
     published = _published_page(
@@ -370,73 +349,70 @@ def test_migration_preserves_rejected_restartable_draft_after_unrelated_publish(
         assert rejected_row.version_status == "draft"
         assert rejected_row.graph_status == "linear"
 
-    # The submitter restarts the rejected draft with revised content -- the
-    # documented recovery path (`update_draft`'s `restart_after_reject`).
+    # Preserving the historical row does not authorize resuming it on a head
+    # that changed after rejection. Refuse before creating a dead-end draft.
     with page_service.session_factory.begin() as session:
         workspace = _workspace(session)
         rejected_row = session.get(ContextPageVersion, rejected_draft_id)
-        restarted = write.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=published.id,
-                base_version_id=rejected_draft_id,
-                base_content_hash=rejected_row.content_hash,
-                update_mode="full_rewrite",
-                body_markdown=f"{published.body_md}\n\nrevised after rejection",
-                reason="restart after rejection",
-            ),
-            actor_kind="mcp_client",
-            actor_id=ACTOR_ID,
+        versions_before = set(
+            session.scalars(
+                select(ContextPageVersion.id).where(
+                    ContextPageVersion.page_id == published.id
+                )
+            ).all()
         )
-        restarted_draft_id = restarted.draft_version_id
-
-    with page_service.session_factory() as session:
-        restarted_row = session.get(ContextPageVersion, restarted_draft_id)
-        assert restarted_row is not None
-        assert restarted_row.parent_version_id == rejected_draft_id
-
-    # `_restart_rejected_draft` always parents the new draft on the
-    # rejected version itself, not the current published head, so when an
-    # unrelated publish happened in between (as staged above) the restarted
-    # draft is genuinely stale relative to the new head -- the same
-    # ordinary, resolvable conflict any draft based on old content would
-    # hit, and a SEPARATE, pre-existing property of `_restart_rejected_
-    # draft` (it does not rebase), not something this fix touches. This is
-    # NOT the corruption this test guards against: a wrongly-`discarded`
-    # ancestor would refuse to publish no matter how the divergence was
-    # resolved, whereas this failure is purely "my base (v1) is not the
-    # current head (v3)" -- ordinary optimistic-concurrency staleness, the
-    # same error `test_invalid_final_publish_is_stable_and_does_not_mutate`
-    # exercises elsewhere in this file. The decisive proof already ran
-    # above (`graph_status == "linear"` survived both the demotion call and
-    # the restart); this closing assertion only confirms the test setup
-    # itself reached a genuinely-stale-not-corrupted state, not a silent
-    # overwrite of the unrelated edit.
-    with page_service.session_factory.begin() as session:
-        workspace = _workspace(session)
-        with pytest.raises(StaleContextDraftError):
-            write.publish_draft(
+        reviews_before = set(
+            session.scalars(
+                select(ReviewItem.id).where(ReviewItem.workspace_id == workspace.id)
+            ).all()
+        )
+        audit_before = audit_context_history(session).violations
+        with pytest.raises(StaleBaseVersionError):
+            write.update_draft(
                 session=session,
                 workspace_id=workspace.id,
-                page_id=published.id,
-                request=PublishContextPageRequest(
-                    version_id=restarted_draft_id,
-                    reason="publish the restarted-after-rejection draft",
+                request=UpdateDraftRequest(
+                    page_id=published.id,
+                    base_version_id=rejected_draft_id,
+                    base_content_hash=rejected_row.content_hash,
+                    update_mode="full_rewrite",
+                    body_markdown=f"{published.body_md}\n\nrevised after rejection",
+                    reason="restart after rejection",
                 ),
-                actor_kind="human",
+                actor_kind="mcp_client",
                 actor_id=ACTOR_ID,
             )
+        assert (
+            set(
+                session.scalars(
+                    select(ContextPageVersion.id).where(
+                        ContextPageVersion.page_id == published.id
+                    )
+                ).all()
+            )
+            == versions_before
+        )
+        assert (
+            set(
+                session.scalars(
+                    select(ReviewItem.id).where(ReviewItem.workspace_id == workspace.id)
+                ).all()
+            )
+            == reviews_before
+        )
 
     with page_service.session_factory() as session:
         page = session.get(ContextPage, published.id)
         assert page is not None
-        # The failed publish attempt must not have mutated any pointer, and
-        # the page must still audit clean -- the rejected draft's survival
-        # is not, itself, a violation.
+        # The failed restart must preserve pointers and existing audit findings.
+        # Migration preflight permits this legacy row even though the runtime
+        # operator audit can still flag its unset draft head.
         assert page.current_published_version_id == later.version_id
+        assert page.current_version_id == later.version_id
+        assert page.latest_draft_version_id is None
+        assert session.get(ReviewItem, created.review_item_id).status == "rejected"
         report = audit_context_history(session)
-        assert report.violations == ()
+        assert report.violations == audit_before
 
 
 def test_restart_after_reject_publishes_cleanly_with_no_intervening_publish(

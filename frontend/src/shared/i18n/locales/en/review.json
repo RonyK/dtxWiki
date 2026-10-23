@@ -180,6 +180,8 @@
   "reject": {
     "confirmTitle": "Reject this review?",
     "confirmBody": "Confirm the target version and its document effect before rejecting.",
+    "checkingImpact": "Checking the current rejection impact…",
+    "recheckImpact": "Check again",
     "confirming": "Rejecting",
     "cancel": "Cancel"
   },

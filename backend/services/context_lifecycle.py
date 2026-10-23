@@ -227,9 +227,7 @@ def project_context_version(
     )
 
 
-def live_draft_chain(
-    session: Session, page: ContextPage
-) -> list[ContextPageVersion]:
+def live_draft_chain(session: Session, page: ContextPage) -> list[ContextPageVersion]:
     """The linear drafts from the latest draft down to the published head.
 
     Newest first, the published head itself excluded. Empty when the page has
@@ -304,18 +302,23 @@ def apply_page_metadata_snapshot(
     return changed
 
 
-def metadata_snapshots(
+def metadata_snapshot_records(
     session: Session, page: ContextPage, version_ids: Iterable[UUID]
-) -> dict[UUID, dict[str, object]]:
-    """The recorded pre-publication metadata of each version that has one."""
+) -> dict[UUID, tuple[dict[str, object], UUID]]:
+    """Recorded metadata and the change set of the selected snapshot operation.
+
+    A version written by a browser may have no own change_set_id. The snapshot
+    operation still identifies the ledger that can carry its metadata when an
+    earlier draft is first published.
+    """
 
     refs = {
         f"context_page_version:{version_id}": version_id for version_id in version_ids
     }
     if not refs:
         return {}
-    snapshots: dict[UUID, dict[str, object]] = {}
-    for diff_ref, summary in session.execute(
+    snapshots: dict[UUID, tuple[dict[str, object], UUID]] = {}
+    for diff_ref, summary, change_set_id in session.execute(
         select_in_workspace(
             ChangeOperation,
             workspace_id=page.workspace_id,
@@ -326,7 +329,11 @@ def metadata_snapshots(
                 ChangeOperation.diff_ref.in_(refs),
             ],
         )
-        .with_only_columns(ChangeOperation.diff_ref, ChangeOperation.diff_summary)
+        .with_only_columns(
+            ChangeOperation.diff_ref,
+            ChangeOperation.diff_summary,
+            ChangeOperation.change_set_id,
+        )
         .order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
     ).all():
         try:
@@ -334,27 +341,41 @@ def metadata_snapshots(
         except ValueError:
             continue
         if isinstance(value, dict) and set(METADATA_SNAPSHOT_FIELDS) <= value.keys():
-            snapshots[refs[diff_ref]] = value
+            snapshots[refs[diff_ref]] = (value, change_set_id)
     return snapshots
 
 
-def effective_metadata_snapshots(
+def metadata_snapshots(
     session: Session, page: ContextPage, version_ids: Iterable[UUID]
 ) -> dict[UUID, dict[str, object]]:
+    """The recorded pre-publication metadata of each version that has one."""
+
+    return {
+        version_id: record[0]
+        for version_id, record in metadata_snapshot_records(
+            session, page, version_ids
+        ).items()
+    }
+
+
+def effective_metadata_snapshot_records(
+    session: Session, page: ContextPage, version_ids: Iterable[UUID]
+) -> dict[UUID, tuple[dict[str, object], UUID]]:
     """Recorded metadata plus any edit staged on the same draft since.
 
     Only drafts with a recorded snapshot appear: without one, a draft's
-    values cannot be told apart from the page's current ones.
+    values cannot be told apart from the page's current ones. The selected
+    snapshot operation's change set is retained alongside the merged values.
     """
 
     from backend.services.page_service import page_metadata_patches_for_versions
 
-    snapshots = metadata_snapshots(session, page, version_ids)
+    snapshots = metadata_snapshot_records(session, page, version_ids)
     patches = page_metadata_patches_for_versions(
         session, page=page, version_ids=tuple(snapshots)
     )
-    effective: dict[UUID, dict[str, object]] = {}
-    for version_id, snapshot in snapshots.items():
+    effective: dict[UUID, tuple[dict[str, object], UUID]] = {}
+    for version_id, (snapshot, change_set_id) in snapshots.items():
         merged = dict(snapshot)
         for field, value in patches.get(version_id, {}).items():
             if field in METADATA_SNAPSHOT_FIELDS:
@@ -363,8 +384,21 @@ def effective_metadata_snapshots(
                     if field == "placement_parent_node_id" and value is not None
                     else value
                 )
-        effective[version_id] = merged
+        effective[version_id] = (merged, change_set_id)
     return effective
+
+
+def effective_metadata_snapshots(
+    session: Session, page: ContextPage, version_ids: Iterable[UUID]
+) -> dict[UUID, dict[str, object]]:
+    """The effective metadata values, without their source change sets."""
+
+    return {
+        version_id: record[0]
+        for version_id, record in effective_metadata_snapshot_records(
+            session, page, version_ids
+        ).items()
+    }
 
 
 def record_metadata_snapshot(
@@ -442,7 +476,8 @@ class ContextRejectionPlan:
 
     # restore_previous_draft, restore_published or hide_unpublished.
     effect: str
-    # The rejected draft and every later draft written on it, newest first.
+    # The rejected draft and every later draft written on it, newest first,
+    # plus any already-rejected legacy ancestors skipped while restoring.
     retired: tuple[ContextPageVersion, ...]
     # restore_previous_draft: the earlier draft that becomes the edit head.
     destination: ContextPageVersion | None
@@ -485,6 +520,18 @@ def plan_context_rejection(
     chain_ids = [member.id for member in chain]
     if version.id in chain_ids:
         position = chain_ids.index(version.id)
+        rejected_ancestor_ids = _rejected_version_ids(
+            session, page, chain[position + 1 :]
+        )
+        # Older rejections left their drafts linear. Never reopen a review for
+        # those exact rejected bytes: retire them and return to what survives
+        # below them, while their original rejection decisions stay intact.
+        while (
+            position + 1 < len(chain)
+            and chain[position + 1].version_status == "draft"
+            and chain[position + 1].id in rejected_ancestor_ids
+        ):
+            position += 1
         retired = tuple(chain[: position + 1])
         destination = chain[position + 1] if position + 1 < len(chain) else None
     elif page.latest_draft_version_id == version.id:
@@ -568,6 +615,9 @@ class RejectedDraftRestart:
     """The head a rejected draft's bytes may restart on (None: no head)."""
 
     parent_version_id: UUID | None
+    # The successful write retires this proven range, including legacy drafts
+    # that a historical rejection left linear. Resolving a restart stays pure.
+    retired_versions: tuple[ContextPageVersion, ...] = ()
 
 
 def rejected_draft_restart(
@@ -580,83 +630,131 @@ def rejected_draft_restart(
     A rejection retires the rejected draft and the later drafts written on
     it and returns the edit head to what lies below them. Any of those
     drafts may restart from its bytes on that head while the head has not
-    moved since. A draft rejected before drafts were retired is still
-    linear and restarts on itself once the head is cleared.
+    moved since. A draft rejected before drafts were retired is still linear,
+    but likewise restarts on its surviving parent only while that parent is
+    still the page's head.
     """
 
-    if version.page_id != page.id or version.version_status != "draft":
+    if (
+        version.workspace_id != page.workspace_id
+        or version.page_id != page.id
+        or version.version_status != "draft"
+        or version.graph_status not in {"linear", "discarded"}
+    ):
         return None
-    if version.graph_status == "linear":
-        if page.latest_draft_version_id is None and _has_rejected_review(
-            session, page, [version.id]
-        ):
-            return RejectedDraftRestart(parent_version_id=version.id)
-        return None
-    if version.graph_status != "discarded":
-        return None
-    retired_ids: list[UUID] = []
+    legacy_linear = version.graph_status == "linear"
+    ancestors: list[ContextPageVersion] = []
     cursor: ContextPageVersion | None = version
+    seen: set[UUID] = set()
     while (
         cursor is not None
-        and cursor.page_id == page.id
         and cursor.version_status == "draft"
-        and cursor.graph_status == "discarded"
-        and cursor.id not in retired_ids
+        and cursor.graph_status in {"linear", "discarded"}
     ):
-        retired_ids.append(cursor.id)
-        cursor = (
-            get_in_workspace(
-                session,
-                ContextPageVersion,
-                workspace_id=page.workspace_id,
-                resource_id=cursor.parent_version_id,
-            )
-            if cursor.parent_version_id is not None
-            else None
+        if (
+            cursor.workspace_id != page.workspace_id
+            or cursor.page_id != page.id
+            or cursor.id in seen
+        ):
+            return None
+        seen.add(cursor.id)
+        ancestors.append(cursor)
+        if cursor.parent_version_id is None:
+            cursor = None
+            break
+        cursor = get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            resource_id=cursor.parent_version_id,
         )
+        if cursor is None:
+            return None
+    rejected_ids = _rejected_version_ids(session, page, ancestors)
+    if legacy_linear and version.id not in rejected_ids:
+        return None
+    retired_ids: set[UUID] = set()
+    for member in ancestors:
+        if member.graph_status != "discarded" and member.id not in rejected_ids:
+            cursor = member
+            break
+        retired_ids.add(member.id)
     surviving_id = cursor.id if cursor is not None else None
     head_id = page.latest_draft_version_id or page.current_published_version_id
-    if surviving_id != head_id or not _has_rejected_review(
-        session, page, retired_ids
-    ):
+    if surviving_id != head_id or not retired_ids.intersection(rejected_ids):
         return None
-    return RejectedDraftRestart(parent_version_id=surviving_id)
-
-
-def _has_rejected_review(
-    session: Session, page: ContextPage, version_ids: list[UUID]
-) -> bool:
-    change_set_ids = set(
-        session.scalars(
-            select_in_workspace(
-                ChangeOperation,
-                workspace_id=page.workspace_id,
-                criteria=[
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref.in_(
-                        [f"context_page_version:{item}" for item in version_ids]
-                    ),
-                ],
-            ).with_only_columns(ChangeOperation.change_set_id)
-        ).all()
-    )
-    return bool(change_set_ids) and (
-        session.scalar(
-            select_in_workspace(
-                ReviewItem,
-                workspace_id=page.workspace_id,
-                criteria=[
-                    ReviewItem.change_set_id.in_(change_set_ids),
-                    ReviewItem.review_type == "context_update",
-                    ReviewItem.status == "rejected",
-                ],
+    if cursor is not None:
+        # Pointer equality alone cannot bless an editing, branched, foreign or
+        # broken head. Reuse the publication topology gate before attaching a
+        # new submitted draft to it; no body or review state is changed here.
+        try:
+            assert_context_publish_candidate(
+                session,
+                page=page,
+                version=cursor,
+                require_latest_draft=page.latest_draft_version_id is not None,
             )
-            .with_only_columns(ReviewItem.id)
-            .limit(1)
-        )
-        is not None
+        except StaleContextDraftError:
+            return None
+    return RejectedDraftRestart(
+        parent_version_id=surviving_id,
+        retired_versions=tuple(
+            member for member in ancestors if member.id in retired_ids
+        ),
     )
+
+
+def _rejected_version_ids(
+    session: Session, page: ContextPage, versions: list[ContextPageVersion]
+) -> set[UUID]:
+    """Exact page versions whose original review still records a rejection."""
+
+    versions = [
+        version
+        for version in versions
+        if version.workspace_id == page.workspace_id and version.page_id == page.id
+    ]
+    if not versions:
+        return set()
+    versions_by_change_set: dict[UUID, set[UUID]] = {}
+    refs = {f"context_page_version:{version.id}": version.id for version in versions}
+    # Publication accepts both the version's producing ledger and later exact
+    # operations (metadata edits, no-op revisions) as its review sources.
+    for version in versions:
+        if version.change_set_id is not None:
+            versions_by_change_set.setdefault(version.change_set_id, set()).add(
+                version.id
+            )
+    for diff_ref, change_set_id in session.execute(
+        select_in_workspace(
+            ChangeOperation,
+            workspace_id=page.workspace_id,
+            criteria=[
+                ChangeOperation.target_type == "context_page",
+                ChangeOperation.target_id == page.id,
+                ChangeOperation.diff_ref.in_(refs),
+            ],
+        ).with_only_columns(ChangeOperation.diff_ref, ChangeOperation.change_set_id)
+    ).all():
+        versions_by_change_set.setdefault(change_set_id, set()).add(refs[diff_ref])
+    if not versions_by_change_set:
+        return set()
+    rejected_change_set_ids = session.scalars(
+        select_in_workspace(
+            ReviewItem,
+            workspace_id=page.workspace_id,
+            criteria=[
+                ReviewItem.change_set_id.in_(versions_by_change_set),
+                ReviewItem.review_type == "context_update",
+                ReviewItem.status == "rejected",
+            ],
+        ).with_only_columns(ReviewItem.change_set_id)
+    ).all()
+    return {
+        version_id
+        for change_set_id in rejected_change_set_ids
+        for version_id in versions_by_change_set[change_set_id]
+    }
 
 
 def assert_context_publish_candidate(

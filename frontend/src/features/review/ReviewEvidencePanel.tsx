@@ -248,7 +248,9 @@ function ExactContextContent({
   const baselineKind = useDraftParent ? "parent" : content.baseline_kind;
   const baselineId = (useDraftParent ? content.draft_parent_version_id : content.baseline_version_id) ?? null;
   const baselineVersionNo = useDraftParent ? content.draft_parent_version_no : content.baseline_version_no;
-  const canCompare = content.can_diff && (
+  // can_diff describes the published baseline. The independently authorized
+  // draft parent has its own budget, enforced by the existing diff endpoint.
+  const canCompare = (useDraftParent || content.can_diff) && (
     (baselineKind === "empty" && baselineId === null)
       || ((baselineKind === "published" || baselineKind === "parent")
         && Boolean(baselineId) && baselineId !== candidateId)

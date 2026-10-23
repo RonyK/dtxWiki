@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from backend.services.lint.autofix import safe_normalize_markdown
 from backend.services.page_service import (
     PageNotFoundError,
     PageService,
+    pending_page_metadata_patch,
     stage_page_metadata_patch,
 )
 from backend.services.read_errors import (
@@ -135,8 +137,11 @@ def _actor(workspace_id, role):
 
 def _detail(session, workspace_id, review_id):
     return ReviewService().get_review(
-        session, workspace_id, review_id,
-        actor_user_id=ACTOR_UUID, actor_role="owner",
+        session,
+        workspace_id,
+        review_id,
+        actor_user_id=ACTOR_UUID,
+        actor_role="owner",
         actor=_actor(workspace_id, "owner"),
     )
 
@@ -289,11 +294,55 @@ def test_rejected_draft_identical_resubmission_forks_actionable_version(
             f"context_page_version:{resubmitted.draft_version_id}"
         )
         assert session.get(ReviewItem, created.review_item_id).status == "rejected"
-        assert session.scalar(
-            select(func.count())
-            .select_from(ReviewDecision)
-            .where(ReviewDecision.review_item_id == created.review_item_id)
-        ) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ReviewDecision)
+                .where(ReviewDecision.review_item_id == created.review_item_id)
+            )
+            == 1
+        )
+
+        # A later draft retired by its ancestor's rejection has a superseded
+        # review, rather than a rejected one. Identical normalized bytes must
+        # still restart it and create a new pending review.
+        first, later = (
+            _write(
+                session,
+                workspace.id,
+                "Cascaded identical resubmission",
+                f"# {name}\n\nBody.",
+            )
+            for name in ("First", "Later")
+        )
+        _reject(session, workspace.id, first.review_item_id)
+        assert session.get(ReviewItem, later.review_item_id).status == "superseded"
+        retired = session.get(ContextPageVersion, later.draft_version_id)
+        unchanged = write.update_draft(
+            session=session,
+            workspace_id=workspace.id,
+            request=UpdateDraftRequest(
+                page_id=first.page_id,
+                base_version_id=retired.id,
+                base_content_hash=retired.content_hash,
+                update_mode="full_rewrite",
+                body_markdown=retired.body_md,
+                reason="restart identical cascaded draft",
+            ),
+            actor_kind=restart_actor_kind,
+            actor_id=ACTOR,
+        )
+        successor = session.get(ContextPageVersion, unchanged.draft_version_id)
+        assert successor.id != retired.id
+        assert successor.parent_version_id is None
+        assert unchanged.outcome == "updated_draft"
+        assert session.get(ReviewItem, unchanged.review_item_id).status == "pending"
+        assert (
+            _approve(
+                session, workspace.id, unchanged.review_item_id
+            ).published_version_id
+            == successor.id
+        )
 
 
 def test_reject_latest_draft_restores_published_head_for_both_reader_classes(
@@ -304,8 +353,11 @@ def test_reject_latest_draft_restores_published_head_for_both_reader_classes(
             session, "Restore published on reject"
         )
         before = ReviewService().get_review(
-            session, workspace.id, draft.review_item_id,
-            actor_user_id=ACTOR_UUID, actor_role="owner",
+            session,
+            workspace.id,
+            draft.review_item_id,
+            actor_user_id=ACTOR_UUID,
+            actor_role="owner",
             actor=_actor(workspace.id, "owner"),
         )
         candidate = before.evidence.operations[0].content
@@ -322,19 +374,22 @@ def test_reject_latest_draft_restores_published_head_for_both_reader_classes(
         assert page.current_version_id == published.draft_version_id
         assert page.current_published_version_id == published.draft_version_id
         assert page.lifecycle_status == "published"
-        assert _decision_audit(session, draft.review_item_id).payload[
-            "reject_effect"
-        ] == "restore_published"
+        assert (
+            _decision_audit(session, draft.review_item_id).payload["reject_effect"]
+            == "restore_published"
+        )
         page_id = page.id
         workspace_id = workspace.id
 
     pages = PageService(session_factory)
-    assert pages.read_page(
-        page_id=page_id, actor=_actor(workspace_id, "editor")
-    ).body_md == "# Published\n\nStable body."
-    assert pages.read_page(
-        page_id=page_id, actor=_actor(workspace_id, "viewer")
-    ).body_md == "# Published\n\nStable body."
+    assert (
+        pages.read_page(page_id=page_id, actor=_actor(workspace_id, "editor")).body_md
+        == "# Published\n\nStable body."
+    )
+    assert (
+        pages.read_page(page_id=page_id, actor=_actor(workspace_id, "viewer")).body_md
+        == "# Published\n\nStable body."
+    )
 
 
 def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
@@ -367,12 +422,16 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
         assert page.lifecycle_status == "draft"
         assert version is not None
         assert version.version_status == "draft"
-        assert _decision_audit(session, created.review_item_id).payload[
-            "reject_effect"
-        ] == "hide_unpublished"
+        assert (
+            _decision_audit(session, created.review_item_id).payload["reject_effect"]
+            == "hide_unpublished"
+        )
         detail = ReviewService().get_review(
-            session, workspace.id, created.review_item_id,
-            actor_user_id=ACTOR_UUID, actor_role="owner",
+            session,
+            workspace.id,
+            created.review_item_id,
+            actor_user_id=ACTOR_UUID,
+            actor_role="owner",
             actor=_actor(workspace.id, "owner"),
         )
         operation = detail.evidence.operations[0]
@@ -396,17 +455,18 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
         }
         assert page_id not in visible_page_ids
 
-    history = pages.list_versions(
-        page_id, actor=_actor(workspace_id, "editor")
-    )
+    history = pages.list_versions(page_id, actor=_actor(workspace_id, "editor"))
     rejected_entry = next(entry for entry in history if entry.version_id == version_id)
     assert rejected_entry.version_status == "draft"
     assert rejected_entry.review_disposition == "rejected"
-    assert pages.read_page(
-        page_id=page_id,
-        version_id=version_id,
-        actor=_actor(workspace_id, "editor"),
-    ).version_id == version_id
+    assert (
+        pages.read_page(
+            page_id=page_id,
+            version_id=version_id,
+            actor=_actor(workspace_id, "editor"),
+        ).version_id
+        == version_id
+    )
 
 
 def test_reject_off_chain_draft_closes_review_without_moving_head(session_factory):
@@ -470,9 +530,10 @@ def test_reject_off_chain_draft_closes_review_without_moving_head(session_factor
             page.current_published_version_id,
         ) == before
         assert page.current_published_version_id == latest.draft_version_id
-        assert _decision_audit(session, stale_review.id).payload[
-            "reject_effect"
-        ] == "no_head_change"
+        assert (
+            _decision_audit(session, stale_review.id).payload["reject_effect"]
+            == "no_head_change"
+        )
         # Nothing retires, so a claimed or changes-requested review stays open.
         assert (claimed.status, requested.status) == ("pending", "changes_requested")
 
@@ -487,6 +548,33 @@ def test_rejecting_a_draft_rejects_the_drafts_written_on_it(session_factory):
         page = session.get(ContextPage, published.page_id)
         d1 = _write(session, workspace.id, title, "# D1\n\nOne.")
         v1 = session.get(ContextPageVersion, d1.draft_version_id)
+        # Restoring these exact bytes must preserve their own risk evidence,
+        # including mandatory flags from lower-risk sibling reviews.
+        original = session.get(ReviewItem, d1.review_item_id)
+        original.risk_level = "low"
+        original.risk_signals = {
+            **original.risk_signals,
+            "human_review_required": True,
+            "caller_needs_review": True,
+            "lint_error": False,
+        }
+        highest = _seed_review(session, workspace.id, page.id, version_id=v1.id)
+        highest.risk_level = "high"
+        highest.risk_policy_version = original.risk_policy_version
+        highest.risk_resolution_summary = "Original high-risk source"
+        highest.risk_policy_snapshot = deepcopy(original.risk_policy_snapshot)
+        highest.risk_signals = {
+            "human_review_required": False,
+            "caller_needs_review": False,
+            "lint_error": False,
+            "reason_codes": ["original_high_risk"],
+        }
+        lint_source = _seed_review(session, workspace.id, page.id, version_id=v1.id)
+        lint_source.risk_level = "medium"
+        lint_source.risk_policy_version = original.risk_policy_version
+        lint_source.risk_resolution_summary = "Original mandatory lint review"
+        lint_source.risk_policy_snapshot = deepcopy(original.risk_policy_snapshot)
+        lint_source.risk_signals = {"human_review_required": False, "lint_error": True}
         # Writing d2 over d1 replaces it: d1's own review closes.
         d2 = write.update_draft(
             session=session,
@@ -580,7 +668,9 @@ def test_rejecting_a_draft_rejects_the_drafts_written_on_it(session_factory):
         d6 = _write(session, workspace.id, title, "# D6\n\nNewest.")
         with pytest.raises(ReviewDecisionImpactChangedError):
             _reject(
-                session, workspace.id, d3.review_item_id,
+                session,
+                workspace.id,
+                d3.review_item_id,
                 fingerprint=shown.impact_fingerprint,
             )
 
@@ -597,7 +687,9 @@ def test_rejecting_a_draft_rejects_the_drafts_written_on_it(session_factory):
         )
         assert shown.cascaded_review_count == 3
         _reject(
-            session, workspace.id, d3.review_item_id,
+            session,
+            workspace.id,
+            d3.review_item_id,
             fingerprint=shown.impact_fingerprint,
         )
         assert page.latest_draft_version_id == d2.draft_version_id
@@ -620,6 +712,7 @@ def test_rejecting_a_draft_rejects_the_drafts_written_on_it(session_factory):
         # d1's review closed when d2 replaced it, so restoring d1 reopens one.
         shown = _detail(session, workspace.id, d2.review_item_id).reject_effect
         assert shown.restores_review is True
+        session.get(ReviewItem, d2.review_item_id).risk_level = "low"
         _reject(session, workspace.id, d2.review_item_id)
         assert page.latest_draft_version_id == d1.draft_version_id
         restored = session.scalar(
@@ -627,6 +720,26 @@ def test_rejecting_a_draft_rejects_the_drafts_written_on_it(session_factory):
                 ReviewItem.decision_summary_code
                 == "context_draft_restored_after_rejection"
             )
+        )
+        assert restored.status == "pending"
+        assert restored.risk_level == "high"
+        assert session.get(ChangeSet, restored.change_set_id).risk_level == "high"
+        assert restored.risk_policy_version == highest.risk_policy_version
+        assert restored.risk_resolution_summary == highest.risk_resolution_summary
+        assert restored.risk_policy_snapshot == highest.risk_policy_snapshot
+        assert all(
+            restored.risk_signals[flag]
+            for flag in ("human_review_required", "caller_needs_review", "lint_error")
+        )
+        policy = default_review_policy()
+        for entry in policy["automation"]["auto_approve_by_risk"].values():
+            entry.update({"allowed": True, "delay_days": 0})
+        workspace.review_policy = policy
+        # This independent alternative stays pending during the sweep too.
+        forked.risk_signals = {"human_review_required": True}
+        session.flush()
+        assert restored.id not in ReviewService().sweep_auto_approve_reviews(
+            session, workspace.id, now=utc_now() + timedelta(days=1)
         )
         assert restored.status == "pending"
         assert _approve(session, workspace.id, restored.id).published_version_id == (
@@ -652,6 +765,55 @@ def test_rejecting_a_draft_rejects_the_drafts_written_on_it(session_factory):
         assert page.latest_draft_version_id is None
         assert page.current_published_version_id == d1.draft_version_id
         assert session.get(ReviewItem, e1.review_item_id).status == "superseded"
+
+        # Legacy source rows cannot prove automation is safe, whether there
+        # is no review record or its risk JSON/snapshot is incomplete.
+        for missing in (True, False):
+            first, later = (
+                _write(
+                    session,
+                    workspace.id,
+                    f"Unknown risk {missing}",
+                    f"# {name}\n\nBody.",
+                )
+                for name in ("Original", "Later")
+            )
+            source = session.get(ReviewItem, first.review_item_id)
+            if missing:
+                session.delete(source)
+            else:
+                source.risk_level = "medium"
+                source.status = "superseded"
+                source.risk_signals = ["invalid legacy signals"]
+                source.risk_policy_snapshot = ["invalid legacy policy"]
+                # Legacy publication recognizes the version's own change set
+                # even if its exact-version operation was not retained.
+                session.execute(
+                    delete(ChangeOperation).where(
+                        ChangeOperation.change_set_id == source.change_set_id,
+                        ChangeOperation.target_type == "context_page",
+                    )
+                )
+            session.flush()
+            _reject(session, workspace.id, later.review_item_id)
+            reopened = session.scalar(
+                select(ReviewItem)
+                .join(
+                    ChangeOperation,
+                    ChangeOperation.change_set_id == ReviewItem.change_set_id,
+                )
+                .where(
+                    ChangeOperation.diff_ref
+                    == f"context_page_version:{first.draft_version_id}",
+                    ReviewItem.status == "pending",
+                )
+            )
+            assert reopened.risk_level == ("high" if missing else "medium")
+            assert reopened.risk_signals["human_review_required"] is True
+            assert reopened.risk_policy_snapshot is None
+            assert reopened.id not in ReviewService().sweep_auto_approve_reviews(
+                session, workspace.id, now=utc_now() + timedelta(days=1)
+            )
 
 
 def test_unpublished_drafts_publish_and_roll_back_with_their_own_metadata(
@@ -694,9 +856,12 @@ def test_unpublished_drafts_publish_and_roll_back_with_their_own_metadata(
 
         # Rejecting the newer draft restores the earlier draft's metadata.
         first, second = chain("Metadata rollback", ("overview", "guide"))
-        assert _detail(
-            session, workspace.id, second.review_item_id
-        ).reject_effect.metadata_kept is False
+        assert (
+            _detail(
+                session, workspace.id, second.review_item_id
+            ).reject_effect.metadata_kept
+            is False
+        )
         _reject(session, workspace.id, second.review_item_id)
         page = session.get(ContextPage, first.page_id)
         assert (page.latest_draft_version_id, page.page_type) == (
@@ -714,12 +879,18 @@ def test_unpublished_drafts_publish_and_roll_back_with_their_own_metadata(
                 == f"context_page_version:{first.draft_version_id}",
             )
         )
-        assert _detail(
-            session, workspace.id, first.review_item_id
-        ).actions.approve.reason_code == "stale_candidate"
-        assert _detail(
-            session, workspace.id, second.review_item_id
-        ).reject_effect.metadata_kept is True
+        assert (
+            _detail(
+                session, workspace.id, first.review_item_id
+            ).actions.approve.reason_code
+            == "stale_candidate"
+        )
+        assert (
+            _detail(
+                session, workspace.id, second.review_item_id
+            ).reject_effect.metadata_kept
+            is True
+        )
         _reject(session, workspace.id, second.review_item_id)
         assert session.get(ContextPage, first.page_id).page_type == "guide"
 
@@ -749,9 +920,73 @@ def test_unpublished_drafts_publish_and_roll_back_with_their_own_metadata(
     )
     with session_factory.begin() as session:
         _write(session, workspace_id, "Page-first metadata", "# B\n\nNext.", "guide")
+        assert session.get(ContextPageVersion, created.version_id).change_set_id is None
         approved = _approve(session, workspace_id, submitted.review_item_id)
         assert approved.published_version_id == created.version_id
         assert session.get(ContextPage, created.id).page_type == "overview"
+
+        # A PAT autosave records a full snapshot despite having no metadata
+        # delta. Old versions from this writer may have no change_set_id.
+        first, second = (
+            _write(
+                session,
+                workspace_id,
+                "PAT metadata conversion",
+                f"# {kind}\n\nBody.",
+                kind,
+            )
+            for kind in ("overview", "guide")
+        )
+        base_hash = session.get(
+            ContextPageVersion, second.draft_version_id
+        ).content_hash
+    saved = pages.autosave_page(
+        page_id=first.page_id,
+        workspace_id=workspace_id,
+        title=None,
+        body_md="# PAT successor\n\nBody only.",
+        actor_kind="human",
+        actor_id=ACTOR,
+        base_version_id=second.draft_version_id,
+        base_content_hash=base_hash,
+        actor_provenance="personal_access_token",
+        idempotency_key="pat-metadata-conversion",
+    )
+    with session_factory.begin() as session:
+        version = session.get(ContextPageVersion, saved.version_id)
+        assert version.change_set_id is None
+        assert saved.change_set_id is not None
+        assert session.get(ReviewItem, second.review_item_id).status == "superseded"
+        assert session.get(ReviewItem, first.review_item_id).status == "pending"
+        page = session.get(ContextPage, first.page_id)
+        assert (
+            pending_page_metadata_patch(session, page=page, version_id=version.id) == {}
+        )
+        stage_page_metadata_patch(
+            session,
+            change_set_id=first.change_set_id,
+            page=page,
+            version=session.get(ContextPageVersion, first.draft_version_id),
+            patch={"title": "Earlier draft renamed"},
+        )
+        _approve(session, workspace_id, first.review_item_id)
+        assert (page.title, page.page_type) == ("Earlier draft renamed", "overview")
+        carried = pending_page_metadata_patch(session, page=page, version_id=version.id)
+        assert (carried["title"], carried["page_type"]) == (
+            "PAT metadata conversion",
+            "guide",
+        )
+        assert (
+            session.scalar(
+                select(ChangeOperation.change_set_id).where(
+                    ChangeOperation.operation == "metadata_patch",
+                    ChangeOperation.diff_ref == f"context_page_version:{version.id}",
+                )
+            )
+            == saved.change_set_id
+        )
+        _approve(session, workspace_id, saved.review_item_id)
+        assert (page.title, page.page_type) == ("PAT metadata conversion", "guide")
 
 
 def test_rejected_draft_restarts_on_the_head_the_rejection_left(session_factory):
@@ -793,39 +1028,102 @@ def test_rejected_draft_restarts_on_the_head_the_rejection_left(session_factory)
         with pytest.raises(StaleBaseVersionError):
             restart()
 
-    # A browser session continues from its rejected draft even when the
-    # rejection left the page with no head at all.
-    with session_factory.begin() as session:
-        workspace_id = _workspace(session).id
-        first, second = (
-            _write(
-                session, workspace_id, "Resume without head", f"# {name}\n\nDraft."
+        # A pre-fix restart could attach the live head to rejected bytes that
+        # were still linear. Rejecting that head must retire the rejected
+        # ancestor too, rather than making it the editable destination.
+        rejected.graph_status = "linear"
+        version.parent_version_id = rejected.id
+        session.flush()
+        preview = _detail(session, workspace.id, restarted.review_item_id).reject_effect
+        assert preview.resulting_draft_version_id == d1.draft_version_id
+        assert preview.cascaded_versions == []
+        _reject(session, workspace.id, restarted.review_item_id)
+        assert (version.graph_status, rejected.graph_status) == (
+            "discarded",
+            "discarded",
+        )
+        assert page.latest_draft_version_id == d1.draft_version_id
+
+        moved = _write(session, workspace.id, title, "# New head\n\nMoved on.")
+        for graph_status in ("linear", "discarded"):
+            rejected.graph_status = graph_status
+            session.flush()
+            with pytest.raises(StaleBaseVersionError):
+                restart()
+            assert page.latest_draft_version_id == moved.draft_version_id
+
+    # Auth channels share autosave, but bearer writes take the reviewed-draft
+    # branch. Both an explicit None parent and a surviving head must reach it.
+    # Legacy linear rows also exercise the identical-body no-op guard.
+    for name, provenance, survives, legacy in (
+        ("Browser headless", "browser_session", False, False),
+        ("PAT headless", "personal_access_token", False, False),
+        ("OAuth surviving", "oauth_client", True, False),
+        ("Browser legacy", "browser_session", True, True),
+        ("PAT legacy", "personal_access_token", False, True),
+    ):
+        with session_factory.begin() as session:
+            workspace_id = _workspace(session).id
+            first = _write(session, workspace_id, name, "# A\n\nDraft.")
+            second = (
+                first
+                if legacy and not survives
+                else _write(session, workspace_id, name, "# B\n\nDraft.")
             )
-            for name in ("A", "B")
+            _reject(
+                session,
+                workspace_id,
+                second.review_item_id if survives or legacy else first.review_item_id,
+            )
+            source = session.get(ContextPageVersion, second.draft_version_id)
+            if legacy:
+                source.graph_status = "linear"
+            source_body, source_hash = source.body_md, source.content_hash
+            expected_parent = first.draft_version_id if survives else None
+        resumed = PageService(session_factory).autosave_page(
+            page_id=first.page_id,
+            workspace_id=workspace_id,
+            title=None,
+            body_md=source_body,
+            actor_kind="human",
+            actor_id=ACTOR,
+            base_version_id=second.draft_version_id,
+            base_content_hash=source_hash,
+            actor_provenance=provenance,
+            idempotency_key=f"resume-{name}",
+            session_version_id=second.draft_version_id,
         )
-        _reject(session, workspace_id, first.review_item_id)
-        second_hash = session.get(
-            ContextPageVersion, second.draft_version_id
-        ).content_hash
-    resumed = PageService(session_factory).autosave_page(
-        page_id=first.page_id,
-        workspace_id=workspace_id,
-        title=None,
-        body_md="# B\n\nDraft, fixed.",
-        actor_kind="human",
-        actor_id=ACTOR,
-        base_version_id=second.draft_version_id,
-        base_content_hash=second_hash,
-        actor_provenance="browser_session",
-        idempotency_key="resume-without-head",
-        session_version_id=second.draft_version_id,
-    )
-    with session_factory() as session:
-        resumed_version = session.get(ContextPageVersion, resumed.version_id)
-        assert resumed_version.parent_version_id is None
-        assert session.get(ContextPage, first.page_id).latest_draft_version_id == (
-            resumed_version.id
-        )
+        with session_factory.begin() as session:
+            resumed_version = session.get(ContextPageVersion, resumed.version_id)
+            assert resumed_version.id != second.draft_version_id
+            assert resumed_version.parent_version_id == expected_parent
+            assert session.get(ContextPage, first.page_id).latest_draft_version_id == (
+                resumed_version.id
+            )
+            if legacy:
+                assert (
+                    session.get(
+                        ContextPageVersion, second.draft_version_id
+                    ).graph_status
+                    == "discarded"
+                )
+            if provenance != "browser_session":
+                reopened = session.get(ReviewItem, resumed.review_item_id)
+                assert reopened.status == "pending"
+                if legacy and not survives:
+                    _reject(session, workspace_id, reopened.id)
+                    page = session.get(ContextPage, first.page_id)
+                    assert page.latest_draft_version_id is None
+                    assert page.current_version_id is None
+                    assert resumed_version.graph_status == "discarded"
+                    assert _no_history_violations(session, page.id)
+                else:
+                    assert (
+                        _approve(
+                            session, workspace_id, reopened.id
+                        ).published_version_id
+                        == resumed.version_id
+                    )
 
 
 def test_reject_published_snapshot_never_demotes_it(session_factory):
@@ -872,9 +1170,10 @@ def test_reject_published_snapshot_never_demotes_it(session_factory):
             session.get(ContextPageVersion, created.draft_version_id).version_status
             == "published_snapshot"
         )
-        assert _decision_audit(session, review.id).payload[
-            "reject_effect"
-        ] == "no_head_change"
+        assert (
+            _decision_audit(session, review.id).payload["reject_effect"]
+            == "no_head_change"
+        )
 
 
 def test_reject_closes_every_open_review_of_the_retired_version_only(
@@ -981,20 +1280,26 @@ def test_reject_retry_is_idempotent_for_decision_audit_and_pointers(session_fact
             page.current_version_id,
             page.current_published_version_id,
         ) == after_first
-        assert session.scalar(
-            select(func.count())
-            .select_from(ReviewDecision)
-            .where(ReviewDecision.review_item_id == created.review_item_id)
-        ) == 1
-        assert session.scalar(
-            select(func.count())
-            .select_from(AuditEvent)
-            .where(
-                AuditEvent.action == "review.decision",
-                AuditEvent.target_kind == "review_item",
-                AuditEvent.target_id == created.review_item_id,
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ReviewDecision)
+                .where(ReviewDecision.review_item_id == created.review_item_id)
             )
-        ) == 1
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.action == "review.decision",
+                    AuditEvent.target_kind == "review_item",
+                    AuditEvent.target_id == created.review_item_id,
+                )
+            )
+            == 1
+        )
 
 
 def test_preapproval_sibling_count_is_zero_without_siblings(session_factory):
@@ -1137,8 +1442,11 @@ def test_approving_earlier_draft_publishes_up_to_it_not_newer_or_forked(
 
         def approve_reason(review):
             return reviews.get_review(
-                session, workspace.id, review.id,
-                actor_user_id=ACTOR_UUID, actor_role="owner",
+                session,
+                workspace.id,
+                review.id,
+                actor_user_id=ACTOR_UUID,
+                actor_role="owner",
                 actor=_actor(workspace.id, "owner"),
             ).actions.approve.reason_code
 
@@ -1179,8 +1487,11 @@ def test_approving_earlier_draft_publishes_up_to_it_not_newer_or_forked(
         )
         session.flush()
         detail = reviews.get_review(
-            session, workspace.id, reviewed.id,
-            actor_user_id=ACTOR_UUID, actor_role="owner",
+            session,
+            workspace.id,
+            reviewed.id,
+            actor_user_id=ACTOR_UUID,
+            actor_role="owner",
             actor=_actor(workspace.id, "owner"),
         )
         assert detail.evidence.operations[0].content.is_current_candidate is True
@@ -1373,16 +1684,22 @@ def test_reconciliation_review_requires_reconcile_or_explicit_discard(
         review.created_at = datetime.now(UTC) - timedelta(days=1)
 
         assert reviews.count_auto_approve_candidates(session, workspace.id) == 0
-        assert reviews.sweep_auto_approve_reviews(
-            session, workspace.id, now=datetime.now(UTC)
-        ) == []
-        assert reviews.get_review(
-            session,
-            workspace.id,
-            review.id,
-            actor_user_id=ACTOR_UUID,
-            actor_role="owner",
-        ).can_decide is False
+        assert (
+            reviews.sweep_auto_approve_reviews(
+                session, workspace.id, now=datetime.now(UTC)
+            )
+            == []
+        )
+        assert (
+            reviews.get_review(
+                session,
+                workspace.id,
+                review.id,
+                actor_user_id=ACTOR_UUID,
+                actor_role="owner",
+            ).can_decide
+            is False
+        )
 
         with pytest.raises(ReadValidationError, match="cannot decide"):
             reviews.apply_decision(

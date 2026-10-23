@@ -180,6 +180,8 @@
   "reject": {
     "confirmTitle": "이 리뷰를 거절하시겠습니까?",
     "confirmBody": "대상 버전과 문서에 미치는 영향을 확인한 후 거절하세요.",
+    "checkingImpact": "현재 거절 영향을 확인하고 있습니다…",
+    "recheckImpact": "다시 확인",
     "confirming": "거절 중",
     "cancel": "취소"
   },

@@ -90,7 +90,7 @@ from backend.services.context_lifecycle import (
     apply_context_publication,
     apply_page_metadata_snapshot,
     assert_context_publish_candidate,
-    effective_metadata_snapshots,
+    effective_metadata_snapshot_records,
     live_draft_chain,
     record_metadata_snapshot,
     rejected_draft_restart,
@@ -1046,6 +1046,10 @@ class ContextWriteService:
                     latest_version_id=disclosed_id,
                     latest_content_hash=disclosed_hash,
                 )
+
+            if restart is not None:
+                for retired in restart.retired_versions:
+                    retired.graph_status = "discarded"
 
             new_body = self._body_for_update(base_version, request)
             classification = _ContextUpdateClassification(
@@ -2695,6 +2699,7 @@ class ContextWriteService:
                 and feedback_id is None
                 and not needs_review
                 and not force_new_version
+                and not restart_after_reject
                 and not self._identical_body_requires_fork(session, base_version)
             ):
                 no_effect_classification = replace(
@@ -4222,24 +4227,28 @@ class ContextWriteService:
         """
 
         newer = live_draft_chain(session, page)
-        snapshots = effective_metadata_snapshots(
+        snapshots = effective_metadata_snapshot_records(
             session, page, [version.id, *(draft.id for draft in newer)]
         )
-        published = snapshots.get(version.id)
-        if published is None:
+        published_record = snapshots.get(version.id)
+        if published_record is None:
             raise StaleContextDraftError(
                 "an earlier draft without recorded metadata cannot be first published"
             )
+        published = published_record[0]
         changed = apply_page_metadata_snapshot(page, published)
         for draft in newer:
-            snapshot = snapshots.get(draft.id)
-            if snapshot is None or draft.change_set_id is None:
+            record = snapshots.get(draft.id)
+            if record is None:
                 continue
+            snapshot, change_set_id = record
             # The whole snapshot, not a delta against this publication: each
             # newer draft must publish its own values whatever lands between.
+            # Page-first versions need not own a change set; their snapshot
+            # operation owns the metadata ledger we must carry forward.
             stage_page_metadata_patch(
                 session,
-                change_set_id=draft.change_set_id,
+                change_set_id=change_set_id,
                 page=page,
                 version=draft,
                 patch=snapshot,

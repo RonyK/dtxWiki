@@ -3356,6 +3356,8 @@ class PageService:
                         # immutable version are never rewritten.
                         current = session_version
                         resume_parent = rejected_restart
+                        for retired in resume_parent.retired_versions:
+                            retired.graph_status = "discarded"
                 same_actor_draft = (
                     current.version_status in ("editing", "draft")
                     and current.graph_status == "linear"
@@ -3466,7 +3468,11 @@ class PageService:
                 # Bytes, not content_hash: the hash ignores trailing spaces, so
                 # a save that only added or removed a hard break (two trailing
                 # spaces) was answered as succeeded and silently not stored.
-                if body_md == current.body_md and not metadata_patch:
+                if (
+                    body_md == current.body_md
+                    and not metadata_patch
+                    and resume_parent is None
+                ):
                     # P2.2/P2.6: `current` is the page-global pointer -- returning
                     # it unchanged is only safe when it is published (anyone with
                     # read access already sees it) or genuinely this actor's own
@@ -3504,6 +3510,7 @@ class PageService:
                         actor_provenance=actor_provenance,
                         session_version_id=session_version_id,
                         metadata_patch=metadata_patch,
+                        restart=resume_parent,
                     )
 
                 staged_patch = dict(baseline_patch or {})
@@ -3728,6 +3735,7 @@ class PageService:
         actor_provenance: str,
         session_version_id: UUID | None,
         metadata_patch: dict[str, object],
+        restart: RejectedDraftRestart | None = None,
     ) -> PagePayload:
         """Stage an AI autosave without mutating any published projection."""
 
@@ -3742,7 +3750,8 @@ class PageService:
             if review.status in {"pending", "changes_requested"}
         ]
         same_actor_unreviewed_draft = (
-            current.version_status in ("editing", "draft")
+            restart is None
+            and current.version_status in ("editing", "draft")
             and current.graph_status == "linear"
             and current.created_by_actor_kind == actor_kind
             and current.created_by_actor_id == actor_id
@@ -3772,7 +3781,9 @@ class PageService:
             version = self._insert_version(
                 session,
                 page_id=page.id,
-                parent_version_id=current.id,
+                parent_version_id=(
+                    restart.parent_version_id if restart is not None else current.id
+                ),
                 body_md=body_md,
                 content_hash=new_hash,
                 actor_kind=actor_kind,
