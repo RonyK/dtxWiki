@@ -141,7 +141,10 @@ def test_the_freeze_covers_every_released_migration_file():
     released = {
         "revision_modules/__init__.py",
         "revision_modules/v0_1/__init__.py",
+        "revision_modules/v0_1/content_event_backfill_v1.py",
+        "revision_modules/v0_1/input_restrictions_v1.py",
         "versions/v0_0/bd62193d5cf6_initial_schema.py",
+        "versions/v0_1/19db79d3e622_release_0_1_3.py",
         "versions/v0_1/efcbcf724889_core_schema.py",
         *(
             f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"

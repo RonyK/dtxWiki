@@ -1,13 +1,15 @@
 {
-  "description": "Canonical baseline for the 0.0.1 and 0.1.1 schemas, renamed and regrouped in 0.1.2 without changing schema or data operations. Frozen files must not be edited after publication; new database changes extend the chain.",
-  "released_in": "0.1.2",
+  "description": "Frozen migration implementations through 0.1.3. The 0.0.1 and 0.1.1 schemas were renamed and regrouped in 0.1.2 without changing schema or data operations; 0.1.3 extends that baseline. Frozen files must not be edited after publication; new database changes extend the chain.",
+  "released_in": "0.1.3",
   "schema_origins": [
     "0.0.1",
-    "0.1.1"
+    "0.1.1",
+    "0.1.3"
   ],
   "sha256": {
     "revision_modules/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
     "revision_modules/v0_1/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
+    "revision_modules/v0_1/content_event_backfill_v1.py": "0321e31467fa8112e133b39a197b9456ea39795a684aaae0c8934eeb1f655995",
     "revision_modules/v0_1/efcbcf724889_core_schema/__init__.py": "b57efc37a5d5c2e8027f42613fdfdb3252376d6784ba4cff95030e74ccd26f09",
     "revision_modules/v0_1/efcbcf724889_core_schema/context_data.py": "366709f74283479354b738c4a4367f78183d327b184ad2d78654a60db4384ccc",
     "revision_modules/v0_1/efcbcf724889_core_schema/context_schema.py": "406886a9b7e0963d0ac5e21947371a0824f5dfb1d382e384d69e90011b74ed85",
@@ -19,7 +21,9 @@
     "revision_modules/v0_1/efcbcf724889_core_schema/tenancy_schema.py": "e36f7d452028a03a73ce94d50f3b6c2b30c43b60230a332170b23fbc83bc9698",
     "revision_modules/v0_1/efcbcf724889_core_schema/unique_key_prepass.py": "6d564b038d785c0d551ee103908ec3f61f0c08a3ff6d325053e629b3519e1cec",
     "revision_modules/v0_1/efcbcf724889_core_schema/workspace_schema.py": "6daaec7d569a6ec8c6f76c444a95e4fc945e218215d9234debcbb5187e2960ec",
+    "revision_modules/v0_1/input_restrictions_v1.py": "14f50082552dc8490e2ee2ac239983f4224cbbce80758df6ce498f9cacef26d5",
     "versions/v0_0/bd62193d5cf6_initial_schema.py": "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8",
+    "versions/v0_1/19db79d3e622_release_0_1_3.py": "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c",
     "versions/v0_1/efcbcf724889_core_schema.py": "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
   }
 }
