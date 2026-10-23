@@ -477,8 +477,6 @@ class ContextIngressService:
                 page=page,
                 session=session,
             ),
-            # TRANSITIONAL(R5): ingress acceptance historically skips fixing.
-            transitional_skip_fixes=True,
         )
         version = insert_context_version(
             session=session,

@@ -171,7 +171,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 f"W5 {suffix} {writer}",
             )
 
-        # W6: editing-session typed patches preserve their resolved bytes.
+        # W6: editing-session typed patches follow workspace Auto-fix.
         editing = page_service.create_page_first(
             workspace_slug="default",
             title="Golden",
@@ -191,7 +191,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             expected_editing_revision=1,
             idempotency_key=f"w6-{suffix}",
         )
-        _assert_stored(session_factory, patched.version_id, RAW, f"W6 {suffix}")
+        _assert_stored(session_factory, patched.version_id, expected, f"W6 {suffix}")
 
         # W7: Context draft creation.
         with session_factory.begin() as session:
@@ -321,7 +321,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             f"W10 legacy repair {suffix}",
         )
 
-        # W11: ingress acceptance intentionally persists raw markdown.
+        # W11: ingress acceptance follows workspace Auto-fix.
         with session_factory.begin() as session:
             parent = session.scalar(
                 select(WorkspaceTreeNode).where(
@@ -355,7 +355,10 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 actor_id=ACTOR_ID,
             )
         _assert_stored(
-            session_factory, accepted.context_page_version_id, RAW, f"W11 {suffix}"
+            session_factory,
+            accepted.context_page_version_id,
+            expected,
+            f"W11 {suffix}",
         )
 
         # W12: OKF frontmatter consumption reaches write_page's body policy.

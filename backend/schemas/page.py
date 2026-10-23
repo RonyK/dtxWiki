@@ -140,7 +140,8 @@ class PagePayload(PageSummary):
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
     # What the write that produced this payload changed. Set by the MCP edit
     # commands and read by their handlers; a private attribute, so the REST
-    # payload and the idempotency ledger's stored result stay unchanged.
+    # payload stays unchanged. The command ledger retains it separately for
+    # an identical receipt when an idempotent patch is replayed.
     _edit_receipt: EditReceipt | None = PrivateAttr(default=None)
 
 

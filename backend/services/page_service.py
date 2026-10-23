@@ -2409,20 +2409,32 @@ class PageService:
                         version=version,
                         session=session,
                     ),
-                    # TRANSITIONAL(R5): preserve patch bytes until R5 applies
-                    # workspace Auto-fix and rebuilds its final block map.
-                    transitional_skip_fixes=True,
                 )
                 new_body = prepared.body
+                next_block_map = (
+                    applied.predicted_block_map.value
+                    if applied.predicted_block_map is not None
+                    else None
+                )
+                if new_body != applied.body:
+                    if next_block_map is None:
+                        next_block_map = compute_block_map_with_ids(
+                            applied.body,
+                            previous_body_md=current_body,
+                            previous_block_map=block_map,
+                            identity_seed=str(version.id),
+                        )
+                    next_block_map = compute_block_map_with_ids(
+                        new_body,
+                        previous_body_md=applied.body,
+                        previous_block_map=next_block_map,
+                        identity_seed=str(version.id),
+                    )
                 self._rewrite_body_in_place(
                     version,
                     prepared,
                     base_block_map=block_map,
-                    prepared_block_map=(
-                        applied.predicted_block_map.value
-                        if applied.predicted_block_map is not None
-                        else None
-                    ),
+                    prepared_block_map=next_block_map,
                 )
                 version.actor_type = actor_kind
                 version.actor_id = parse_uuid_or_none(actor_id)
