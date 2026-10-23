@@ -12,12 +12,12 @@
   "header": {
     "eyebrow": "Workspace search",
     "title": "Search",
-    "subtitle": "Search across Context pages, Library sources, Agent pages, and changes."
+    "subtitle": "Search across Context pages, Library sources, and Agent pages."
   },
   "form": {
     "query": "Query",
     "clear": "Clear search",
-    "queryPlaceholder": "Search Context, Library, Agent pages, changes",
+    "queryPlaceholder": "Search Context, Library, Agent pages",
     "scope": "Scope",
     "mode": "Mode",
     "submit": "Search"
@@ -27,8 +27,7 @@
     "context_page": "Context",
     "library_item": "Library",
     "library_artifact": "Artifacts",
-    "agent_page": "Agent",
-    "change": "Changes"
+    "agent_page": "Agent"
   },
   "modes": {
     "keyword": "Keyword retrieval",
@@ -60,17 +59,16 @@
     "count_other": "{{count}} results",
     "countPlus": "{{count}}+ results",
     "open": "Open {{title}}",
-    "openContext": "Open Context",
-    "openLibrary": "Open Library",
-    "openAgent": "Open Agent",
-    "openReview": "Open Review",
     "openUnavailable": "Open unavailable",
-    "noCitation": "No citation",
     "cannotOpen": "{{title}} cannot be opened from search yet",
     "serverOrder": "Results",
     "disambiguation": "Multiple exact matches",
     "warningSummary": "{{warnings}}",
-    "matchedName": "Matched name: {{name}}"
+    "changeScopeMoved": "Showing all documents. For changes, use document History, Activity, or Review.",
+    "activity": "Activity",
+    "review": "Review",
+    "reviewLinkMissing": "Cannot open directly from search · Review link information unavailable",
+    "linkMissing": "Cannot open directly from search · Link information unavailable"
   },
   "examples": {
     "label": "Search examples",
@@ -95,14 +93,17 @@
   "loadingMore": "Loading…",
   "matchReasons": {
     "exact_id": "Exact ID",
-    "exact_slug": "Exact slug",
-    "exact_title": "Exact title",
+    "exact_slug": "Path match",
+    "exact_title": "Title match",
     "exact_alias": "Exact alias",
     "trigram": "Fuzzy name",
     "keyword": "Keyword",
-    "semantic": "Semantic",
+    "semantic": "Similar meaning",
     "hybrid": "Hybrid",
-    "associative": "Associated"
+    "associative": "Associated",
+    "titleContains": "Title contains the query",
+    "similarName": "Similar name: ‘{{name}}’",
+    "aliasMatch": "Alias ‘{{name}}’ matches"
   },
   "warningCodes": {
     "permission_limited": "Restricted Library items and artifacts are hidden for your current permissions",

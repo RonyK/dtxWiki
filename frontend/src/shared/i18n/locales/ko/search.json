@@ -12,12 +12,12 @@
   "header": {
     "eyebrow": "워크스페이스 검색",
     "title": "검색",
-    "subtitle": "컨텍스트 페이지, 라이브러리 소스, 에이전트 페이지, 변경 이력을 함께 검색합니다."
+    "subtitle": "컨텍스트 페이지, 라이브러리 소스, 에이전트 페이지를 함께 검색합니다."
   },
   "form": {
     "query": "검색어",
     "clear": "검색 지우기",
-    "queryPlaceholder": "컨텍스트, 라이브러리, 에이전트 페이지, 변경 검색",
+    "queryPlaceholder": "컨텍스트, 라이브러리, 에이전트 페이지 검색",
     "scope": "범위",
     "mode": "모드",
     "submit": "검색"
@@ -27,8 +27,7 @@
     "context_page": "컨텍스트",
     "library_item": "라이브러리",
     "library_artifact": "자료",
-    "agent_page": "에이전트",
-    "change": "변경"
+    "agent_page": "에이전트"
   },
   "modes": {
     "keyword": "키워드 검색",
@@ -60,17 +59,16 @@
     "count_other": "{{count}}개 결과",
     "countPlus": "{{count}}개 이상 결과",
     "open": "{{title}} 열기",
-    "openContext": "컨텍스트 열기",
-    "openLibrary": "라이브러리 열기",
-    "openAgent": "에이전트 열기",
-    "openReview": "리뷰 열기",
     "openUnavailable": "열 수 없음",
-    "noCitation": "인용 없음",
     "cannotOpen": "{{title, josaEunNeun}} 아직 검색에서 열 수 없습니다",
     "serverOrder": "결과",
     "disambiguation": "동일한 이름의 문서",
     "warningSummary": "{{warnings}}",
-    "matchedName": "일치한 이름: {{name}}"
+    "changeScopeMoved": "전체 문서를 표시합니다. 변경 이력은 문서의 히스토리, 활동 또는 리뷰에서 확인하세요.",
+    "activity": "활동",
+    "review": "리뷰",
+    "reviewLinkMissing": "검색에서 바로 열 수 없음 · 리뷰 연결 정보 없음",
+    "linkMissing": "검색에서 바로 열 수 없음 · 연결 정보 없음"
   },
   "examples": {
     "label": "검색 예시",
@@ -95,14 +93,17 @@
   "loadingMore": "불러오는 중…",
   "matchReasons": {
     "exact_id": "ID 일치",
-    "exact_slug": "슬러그 일치",
+    "exact_slug": "경로 일치",
     "exact_title": "제목 일치",
     "exact_alias": "별칭 일치",
     "trigram": "유사 이름",
     "keyword": "키워드",
-    "semantic": "시맨틱",
+    "semantic": "의미가 비슷함",
     "hybrid": "하이브리드",
-    "associative": "연관 문서"
+    "associative": "연관 문서",
+    "titleContains": "제목에 검색어 포함",
+    "similarName": "비슷한 이름: ‘{{name}}’",
+    "aliasMatch": "별칭 ‘{{name}}’ 일치"
   },
   "warningCodes": {
     "permission_limited": "현재 권한으로 볼 수 없는 제한된 라이브러리 항목과 자료는 검색 결과에서 제외되었습니다",

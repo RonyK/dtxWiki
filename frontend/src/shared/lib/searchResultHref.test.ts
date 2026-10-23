@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RankedSearchResult } from "../api/operations";
-import { searchResultHref } from "./searchResultHref";
+import { searchResultHref, searchResultLink } from "./searchResultHref";
 
 describe("searchResultHref", () => {
   it("uses content chunk document ids for semantic context hits", () => {
@@ -36,6 +36,9 @@ describe("searchResultHref", () => {
           id: "artifact-1",
         }),
       ),
+    ).toBeNull();
+    expect(
+      searchResultLink(result("artifact-1", "library_artifact")),
     ).toBeNull();
   });
 
@@ -86,6 +89,16 @@ describe("searchResultHref", () => {
         }),
       ),
     ).toBe("/agent?target=agent-1");
+    for (const [kind, id, href, destination] of [
+      ["context_page", "page-1", "/context?target=page-1", "context"],
+      ["library_item", "item-1", "/library?target=item-1", "library"],
+      ["agent_page", "agent-1", "/agent?target=agent-1", "agent"],
+    ]) {
+      expect(
+        searchResultLink(result("feedback-1", "feedback", { kind, id })),
+      ).toEqual({ href, destination });
+    }
+    expect(searchResultLink(result("feedback-1", "feedback"))).toBeNull();
   });
 
   it("opens change set hits only when a review item is known", () => {
@@ -98,6 +111,12 @@ describe("searchResultHref", () => {
       ),
     ).toBe("/review?review=review-1");
     expect(searchResultHref(result("change-2", "change_set"))).toBeNull();
+    expect(
+      searchResultLink(result("change-1", "change_set", {
+        kind: "review_item", id: "review-1",
+      })),
+    ).toEqual({ href: "/review?review=review-1", destination: "review" });
+    expect(searchResultLink(result("change-2", "change_set"))).toBeNull();
   });
 
   it("keeps legacy source hits as library links", () => {
@@ -121,6 +140,17 @@ describe("searchResultHref", () => {
           "workspace-1",
         ),
       ).toBe("/workspaces/workspace-1/context/pages/page-1");
+      expect(
+        searchResultLink(
+          result("chunk-1", "context_page", {
+            kind: "content_chunk", document_id: "page-1",
+          }),
+          "workspace-1",
+        ),
+      ).toEqual({
+        href: "/workspaces/workspace-1/context/pages/page-1",
+        destination: "context",
+      });
     });
 
     it("builds the canonical Context permalink for a context claim hit", () => {
@@ -133,6 +163,9 @@ describe("searchResultHref", () => {
           "workspace-1",
         ),
       ).toBe("/workspaces/workspace-1/context/pages/page-1");
+      expect(
+        searchResultLink(result("claim-1", "context_claim"), "workspace-1"),
+      ).toBeNull();
     });
 
     it("builds the canonical Context permalink for a feedback hit on a context page", () => {
