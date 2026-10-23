@@ -923,13 +923,12 @@ a.activity-source-chip:focus-visible {
    `18px minmax(0, 1fr) auto auto` already provides, so no override remains
    here. */
 
-/* Search result card. Same language as the Lint findings queue and the
-   Activity feed: neutral surface, one toned pill for identity, and a bordered
-   two-segment chip for the metadata + action pair. It replaces .operations-row
-   here rather than changing that shared primitive, which Setup/Settings/
-   AccountSecurity still use as-is. */
+/* Search rows: title, preview, location, then an optional match explanation. */
 .search-result-row {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
   width: 100%;
   min-width: 0;
   padding: 12px 14px;
@@ -945,30 +944,16 @@ a.activity-source-chip:focus-visible {
     border-color: var(--border-strong);
     background: var(--surface-hover);
   }
+  a.search-result-row:hover .search-result-title-text { text-decoration: underline; }
+  a.search-result-row:hover .search-result-chevron { color: var(--info); }
 }
 
-a.search-result-row:focus-visible {
-  outline: 2px solid var(--info);
-  outline-offset: 2px;
-}
-
-/* A result that cannot be opened is still a card, but must not offer the
-   hover/pointer affordances of a link. */
-.search-result-row.is-disabled {
-  background: var(--surface-subtle);
-  cursor: default;
-}
-
-.search-result-body {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
+a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.search-result-row.is-disabled { background: var(--surface-subtle); cursor: default; }
+.search-result-body { display: grid; gap: 6px; min-width: 0; }
 .search-result-title {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
   margin: 0;
   color: var(--ink);
@@ -976,13 +961,18 @@ a.search-result-row:focus-visible {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-
-/* The result kind, in the slot Lint gives severity and Activity gives the
-   actor. Every row previously shared one identical leading glyph, so kind was
-   carried only by the trailing button's hue. */
+.search-result-title-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+  line-height: 1.5;
+}
 .search-result-kind {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   height: 22px;
   padding: 0 10px;
   border-radius: 999px;
@@ -992,138 +982,46 @@ a.search-result-row:focus-visible {
   font-weight: 700;
   white-space: nowrap;
 }
-
-.search-result-kind[data-identity="context"] {
-  --kind-tone: var(--context);
-}
-
-.search-result-kind[data-identity="library"] {
-  --kind-tone: var(--library);
-}
-
-.search-result-kind[data-identity="agent"] {
-  --kind-tone: var(--agent);
-}
-
-.search-result-kind[data-identity="review"] {
-  --kind-tone: var(--review);
-}
-
-.search-result-kind[data-identity="muted"] {
-  --kind-tone: var(--ink-muted);
-}
-
+.search-result-kind[data-identity="context"] { --kind-tone: var(--context); }
+.search-result-kind[data-identity="library"] { --kind-tone: var(--library); }
+.search-result-kind[data-identity="agent"] { --kind-tone: var(--agent); }
+.search-result-kind[data-identity="review"] { --kind-tone: var(--review); }
+.search-result-kind[data-identity="muted"] { --kind-tone: var(--ink-muted); }
 .search-result-snippet,
-.search-result-path {
+.search-result-location,
+.search-result-reason,
+.search-result-unavailable,
+.search-result-id {
   margin: 0;
-  color: var(--ink-soft);
   font-size: 12px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
-
-/* The chip row is a distinct component, not a continuation of the snippet
-   above it (matches .lint-finding-chips / .activity-row__chips). */
-.search-result-chips {
-  margin-top: 4px;
-}
-
-/* Match reason and the open action live in ONE bordered box divided by a
-   hairline. As two separate chips they never agreed -- 20px against 24px --
-   the same drift the Lint queue had between its rule and target chips. */
-.search-source-chip {
-  display: inline-flex;
-  align-items: stretch;
-  min-width: 0;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.search-source-chip__reason {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 1 auto;
-  min-width: 0;
-  min-height: 30px;
-  padding: 0 14px;
-  overflow: hidden;
-  background: var(--surface-subtle);
-  color: var(--ink-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The whole row is already the link, so this is a visual affordance rather
-   than a nested interactive element -- it must not be an <a>. */
-.search-source-chip__open {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 0 14px;
-  background: color-mix(in srgb, var(--kind-tone) 8%, var(--surface));
-  color: color-mix(in srgb, var(--kind-tone) 70%, var(--ink));
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.search-source-chip__reason + .search-source-chip__open {
-  border-left: 1px solid var(--border);
-}
-
-.search-source-chip__open[data-identity="context"] {
-  --kind-tone: var(--context);
-}
-
-.search-source-chip__open[data-identity="library"] {
-  --kind-tone: var(--library);
-}
-
-.search-source-chip__open[data-identity="agent"] {
-  --kind-tone: var(--agent);
-}
-
-.search-source-chip__open[data-identity="review"] {
-  --kind-tone: var(--review);
-}
-
-.search-source-chip__open[data-identity="muted"] {
-  --kind-tone: var(--ink-muted);
-}
-
-/* Muted meta text replacing the invented "open unavailable"/"no citation"
-   StatusPills (which falsely read as system faults). */
-.search-result-meta {
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-}
+.search-result-snippet { color: var(--ink-soft); }
+.search-result-snippet strong { font-weight: 600; }
+.search-result-location { display: flex; align-items: center; gap: 5px; color: var(--ink-muted); }
+.search-result-location > svg { flex-shrink: 0; }
+.search-result-location-parts { display: flex; align-items: center; min-width: 0; }
+.search-result-location-part { display: inline-flex; align-items: center; min-width: 0; gap: 4px; }
+.search-result-location-part > svg { flex-shrink: 0; }
+.search-result-location-part > span { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Keep first and last two stages on desktop. The full path is also supplied
+   through aria-describedby, including on touch screens. */
+.search-result-location-part[data-desktop-visible="false"] { display: none; }
+.search-result-reason { display: flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--info); }
+.search-result-reason > svg { flex-shrink: 0; }
+.search-result-unavailable,
+.search-result-id,
+.search-result-chevron,
+.search-result-disabled-label { color: var(--ink-muted); }
+.search-result-disabled-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
 
 @media (max-width: 640px) {
-  /* Side by side on a phone the open segment shrinks to a few unreadable
-     characters; stack the two segments inside the same box instead, exactly
-     as .lint-source-chip does. */
-  .search-source-chip {
-    flex-direction: column;
-    align-items: stretch;
-    width: 100%;
-  }
-
-  .search-source-chip__reason + .search-source-chip__open {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-}
-
-@media (max-width: 1024px), (any-pointer: coarse) {
-  .search-source-chip__reason,
-  .search-source-chip__open {
-    min-height: 44px;
-  }
+  .search-result-title { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .search-result-title-text { -webkit-line-clamp: 3; }
+  .search-result-row.is-disabled { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .search-result-location-part[data-mobile-visible="true"] { display: inline-flex; }
+  .search-result-location-part[data-mobile-visible="false"] { display: none; }
 }
 
 .search-disambiguation-list {

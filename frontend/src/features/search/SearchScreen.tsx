@@ -1,6 +1,6 @@
-import { ExternalLink, Search } from "lucide-react";
+import { ChevronRight, Folder, Info, Search } from "lucide-react";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -25,7 +25,7 @@ import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../../shared/lib/searchLimits";
-import { searchResultHref } from "../../shared/lib/searchResultHref";
+import { searchResultHref, searchResultLink } from "../../shared/lib/searchResultHref";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
 const SCOPES: SearchScope[] = [
@@ -34,7 +34,6 @@ const SCOPES: SearchScope[] = [
   "library_item",
   "library_artifact",
   "agent_page",
-  "change",
 ];
 const SEARCH_EXAMPLES = [
   { key: "embeddingPolicy", defaultValue: "embedding policy" },
@@ -322,6 +321,12 @@ export function SearchScreen() {
     setScope(nextScope);
     const trimmed = query.trim();
     if (!trimmed || !debouncedQuery) {
+      if (searchParams.get("scope") === "change") {
+        const nextParams = new URLSearchParams(searchParams);
+        if (nextScope === "all") nextParams.delete("scope");
+        else nextParams.set("scope", nextScope);
+        setSearchParams(nextParams, { replace: true });
+      }
       return;
     }
     // Keep the URL in step with the rescoped results so refresh/share
@@ -357,12 +362,21 @@ export function SearchScreen() {
             <p className="feature-subtitle">
               {t("header.subtitle", {
                 defaultValue:
-                  "Search across Context pages, Library sources, Agent pages, and changes.",
+                  "Search across Context pages, Library sources, and Agent pages.",
               })}
             </p>
           </div>
         </div>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {searchParams.get("scope") === "change" ? (
+          <StatusBanner tone="info">
+            {t("results.changeScopeMoved", {
+              defaultValue: "Showing all documents. For changes, use document History, Activity, or Review.",
+            })}
+            {" "}<Link to="/activity">{t("results.activity", { defaultValue: "Activity" })}</Link>
+            {" · "}<Link to="/review">{t("results.review", { defaultValue: "Review" })}</Link>
+          </StatusBanner>
+        ) : null}
         <form className="search-panel" onSubmit={submit}>
           <div className="search-panel-field">
             <label htmlFor="workspace-search-query">
@@ -374,7 +388,7 @@ export function SearchScreen() {
               id="workspace-search-query"
               maxLength={SEARCH_QUERY_MAX_LENGTH}
               placeholder={t("form.queryPlaceholder", {
-                defaultValue: "Search Context, Library, Agent pages, changes",
+                defaultValue: "Search Context, Library, Agent pages",
               })}
               value={query}
               onChange={updateQuery}
@@ -424,6 +438,7 @@ export function SearchScreen() {
           unavailable={Boolean(error && debouncedQuery)}
           onSelectSuggestion={runSuggestedQuery}
           workspaceId={workspaceId}
+          query={debouncedQuery}
         />
         {loadMoreError ? (
           <StatusBanner tone="warning">{loadMoreError}</StatusBanner>
@@ -451,12 +466,14 @@ function SearchResults({
   unavailable,
   onSelectSuggestion,
   workspaceId,
+  query,
 }: {
   loading: boolean;
   payload: SearchPayload | null;
   unavailable: boolean;
   onSelectSuggestion: (query: string) => void;
   workspaceId: string | null;
+  query: string;
 }) {
   const { t } = useTranslation("search");
   const suggestions = SEARCH_EXAMPLES.map((entry) =>
@@ -577,6 +594,12 @@ function SearchResults({
               key={`${result.type}-${result.id}`}
               result={result}
               workspaceId={workspaceId}
+              query={query}
+              showShortId={payload.ranked_results.some((other) =>
+                other.id !== result.id &&
+                normalizedText(other.title) === normalizedText(result.title) &&
+                locationLooksSame(resultLocation(other), resultLocation(result))
+              )}
             />
           ))}
         </div>
@@ -701,94 +724,106 @@ function disambiguationHref(
 function SearchResultRow({
   result,
   workspaceId,
+  query,
+  showShortId,
 }: {
   result: RankedSearchResult;
   workspaceId: string | null;
+  query: string;
+  showShortId: boolean;
 }) {
   const { t } = useTranslation("search");
-  const href = searchResultHref(result, workspaceId);
-  const identity = identityForHref(href);
-  const title = result.title;
-  const snippet = result.snippet;
+  const descriptionId = useId();
+  const link = searchResultLink(result, workspaceId);
   const typeLabel = domainLabel("search", "types", result.type, t);
-  const matchReason = result.match_reason
-    ? t(`matchReasons.${result.match_reason}`, {
-        defaultValue: defaultMatchReasonLabel(result.match_reason),
-      })
-    : null;
-  const content = (
-    <div className="search-result-body">
-      {/* The result kind leads the row as a toned pill, the same slot Lint
-          gives severity and Activity gives the actor. It used to be carried
-          only by the trailing open-button's hue, while every row shared one
-          identical leading glyph. */}
-      <p className="search-result-title">
-        <span
-          className="search-result-kind"
-          data-identity={identity ?? "muted"}
-        >
-          {typeLabel}
-        </span>
-        <span>{title}</span>
-      </p>
-      {snippet || result.matched_name ? (
-        <p className="search-result-snippet">
-          {snippet ||
-            t("results.matchedName", {
-              name: result.matched_name,
-              defaultValue: `Matched name: ${result.matched_name}`,
-            })}
-        </p>
-      ) : null}
-      {result.concept_path ? (
-        <p className="search-result-path">
-          {displayConceptPath(result.concept_path)}
-        </p>
-      ) : null}
-      <span className="row-badges search-result-chips">
-        {/* Match reason and the open action are one bordered box split by a
-            hairline -- the same joined segment as Lint's [rule | target].
-            As two separate chips they never agreed: 20px against 24px. */}
-        <span className="search-source-chip">
-          {matchReason ? (
-            <span className="search-source-chip__reason">{matchReason}</span>
-          ) : null}
-          <span
-            className="search-source-chip__open"
-            data-identity={identity ?? "muted"}
-          >
-            {href && identity ? (
-              <>
-                <ExternalLink size={13} aria-hidden="true" />
-                {t(
-                  `results.open${identity[0].toUpperCase()}${identity.slice(1)}`,
-                  { defaultValue: typeLabel },
-                )}
-              </>
-            ) : (
-              t("results.openUnavailable", {
-                defaultValue: "Open unavailable",
-              })
-            )}
-          </span>
-        </span>
-        {result.stale ? <StatusPill status="stale" compact /> : null}
-        {result.archived ? <StatusPill status="archived" compact /> : null}
-        {!result.citation_available ? (
-          <span className="search-result-meta">
-            {t("results.noCitation", { defaultValue: "No citation" })}
-          </span>
-        ) : null}
-      </span>
-    </div>
+  const snippet = searchPreview(result.snippet ?? "");
+  const summary = searchPreview(result.summary ?? "");
+  const matchedName = result.matched_name ?? "";
+  const preview = snippet || summary || (
+    normalizedText(matchedName) !== normalizedText(result.title) ? matchedName : ""
   );
-  if (!href) {
+  const heading = snippet && result.heading_path
+    ? result.heading_path.filter((part) => normalizedText(part) !== normalizedText(result.title)).at(-1)
+    : null;
+  const reason = result.match_reason;
+  let matchReason: string | null = null;
+  if (reason === "trigram") {
+    matchReason = normalizedText(query) && normalizedText(result.title).includes(normalizedText(query))
+      ? t("matchReasons.titleContains", { defaultValue: "Title contains the query" })
+      : t("matchReasons.similarName", { name: matchedName || result.title, defaultValue: "Similar name: ‘{{name}}’" });
+  } else if (reason === "exact_alias") {
+    matchReason = t("matchReasons.aliasMatch", { name: matchedName, defaultValue: "Alias ‘{{name}}’ matches" });
+  } else if (reason && reason !== "keyword" && reason !== "hybrid") {
+    matchReason = t(`matchReasons.${reason}`, { defaultValue: defaultMatchReasonLabel(reason) });
+  }
+  const location = resultLocation(result);
+  const locationParts = presentLocation(location);
+  const fullPath = location.join(" › ");
+  const unavailable = !link ? t(
+    result.type === "change_set" ? "results.reviewLinkMissing" : "results.linkMissing",
+    { defaultValue: result.type === "change_set"
+      ? "Cannot open directly from search · Review link information unavailable"
+      : "Cannot open directly from search · Link information unavailable" },
+  ) : null;
+  const description = [fullPath, showShortId ? `ID ${result.id.slice(0, 8)}` : null, matchReason, unavailable].filter(Boolean).join(". ");
+  const content = (
+    <>
+      <div className="search-result-body">
+        <p className="search-result-title">
+          <span className="search-result-kind" data-identity={link?.destination ?? "muted"}>
+            {typeLabel}
+          </span>
+          <span className="search-result-title-text">{result.title}</span>
+          {result.archived ? <StatusPill status="archived" compact /> : null}
+        </p>
+        {preview ? (
+          <p className="search-result-snippet">
+            {heading ? <><strong>{heading}</strong>{" · "}</> : null}
+            {preview}
+          </p>
+        ) : null}
+        {location.length > 0 ? (
+          <p className="search-result-location" title={fullPath} aria-hidden="true">
+            <Folder size={13} aria-hidden="true" />
+            <span className="search-result-location-parts">
+              {locationParts.map((part, index) => (
+                <span
+                  className="search-result-location-part"
+                  data-desktop-visible={part.desktop}
+                  data-mobile-visible={part.mobile}
+                  key={index}
+                >
+                  {index > 0 ? <ChevronRight size={12} aria-hidden="true" /> : null}
+                  <span>{part.text}</span>
+                </span>
+              ))}
+            </span>
+          </p>
+        ) : null}
+        {showShortId ? <p className="search-result-id">{result.id.slice(0, 8)}</p> : null}
+        {matchReason ? (
+          <p className="search-result-reason">
+            <Search size={13} aria-hidden="true" />{matchReason}
+          </p>
+        ) : null}
+        {unavailable ? <p className="search-result-unavailable">{unavailable}</p> : null}
+        {description ? <span className="visually-hidden" id={descriptionId}>{description}</span> : null}
+      </div>
+      {link ? (
+        <ChevronRight className="search-result-chevron" size={18} aria-hidden="true" />
+      ) : (
+        <span className="search-result-disabled-label">
+          <Info size={14} aria-hidden="true" />
+          {t("results.openUnavailable", { defaultValue: "Open unavailable" })}
+        </span>
+      )}
+    </>
+  );
+  if (!link) {
     return (
       <div
-        aria-label={t("results.cannotOpen", {
-          defaultValue: "{{title}} cannot be opened from search yet",
-          title,
-        })}
+        aria-label={t("results.cannotOpen", { defaultValue: "{{title}} cannot be opened from search yet", title: result.title })}
+        aria-describedby={description ? descriptionId : undefined}
         className="search-result-row is-disabled"
       >
         {content}
@@ -798,26 +833,78 @@ function SearchResultRow({
   return (
     <Link
       className="search-result-row linked"
-      to={href}
-      aria-label={t("results.open", {
-        defaultValue: "Open {{title}}",
-        title,
-      })}
+      to={link.href}
+      aria-label={t("results.open", { defaultValue: "Open {{title}}", title: result.title })}
+      aria-describedby={description ? descriptionId : undefined}
     >
       {content}
     </Link>
   );
 }
 
-function identityForHref(
-  href: string | null,
-): "context" | "library" | "agent" | "review" | null {
-  if (!href) return null;
-  if (href.startsWith("/context")) return "context";
-  if (href.startsWith("/library")) return "library";
-  if (href.startsWith("/agent")) return "agent";
-  if (href.startsWith("/review")) return "review";
-  return null;
+function normalizedText(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase().trim().replace(/\s+/g, " ");
+}
+
+function resultLocation(result: RankedSearchResult): string[] {
+  if (result.location?.length) return result.location;
+  if (!result.concept_path) return [];
+  const path = displayConceptPath(result.concept_path);
+  // Generated Context slugs are storage identifiers. Human slugs remain useful
+  // as a fallback when the server has no tree placement for the result.
+  if ((result.type === "context_page" || result.type === "context_claim") &&
+    /^\/?context\/p-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(path)) return [];
+  return [path];
+}
+
+function presentLocation(location: string[]) {
+  const shorten = (part: string) => {
+    const characters = Array.from(part);
+    return characters.length > 22 ? `${characters.slice(0, 21).join("")}…` : part;
+  };
+  return location.flatMap((part, index) => {
+    const stage = {
+      text: shorten(part),
+      desktop: location.length < 4 || index === 0 || index >= location.length - 2,
+      mobile: location.length < 3 || index === 0 || index === location.length - 1,
+    };
+    return index === 1 && location.length >= 3
+      ? [{ text: "…", desktop: location.length >= 4, mobile: true }, stage]
+      : [stage];
+  });
+}
+
+function locationLooksSame(left: string[], right: string[]) {
+  const leftParts = presentLocation(left);
+  const rightParts = presentLocation(right);
+  return (["desktop", "mobile"] as const).some((viewport) =>
+    JSON.stringify(leftParts.filter((part) => part[viewport]).map((part) => part.text)) ===
+    JSON.stringify(rightParts.filter((part) => part[viewport]).map((part) => part.text)),
+  );
+}
+
+// Search previews are plain text. Keep labels/content while removing Markdown
+// presentation syntax; never change the stored source or render result HTML.
+function searchPreview(value: string): string {
+  const code: string[] = [];
+  return value
+    .replace(/```[^\n]*\n([\s\S]*?)```|~~~[^\n]*\n([\s\S]*?)~~~|`([^`\n]+)`/g,
+      (_match, fenced: string | undefined, tilde: string | undefined, inline: string | undefined) => {
+        code.push(fenced ?? tilde ?? inline ?? "");
+        return `\uE000${code.length - 1}\uE001`;
+      })
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/<((?:https?:\/\/|mailto:)[^>]+)>/g, "$1")
+    .replace(/<\/?(?:a|abbr|b|blockquote|br|code|del|div|em|h[1-6]|hr|i|li|ol|p|pre|s|small|span|strong|sub|sup|table|tbody|td|th|thead|tr|ul)(?:\s[^<>]*?)?\s*\/?>/gi, "")
+    .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/\*\*(\S(?:[^*]*\S)?)\*\*/g, "$1")
+    .replace(/\*(\S(?:[^*]*\S)?)\*/g, "$1")
+    .replace(/(^|[^\p{L}\p{N}_])__([^_\n]+)__(?=$|[^\p{L}\p{N}_])/gu, "$1$2")
+    .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1$2")
+    .replace(/`+/g, "")
+    .replace(/\uE000(\d+)\uE001/g, (_match, index: string) => code[Number(index)] ?? "")
+    .replace(/\s+/g, " ").trim();
 }
 
 function parseScope(value: string | null): SearchScope {
@@ -882,11 +969,11 @@ function newPageFromSearchHref(query: string | undefined) {
 function defaultMatchReasonLabel(reason: string) {
   if (reason === "exact_id") return "Exact ID";
   if (reason === "exact_title") return "Exact title";
-  if (reason === "exact_slug") return "Exact slug";
+  if (reason === "exact_slug") return "Path match";
   if (reason === "exact_alias") return "Exact alias";
   if (reason === "trigram") return "Fuzzy name";
   if (reason === "grep_wiki") return "Grep";
-  if (reason === "semantic") return "Semantic";
+  if (reason === "semantic") return "Similar meaning";
   if (reason === "hybrid") return "Hybrid";
   if (reason === "associative") return "Associated";
   return "Keyword";
