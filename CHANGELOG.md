@@ -1,9 +1,12 @@
 # Changelog
 
-## 0.1.3 — Unreleased
+## 0.1.3 — 2026-10-23
 
 ### Runtime and upgrades
 
+- Upgrade the published 0.1.2 database directly to the final 0.1.3 schema in
+  one revision. Validate inputs before changing tables, combine new columns and
+  input checks per table, and retain proven content-event timestamps.
 - `dtxwiki` and `dtxwiki serve` now start and stop the required background
   worker together. If another process manager already runs `dtxwiki-worker run`,
   set `DTXWIKI_WORKER_MODE=external` or pass `--worker-mode external` before
@@ -96,6 +99,8 @@
   setup troubleshooting. Link SMTP and advanced operations to the docs.
 - Align the npm guide with the same release and runtime behavior.
 - Correct deployment-guide recovery and SMTP instructions and stale README links.
+- Add explicit MCP anchors, matching English/Korean setup steps and release-pinned
+  links. Restore input-audit, password-recovery and worker-mode upgrade guidance.
 
 ## 0.1.2 — 2026-10-14
 

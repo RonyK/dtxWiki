@@ -194,7 +194,7 @@ def _write_cyclic_revisions(stage):
 
 
 def _write_duplicate_revision(stage):
-    _write_revision(stage, CURRENT_HEAD, ("c7a4e91b2d60", "d148b9746ff5"))
+    _write_revision(stage, CURRENT_HEAD, "efcbcf724889")
 
 
 def _detach_core_schema_from_the_baseline(stage):

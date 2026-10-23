@@ -1,6 +1,6 @@
 {
   "name": "@dtxsuite/dtxwiki",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Run dtxWiki, the local-first MCP-native Markdown wiki for AI tools, with npx",
   "license": "AGPL-3.0-only OR Elastic-2.0",
   "author": "dtxSuite",

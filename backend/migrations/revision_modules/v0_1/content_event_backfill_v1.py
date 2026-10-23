@@ -1,7 +1,8 @@
-"""Add durable content-event times and personal workspace favorites.
+"""Revision-owned proof of historical content-event times.
 
-Revision ID: c7a4e91b2d60
-Revises: efcbcf724889
+The release migration creates the final columns before invoking this helper.
+Keep normalization and publication evidence independent of application code so
+future reader or audit changes cannot alter the meaning of an upgrade replay.
 """
 
 import json
@@ -9,40 +10,39 @@ import unicodedata
 from uuid import UUID
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.sql.expression import Grouping
 
-revision = "c7a4e91b2d60"
-down_revision = "efcbcf724889"
-branch_labels = None
-depends_on = None
 
+def backfill_content_event_times(connection) -> None:
+    """Fill only proven Context/Agent times, leaving unknown times as NULL."""
+    metadata = sa.MetaData()
+    for kind, pointer in (
+        ("context_page", "current_published_version_id"),
+        ("agent_page", "current_active_version_id"),
+    ):
+        pages = sa.Table(kind, metadata, autoload_with=connection, resolve_fks=False)
+        if (
+            connection.execute(
+                sa.select(pages.c.id).where(pages.c[pointer].is_not(None)).limit(1)
+            ).first()
+            is not None
+        ):
+            break
+    else:
+        # Empty and draft-only installations have no publication evidence to
+        # prove. Avoid indexing their unrelated historical audit collection.
+        return
 
-def upgrade() -> None:
-    for name in ("context_page", "agent_page", "library_item"):
-        op.add_column(name, sa.Column("content_changed_at", sa.DateTime(timezone=True)))
-    op.create_table(
-        "user_favorite",
-        sa.Column("user_id", sa.Uuid(), nullable=False),
-        sa.Column("workspace_id", sa.Uuid(), nullable=False),
-        sa.Column("target_kind", sa.Text(), nullable=False),
-        sa.Column("target_id", sa.Uuid(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint(
-            "target_kind IN ('context_page', 'library_item', 'agent_page')",
-            name="user_favorite_target_kind_check",
-        ),
-        sa.PrimaryKeyConstraint("user_id", "workspace_id", "target_kind", "target_id"),
-    )
     # Seek each exact version, including when a long chain has unchanged
     # content. A target/time index alone rescans all newer target events at
     # every predecessor. This index adds no ongoing product write cost.
-    connection = op.get_bind()
-    audits = sa.Table("audit_event", sa.MetaData(), autoload_with=connection)
+    audits = sa.Table(
+        "audit_event", metadata, autoload_with=connection, resolve_fks=False
+    )
     lookup_index = _publication_lookup_index(audits)
     lookup_index.create(connection)
     try:
-        _backfill_proven_publications(audits)
+        _backfill_proven_publications(connection, audits)
     finally:
         lookup_index.drop(connection)
 
@@ -207,8 +207,7 @@ def _publication_time(
     return None
 
 
-def _backfill_proven_publications(audits):
-    connection = op.get_bind()
+def _backfill_proven_publications(connection, audits):
     metadata = audits.metadata
     for kind, pointer, owner, action, previous_key in (
         (
@@ -226,8 +225,10 @@ def _backfill_proven_publications(audits):
             "previous_active_version_id",
         ),
     ):
-        pages = sa.Table(kind, metadata, autoload_with=connection)
-        versions = sa.Table(f"{kind}_version", metadata, autoload_with=connection)
+        pages = sa.Table(kind, metadata, autoload_with=connection, resolve_fks=False)
+        versions = sa.Table(
+            f"{kind}_version", metadata, autoload_with=connection, resolve_fks=False
+        )
         after_id = None
         while True:
             statement = (
@@ -266,9 +267,3 @@ def _backfill_proven_publications(audits):
     # Library's old upload event lacks the prior current source, and overlays
     # can replace extraction output. Its latest content event is unprovable
     # from version creation alone; unknown historical times remain NULL.
-
-
-def downgrade() -> None:
-    op.drop_table("user_favorite")
-    for name in ("library_item", "agent_page", "context_page"):
-        op.drop_column(name, "content_changed_at")
