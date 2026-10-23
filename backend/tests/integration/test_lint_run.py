@@ -18,8 +18,9 @@ from backend.schemas.lint import (
     LintFindingDecisionRequest,
     LintRunCreateRequest,
 )
-from backend.services.lint import LintModule, LintRegistry
+from backend.services.lint import LintContext, LintModule, LintRegistry, LintStage
 from backend.services.lint.base import LintFindingDraft
+from backend.services.lint.scopes import findings_for_target
 from backend.services.lint_service import LintService
 from backend.services.read_errors import ReadValidationError
 from backend.tests.conftest import authenticate_test_client
@@ -28,12 +29,13 @@ pytestmark = pytest.mark.integration
 
 
 class _Dummy:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.dummy_format"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,
@@ -902,10 +904,8 @@ def test_missing_backlink_rule_batches_many_outbound_targets(
 
         event.listen(session.get_bind(), "before_cursor_execute", count_query)
         try:
-            findings = rule.check(
-                session=session,
-                workspace_id=workspace_id,
-                target=source_page,
+            findings = findings_for_target(
+                rule, source_page, LintContext(session, workspace_id, page=source_page)
             )
         finally:
             event.remove(session.get_bind(), "before_cursor_execute", count_query)
@@ -937,13 +937,14 @@ def test_create_run_delegates_to_run_lint_and_completes(session_factory):
 
 
 class _Toggleable:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.toggle"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
     fires = True
 
-    def check(self, *, session, workspace_id, target, body=None):
+    def check_target(self, target, ctx):
         if not self.fires:
             return []
         return [
@@ -1169,12 +1170,13 @@ def test_run_lint_does_not_resurrect_dismissed_finding(session_factory):
 
 
 class _FmtRule:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.fmt"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,
@@ -1186,12 +1188,13 @@ class _FmtRule:
 
 
 class _KbRule:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.kb"
     layer = "knowledge"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,

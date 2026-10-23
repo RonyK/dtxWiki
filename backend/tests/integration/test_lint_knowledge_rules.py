@@ -7,7 +7,8 @@ from backend.models.context import ContextPage, ContextPageVersion, PageNameInde
 from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
 from backend.schemas.lint import LintRunCreateRequest
-from backend.services.lint import LintRegistry
+from backend.services.lint import LintContext, LintRegistry
+from backend.services.lint.scopes import findings_for_target
 from backend.services.lint_service import LintService
 from backend.services.page_service import refresh_page_links
 
@@ -50,10 +51,10 @@ def _refresh(session, *pages):
 
 
 def _check(session, rule_id, page):
-    return (
-        LintRegistry.builtin()
-        .rule(rule_id)
-        .check(session=session, workspace_id=page.workspace_id, target=page)
+    return findings_for_target(
+        LintRegistry.builtin().rule(rule_id),
+        page,
+        LintContext(session, page.workspace_id, page=page),
     )
 
 

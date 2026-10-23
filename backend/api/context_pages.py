@@ -83,7 +83,7 @@ from backend.schemas.page import (
     SubmitContextEditRequest,
 )
 from backend.schemas.read import ContextPageListResponse
-from backend.services.lint.base import PUBLICATION_FLOOR_RULES
+from backend.services.lint import LintRegistry, LintStage
 from backend.services.page_service import (
     PageConflictError,
     PageContextMediaError,
@@ -821,11 +821,14 @@ def page_write_response(
     *,
     published_findings=None,
     write_operation: bool = True,
+    lint_registry: LintRegistry | None = None,
 ) -> dict:
     """Wrap a page with operation-accurate warnings for unpublished content."""
     warnings = []
+    registry = lint_registry if lint_registry is not None else LintRegistry.builtin()
     for reason in page.publish_blocked_reasons:
-        if reason.code in PUBLICATION_FLOOR_RULES:
+        rule = registry.rule(reason.code)
+        if rule is not None and LintStage.PUBLISH_FLOOR in rule.stages:
             message = (
                 f"Saved as a draft, not published. {reason.message}"
                 if write_operation

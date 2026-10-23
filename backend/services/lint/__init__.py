@@ -7,10 +7,14 @@ from sqlalchemy.orm import Session
 from backend.services.lint.base import (
     LINT_LAYERS,
     LINT_SEVERITIES,
+    BodyRule,
+    LintContext,
     LintFindingDraft,
     LintModule,
     LintPolicy,
     LintRule,
+    LintStage,
+    TargetRule,
 )
 from backend.services.lint.registry import LintRegistry
 
@@ -35,21 +39,40 @@ def page_format_warnings_for_body(
     if not body:
         return []
     messages: list[str] = []
-    for rule in registry.enabled(policy, layer="format", target_type="context_page"):
-        for draft in rule.check(
-            session=session, workspace_id=workspace_id, target=page, body=body
+    for rule in registry.rules_for(LintStage.READ, policy, target_type="context_page"):
+        for draft in rule.check_body(
+            body, LintContext(session, workspace_id, page=page)
         ):
             messages.append(draft.suggested_action or draft.rule_id)
     return messages
 
 
+def publish_floor_findings(
+    body: str, *, registry: LintRegistry | None = None
+) -> list[LintFindingDraft]:
+    """Apply the publication stage's required rules to one submitted body."""
+    if not body:
+        return []
+    resolved_registry = registry if registry is not None else LintRegistry.builtin()
+    return [
+        finding
+        for rule in resolved_registry.rules_for(LintStage.PUBLISH_FLOOR, None)
+        for finding in rule.check_body(body, LintContext(None, None))
+    ]
+
+
 __all__ = [
     "LINT_LAYERS",
     "LINT_SEVERITIES",
+    "BodyRule",
+    "LintContext",
     "LintFindingDraft",
     "LintModule",
     "LintPolicy",
     "LintRegistry",
     "LintRule",
+    "LintStage",
+    "TargetRule",
     "page_format_warnings_for_body",
+    "publish_floor_findings",
 ]

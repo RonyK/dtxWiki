@@ -5,10 +5,10 @@ from types import MappingProxyType
 
 from backend.services.lint.base import (
     LINT_LAYERS,
-    PUBLICATION_FLOOR_RULES,
     LintModule,
     LintPolicy,
     LintRule,
+    LintStage,
 )
 
 
@@ -69,9 +69,22 @@ class LintRegistry:
             and (layer is None or rule.layer == layer)
             and (target_type is None or target_type in rule.applies_to)
             and (
-                rule.rule_id in PUBLICATION_FLOOR_RULES
+                LintStage.PUBLISH_FLOOR in rule.stages
                 or resolved_policy.rule_enabled(
                     rule.rule_id, default_enabled=rule.default_enabled
                 )
             )
+        ]
+
+    def rules_for(
+        self,
+        stage: LintStage,
+        policy: LintPolicy | dict[str, bool] | None,
+        *,
+        target_type: str | None = None,
+    ) -> list[LintRule]:
+        return [
+            rule
+            for rule in self.enabled(policy, target_type=target_type)
+            if stage in rule.stages
         ]

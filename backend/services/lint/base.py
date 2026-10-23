@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from enum import StrEnum
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -35,36 +36,42 @@ class LintFindingDraft:
     fingerprint: str = ""
 
 
+class LintStage(StrEnum):
+    SAVE = "save"
+    READ = "read"
+    RUN = "run"
+    PUBLISH_FLOOR = "publish_floor"
+
+
+@dataclass(frozen=True)
+class LintContext:
+    """The caller's workspace, actor, and optional page/version context."""
+
+    session: Session | None
+    workspace_id: UUID | None
+    actor: object | None = None
+    page: object | None = None
+    version: object | None = None
+
+
 class LintRule(Protocol):
-    """A pluggable lint checker.
-
-    ``layer`` is ``"format"`` (deterministic, syntactic) or ``"knowledge"``
-    (semantic / graph). ``applies_to`` is the set of target types the rule can
-    check; the executor only hands a rule targets of a matching type.
-    """
-
     rule_id: str
     layer: str
     default_enabled: bool
     applies_to: frozenset[str]
-    runtime_checkable: bool
-
-    def check(
-        self,
-        *,
-        session: Session,
-        workspace_id: UUID,
-        target: object,
-        body: str | None = None,
-    ) -> list[LintFindingDraft]:
-        """Produce findings for ``target``. ``body`` lets a caller lint an
-        explicit body (e.g. a specific version) instead of the rule's default
-        page-body resolution; rules that don't read a body may ignore it."""
-        ...
+    stages: frozenset[LintStage]
 
 
-# A workspace cannot disable safeguards used by the publication floor.
-PUBLICATION_FLOOR_RULES = frozenset({"md.code_fence_balance"})
+@runtime_checkable
+class BodyRule(LintRule, Protocol):
+    def check_body(self, body: str, ctx: LintContext) -> list[LintFindingDraft]: ...
+
+
+@runtime_checkable
+class TargetRule(LintRule, Protocol):
+    def check_target(
+        self, target: object, ctx: LintContext
+    ) -> list[LintFindingDraft]: ...
 
 
 @dataclass(frozen=True)

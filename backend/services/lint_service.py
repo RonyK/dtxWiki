@@ -29,8 +29,14 @@ from backend.schemas.lint import (
 from backend.services.audit_service import AuditService
 from backend.services.delegated_tasks import produce_folder_summary_tasks
 from backend.services.job_queue import JobQueueService
-from backend.services.lint import LintModule, LintPolicy, LintRegistry
-from backend.services.lint.base import PUBLICATION_FLOOR_RULES
+from backend.services.lint import (
+    LintContext,
+    LintModule,
+    LintPolicy,
+    LintRegistry,
+    LintStage,
+)
+from backend.services.lint.scopes import findings_for_target
 from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
@@ -307,7 +313,10 @@ class LintService:
         enabled_ids: set[str] = set()
         for target_type in {tt for tt, _, _ in targets}:
             enabled_ids |= {
-                r.rule_id for r in registry.enabled(policy, target_type=target_type)
+                r.rule_id
+                for r in registry.rules_for(
+                    LintStage.RUN, policy, target_type=target_type
+                )
             }
         existing = (
             list(
@@ -331,9 +340,11 @@ class LintService:
         counts: dict[str, int] = {}
         produced_keys: set[tuple[UUID | None, str]] = set()
         for target_type, target, target_id in targets:
-            for rule in registry.enabled(policy, target_type=target_type):
-                for draft in rule.check(
-                    session=session, workspace_id=workspace_id, target=target
+            for rule in registry.rules_for(
+                LintStage.RUN, policy, target_type=target_type
+            ):
+                for draft in findings_for_target(
+                    rule, target, LintContext(session, workspace_id, page=target)
                 ):
                     tid = draft.target_id if draft.target_id is not None else target_id
                     key = (tid, draft.fingerprint)
@@ -519,13 +530,13 @@ class LintService:
                 layer=rule.layer,
                 default_enabled=rule.default_enabled,
                 enabled=(
-                    rule.rule_id in PUBLICATION_FLOOR_RULES
+                    LintStage.PUBLISH_FLOOR in rule.stages
                     or LintPolicy(workspace).rule_enabled(
                         rule.rule_id, default_enabled=rule.default_enabled
                     )
                 ),
                 runtime_checkable=getattr(rule, "runtime_checkable", True),
-                policy_locked=rule.rule_id in PUBLICATION_FLOOR_RULES,
+                policy_locked=LintStage.PUBLISH_FLOOR in rule.stages,
             )
             for rule in self.lint_registry.rules()
         ]

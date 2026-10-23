@@ -32,8 +32,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from backend.services.lint.rules_format import _frontmatter_body_offset
 from backend.utils.markdown_fence import fence_opener, is_fence_closer
+from backend.utils.page_frontmatter import frontmatter_body_offset
 
 logger = logging.getLogger(__name__)
 
@@ -513,7 +513,7 @@ def analyze_markdown(body: str) -> MarkdownAnalysis:
     lines = text.split("\n")
     if len(lines) != len(source_line_starts):  # pragma: no cover - invariant
         raise ValueError("source line map diverged from canonical line endings")
-    offset = _frontmatter_body_offset(lines)
+    offset = frontmatter_body_offset(lines)
     frontmatter = lines[:offset]
     body_lines = lines[offset:]
     had_separator = bool(body_lines) and body_lines[0].strip() == ""

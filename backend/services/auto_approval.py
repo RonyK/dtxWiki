@@ -82,11 +82,11 @@ def evaluate_context_write(
             )
         )
     if body:
-        from backend.services.lint.rules_format import body_error_findings
+        from backend.services.lint import publish_floor_findings
 
         # Fixed objective floor only (unclosed fence/frontmatter) — see
-        # body_error_findings. Cross-page wikilink checks are advisory (M6).
-        findings = body_error_findings(body)
+        # publish_floor_findings. Cross-page wikilink checks are advisory (M6).
+        findings = publish_floor_findings(body)
         if findings:
             vetoes.append("lint_error")
             # The finding already carries the offending line number; passing it

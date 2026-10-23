@@ -5,7 +5,7 @@ from backend.models.context import ContextPage
 from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
 from backend.schemas.lint import LintRunCreateRequest
-from backend.services.lint import LintModule, LintRegistry
+from backend.services.lint import LintModule, LintRegistry, LintStage
 from backend.services.lint.base import LintFindingDraft
 from backend.services.lint_service import LintService
 from backend.services.settings_service import (
@@ -17,12 +17,13 @@ pytestmark = pytest.mark.integration
 
 
 class _Rule:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.policy_rule"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,

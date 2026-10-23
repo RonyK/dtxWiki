@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from backend.services.lint.base import LintModule
+from backend.services.lint.base import LintModule, LintStage
 
 
 @dataclass(frozen=True)
@@ -10,8 +10,9 @@ class _ExternalRule:
     applies_to: frozenset[str]
     default_enabled: bool = True
     runtime_checkable: bool = False
+    stages: frozenset[LintStage] = frozenset()
 
-    def check(self, **_kwargs):
+    def check_target(self, target, ctx):
         return []
 
 

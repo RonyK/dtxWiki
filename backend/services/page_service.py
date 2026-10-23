@@ -102,9 +102,9 @@ from backend.services.job_queue import (
     JobQueueService,
     context_page_embed_idempotency_key,
 )
+from backend.services.lint import LintRegistry, publish_floor_findings
 from backend.services.lint.autofix import safe_normalize_markdown
 from backend.services.lint.rules_format import (
-    body_error_findings,
     body_relative_message,
 )
 from backend.services.mcp_write_idempotency import (
@@ -453,6 +453,7 @@ class PageService:
         job_queue: JobQueueService | None = None,
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
+        lint_registry: LintRegistry | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.change_audit_recorder = (
@@ -460,6 +461,9 @@ class PageService:
         )
         self.job_queue = job_queue or JobQueueService()
         self.context_media_repository_factory = context_media_repository_factory
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else LintRegistry.builtin()
+        )
 
     def list_pages(
         self,
@@ -4500,8 +4504,7 @@ class PageService:
             raise PageNotFoundError(f"workspace not found: {workspace_slug}")
         return workspace
 
-    @staticmethod
-    def _fails_objective_floor(body_md: str | None) -> bool:
+    def _fails_objective_floor(self, body_md: str | None) -> bool:
         """Whether the prepared body is structurally malformed.
 
         The floor is one rule -- an unclosed code fence -- chosen because it has
@@ -4509,7 +4512,9 @@ class PageService:
         could repair is already gone; the fence is not one it repairs, which is
         why a failure here means the defect genuinely remains.
         """
-        return bool(body_md) and bool(body_error_findings(body_md))
+        return bool(body_md) and bool(
+            publish_floor_findings(body_md, registry=self.lint_registry)
+        )
 
     def _stages_as_draft(
         self,
@@ -5003,7 +5008,9 @@ class PageService:
             draft_saved_at=(
                 page.updated_at if version.version_status == "draft" else None
             ),
-            publish_blocked_reasons=_publish_blocked_reasons(session, page, version),
+            publish_blocked_reasons=_publish_blocked_reasons(
+                session, page, version, registry=self.lint_registry
+            ),
         )
 
 
@@ -5011,6 +5018,8 @@ def _publish_blocked_reasons(
     session: Session,
     page: ContextPage,
     version: ContextPageVersion,
+    *,
+    registry: LintRegistry | None = None,
 ) -> list[DraftReviewReason]:
     """Why this version is not published, from body + workflow evidence."""
     if version.version_status != "draft":
@@ -5023,7 +5032,7 @@ def _publish_blocked_reasons(
                 version.body_md,
             ),
         )
-        for finding in body_error_findings(version.body_md)
+        for finding in publish_floor_findings(version.body_md, registry=registry)
     ]
     diff_ref = f"context_page_version:{version.id}"
     evidence_rows = session.execute(

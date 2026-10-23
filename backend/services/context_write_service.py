@@ -126,9 +126,9 @@ from backend.services.library_canonical import (
     get_canonical_library_version,
 )
 from backend.services.library_storage import INLINE_TEXT_PREFIX
+from backend.services.lint import publish_floor_findings
 from backend.services.lint.autofix import safe_normalize_markdown
 from backend.services.lint.rules_format import (
-    body_error_findings,
     body_relative_message,
 )
 from backend.services.mcp_client_service import find_trace_mcp_client
@@ -3212,7 +3212,7 @@ class ContextWriteService:
                                 version.body_md,
                             ),
                         )
-                        for finding in body_error_findings(version.body_md)
+                        for finding in publish_floor_findings(version.body_md)
                     ],
                 )
             assert_context_publish_candidate(
@@ -3238,7 +3238,7 @@ class ContextWriteService:
                         version.body_md,
                     ),
                 )
-                for finding in body_error_findings(version.body_md)
+                for finding in publish_floor_findings(version.body_md)
             ]
             if findings and not publish_despite_findings:
                 # Carry the defects out with the refusal: the author is looking

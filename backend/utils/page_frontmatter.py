@@ -494,3 +494,21 @@ def derive_nav_description(
     if len(collapsed) > max_length:
         return collapsed[: max_length - 1].rstrip() + "…"
     return collapsed
+
+
+def frontmatter_body_offset(lines: list[str]) -> int:
+    """Index of the first body line after a leading YAML frontmatter block.
+
+    Matches :func:`backend.utils.page_frontmatter.parse_page_frontmatter`
+    exactly (incl. the ``len < 3`` minimum): a leading ``---`` is frontmatter
+    ONLY when a later ``---``/``...`` closes it. An unclosed leading ``---`` is
+    body (a thematic break) — there is no "unclosed frontmatter" error, because
+    it can't be told apart from a valid rule + colon line like ``Note: ...``
+    (LG-F4). Returns 0 when there is no closed frontmatter block to strip.
+    """
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return 0
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() in FRONTMATTER_DELIMITERS:
+            return idx + 1
+    return 0

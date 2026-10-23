@@ -1,9 +1,16 @@
 import pytest
 
-from backend.services.lint import LintFindingDraft, LintModule, LintPolicy, LintRegistry
+from backend.services.lint import (
+    LintFindingDraft,
+    LintModule,
+    LintPolicy,
+    LintRegistry,
+    LintStage,
+)
 
 
 class _Dummy:
+    stages = frozenset({LintStage.RUN})
     """Duck-typed LintRule for engine tests (no DB, no registration)."""
 
     def __init__(
@@ -19,7 +26,7 @@ class _Dummy:
         self.default_enabled = default_enabled
         self.applies_to = applies_to
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,
@@ -132,6 +139,33 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
         rule.rule_id for rule in registry.enabled(policy)
     }
     assert extra.rule_id not in {rule.rule_id for rule in registry.enabled(policy)}
+    assert {rule.rule_id for rule in registry.rules_for(LintStage.READ, policy)} == {
+        "md.heading_hierarchy",
+        "md.code_fence_balance",
+        "md.table_wellformed",
+        "md.image_ref",
+        "md.mermaid_block",
+    }
+    assert [
+        rule.rule_id for rule in registry.rules_for(LintStage.PUBLISH_FLOOR, policy)
+    ] == [
+        "md.code_fence_balance",
+    ]
+    assert LintStage.PUBLISH_FLOOR in registry.rule("md.code_fence_balance").stages
+    catalogue = services.lint.list_rules(
+        SimpleNamespace(
+            get=lambda *_: SimpleNamespace(
+                lint_policy={
+                    "md.code_fence_balance": False,
+                }
+            )
+        ),
+        None,
+    )
+    floor_info = next(
+        info for info in catalogue.rules if info.rule_id == "md.code_fence_balance"
+    )
+    assert floor_info.policy_locked is True and floor_info.enabled is True
     with pytest.raises(ValueError, match="duplicate lint rule_id"):
         LintRegistry(
             (*builtin.modules, LintModule("duplicate", 1, (builtin.rules()[0],)))
