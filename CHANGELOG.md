@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
+  Writers, readers and the worker share the assembled registry. Supply modules
+  before that registry is first used; late injection raises `ValueError`.
+
 ## 0.1.4 — 2026-10-23
 
 ### Search results
