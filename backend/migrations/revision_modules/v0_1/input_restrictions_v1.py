@@ -151,14 +151,14 @@ def check_encoding(connection) -> None:
 
 
 def audit(connection, *, allow_missing: bool = False) -> list[dict]:
-    """Count violations; only bounded IDs and rule names leave the database."""
+    """Count all rules in one scan per table; return only bounded IDs/counts."""
     check_encoding(connection)
-    inspector = sa.inspect(connection)
-    tables = set(inspector.get_table_names())
-    columns = {}
-    result = []
+    inspector = sa.inspect(connection) if allow_missing else None
+    tables = set(inspector.get_table_names()) if inspector is not None else set()
+    columns: dict[str, set[str]] = {}
+    by_table: dict[str, list[Rule]] = {}
     for rule in RULES:
-        if allow_missing:
+        if inspector is not None:
             if rule.table not in tables:
                 continue
             if rule.table not in columns:
@@ -167,16 +167,27 @@ def audit(connection, *, allow_missing: bool = False) -> list[dict]:
                 }
             if rule.field not in columns[rule.table]:
                 continue
-        expression = rule_sql(rule, connection.dialect.name)
-        predicate = f"NOT ({expression})"
-        count = connection.execute(
-            sa.text(f'SELECT count(*) FROM "{rule.table}" WHERE {predicate}')
-        ).scalar_one()
-        if count:
+        by_table.setdefault(rule.table, []).append(rule)
+
+    result = []
+    for table, rules in by_table.items():
+        predicates = [
+            f"NOT ({rule_sql(rule, connection.dialect.name)})" for rule in rules
+        ]
+        # SUM over an empty table is NULL. The old WHERE/count contract counts
+        # only true violations, so NULL predicates must also contribute zero.
+        totals = ", ".join(
+            f"coalesce(sum(CASE WHEN {predicate} THEN 1 ELSE 0 END), 0)"
+            for predicate in predicates
+        )
+        counts = connection.execute(sa.text(f'SELECT {totals} FROM "{table}"')).one()
+        for rule, predicate, count in zip(rules, predicates, counts, strict=True):
+            if not count:
+                continue
             ids = (
                 connection.execute(
                     sa.text(
-                        f'SELECT id FROM "{rule.table}" WHERE {predicate} '
+                        f'SELECT id FROM "{table}" WHERE {predicate} '
                         "ORDER BY id LIMIT 5"
                     )
                 )

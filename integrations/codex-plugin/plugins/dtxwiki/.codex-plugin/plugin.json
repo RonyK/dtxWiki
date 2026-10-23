@@ -1,6 +1,6 @@
 {
   "name": "dtxwiki",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Use dtxWiki MCP with grounded retrieval, draft authoring, human review, and staged maintenance workflows.",
   "author": {
     "name": "dtxSuite"

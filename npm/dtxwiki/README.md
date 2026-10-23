@@ -42,7 +42,7 @@ dtxwiki
 
 ## Server and MCP setup
 
-The [README](https://github.com/dtxSuite/dtxWiki/blob/main/README.md#get-started)
+The [README](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#get-started)
 includes administrator grants, external access, background execution, MCP client
 registration commands, and setup troubleshooting. Replace foreground `dtxwiki`
 commands with `npx @dtxsuite/dtxwiki@0.1.3`.
@@ -54,7 +54,7 @@ launcher starts child processes; its PID is not the server PID.
 
 This package selects the Python release, so `dtxwiki update` prints the npm
 steps instead of upgrading it. Stop dtxWiki, back up `~/.dtxwiki`,
-and read the [release notes](https://github.com/dtxSuite/dtxWiki/blob/main/CHANGELOG.md)
+and read the [release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md)
 and [maintenance guide](http://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/).
 Complete any required data checks or migrations before starting the new version.
 
@@ -72,10 +72,10 @@ to it; see the maintenance guide.
 
 ## Documentation and license
 
-The [project README](https://github.com/dtxSuite/dtxWiki/blob/main/README.md#get-started)
+The [project README](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#get-started)
 covers setup for 0.1.3. See the [documentation](http://docs.dtxwiki.com/) for
 SMTP, backups, and advanced configuration.
 
 dtxWiki is licensed under `AGPL-3.0-only OR Elastic-2.0`, at your election;
-see the [license terms](https://github.com/dtxSuite/dtxWiki/blob/main/LICENSE).
+see the [license terms](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/LICENSE).
 dtxSuite also offers commercial licenses.

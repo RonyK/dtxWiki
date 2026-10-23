@@ -2,7 +2,7 @@
 
 **쌓아 둔 지식을, AI와 함께 다음 작업에 활용하세요.**
 
-[웹사이트](https://www.dtxwiki.com/ko/) · [사용 안내](http://docs.dtxwiki.com/ko/) · [PyPI](https://pypi.org/project/dtxwiki/) · [English](https://github.com/dtxSuite/dtxWiki/blob/main/README.md)
+[웹사이트](https://www.dtxwiki.com/ko/) · [사용 안내](http://docs.dtxwiki.com/ko/) · [PyPI](https://pypi.org/project/dtxwiki/) · [English](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md)
 
 dtxWiki는 메모, 참고 자료, 의사결정을 연결해 사람과 AI 도구가 함께 사용하는
 지식 베이스를 만듭니다. 작업의 배경을 찾기 쉽게 남겨 두고, 다음 일이 시작될 때
@@ -41,8 +41,12 @@ dtxWiki는 메모, 참고 자료, 의사결정을 연결해 사람과 AI 도구�
 ## 시작하기
 
 이 안내는 **dtxWiki 0.1.3** 기준입니다. 내 컴퓨터에서 시작하고,
-[다른 기기에서 접속하기](#3-다른-기기에서-접속하기)와
+[다른 기기에서 접속하기](#server-access)와
 [백그라운드 실행](#4-백그라운드-실행)까지 설정하면 다른 사람과 함께 사용할 수 있습니다.
+Claude Code나 Codex CLI를 등록하려면
+[MCP 클라이언트 연결하기](#mcp-clients)를 참고하세요.
+기존 설치를 사용 중이라면 새 서버를 시작하기 전에
+[0.1.3으로 업데이트하기](#upgrade-013)를 읽으세요.
 
 ### 1. 설치하고 웹 서버 실행하기
 
@@ -75,7 +79,7 @@ dtxwiki
 npm을 쓸 때는 터미널에서 직접 실행하는 `dtxwiki` 명령을
 `npx @dtxsuite/dtxwiki@0.1.3`으로 바꾸세요. 아래의 수동 백그라운드 실행 예시는
 uv/pipx로 직접 설치한 명령을 사용합니다. 실행기 설명은
-[npm 안내](https://github.com/dtxSuite/dtxWiki/blob/main/npm/dtxwiki/README.md)를 참고하세요.
+[npm 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)를 참고하세요.
 
 </details>
 
@@ -100,6 +104,8 @@ dtxwiki
 
 서버 관리자는 인스턴스를 관리합니다. 문서를 공유하려면 별도로 사용자를
 워크스페이스에 추가하고 역할을 부여해야 합니다.
+
+<a id="server-access"></a>
 
 ### 3. 다른 기기에서 접속하기
 
@@ -146,18 +152,20 @@ dtxwiki serve --host 0.0.0.0 --port 21080 --no-open
 #### 함께 사용할 HTTPS 서버
 
 sudo를 사용할 수 있는 Ubuntu 22.04 이상 서버를 준비하고 도메인의 DNS가 서버를
-가리키게 하세요. **TCP 80·443** 인바운드를 허용한 뒤, 서버에서 0.1.3 설치 프로그램을
-내려받고 도메인과 관리자 이메일을 바꾸어 실행하세요.
+가리키게 하세요. **TCP 80·443** 인바운드를 허용한 뒤, 서버에서 0.1.3 설치 프로그램과
+해당 릴리스의 wheel을 내려받고 도메인과 관리자 이메일을 바꾸어 실행하세요.
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
 curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.1.3/infra/prod/install.sh -o install-dtxwiki.sh
+curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.1.3/dtxwiki-0.1.3-py3-none-any.whl -o /tmp/dtxwiki-0.1.3-py3-none-any.whl
+chmod 0644 /tmp/dtxwiki-0.1.3-py3-none-any.whl
 sudo bash install-dtxwiki.sh \
   --domain wiki.example.com \
   --email admin@example.com \
   --tls acme \
-  --index-url https://pypi.org/simple
+  --wheel /tmp/dtxwiki-0.1.3-py3-none-any.whl
 ```
 
 설치 프로그램이 Python, HTTPS, 관리자 계정과 재부팅 후에도 시작되는 서비스를
@@ -169,7 +177,7 @@ sudo bash install-dtxwiki.sh \
 
 이 설치는 서버와 worker를 별도 systemd 서비스로 관리하며 필요한 모드를 자동으로
 설정합니다. worker를 수동으로 추가 실행하지 마세요. 사설 인증서, 기존 프록시,
-wheel을 지정한 설치는
+사설 패키지 인덱스 설정은
 [배포 안내](http://docs.dtxwiki.com/ko/docs/0.1/administration/deployment/)를 참고하세요.
 
 ### 4. 백그라운드 실행
@@ -237,10 +245,19 @@ sudo systemctl start dtxwiki dtxwiki-worker
 
 `Ctrl+C`는 journal 로그 보기만 끝내며 서비스를 중지하지 않습니다.
 
+<a id="mcp-clients"></a>
+
 ### 5. MCP 클라이언트 연결하기
 
+[English: the same MCP setup instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.md#mcp-clients)
+
+dtxWiki를 실행한 상태로 두고 클라이언트 컴퓨터에 Claude Code나 Codex CLI를
+설치하세요. 아래 예시는 액세스 키(PAT, 개인 액세스 토큰)로 Streamable HTTP
+주소에 연결하는 방법입니다.
+
 등록 명령은 dtxWiki 서버가 아니라 **AI 클라이언트를 실행하는 컴퓨터에서** 실행합니다.
-그 컴퓨터가 접속할 수 있는 주소를 사용하세요.
+그 컴퓨터가 접속할 수 있는 주소를 사용하세요. LAN이나 HTTPS 서버 설정은
+[다른 기기에서 접속하기](#server-access)를 참고하세요.
 
 | 클라이언트 실행 위치 | MCP 주소 |
 | --- | --- |
@@ -253,15 +270,29 @@ sudo systemctl start dtxwiki dtxwiki-worker
 loopback이나 사설 LAN 주소에 접속할 수 없고, 이 릴리스에서는 전체 OAuth 연결 과정이
 아직 검증되지 않았습니다. Claude Code나 Codex CLI의 액세스 키 연결로 시작하세요.
 
-#### 키에 필요한 권한
+#### 액세스 키 만들기
 
-연결할 서버의 **설정 > MCP 접근**에서 키를 만들고, 접근할 워크스페이스를 고른 뒤
-선택을 적용하세요. **읽기**는 검색·조회 권한이며, 추가·편집하려면 **쓰기**도
-필요합니다. **AI 실행**은 편집 권한을 주지 않습니다. 계정 자체에도 해당
-워크스페이스의 적절한 역할이 있어야 합니다.
+1. 클라이언트가 사용할 계정으로 연결할 dtxWiki 서버에 로그인하세요.
+   **설정 > MCP 접근**에서 AI 앱과 **액세스 키** 방식을 선택하세요.
+2. 키 이름과 권한을 정하고, 접근을 허용할 워크스페이스를 하나 이상 고른 뒤
+   워크스페이스 선택을 적용하세요.
+3. **액세스 키 생성**을 누르고 생성된 설정 안내를 사용하세요.
+   이 화면에서 만든 키는 한 번만 표시되며 90일 뒤 만료됩니다.
 
-키는 한 번만 표시되고 90일 뒤 만료됩니다. 화면에서 생성한 설정을 사용하거나
-아래 명령으로 직접 등록하세요. 클라이언트의 터미널에서 주소와 키를 바꾸어 설정합니다.
+| 권한 | 가능한 작업 |
+| --- | --- |
+| 읽기 | 접근 가능한 자료 검색·조회 |
+| 쓰기 | Context 초안 생성·편집 및 검토 요청 |
+| AI 실행 | Agent 입력 번들 구성 및 Agent 초안 생성. Context 편집에 필요한 쓰기 권한을 대신하지 않습니다. |
+
+Context를 편집하려면 **AI 실행**이 켜져 있어도 **쓰기**를 선택해야 합니다.
+**쓰기**와 **AI 실행**에는 선택한 모든 워크스페이스에서 **편집자 또는 소유자**
+역할이 필요합니다. 뷰어는 **읽기**만 선택하세요. 서버 관리자 권한이
+워크스페이스 멤버십을 대신하지 않습니다.
+
+아래 명령은 화면에서 생성된 설정 대신 직접 등록할 때 사용합니다. 클라이언트
+컴퓨터의 Bash/zsh 터미널에서 주소와 키를 바꾸어 설정하세요. PowerShell에서는
+아래 펼침 영역의 명령을 사용하세요.
 
 ```bash
 export DTXWIKI_MCP_URL='http://127.0.0.1:21080/mcp'
@@ -308,11 +339,25 @@ codex mcp add dtxwiki --url $env:DTXWIKI_MCP_URL --bearer-token-env-var DTXWIKI_
 
 </details>
 
+#### 워크스페이스 접근 확인하기
+
 클라이언트의 연결 완료 표시만으로 워크스페이스나 쓰기 접근까지 확인되지는 않습니다.
-선택한 워크스페이스에 읽기 요청을 한 번 실행하고 **채팅**에서 도구 호출을 확인하세요.
-편집이 거부되면 관리자 계정을 다시 만들기보다 키의 쓰기 권한, 허용 워크스페이스와
-계정 역할을 확인하세요. 클라이언트별 상세 설정과 OAuth 호환성은
-[AI 앱 연결 안내](http://docs.dtxwiki.com/ko/docs/0.1/integrations/mcp-connections/)를 참고하세요.
+클라이언트에 다음과 같이 요청하세요.
+
+> dtxWiki에서 접근 가능한 워크스페이스를 나열해 줘. `<워크스페이스 이름>`의
+> 가이드를 읽고, `<문서 제목>`을 찾아 읽어 줘.
+
+꺾쇠 안의 내용을 접근 가능한 워크스페이스와 문서로 바꾸고, 가이드와 문서가
+반환되는지 확인하세요. 편집자와 소유자는 해당 워크스페이스의 **채팅**에서
+호출 기록도 확인할 수 있습니다. 뷰어는 채팅에 접근할 수 없습니다.
+편집이 거부되면 키의 쓰기 권한, 허용 워크스페이스와 계정 역할을 확인하세요.
+Context 변경은 검토할 초안으로 준비됩니다.
+
+기존 키의 허용 워크스페이스는 클라이언트를
+다시 등록하지 않고 **설정 > MCP 접근**에서 변경할 수 있습니다. 권한 규칙은
+[배포 안내의 MCP 워크스페이스 접근](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/DEPLOYMENT.md#mcp-workspace-access)을 참고하세요.
+다른 클라이언트와 OAuth 호환성은
+[AI 앱 연결 안내](https://docs.dtxwiki.com/ko/docs/0.1/integrations/mcp-connections/)를 참고하세요.
 
 ## 설치·연결이 막힐 때
 
@@ -327,6 +372,43 @@ codex mcp add dtxwiki --url $env:DTXWIKI_MCP_URL --bearer-token-env-var DTXWIKI_
 | MCP 읽기는 되지만 쓰기가 안 되거나 403 반환 | 쓰기 권한, 허용 워크스페이스, 계정 역할, MCP 접근 설정의 사용 차단 여부를 확인하세요. |
 | worker 오류로 서버가 종료됨 | `server.log` 또는 systemd journal의 오류를 먼저 해결하세요. 통합 runtime 옆에 worker를 추가로 실행해서 해결할 수는 없습니다. |
 
+<a id="upgrade-013"></a>
+
+## 0.1.3으로 업데이트하기
+
+systemd나 Docker 설치는 [백업과 유지보수](https://docs.dtxwiki.com/ko/docs/0.1/administration/backup-upgrades/)의
+배포 방식별 업데이트 절차를 따르세요. 로컬 설치는
+[변경 내역](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md)을 읽고
+서버와 별도로 실행한 모든 worker를 중지한 뒤 DB·파일·설정을 백업하세요.
+기존 설치 방식을 사용해 0.1.3을 설치하되 새 서버를 시작하지 마세요.
+기존 uv 설치를 바꿀 때는
+`uv tool install --force --python 3.12 "dtxwiki==0.1.3"`을 사용하세요.
+
+서버와 같은 OS 계정·환경 설정·DB로, 시작 전에 **새 버전의** 검사를 실행하세요.
+
+```bash
+dtxwiki inputs audit
+```
+
+이 검사는 데이터나 스키마를 변경하지 않습니다. 종료 코드 **0**은 업그레이드
+차단 항목이 없다는 뜻이며, 보존되는 과거 이력의 발견 사항은 남을 수 있습니다.
+**1**은 현재 메타데이터가 새 제약 조건을 위반한다는 뜻이고, **2**는 DB를
+검사하지 못했다는 뜻입니다. 보고된 값을 `dtxwiki users set-display-name`,
+`dtxwiki users set-email`, `dtxwiki inputs repair-metadata`로 UUID를 지정해
+수정한 뒤 종료 코드가 0이 될 때까지 다시 검사하세요. 각 명령은 `--help`와
+`--db`를 제공합니다.
+
+표시 이름은 Unicode 코드 포인트 1–32개, 이메일은 전체 UTF-8 254바이트 이내이며
+`@` 앞부분은 64바이트 이내여야 합니다. 기존 비밀번호가 Unicode 코드 포인트
+128개를 초과하면 로그인이나 재인증에 사용할 수 없습니다. 비밀번호 복구 또는
+관리자 복구로 8–128개 길이의 새 비밀번호를 설정하세요.
+
+process manager로 worker를 별도 실행한다면 새 웹 서버를 시작하기 전에
+`DTXWIKI_WORKER_MODE=external`을 설정하세요. systemd updater는 자동으로
+설정하며 Docker 이미지는 이미 external 모드를 기본값으로 사용합니다.
+업데이트 후 MCP 클라이언트를 다시 시작해 변경된 도구 정의를 불러오세요.
+롤백할 때는 해당 버전의 프로그램과 업그레이드 전 DB 백업을 함께 복원해야 합니다.
+
 ## 추가 설정과 관리
 
 | 필요한 작업 | 안내 |
@@ -336,9 +418,6 @@ codex mcp add dtxwiki --url $env:DTXWIKI_MCP_URL --bearer-token-env-var DTXWIKI_
 | 백업·업데이트·데이터 복원 | [백업과 유지보수](http://docs.dtxwiki.com/ko/docs/0.1/administration/backup-upgrades/) |
 | 실행·연결 문제 | [문제 해결](http://docs.dtxwiki.com/ko/docs/0.1/administration/troubleshooting/) |
 
-업데이트 전에는 dtxWiki를 종료하고 데이터를 백업하세요.
-[변경 내역](https://github.com/dtxSuite/dtxWiki/blob/main/CHANGELOG.md)을 읽고 새 버전의
-`dtxwiki inputs audit`으로 검사해 보고된 차단 항목을 해결하세요.
 더 많은 활용 방법은 [전체 사용 안내](http://docs.dtxwiki.com/ko/)에서 확인할 수 있습니다.
 
 ## 함께 만들기
@@ -346,10 +425,10 @@ codex mcp add dtxwiki --url $env:DTXWIKI_MCP_URL --bearer-token-env-var DTXWIKI_
 활용 사례를 공유하거나, 개선 아이디어를 제안하거나, 문제를 발견했다면
 [GitHub](https://github.com/dtxSuite/dtxWiki/issues)에 알려 주세요.
 코드와 문서 기여 방법은
-[기여 가이드](https://github.com/dtxSuite/dtxWiki/blob/main/CONTRIBUTING.md)를 참고하세요.
+[기여 가이드](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CONTRIBUTING.md)를 참고하세요.
 
 ## 라이선스
 
 dtxWiki는 **AGPL-3.0-only OR Elastic-2.0** 중 하나를 선택하여 사용할 수 있습니다.
 이용 조건, 제3자 구성요소의 고지, 상용 라이선스 안내는
-[LICENSE](https://github.com/dtxSuite/dtxWiki/blob/main/LICENSE)를 참고하세요.
+[LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/LICENSE)를 참고하세요.

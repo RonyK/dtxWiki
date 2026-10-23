@@ -8,7 +8,7 @@ scenarios below cover distinct CLI, revocation and projection side effects.
 import os
 import sqlite3
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -31,7 +31,7 @@ from backend.services.ops.input_maintenance import (
     repair_input,
 )
 
-PRE_INPUT_REVISION = "d148b9746ff5"
+PRE_INPUT_REVISION = "efcbcf724889"
 
 
 def _database(tmp_path, revision=PRE_INPUT_REVISION):
@@ -64,13 +64,46 @@ def _user(connection, *, name="Alice", email="alice@example.test"):
     return identity
 
 
+def _workspace(connection, identity, *, slug="nullable", title="Nullable"):
+    # Reflect the released schema: the current ORM adds context_media_policy.
+    table = sa.Table("workspace", sa.MetaData(), autoload_with=connection)
+    now = datetime.now(UTC)
+    connection.execute(
+        table.insert().values(
+            id=identity.hex,
+            slug=slug,
+            title=title,
+            name=title,
+            goal="Preserve pre-upgrade metadata",
+            default_language="en",
+            library_policy={},
+            write_policy={},
+            citation_policy={},
+            agent_injection_policy={},
+            review_policy={},
+            lint_policy={},
+            auto_fix_enabled=False,
+            ask_retrieval_mode="auto",
+            edge_projection_version=0,
+            authority_projection_version=-1,
+            visibility="private",
+            join_policy="invite_only",
+            directory_title_key=title.lower(),
+            created_by_actor_id=uuid4().hex,
+            owner_actor_id=uuid4().hex,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
 def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
     tmp_path, monkeypatch
 ):
     # Separate from the successful policy round trip: dirty data must refuse
     # upgrade without advancing the stamp, then remain repairable. The oldest
     # supported schema lacks member_search_key and the recovery tables, and its
-    # refused run rolls back two earlier revisions; repairs on the parent
+    # refused run rolls back the core revision; repairs on the parent
     # schema are covered by the email and CLI tests below.
     original_connect = sqlite3.dbapi2.connect
 
@@ -273,7 +306,6 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
         LibraryItem,
         McpChatSession,
         MCPClient,
-        Workspace,
         WorkspaceTreeNode,
     )
 
@@ -281,14 +313,7 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
     engine = sa.create_engine(url)
     workspace, client, item, chat, node = (uuid4() for _ in range(5))
     with engine.begin() as connection:
-        connection.execute(
-            Workspace.__table__.insert().values(
-                id=workspace,
-                slug="nullable",
-                title="Nullable",
-                name="Nullable",
-            )
-        )
+        _workspace(connection, workspace)
         connection.execute(
             MCPClient.__table__.insert().values(
                 id=client,
@@ -355,33 +380,47 @@ def test_optional_title_repairs_preserve_null_and_automatic_chat_semantics(tmp_p
 def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
     import json
 
-    from backend.app.db import make_session_factory_from_settings
-    from backend.app.settings import Settings
-    from backend.models import ChangeOperation, ChangeSet, PageNameIndex, Workspace
-    from backend.scripts.seed_dev import seed_default_workspace
-    from backend.services.page_service import PageService
-
-    # Current ORM setup needs TreeRail columns, before the input CHECKs exist.
-    url, _config = _database(tmp_path, "49d9c0776c5a")
-    factory = make_session_factory_from_settings(Settings(database_url=url))
-    with factory.begin() as session:
-        seed_default_workspace(session)
-    page = PageService(factory).write_page(
-        workspace_slug="default",
-        slug="repair-title",
-        title="Old title",
-        body_md="# Old title\nOriginal body",
-        actor_kind="human",
-        actor_id="00000000-0000-0000-0000-000000000010",
-        actor_provenance="browser_session",
+    from backend.models import (
+        ChangeOperation,
+        ChangeSet,
+        ContextPage,
+        ContextPageVersion,
+        PageNameIndex,
     )
+
+    # Seed the released schema directly: current services query 0.1.3 columns.
+    url, _config = _database(tmp_path)
     engine = sa.create_engine(url)
+    workspace, page, version_id = (uuid4() for _ in range(3))
+    body = "# Old title\nOriginal body"
     with engine.begin() as connection:
-        workspace = connection.scalar(sa.select(Workspace.id))
-        version = connection.execute(
-            sa.text("SELECT id,body_md FROM context_page_version WHERE page_id=:page"),
-            {"page": page.id.hex},
-        ).one()
+        _workspace(connection, workspace, slug="default", title="Default")
+        connection.execute(
+            ContextPage.__table__.insert().values(
+                id=page,
+                workspace_id=workspace,
+                slug="repair-title",
+                title="Old title",
+            )
+        )
+        connection.execute(
+            ContextPageVersion.__table__.insert().values(
+                id=version_id,
+                workspace_id=workspace,
+                page_id=page,
+                body_md=body,
+                content_hash="preserved-historical-hash",
+                actor_type="human",
+                version_status="draft",
+                created_by_actor_kind="human",
+                created_by_actor_id="00000000-0000-0000-0000-000000000010",
+            )
+        )
+        connection.execute(
+            ContextPage.__table__.update()
+            .where(ContextPage.id == page)
+            .values(current_version_id=version_id, latest_draft_version_id=version_id)
+        )
         change = uuid4()
         operation = uuid4()
         patch = json.dumps({"title": "Draft alternate"})
@@ -399,24 +438,28 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
                 workspace_id=workspace,
                 change_set_id=change,
                 target_type="context_page",
-                target_id=page.id,
+                target_id=page,
                 operation="metadata_patch",
                 diff_summary=patch,
-                diff_ref=f"context_page_version:{UUID(version.id)}",
+                diff_ref=f"context_page_version:{version_id}",
             )
         )
         connection.execute(
-            PageNameIndex.__table__.insert().values(
-                workspace_id=workspace,
-                page_id=page.id,
-                source_version_id=UUID(version.id),
-                visibility_scope="draft",
-                name="Draft alternate",
-                name_norm="draft alternate",
-                name_kind="title",
-            )
+            PageNameIndex.__table__.insert(),
+            [
+                {
+                    "workspace_id": workspace,
+                    "page_id": page,
+                    "source_version_id": version_id,
+                    "visibility_scope": "draft",
+                    "name": title,
+                    "name_norm": title.lower(),
+                    "name_kind": "title",
+                }
+                for title in ("Old title", "Draft alternate")
+            ],
         )
-    repair_input(url, "context-page", page.id, "title", "Repaired title")
+    repair_input(url, "context-page", page, "title", "Repaired title")
     with engine.connect() as connection:
         names = (
             connection.execute(
@@ -424,7 +467,7 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
                     "SELECT name FROM page_name_index WHERE page_id=:page "
                     "AND name_kind='title'"
                 ),
-                {"page": page.id.hex},
+                {"page": page.hex},
             )
             .scalars()
             .all()
@@ -433,9 +476,9 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
         assert (
             connection.execute(
                 sa.text("SELECT body_md FROM context_page_version WHERE id=:version"),
-                {"version": version.id},
+                {"version": version_id.hex},
             ).scalar_one()
-            == version.body_md
+            == body
         )
         assert (
             connection.execute(
@@ -453,7 +496,7 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(tmp_path):
                     "WHERE replace(page_id,'-','')=:page "
                     "AND name_kind='title'"
                 ),
-                {"page": page.id.hex},
+                {"page": page.hex},
             )
             .scalars()
             .all()

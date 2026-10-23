@@ -35,9 +35,6 @@ SUPPORTED = frozenset(
     {
         "bd62193d5cf6",
         "efcbcf724889",
-        "d148b9746ff5",
-        "c7a4e91b2d60",
-        "49d9c0776c5a",
         REVISION,
     }
 )

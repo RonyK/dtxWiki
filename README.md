@@ -2,7 +2,7 @@
 
 **Give your AI the knowledge you've already built.**
 
-[Website](https://www.dtxwiki.com/) · [Documentation](http://docs.dtxwiki.com/) · [PyPI](https://pypi.org/project/dtxwiki/) · [한국어](https://github.com/dtxSuite/dtxWiki/blob/main/README.ko.md)
+[Website](https://www.dtxwiki.com/) · [Documentation](http://docs.dtxwiki.com/) · [PyPI](https://pypi.org/project/dtxwiki/) · [한국어](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.ko.md)
 
 dtxWiki connects your notes, source materials, and decisions in a knowledge base
 that you and your AI tools can use together. Keep your reasoning and references
@@ -43,8 +43,12 @@ write, organize, and search without an AI account or API key.
 ## Get started
 
 This guide is for **dtxWiki 0.1.3**. Start on your own computer, then follow
-[Access from other devices](#3-access-from-other-devices) and
+[Access from other devices](#server-access) and
 [Run in the background](#4-run-in-the-background) to share it with others.
+To register Claude Code or Codex CLI, follow
+[Connect MCP clients](#mcp-clients).
+For an existing installation, read [Upgrading to 0.1.3](#upgrade-013) before
+starting the new server.
 
 ### 1. Install and start the web server
 
@@ -76,7 +80,7 @@ Your data is stored in the `.dtxwiki` folder in your home directory by default.
 
 With npm, replace `dtxwiki` in foreground CLI commands with
 `npx @dtxsuite/dtxwiki@0.1.3`. The manual background examples below use a direct
-uv/pipx installation. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/main/npm/dtxwiki/README.md)
+uv/pipx installation. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)
 for launcher details.
 
 </details>
@@ -103,6 +107,8 @@ to load the new permissions.
 
 A server-admin manages the instance. Sharing documents still requires adding
 people to the workspace and assigning their roles.
+
+<a id="server-access"></a>
 
 ### 3. Access from other devices
 
@@ -151,17 +157,19 @@ server-admin permission does not automatically share workspace content.
 
 Use an Ubuntu 22.04+ server with `sudo`, point your domain's DNS to it, and
 allow incoming **TCP 80 and 443**. On the server, download the 0.1.3 installer
-and replace the domain and administrator email:
+and its release wheel, then replace the domain and administrator email:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
 curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.1.3/infra/prod/install.sh -o install-dtxwiki.sh
+curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.1.3/dtxwiki-0.1.3-py3-none-any.whl -o /tmp/dtxwiki-0.1.3-py3-none-any.whl
+chmod 0644 /tmp/dtxwiki-0.1.3-py3-none-any.whl
 sudo bash install-dtxwiki.sh \
   --domain wiki.example.com \
   --email admin@example.com \
   --tls acme \
-  --index-url https://pypi.org/simple
+  --wheel /tmp/dtxwiki-0.1.3-py3-none-any.whl
 ```
 
 The installer prepares Python, HTTPS, an administrator account, and services
@@ -174,7 +182,7 @@ add them to the workspace in **Settings > Members & access**.
 This installation manages the server and worker as separate systemd services;
 it configures that mode for you. Do not launch another worker manually.
 Use the [deployment guide](http://docs.dtxwiki.com/docs/0.1/administration/deployment/)
-for private certificates, an existing proxy, or a fixed wheel installation.
+for private certificates, an existing proxy, or a package mirror.
 
 ### 4. Run in the background
 
@@ -242,10 +250,19 @@ sudo systemctl start dtxwiki dtxwiki-worker
 
 `Ctrl+C` stops following the journal; it does not stop the services.
 
+<a id="mcp-clients"></a>
+
 ### 5. Connect MCP clients
 
+[한국어: 같은 MCP 연결 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/README.ko.md#mcp-clients)
+
+Keep dtxWiki running and install Claude Code or Codex CLI on the client computer.
+The examples below connect to its Streamable HTTP endpoint using an access key
+(personal access token, or PAT).
+
 Run client registration commands **on the computer where the AI client runs**,
-not on the dtxWiki server. Choose an endpoint that computer can reach:
+not on the dtxWiki server. Choose an endpoint that computer can reach. For LAN
+or HTTPS server setup, follow [Access from other devices](#server-access).
 
 | Where the client runs | MCP URL |
 | --- | --- |
@@ -258,16 +275,29 @@ it is not the browser root URL or `/api/v1`. Cloud connectors cannot reach your
 loopback or private LAN address, and their full OAuth flow is not yet verified
 for this release. Start with an access key for Claude Code or Codex CLI.
 
-#### Key permissions
+#### Create an access key
 
-Create a key in **Settings > MCP access** for the target server. Select the
-workspaces it may access and apply the selection. **Read** permits search and
-reading; **Write** is also required to add or edit content. **Run AI** does not
-grant editing. The account still needs the appropriate workspace role.
+1. Sign in to the target dtxWiki server with the account the client should use.
+   In **Settings > MCP access**, choose your AI app and **Access Key**.
+2. Name the key, choose its permissions, and select at least one workspace it
+   may access. Apply the workspace selection.
+3. Click **Generate access key**, then use the generated setup instructions.
+   Keys created on this screen are shown once and expire after 90 days.
 
-Keys are shown once and expire after 90 days. Use the generated setup in the
-screen, or register manually as follows. Set these variables in the client terminal,
-replacing the URL and key:
+| Permission | What it enables |
+| --- | --- |
+| Read | Search and read accessible content. |
+| Write | Create or edit Context drafts and submit them for review. |
+| Run AI | Build Agent input bundles and create Agent drafts. It does not replace Write for Context editing. |
+
+For Context editing, select **Write** even if **Run AI** is already enabled.
+**Write** and **Run AI** require an **Editor or Owner** role in every selected
+workspace. Viewers should select **Read** only. Server-admin permission does
+not replace workspace membership.
+
+The commands below are a manual alternative to the generated setup. In a
+Bash/zsh terminal on the client computer, set these variables, replacing the URL
+and key. For PowerShell, use the commands in the expandable section below.
 
 ```bash
 export DTXWIKI_MCP_URL='http://127.0.0.1:21080/mcp'
@@ -314,12 +344,27 @@ in a new session before starting Codex.
 
 </details>
 
+#### Verify workspace access
+
 A client reporting a connected server does not prove workspace or write access.
-Make one read request against the selected workspace, then check **Chats** for
-the tool call. If edits are refused, check the key's Write scope, allowed
-workspaces, and account role rather than creating another server-admin account.
-Client-specific details and OAuth compatibility are in
-[Connect an AI app](http://docs.dtxwiki.com/docs/0.1/integrations/mcp-connections/).
+Ask the client:
+
+> Use dtxWiki to list the workspaces I can access. In `<workspace name>`, read
+> the workspace guide, then find and read `<page title>`.
+
+Replace the placeholders with a workspace and page you can access, then confirm
+that the guide and page are returned. Editors and Owners can also inspect the
+calls in **Chats** in that workspace; Viewers do not have access to Chats.
+If edits are refused, check the key's Write scope, allowed workspaces, and
+account role. Context changes
+are prepared as drafts for review.
+
+You can change an existing key's
+allowed workspaces in **Settings > MCP access** without registering the client
+again. For the permission rules, see
+[MCP workspace access in the deployment guide (Korean)](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/DEPLOYMENT.md#mcp-workspace-access).
+Other clients and OAuth compatibility are covered in
+[Connect an AI app](https://docs.dtxwiki.com/docs/0.1/integrations/mcp-connections/).
 
 ## If setup gets stuck
 
@@ -334,6 +379,45 @@ Client-specific details and OAuth compatibility are in
 | MCP can read but cannot write, or returns 403 | Check Write scope, allowed workspaces, workspace role, and whether the connection is blocked in MCP access settings. |
 | A worker error stops the server | Read `server.log` or the systemd journal and fix the reported error. Starting another worker alongside the managed runtime will not repair it. |
 
+<a id="upgrade-013"></a>
+
+## Upgrading to 0.1.3
+
+For systemd or Docker installations, follow the
+[maintenance guide](https://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/)
+for the deployment-specific update steps. For local installations, read the
+[release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md), stop
+the server and every separately managed worker, then back up the database,
+files, and configuration. Install 0.1.3 using your existing installation method
+without starting the new server. For an existing uv installation, use
+`uv tool install --force --python 3.12 "dtxwiki==0.1.3"`.
+
+Using the server's OS account, environment settings, and database, run the
+**new version's** audit before starting it:
+
+```bash
+dtxwiki inputs audit
+```
+
+The audit changes neither data nor schema. Exit code **0** means no upgrade
+blockers; preserved historical findings may remain. **1** means current metadata
+violates the new constraints; **2** means the database could not be audited.
+Repair the reported values explicitly by UUID with `dtxwiki users set-display-name`,
+`dtxwiki users set-email`, or `dtxwiki inputs repair-metadata`, then rerun the
+audit until it exits 0. Each command provides `--help` and `--db`.
+
+Display names allow 1–32 Unicode code points; email allows at most 254 UTF-8
+bytes in total, with at most 64 before `@`. Existing passwords longer than
+128 Unicode code points cannot be used for login or reauthentication. Use
+password recovery or administrator recovery to set a new password of 8–128
+code points.
+
+If a process manager runs a separate worker, set `DTXWIKI_WORKER_MODE=external`
+before starting the upgraded web server. The systemd updater sets this
+automatically; Docker images already default to external mode. Restart MCP
+clients after upgrading so they reload the updated tool definitions. Rollback
+requires the matching application version and its pre-upgrade database backup.
+
 ## Further reading
 
 | What you need | Guide |
@@ -343,9 +427,6 @@ Client-specific details and OAuth compatibility are in
 | Backups, updates, and restoring data | [Backups and maintenance](http://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/) |
 | Startup or connection problems | [Troubleshooting](http://docs.dtxwiki.com/docs/0.1/administration/troubleshooting/) |
 
-Before upgrading, stop dtxWiki and back up the data. Read the
-[release notes](https://github.com/dtxSuite/dtxWiki/blob/main/CHANGELOG.md) and run
-the new version's `dtxwiki inputs audit`; resolve any reported blocking issues.
 See the [full documentation](http://docs.dtxwiki.com/) for more workflows.
 
 ## Get involved
@@ -353,10 +434,10 @@ See the [full documentation](http://docs.dtxwiki.com/) for more workflows.
 Share a use case, suggest an improvement, or report a problem on
 [GitHub](https://github.com/dtxSuite/dtxWiki/issues).
 For code and documentation contributions, see the
-[contribution guide](https://github.com/dtxSuite/dtxWiki/blob/main/CONTRIBUTING.md).
+[contribution guide](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CONTRIBUTING.md).
 
 ## License
 
 dtxWiki is available under your choice of **AGPL-3.0-only OR Elastic-2.0**.
-See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/main/LICENSE) for the terms,
+See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/LICENSE) for the terms,
 third-party notices, and commercial licensing options.
