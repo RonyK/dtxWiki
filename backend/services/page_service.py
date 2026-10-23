@@ -3279,75 +3279,25 @@ class PageService:
         that is open now (or saying none is).
         """
 
-        # The body/revision this save started from, for the edit receipt.
-        # Empty when the call replays a stored result instead of executing.
+        # Empty on an idempotency replay, where no write callback executes.
         receipt_base: dict[str, object] = {}
         with self.session_factory.begin() as session:
 
             def _execute() -> PagePayload:
-                # `prepare_page_write`'s normalized body reassigns this name
-                # below -- without `nonlocal`, that assignment would make
-                # Python treat every read of it earlier in this closure as an
-                # unbound local instead of the enclosing parameter.
-                nonlocal body_md
-
-                # SQLite: FOR UPDATE is a no-op, so take write intent before the
-                # guarded read. This path rewrites the draft row in place below,
-                # which is what a concurrent publish_draft is checking the hash of.
-                acquire_write_intent(session)
-                self._lock_context_media_usage_intent_for_page(session, page_id)
-                page = context_page_repo.get_page_by_id_for_update(session, page_id)
-                if page is None:
-                    raise PageNotFoundError("page not found")
-                if editing_version_id is not None:
-                    self._require_named_open_edit(
-                        session, page, editing_version_id, actor_kind, actor_id
-                    )
-                current = self._require_page_version(
-                    session,
-                    page,
-                    self._editable_version_id_for_actor(
-                        session, page, actor_kind, actor_id
-                    ),
+                page = self._autosave_lock_and_load(
+                    session=session,
+                    page_id=page_id,
+                    editing_version_id=editing_version_id,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
                 )
-                if session_version_id is not None:
-                    session_version = self._require_page_version(
-                        session,
-                        page,
-                        session_version_id,
-                    )
-                    if current.id != session_version.id:
-                        session_reviews = self._context_reviews_for_version(
-                            session=session,
-                            page=page,
-                            version=session_version,
-                        )
-                        can_resume_rejected_session = (
-                            session_version.version_status == "draft"
-                            and session_version.graph_status == "linear"
-                            and session_version.created_by_actor_kind == actor_kind
-                            and session_version.created_by_actor_id == actor_id
-                            and any(
-                                review.status == "rejected"
-                                for review in session_reviews
-                            )
-                        )
-                        if not can_resume_rejected_session:
-                            disclosed_version_id, disclosed_content_hash = (
-                                self._disclosable_version_fields(
-                                    current, actor_kind, actor_id
-                                )
-                            )
-                            raise PageConflictError(
-                                server_version_id=disclosed_version_id,
-                                server_content_hash=disclosed_content_hash,
-                            )
-                        # Rejection deliberately restores the visible page head to
-                        # the published snapshot. The submitting session may still
-                        # continue from its exact rejected bytes, but only by
-                        # forking a successor below; the resolved review and its
-                        # immutable version are never rewritten.
-                        current = session_version
+                current = self._autosave_resolve_target(
+                    session=session,
+                    page=page,
+                    session_version_id=session_version_id,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                )
                 same_actor_draft = (
                     current.version_status in ("editing", "draft")
                     and current.graph_status == "linear"
@@ -3356,74 +3306,46 @@ class PageService:
                 )
                 receipt_base["body"] = current.body_md
                 receipt_base["revision"] = current.editing_revision
-                try:
-                    self._validate_base(
-                        session,
-                        page,
-                        current,
-                        base_version_id,
-                        base_content_hash,
-                        expected_editing_revision,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                    )
-                except PageConflictError:
-                    if on_stale != "preserve_as_alternative":
-                        raise
-                    next_title = title or page.title
-                    prepared = prepare_page_write(
-                        body_md=body_md,
-                        title=next_title,
-                        slug=page.slug,
-                        page_type=page_type,
-                        tags=tags,
-                        aliases=aliases,
-                        fallback_page_type=page.page_type,
-                        fallback_tags=list(page.tags or []),
-                        fallback_aliases=list(page.aliases or []),
-                        auto_fix=page.workspace.auto_fix_enabled,
-                    )
-                    return self._preserve_alternative(
+                is_stale = self._autosave_check_base(
+                    session=session,
+                    page=page,
+                    current=current,
+                    base_version_id=base_version_id,
+                    base_content_hash=base_content_hash,
+                    expected_editing_revision=expected_editing_revision,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    on_stale=on_stale,
+                )
+                next_title = title or page.title
+                prepared = self._autosave_prepare(
+                    session=session,
+                    page=page,
+                    title=next_title,
+                    body_md=body_md,
+                    page_type=page_type,
+                    tags=tags,
+                    aliases=aliases,
+                    actor_provenance=actor_provenance,
+                    is_stale=is_stale,
+                )
+                if is_stale:
+                    return self._autosave_persist_alternative(
                         session=session,
                         page=page,
                         current=current,
                         title=title,
-                        body_md=prepared.body_md,
-                        content_hash=calculate_content_hash(prepared.body_md),
+                        prepared=prepared,
                         actor_kind=actor_kind,
                         actor_id=actor_id,
                         base_version_id=base_version_id,
                         base_content_hash=base_content_hash,
-                        page_type=prepared.page_type,
-                        tags=prepared.tags,
-                        aliases=prepared.aliases,
                         actor_provenance=actor_provenance,
                     )
-
-                next_title = title or page.title
-                workspace = self._workspace_for(session, page.workspace_id)
-                prepared = prepare_page_write(
-                    body_md=body_md,
-                    title=next_title,
-                    slug=page.slug,
-                    page_type=page_type,
-                    tags=tags,
-                    aliases=aliases,
-                    fallback_page_type=page.page_type,
-                    fallback_tags=list(page.tags or []),
-                    fallback_aliases=list(page.aliases or []),
-                    auto_fix=(
-                        workspace.auto_fix_enabled
-                        if actor_provenance in AI_PROVENANCES
-                        else False
-                    ),
-                )
-                body_md = prepared.body_md
-                # This path may rewrite an existing draft row in place, bypassing
-                # the central PageVersion constructor. Refuse transient/unsafe
-                # media before creating ledger rows or mutating the draft.
-                self._validate_media_markdown(body_md)
-                new_hash = calculate_content_hash(body_md)
+                # In-place rewrites bypass the central PageVersion constructor.
+                # Validate media before creating ledger rows or mutating a draft.
+                self._validate_media_markdown(prepared.body_md)
+                new_hash = calculate_content_hash(prepared.body_md)
 
                 baseline_patch = (
                     pending_page_metadata_patch(
@@ -3458,7 +3380,7 @@ class PageService:
                 # Bytes, not content_hash: the hash ignores trailing spaces, so
                 # a save that only added or removed a hard break (two trailing
                 # spaces) was answered as succeeded and silently not stored.
-                if body_md == current.body_md and not metadata_patch:
+                if prepared.body_md == current.body_md and not metadata_patch:
                     # P2.2/P2.6: `current` is the page-global pointer -- returning
                     # it unchanged is only safe when it is published (anyone with
                     # read access already sees it) or genuinely this actor's own
@@ -3485,11 +3407,11 @@ class PageService:
                     and current.created_by_actor_id == actor_id
                 )
                 if actor_provenance in AI_PROVENANCES and not own_open_edit:
-                    return self._autosave_reviewed_draft(
+                    return self._autosave_persist_reviewed_draft(
                         session=session,
                         page=page,
                         current=current,
-                        body_md=body_md,
+                        body_md=prepared.body_md,
                         new_hash=new_hash,
                         actor_kind=actor_kind,
                         actor_id=actor_id,
@@ -3498,157 +3420,20 @@ class PageService:
                         metadata_patch=metadata_patch,
                     )
 
-                staged_patch = dict(baseline_patch or {})
-                staged_patch.update(metadata_patch)
-
-                # A ReviewItem speaks for the exact bytes stored in its referenced
-                # version.  Browser and bearer authentication intentionally resolve
-                # to the same human actor, so actor ownership alone is not enough to
-                # decide that this mutable row still belongs to the browser session.
-                # Fork before changing a reviewed row; later browser autosaves keep
-                # mutating the one successor draft because no review targets it.
-                targeting_reviews = self._context_reviews_for_version(
+                return self._autosave_persist_editing_row(
                     session=session,
                     page=page,
-                    version=current,
-                )
-                if own_open_edit:
-                    targeting_reviews = self._settle_autosave_reviews_of_open_edit(
-                        session=session,
-                        page=page,
-                        version=current,
-                        reviews=targeting_reviews,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                    )
-                replaced_reviews = [
-                    review
-                    for review in targeting_reviews
-                    if review.status in {"pending", "changes_requested"}
-                ]
-                created_session_draft = not same_actor_draft or bool(targeting_reviews)
-                if created_session_draft:
-                    version = self._insert_version(
-                        session,
-                        page_id=page.id,
-                        parent_version_id=current.id,
-                        body_md=body_md,
-                        content_hash=new_hash,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                        version_status="draft",
-                    )
-                else:
-                    version = current
-                    version.editing_revision += 1
-                session_operation = (
-                    None
-                    if created_session_draft
-                    else self._autosave_session_operation(
-                        session, page, version, actor_kind, actor_id
-                    )
-                )
-                # An adopted draft (a restore, an accepted proposal, this session
-                # after a reload) has no ledger row of ours until the session
-                # actually stages something. Opening one then keeps the budget at
-                # one change set per session while leaving the other change set's
-                # record of its own work untouched.
-                if session_operation is None:
-                    change_set = ChangeSet(
-                        workspace_id=page.workspace_id,
-                        reason="page.autosave.draft",
-                        trigger_type="manual_edit",
-                        actor_type=actor_kind,
-                        actor_id=parse_uuid_or_none(actor_id),
-                        status="applied",
-                        risk_level="low",
-                    )
-                    session.add(change_set)
-                    session.flush()
-                    operation = ChangeOperation(
-                        workspace_id=change_set.workspace_id,
-                        change_set_id=change_set.id,
-                        target_type="context_page",
-                        target_id=page.id,
-                        operation="update",
-                        diff_summary="page.autosave.draft",
-                        diff_ref=f"context_page_version:{version.id}",
-                    )
-                    session.add(operation)
-                    self.change_audit_recorder.audit_service.emit(
-                        session=session,
-                        workspace_id=page.workspace_id,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                        action="page.autosave.draft",
-                        target_kind="context_page",
-                        target_id=page.id,
-                        payload={
-                            "before_content_hash": current.content_hash,
-                            "after_content_hash": version.content_hash,
-                            "parent_version_id": str(current.id),
-                            "session_version_id": (
-                                str(session_version_id)
-                                if session_version_id is not None
-                                else None
-                            ),
-                        },
-                    )
-                    session.flush()
-                    if version.change_set_id is None:
-                        version.change_set_id = change_set.id
-                    session.add(version)
-                    session_operation = operation
-                    opened_session_ledger = True
-                else:
-                    opened_session_ledger = False
-
-                self._rewrite_body_in_place(version, body_md, new_hash)
-                version.actor_type = actor_kind
-                version.actor_id = parse_uuid_or_none(actor_id)
-                version.actor_display_name = resolve_actor_display_name(
-                    session,
+                    current=current,
+                    body_md=prepared.body_md,
+                    new_hash=new_hash,
+                    next_title=next_title,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                )
-                version.created_by_actor_kind = actor_kind
-                version.created_by_actor_id = actor_id
-                session.add(version)
-                if not created_session_draft:
-                    self._sync_version_usage(
-                        session,
-                        page=page,
-                        version=version,
-                        body_md=body_md,
-                    )
-                page.updated_at = utc_now()
-                self._set_current_version(session, page, version, next_title)
-                self._replace_autosave_metadata_patch(
-                    session=session,
-                    patch=staged_patch,
-                    operation=session_operation,
-                )
-                superseded_review_count = self._supersede_content_replaced_reviews(
-                    session=session,
-                    page=page,
-                    replaced_version=current,
-                    successor_version=version,
-                    reviews=replaced_reviews,
-                    new_change_set_id=session_operation.change_set_id,
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
-                )
-                refresh_page_links(session, page=page, version=version)
-                return self._payload_from_page(
-                    session,
-                    page,
-                    version,
-                    change_set_id=(
-                        session_operation.change_set_id
-                        if opened_session_ledger
-                        else None
-                    ),
-                    superseded_review_count=superseded_review_count,
+                    session_version_id=session_version_id,
+                    same_actor_draft=same_actor_draft,
+                    own_open_edit=own_open_edit,
+                    baseline_patch=baseline_patch,
+                    metadata_patch=metadata_patch,
                 )
 
             result = execute_idempotent_write(
@@ -3693,17 +3478,363 @@ class PageService:
                 execute=_execute,
                 retry_only=retry_only,
             )
-            if with_edit_receipt and receipt_base:
-                result._edit_receipt = build_edit_receipt(
-                    edit_mode="whole_body",
-                    before_body=str(receipt_base["body"]),
-                    after_body=result.body_md,
-                    editing_revision_before=int(receipt_base["revision"]),
-                    editing_revision_after=result.editing_revision,
-                )
-            return result
+            return self._autosave_receipt(
+                result=result,
+                receipt_base=receipt_base,
+                with_edit_receipt=with_edit_receipt,
+            )
 
-    def _autosave_reviewed_draft(
+    def _autosave_lock_and_load(
+        self,
+        *,
+        session: Session,
+        page_id: UUID,
+        editing_version_id: UUID | None,
+        actor_kind: str,
+        actor_id: str,
+    ) -> ContextPage:
+        # SQLite: FOR UPDATE is a no-op, so take write intent before the
+        # guarded read. This path rewrites the draft row in place below,
+        # which is what a concurrent publish_draft is checking the hash of.
+        acquire_write_intent(session)
+        self._lock_context_media_usage_intent_for_page(session, page_id)
+        page = context_page_repo.get_page_by_id_for_update(session, page_id)
+        if page is None:
+            raise PageNotFoundError("page not found")
+        if editing_version_id is not None:
+            self._require_named_open_edit(
+                session, page, editing_version_id, actor_kind, actor_id
+            )
+        return page
+
+    def _autosave_resolve_target(
+        self,
+        *,
+        session: Session,
+        page: ContextPage,
+        session_version_id: UUID | None,
+        actor_kind: str,
+        actor_id: str,
+    ) -> ContextPageVersion:
+        current = self._require_page_version(
+            session,
+            page,
+            self._editable_version_id_for_actor(session, page, actor_kind, actor_id),
+        )
+        if session_version_id is not None:
+            session_version = self._require_page_version(
+                session,
+                page,
+                session_version_id,
+            )
+            if current.id != session_version.id:
+                session_reviews = self._context_reviews_for_version(
+                    session=session,
+                    page=page,
+                    version=session_version,
+                )
+                can_resume_rejected_session = (
+                    session_version.version_status == "draft"
+                    and session_version.graph_status == "linear"
+                    and session_version.created_by_actor_kind == actor_kind
+                    and session_version.created_by_actor_id == actor_id
+                    and any(review.status == "rejected" for review in session_reviews)
+                )
+                if not can_resume_rejected_session:
+                    disclosed_version_id, disclosed_content_hash = (
+                        self._disclosable_version_fields(current, actor_kind, actor_id)
+                    )
+                    raise PageConflictError(
+                        server_version_id=disclosed_version_id,
+                        server_content_hash=disclosed_content_hash,
+                    )
+                # Rejection deliberately restores the visible page head to
+                # the published snapshot. The submitting session may still
+                # continue from its exact rejected bytes, but only by
+                # forking a successor below; the resolved review and its
+                # immutable version are never rewritten.
+                current = session_version
+        return current
+
+    def _autosave_check_base(
+        self,
+        *,
+        session: Session,
+        page: ContextPage,
+        current: ContextPageVersion,
+        base_version_id: UUID | None,
+        base_content_hash: str | None,
+        expected_editing_revision: int | None,
+        actor_kind: str,
+        actor_id: str,
+        on_stale: str,
+    ) -> bool:
+        try:
+            self._validate_base(
+                session,
+                page,
+                current,
+                base_version_id,
+                base_content_hash,
+                expected_editing_revision,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+        except PageConflictError:
+            if on_stale != "preserve_as_alternative":
+                raise
+            return True
+        return False
+
+    def _autosave_prepare(
+        self,
+        *,
+        session: Session,
+        page: ContextPage,
+        title: str,
+        body_md: str,
+        page_type: str | None,
+        tags: list[str] | None,
+        aliases: list[str] | None,
+        actor_provenance: str,
+        is_stale: bool,
+    ) -> PreparedPageWrite:
+        workspace = self._workspace_for(session, page.workspace_id)
+        return prepare_page_write(
+            body_md=body_md,
+            title=title,
+            slug=page.slug,
+            page_type=page_type,
+            tags=tags,
+            aliases=aliases,
+            fallback_page_type=page.page_type,
+            fallback_tags=list(page.tags or []),
+            fallback_aliases=list(page.aliases or []),
+            # TRANSITIONAL(R6): preserve the existing stale-browser/AI policy
+            # until the workspace Auto-fix policy is unified in R6.
+            auto_fix=(
+                workspace.auto_fix_enabled
+                and (is_stale or actor_provenance in AI_PROVENANCES)
+            ),
+        )
+
+    def _autosave_persist_alternative(
+        self,
+        *,
+        session: Session,
+        page: ContextPage,
+        current: ContextPageVersion,
+        title: str | None,
+        prepared: PreparedPageWrite,
+        actor_kind: str,
+        actor_id: str,
+        base_version_id: UUID | None,
+        base_content_hash: str | None,
+        actor_provenance: str,
+    ) -> PagePayload:
+        return self._preserve_alternative(
+            session=session,
+            page=page,
+            current=current,
+            title=title,
+            body_md=prepared.body_md,
+            content_hash=calculate_content_hash(prepared.body_md),
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            base_version_id=base_version_id,
+            base_content_hash=base_content_hash,
+            page_type=prepared.page_type,
+            tags=prepared.tags,
+            aliases=prepared.aliases,
+            actor_provenance=actor_provenance,
+        )
+
+    def _autosave_persist_editing_row(
+        self,
+        *,
+        session: Session,
+        page: ContextPage,
+        current: ContextPageVersion,
+        body_md: str,
+        new_hash: str,
+        next_title: str,
+        actor_kind: str,
+        actor_id: str,
+        session_version_id: UUID | None,
+        same_actor_draft: bool,
+        own_open_edit: bool,
+        baseline_patch: dict[str, object] | None,
+        metadata_patch: dict[str, object],
+    ) -> PagePayload:
+        staged_patch = dict(baseline_patch or {})
+        staged_patch.update(metadata_patch)
+
+        # A ReviewItem speaks for the exact bytes stored in its referenced
+        # version.  Browser and bearer authentication intentionally resolve
+        # to the same human actor, so actor ownership alone is not enough to
+        # decide that this mutable row still belongs to the browser session.
+        # Fork before changing a reviewed row; later browser autosaves keep
+        # mutating the one successor draft because no review targets it.
+        targeting_reviews = self._context_reviews_for_version(
+            session=session,
+            page=page,
+            version=current,
+        )
+        if own_open_edit:
+            targeting_reviews = self._settle_autosave_reviews_of_open_edit(
+                session=session,
+                page=page,
+                version=current,
+                reviews=targeting_reviews,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+        replaced_reviews = [
+            review
+            for review in targeting_reviews
+            if review.status in {"pending", "changes_requested"}
+        ]
+        created_session_draft = not same_actor_draft or bool(targeting_reviews)
+        if created_session_draft:
+            version = self._insert_version(
+                session,
+                page_id=page.id,
+                parent_version_id=current.id,
+                body_md=body_md,
+                content_hash=new_hash,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                version_status="draft",
+            )
+        else:
+            version = current
+            version.editing_revision += 1
+        session_operation = (
+            None
+            if created_session_draft
+            else self._autosave_session_operation(
+                session, page, version, actor_kind, actor_id
+            )
+        )
+        # An adopted draft (a restore, an accepted proposal, this session
+        # after a reload) has no ledger row of ours until the session
+        # actually stages something. Opening one then keeps the budget at
+        # one change set per session while leaving the other change set's
+        # record of its own work untouched.
+        if session_operation is None:
+            change_set = ChangeSet(
+                workspace_id=page.workspace_id,
+                reason="page.autosave.draft",
+                trigger_type="manual_edit",
+                actor_type=actor_kind,
+                actor_id=parse_uuid_or_none(actor_id),
+                status="applied",
+                risk_level="low",
+            )
+            session.add(change_set)
+            session.flush()
+            operation = ChangeOperation(
+                workspace_id=change_set.workspace_id,
+                change_set_id=change_set.id,
+                target_type="context_page",
+                target_id=page.id,
+                operation="update",
+                diff_summary="page.autosave.draft",
+                diff_ref=f"context_page_version:{version.id}",
+            )
+            session.add(operation)
+            self.change_audit_recorder.audit_service.emit(
+                session=session,
+                workspace_id=page.workspace_id,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                action="page.autosave.draft",
+                target_kind="context_page",
+                target_id=page.id,
+                payload={
+                    "before_content_hash": current.content_hash,
+                    "after_content_hash": version.content_hash,
+                    "parent_version_id": str(current.id),
+                    "session_version_id": (
+                        str(session_version_id)
+                        if session_version_id is not None
+                        else None
+                    ),
+                },
+            )
+            session.flush()
+            if version.change_set_id is None:
+                version.change_set_id = change_set.id
+            session.add(version)
+            session_operation = operation
+            opened_session_ledger = True
+        else:
+            opened_session_ledger = False
+
+        self._rewrite_body_in_place(version, body_md, new_hash)
+        version.actor_type = actor_kind
+        version.actor_id = parse_uuid_or_none(actor_id)
+        version.actor_display_name = resolve_actor_display_name(
+            session,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        version.created_by_actor_kind = actor_kind
+        version.created_by_actor_id = actor_id
+        session.add(version)
+        if not created_session_draft:
+            self._sync_version_usage(
+                session,
+                page=page,
+                version=version,
+                body_md=body_md,
+            )
+        page.updated_at = utc_now()
+        self._set_current_version(session, page, version, next_title)
+        self._replace_autosave_metadata_patch(
+            session=session,
+            patch=staged_patch,
+            operation=session_operation,
+        )
+        superseded_review_count = self._supersede_content_replaced_reviews(
+            session=session,
+            page=page,
+            replaced_version=current,
+            successor_version=version,
+            reviews=replaced_reviews,
+            new_change_set_id=session_operation.change_set_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        refresh_page_links(session, page=page, version=version)
+        return self._payload_from_page(
+            session,
+            page,
+            version,
+            change_set_id=(
+                session_operation.change_set_id if opened_session_ledger else None
+            ),
+            superseded_review_count=superseded_review_count,
+        )
+
+    @staticmethod
+    def _autosave_receipt(
+        *,
+        result: PagePayload,
+        receipt_base: dict[str, object],
+        with_edit_receipt: bool,
+    ) -> PagePayload:
+        if with_edit_receipt and receipt_base:
+            result._edit_receipt = build_edit_receipt(
+                edit_mode="whole_body",
+                before_body=str(receipt_base["body"]),
+                after_body=result.body_md,
+                editing_revision_before=int(receipt_base["revision"]),
+                editing_revision_after=result.editing_revision,
+            )
+        return result
+
+    def _autosave_persist_reviewed_draft(
         self,
         *,
         session: Session,
