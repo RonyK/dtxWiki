@@ -90,12 +90,12 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     class CanonicalizeLink:
         def fix(self, body, _ctx):
             fixed = body.replace("draft-link", "canonical-link")
-            return FixResult(fixed, ("links",) if fixed != body else ())
+            return FixResult(fixed, ("link.canonicalized",) if fixed != body else ())
 
     class FormatList:
         def fix(self, body, _ctx):
             fixed = body.replace("* canonical-link", "- canonical-link")
-            return FixResult(fixed, ("format",) if fixed != body else ())
+            return FixResult(fixed, ("format.list_marker",) if fixed != body else ())
 
     # Deliberately reverse registration order. The later formatter can only
     # produce the expected body after the earlier link module has run.
@@ -108,7 +108,7 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     injected = BodyPreparer(registry=registry, policy_factory=EnabledPolicy)
     result = injected.prepare(BodyInput("# Body\n\n* draft-link\n"), ctx)
     assert result.body == "# Body\n\n- canonical-link\n"
-    assert result.fixes == ("links", "format")
+    assert result.fixes == ("link.canonicalized", "format.list_marker")
     assert [finding.rule_id for finding in result.findings] == ["test.final_body"]
     assert result.findings[0].target_id == page.id
     assert len(observed) == 1
