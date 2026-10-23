@@ -51,6 +51,7 @@ from backend.services.read_errors import (
 from backend.services.review_risk_policy import _preset_policy
 from backend.services.review_service import ReviewService
 from backend.tests.integration import test_context_media_repository as media_fixtures
+from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_outline import parse_outline
 
@@ -1120,8 +1121,13 @@ def test_update_draft_stale_base_error_never_discloses_a_foreign_private_editing
             session,
             page_id=page.id,
             parent_version_id=created.draft_version_id,
-            body_md=private_body,
-            content_hash=calculate_content_hash(private_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=private_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000ee",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
@@ -3841,8 +3847,13 @@ def test_publish_draft_without_bound_review_publishes(session_factory):
             session,
             page_id=created.page_id,
             parent_version_id=created.draft_version_id,
-            body_md="# Review Free Publish Target\n\nUnreviewed body.",
-            content_hash="0" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=created.page_id,
+                body_md="# Review Free Publish Target\n\nUnreviewed body.",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="draft",
@@ -3915,9 +3926,12 @@ def test_publish_revalidates_stored_unsafe_body_without_moving_published_pointer
             session,
             page_id=created.page_id,
             parent_version_id=published_id_before,
-            body_md="# Stored unsafe publish target\n\nSafe staged body.",
-            content_hash=calculate_content_hash(
-                "# Stored unsafe publish target\n\nSafe staged body."
+            body=prepare_context_body(
+                session,
+                page_id=created.page_id,
+                body_md="# Stored unsafe publish target\n\nSafe staged body.",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
             ),
             actor_kind="human",
             actor_id=ACTOR_ID,

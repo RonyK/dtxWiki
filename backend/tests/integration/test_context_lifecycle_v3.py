@@ -25,6 +25,7 @@ from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
 from backend.services.read_errors import StaleContextDraftError
 from backend.services.review_service import ReviewService
+from backend.tests.utils.prepared_body import prepare_context_body
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 ACTOR_UUID = UUID(ACTOR_ID)
@@ -135,8 +136,13 @@ def test_direct_publication_supersedes_v1_and_normalizes_all_published_rows(
             session,
             page_id=page.id,
             parent_version_id=old.id,
-            body_md="# Direct Lifecycle\n\nrogue",
-            content_hash="a" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md="# Direct Lifecycle\n\nrogue",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="published_snapshot",
@@ -657,8 +663,13 @@ def test_publish_demotes_superseded_linear_draft_ancestor(page_service):
             session,
             page_id=page.id,
             parent_version_id=published.version_id,
-            body_md=f"{published.body_md}\n\nfork v1",
-            content_hash="1" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=f"{published.body_md}\n\nfork v1",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="draft",
@@ -668,8 +679,13 @@ def test_publish_demotes_superseded_linear_draft_ancestor(page_service):
             session,
             page_id=page.id,
             parent_version_id=v1.id,
-            body_md=f"{published.body_md}\n\nfork v2",
-            content_hash="2" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=f"{published.body_md}\n\nfork v2",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="draft",
@@ -870,8 +886,13 @@ def test_repair_does_not_resurrect_a_demoted_fork_ancestor(page_service):
             session,
             page_id=page.id,
             parent_version_id=published.version_id,
-            body_md=f"{published.body_md}\n\nfork v1",
-            content_hash="3" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=f"{published.body_md}\n\nfork v1",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="draft",
@@ -881,8 +902,13 @@ def test_repair_does_not_resurrect_a_demoted_fork_ancestor(page_service):
             session,
             page_id=page.id,
             parent_version_id=v1.id,
-            body_md=f"{published.body_md}\n\nfork v2",
-            content_hash="4" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=f"{published.body_md}\n\nfork v2",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="draft",
@@ -1136,8 +1162,13 @@ def test_invalid_final_publish_is_stable_and_does_not_mutate(
                 session,
                 page_id=page.id,
                 parent_version_id=version.id,
-                body_md=version.body_md + "\n\nlater",
-                content_hash="b" * 64,
+                body=prepare_context_body(
+                    session,
+                    page_id=page.id,
+                    body_md=version.body_md + "\n\nlater",
+                    actor_kind="human",
+                    actor_id=ACTOR_ID,
+                ),
                 actor_kind="human",
                 actor_id=ACTOR_ID,
                 version_status="draft",

@@ -96,6 +96,8 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
 
     from backend.app.container import assemble
     from backend.app.settings import Settings
+    from backend.app.state import get_page_service_from_app
+    from backend.mcp.context_tools import _context_edit_page_service
 
     builtin = LintRegistry.builtin()
     assert builtin is not LintRegistry.builtin()
@@ -126,13 +128,46 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
         "nav.unreachable",
     }
     extra = _Dummy("test.injected", default_enabled=False)
-    container = assemble(Settings(), lint_modules=(LintModule("test", 1000, (extra,)),))
+    container = assemble(
+        Settings(),
+        session_factory=SimpleNamespace(),
+        lint_modules=(LintModule("test", 1000, (extra,)),),
+    )
     services = container.get_services()
     registry = services.lint_registry
     assert registry.rule(extra.rule_id) is extra
+    configured_modules = services.lint_modules
+    with pytest.raises(ValueError, match="before the lint registry is constructed"):
+        assemble(
+            container.settings,
+            services=services,
+            lint_modules=(LintModule("late", 1100, (_Dummy("test.late"),)),),
+        )
+    assert services.lint_modules is configured_modules
+    assert services.lint_registry is registry
+    assert "test.late" not in registry.rule_ids()
     assert services.lint.lint_registry is registry
     assert services.settings_svc.lint_registry is registry
     assert services.domain_read.lint_registry is registry
+    assert services.body_preparer.registry is registry
+    pages = container.get_page_service()
+    assert pages.body_preparer is services.body_preparer
+    assert pages.change_audit_recorder.lint_registry is registry
+    assert services.context_write.body_preparer is services.body_preparer
+    assert services.context_ingress.body_preparer is services.body_preparer
+    assert services.review.body_preparer is services.body_preparer
+    mcp_pages = _context_edit_page_service(
+        SimpleNamespace(
+            session_factory=container.db.control_session_factory(),
+            services=services,
+        )
+    )
+    assert mcp_pages.body_preparer is services.body_preparer
+    assert mcp_pages.lint_registry is registry
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(container=container))
+    )
+    assert get_page_service_from_app(request) is pages
     assert extra.rule_id not in builtin.rule_ids()
     policy = LintPolicy(SimpleNamespace(lint_policy={"md.code_fence_balance": False}))
     assert "md.code_fence_balance" in {

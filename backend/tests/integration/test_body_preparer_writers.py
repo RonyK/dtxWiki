@@ -19,6 +19,7 @@ from backend.schemas.context_write import UpdateDraftRequest, WriteDraftRequest
 from backend.services.context_ingress_service import ContextIngressService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.okf import import_okf_bundle
+from backend.utils.content_hash import content_hash
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 RAW = "# Golden\n\n* item\n\n\n\nend   \n"
@@ -287,6 +288,37 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             )
         _assert_stored(
             session_factory, updated.draft_version_id, expected, f"W10 {suffix}"
+        )
+
+        # A valid rewrite can repair historical unsafe bytes. Preparing the
+        # old base for an auto-approval comparison must not reject that write.
+        legacy = _published(page_service, f"w10-legacy-{suffix}")
+        legacy_body = "![inline](data:image/png;base64,aGVsbG8=)"
+        legacy_hash = content_hash(legacy_body)
+        with session_factory.begin() as session:
+            stored = session.get(ContextPageVersion, legacy.version_id)
+            stored.body_md = legacy_body
+            stored.content_hash = legacy_hash
+        with session_factory.begin() as session:
+            repaired = service.update_draft(
+                session=session,
+                workspace_id=workspace_id,
+                request=UpdateDraftRequest(
+                    page_id=legacy.id,
+                    base_version_id=legacy.version_id,
+                    base_content_hash=legacy_hash,
+                    update_mode="full_rewrite",
+                    body_markdown=RAW,
+                    reason="repair historical unsafe content",
+                ),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+        _assert_stored(
+            session_factory,
+            repaired.draft_version_id,
+            expected,
+            f"W10 legacy repair {suffix}",
         )
 
         # W11: ingress acceptance intentionally persists raw markdown.

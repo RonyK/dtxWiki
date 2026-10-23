@@ -329,6 +329,13 @@ class _MermaidBlockRule:
         return findings
 
 
+def safe_format_body(body: str, ctx: LintContext | None = None) -> str:
+    """The format module's deterministic, fail-closed fixer."""
+    from backend.services.lint.autofix import safe_normalize_markdown
+
+    return safe_normalize_markdown(body)
+
+
 MODULE = LintModule(
     "format",
     900,
@@ -339,4 +346,6 @@ MODULE = LintModule(
         _ImageRefRule(),
         _MermaidBlockRule(),
     ),
+    fixer=safe_format_body,
+    fix_on_save_setting="auto_fix",
 )

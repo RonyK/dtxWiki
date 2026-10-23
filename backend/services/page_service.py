@@ -24,11 +24,8 @@ from backend.context_media.domain import (
     validate_markdown_media_policy,
 )
 from backend.context_media.ports import ContextMediaRepository
-from backend.domain.input_policy import (
-    validate_body,
-    validate_text,
-    validate_title,
-)
+from backend.domain.input_policy import validate_text
+from backend.domain.prepared_body import PreparedBody, PreparedMetadata
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
@@ -70,6 +67,12 @@ from backend.services.anchor_resolver import (
     resolve_anchor,
 )
 from backend.services.audit_service import AuditService
+from backend.services.body_preparer import (
+    BodyInput,
+    BodyPreparer,
+    PageMetadataInput,
+    WriteContext,
+)
 from backend.services.change_review_audit import ChangeReviewAuditRecorder
 from backend.services.context_editing import (
     ContextEditError,
@@ -103,7 +106,6 @@ from backend.services.job_queue import (
     context_page_embed_idempotency_key,
 )
 from backend.services.lint import LintRegistry, publish_floor_findings
-from backend.services.lint.autofix import safe_normalize_markdown
 from backend.services.lint.rules_format import (
     body_relative_message,
 )
@@ -130,15 +132,19 @@ from backend.utils.block_identity import (
     compute_block_map_with_ids,
     heal_block_map,
 )
-from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_outline import parse_outline
 from backend.utils.page_frontmatter import (
     PAGE_TYPES,
     derive_nav_description,
     parse_page_frontmatter,
     title_from_markdown_heading,
-    upsert_page_frontmatter,
     validate_page_markdown_input,
+)
+from backend.utils.page_frontmatter import (
+    normalize_page_aliases as normalize_page_aliases,
+)
+from backend.utils.page_frontmatter import (
+    normalize_page_tags as normalize_page_tags,
 )
 from backend.utils.uuid import parse_uuid_or_none
 
@@ -277,14 +283,6 @@ class PageVersionListResult:
 class PagePublishResult:
     page: PagePayload
     findings: list[DraftReviewReason]
-
-
-@dataclass(frozen=True)
-class PreparedPageWrite:
-    body_md: str
-    page_type: str | None
-    tags: list[str] | None
-    aliases: list[str] | None
 
 
 # Page links are page-level backlink edges. The regex captures the target text
@@ -454,16 +452,20 @@ class PageService:
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
         lint_registry: LintRegistry | None = None,
+        body_preparer: BodyPreparer | None = None,
     ) -> None:
         self.session_factory = session_factory
-        self.change_audit_recorder = (
-            change_audit_recorder or ChangeReviewAuditRecorder()
+        self.body_preparer = (
+            body_preparer if body_preparer is not None else BodyPreparer(lint_registry)
+        )
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else self.body_preparer.registry
+        )
+        self.change_audit_recorder = change_audit_recorder or ChangeReviewAuditRecorder(
+            lint_registry=self.lint_registry
         )
         self.job_queue = job_queue or JobQueueService()
         self.context_media_repository_factory = context_media_repository_factory
-        self.lint_registry = (
-            lint_registry if lint_registry is not None else LintRegistry.builtin()
-        )
 
     def list_pages(
         self,
@@ -1134,6 +1136,7 @@ class PageService:
                 audit_service=self.change_audit_recorder.audit_service,
                 job_queue=self.job_queue,
                 context_media_repository_factory=self.context_media_repository_factory,
+                body_preparer=self.body_preparer,
             ).patch_draft(
                 session=session,
                 workspace_id=actor.workspace_id,
@@ -1331,6 +1334,7 @@ class PageService:
                 result = ContextWriteService(
                     audit_service=self.change_audit_recorder.audit_service,
                     job_queue=self.job_queue,
+                    body_preparer=self.body_preparer,
                     context_media_repository_factory=(
                         self.context_media_repository_factory
                     ),
@@ -1471,12 +1475,11 @@ class PageService:
             parsed = parse_page_frontmatter(target.body_md)
             title = title_from_markdown_heading(parsed.body) or page.title
             was_archived = page.lifecycle_status == "archived"
-            version = self._insert_version(
+            version = self._insert_version_copy(
                 session,
                 page_id=page.id,
                 parent_version_id=current.id,
-                body_md=target.body_md,
-                content_hash=target.content_hash,
+                source_version=target,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status="draft",
@@ -1704,25 +1707,40 @@ class PageService:
             next_title = title or "제목 없음"
             page_id = uuid4()
             default_slug = f"p-{page_id}"
-            prepared = prepare_page_write(
-                body_md=body_md,
-                title=next_title,
-                slug=default_slug,
-                page_type=page_type,
-                tags=tags,
-                aliases=aliases,
-                auto_fix=workspace.auto_fix_enabled,
+            prepared = self._prepare_body(
+                BodyInput(
+                    body_md=body_md,
+                    metadata=PageMetadataInput(
+                        title=next_title,
+                        slug=default_slug,
+                        page_type=page_type,
+                        tags=tags,
+                        aliases=aliases,
+                    ),
+                    fallback_metadata=PreparedMetadata(
+                        page_type=None,
+                        tags=None,
+                        aliases=None,
+                    ),
+                ),
+                WriteContext(
+                    workspace=workspace,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                    page=None,
+                    version=None,
+                    session=session,
+                ),
             )
-            if prepared.body_md:
-                self._validate_media_markdown(prepared.body_md)
             page = ContextPage(
                 id=page_id,
                 workspace_id=workspace.id,
                 slug=default_slug,
                 title=next_title,
-                page_type=prepared.page_type or "overview",
-                tags=prepared.tags or [],
-                aliases=prepared.aliases or [],
+                page_type=prepared.metadata.page_type or "overview",
+                tags=prepared.metadata.tags or [],
+                aliases=prepared.metadata.aliases or [],
             )
             session.add(page)
             session.flush()
@@ -1730,8 +1748,7 @@ class PageService:
                 session,
                 page_id=page.id,
                 parent_version_id=None,
-                body_md=prepared.body_md,
-                content_hash=calculate_content_hash(prepared.body_md),
+                body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status="editing",
@@ -1849,16 +1866,11 @@ class PageService:
                             server_version_id=actual_id,
                             server_content_hash=actual_hash,
                         )
-                version = self._insert_version(
+                version = self._insert_version_copy(
                     session,
                     page_id=page.id,
                     parent_version_id=base.id if base is not None else None,
-                    body_md=base.body_md if base is not None else "",
-                    content_hash=(
-                        base.content_hash
-                        if base is not None
-                        else calculate_content_hash("")
-                    ),
+                    source_version=base,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     version_status="editing",
@@ -2386,13 +2398,25 @@ class PageService:
                         details=list(exc.details),
                     ) from exc
 
-                new_body = applied.body
-                new_hash = calculate_content_hash(new_body)
-                self._validate_media_markdown(new_body)
+                prepared = self._prepare_body(
+                    BodyInput(applied.body),
+                    WriteContext(
+                        workspace=self._workspace_for(session, page.workspace_id),
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        actor_provenance=actor_provenance,
+                        page=page,
+                        version=version,
+                        session=session,
+                    ),
+                    # TRANSITIONAL(R5): preserve patch bytes until R5 applies
+                    # workspace Auto-fix and rebuilds its final block map.
+                    transitional_skip_fixes=True,
+                )
+                new_body = prepared.body
                 self._rewrite_body_in_place(
                     version,
-                    new_body,
-                    new_hash,
+                    prepared,
                     base_block_map=block_map,
                     prepared_block_map=(
                         applied.predicted_block_map.value
@@ -2507,26 +2531,39 @@ class PageService:
                 workspace.id,
                 slug,
             )
-            prepared = prepare_page_write(
-                body_md=body_md,
-                title=title,
-                slug=slug,
-                page_type=page_type,
-                tags=tags,
-                aliases=aliases,
-                fallback_page_type=page.page_type if page is not None else None,
-                fallback_tags=list(page.tags or []) if page is not None else None,
-                fallback_aliases=list(page.aliases or []) if page is not None else None,
-                auto_fix=workspace.auto_fix_enabled,
+            prepared = self._prepare_body(
+                BodyInput(
+                    body_md=body_md,
+                    metadata=PageMetadataInput(
+                        title=title,
+                        slug=slug,
+                        page_type=page_type,
+                        tags=tags,
+                        aliases=aliases,
+                    ),
+                    fallback_metadata=PreparedMetadata(
+                        page_type=page.page_type if page is not None else None,
+                        tags=list(page.tags or []) if page is not None else None,
+                        aliases=list(page.aliases or []) if page is not None else None,
+                    ),
+                ),
+                WriteContext(
+                    workspace=workspace,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                    page=page,
+                    version=None,
+                    session=session,
+                ),
             )
-            body_md = prepared.body_md
-            self._validate_media_markdown(body_md)
+            body_md = prepared.body
             requires_human_review = self._stages_as_draft(
                 workspace=workspace,
                 actor_provenance=actor_provenance,
                 body_md=body_md,
             )
-            new_hash = calculate_content_hash(body_md)
+            new_hash = prepared.content_hash
             page_created = False
 
             if page is None:
@@ -2535,25 +2572,39 @@ class PageService:
                     workspace_id=workspace.id,
                     slug=slug,
                     title=title,
-                    page_type=prepared.page_type or "overview",
-                    tags=prepared.tags or [],
-                    aliases=prepared.aliases or [],
+                    page_type=prepared.metadata.page_type or "overview",
+                    tags=prepared.metadata.tags or [],
+                    aliases=prepared.metadata.aliases or [],
                 )
                 if not page_created:
-                    prepared = prepare_page_write(
-                        body_md=body_md,
-                        title=title,
-                        slug=slug,
-                        page_type=page_type,
-                        tags=tags,
-                        aliases=aliases,
-                        fallback_page_type=page.page_type,
-                        fallback_tags=list(page.tags or []),
-                        fallback_aliases=list(page.aliases or []),
-                        auto_fix=workspace.auto_fix_enabled,
+                    prepared = self._prepare_body(
+                        BodyInput(
+                            body_md=body_md,
+                            metadata=PageMetadataInput(
+                                title=title,
+                                slug=slug,
+                                page_type=page_type,
+                                tags=tags,
+                                aliases=aliases,
+                            ),
+                            fallback_metadata=PreparedMetadata(
+                                page_type=page.page_type,
+                                tags=list(page.tags or []),
+                                aliases=list(page.aliases or []),
+                            ),
+                        ),
+                        WriteContext(
+                            workspace=workspace,
+                            actor_kind=actor_kind,
+                            actor_id=actor_id,
+                            actor_provenance=actor_provenance,
+                            page=page,
+                            version=None,
+                            session=session,
+                        ),
                     )
-                    body_md = prepared.body_md
-                    new_hash = calculate_content_hash(body_md)
+                    body_md = prepared.body
+                    new_hash = prepared.content_hash
 
             if page_created:
                 create_as_draft = requires_human_review or as_draft
@@ -2561,8 +2612,7 @@ class PageService:
                     session,
                     page_id=page.id,
                     parent_version_id=None,
-                    body_md=body_md,
-                    content_hash=new_hash,
+                    body=prepared,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     # Insert through the draft state so the partial unique
@@ -2627,9 +2677,9 @@ class PageService:
             metadata_patch = page_metadata_delta(
                 page,
                 title=title,
-                page_type=prepared.page_type,
-                tags=prepared.tags,
-                aliases=prepared.aliases,
+                page_type=prepared.metadata.page_type,
+                tags=prepared.metadata.tags,
+                aliases=prepared.metadata.aliases,
                 baseline_patch=(
                     pending_page_metadata_patch(
                         session,
@@ -2666,9 +2716,9 @@ class PageService:
                     if not stage_metadata:
                         apply_page_metadata(
                             page,
-                            page_type=prepared.page_type,
-                            tags=prepared.tags,
-                            aliases=prepared.aliases,
+                            page_type=prepared.metadata.page_type,
+                            tags=prepared.metadata.tags,
+                            aliases=prepared.metadata.aliases,
                         )
                     self._set_current_version(
                         session,
@@ -2718,8 +2768,7 @@ class PageService:
                 session,
                 page_id=page.id,
                 parent_version_id=current.id,
-                body_md=body_md,
-                content_hash=new_hash,
+                body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status="draft",
@@ -2741,9 +2790,9 @@ class PageService:
             if not version_stages_metadata:
                 apply_page_metadata(
                     page,
-                    page_type=prepared.page_type,
-                    tags=prepared.tags,
-                    aliases=prepared.aliases,
+                    page_type=prepared.metadata.page_type,
+                    tags=prepared.metadata.tags,
+                    aliases=prepared.metadata.aliases,
                 )
             self._set_current_version(
                 session,
@@ -2834,26 +2883,39 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             next_title = title or page.title
-            prepared = prepare_page_write(
-                body_md=body_md,
-                title=next_title,
-                slug=page.slug,
-                page_type=page_type,
-                tags=tags,
-                aliases=aliases,
-                fallback_page_type=page.page_type,
-                fallback_tags=list(page.tags or []),
-                fallback_aliases=list(page.aliases or []),
-                auto_fix=page.workspace.auto_fix_enabled,
+            prepared = self._prepare_body(
+                BodyInput(
+                    body_md=body_md,
+                    metadata=PageMetadataInput(
+                        title=next_title,
+                        slug=page.slug,
+                        page_type=page_type,
+                        tags=tags,
+                        aliases=aliases,
+                    ),
+                    fallback_metadata=PreparedMetadata(
+                        page_type=page.page_type,
+                        tags=list(page.tags or []),
+                        aliases=list(page.aliases or []),
+                    ),
+                ),
+                WriteContext(
+                    workspace=self._workspace_for(session, page.workspace_id),
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                    page=page,
+                    version=None,
+                    session=session,
+                ),
             )
-            body_md = prepared.body_md
-            self._validate_media_markdown(body_md)
+            body_md = prepared.body
             requires_human_review = self._stages_as_draft(
                 workspace=self._workspace_for(session, page.workspace_id),
                 actor_provenance=actor_provenance,
                 body_md=body_md,
             )
-            new_hash = calculate_content_hash(body_md)
+            new_hash = prepared.content_hash
 
             # Not actor-scoped: `update_page` always targets the page's own
             # shared head, same as before P8.1 -- unlike `autosave_page`, it
@@ -2883,15 +2945,11 @@ class PageService:
                     page=page,
                     current=current,
                     title=title,
-                    body_md=body_md,
-                    content_hash=new_hash,
+                    prepared=prepared,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     base_version_id=base_version_id,
                     base_content_hash=base_content_hash,
-                    page_type=prepared.page_type,
-                    tags=prepared.tags,
-                    aliases=prepared.aliases,
                     actor_provenance=actor_provenance,
                 )
             placement_changed = (
@@ -2911,9 +2969,9 @@ class PageService:
             metadata_patch = page_metadata_delta(
                 page,
                 title=next_title,
-                page_type=prepared.page_type,
-                tags=prepared.tags,
-                aliases=prepared.aliases,
+                page_type=prepared.metadata.page_type,
+                tags=prepared.metadata.tags,
+                aliases=prepared.metadata.aliases,
                 baseline_patch=(
                     pending_page_metadata_patch(
                         session,
@@ -2948,9 +3006,9 @@ class PageService:
                     if not stage_metadata:
                         apply_page_metadata(
                             page,
-                            page_type=prepared.page_type,
-                            tags=prepared.tags,
-                            aliases=prepared.aliases,
+                            page_type=prepared.metadata.page_type,
+                            tags=prepared.metadata.tags,
+                            aliases=prepared.metadata.aliases,
                         )
                     self._set_current_version(
                         session,
@@ -3023,8 +3081,7 @@ class PageService:
                 session,
                 page_id=page.id,
                 parent_version_id=current.id,
-                body_md=body_md,
-                content_hash=new_hash,
+                body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status="draft",
@@ -3041,9 +3098,9 @@ class PageService:
             if not version_stages_metadata:
                 apply_page_metadata(
                     page,
-                    page_type=prepared.page_type,
-                    tags=prepared.tags,
-                    aliases=prepared.aliases,
+                    page_type=prepared.metadata.page_type,
+                    tags=prepared.metadata.tags,
+                    aliases=prepared.metadata.aliases,
                 )
             self._set_current_version(
                 session,
@@ -3125,8 +3182,23 @@ class PageService:
                 superseded_review_count=superseded_review_count,
             )
 
-    def _insert_version(self, session: Session, **kwargs) -> ContextPageVersion:
-        body_md = kwargs.get("body_md")
+    def _prepare_body(
+        self,
+        input: BodyInput,
+        ctx: WriteContext,
+        *,
+        transitional_skip_fixes: bool = False,
+    ) -> PreparedBody:
+        try:
+            return self.body_preparer.prepare(
+                input, ctx, transitional_skip_fixes=transitional_skip_fixes
+            )
+        except MarkdownMediaPolicyError as exc:
+            raise PageMediaPolicyError(str(exc), reason_code=exc.reason_code) from exc
+
+    def _insert_version(
+        self, session: Session, *, body: PreparedBody, **kwargs
+    ) -> ContextPageVersion:
         repository = (
             self.context_media_repository_factory(session)
             if self.context_media_repository_factory is not None
@@ -3135,6 +3207,7 @@ class PageService:
         try:
             return context_page_repo.insert_version(
                 session,
+                body=body,
                 context_media_repository=repository,
                 **kwargs,
             )
@@ -3143,7 +3216,38 @@ class PageService:
         except ContextMediaError as exc:
             raise PageContextMediaError(str(exc), error_code=exc.error_code) from exc
         except ValueError as exc:
-            if isinstance(body_md, str) and "dtx-media://asset/" in body_md:
+            if "dtx-media://asset/" in body.body:
+                raise PageValidationError(str(exc)) from exc
+            raise
+
+    def _insert_version_copy(
+        self,
+        session: Session,
+        *,
+        source_version: ContextPageVersion | None,
+        **kwargs,
+    ) -> ContextPageVersion:
+        repository = (
+            self.context_media_repository_factory(session)
+            if self.context_media_repository_factory is not None
+            else None
+        )
+        try:
+            return context_page_repo.insert_version_copy(
+                session,
+                source_version=source_version,
+                context_media_repository=repository,
+                **kwargs,
+            )
+        except MarkdownMediaPolicyError as exc:
+            raise PageMediaPolicyError(str(exc), reason_code=exc.reason_code) from exc
+        except ContextMediaError as exc:
+            raise PageContextMediaError(str(exc), error_code=exc.error_code) from exc
+        except ValueError as exc:
+            if (
+                source_version is not None
+                and "dtx-media://asset/" in source_version.body_md
+            ):
                 raise PageValidationError(str(exc)) from exc
             raise
 
@@ -3325,8 +3429,11 @@ class PageService:
                 prepared = self._autosave_prepare(
                     session=session,
                     page=page,
+                    current=current,
                     title=next_title,
                     body_md=body_md,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
                     page_type=page_type,
                     tags=tags,
                     aliases=aliases,
@@ -3346,11 +3453,6 @@ class PageService:
                         base_content_hash=base_content_hash,
                         actor_provenance=actor_provenance,
                     )
-                # In-place rewrites bypass the central PageVersion constructor.
-                # Validate media before creating ledger rows or mutating a draft.
-                self._validate_media_markdown(prepared.body_md)
-                new_hash = calculate_content_hash(prepared.body_md)
-
                 baseline_patch = (
                     pending_page_metadata_patch(
                         session,
@@ -3363,9 +3465,9 @@ class PageService:
                 metadata_patch = page_metadata_delta(
                     page,
                     title=next_title,
-                    page_type=prepared.page_type,
-                    tags=prepared.tags,
-                    aliases=prepared.aliases,
+                    page_type=prepared.metadata.page_type,
+                    tags=prepared.metadata.tags,
+                    aliases=prepared.metadata.aliases,
                     baseline_patch=baseline_patch,
                 )
                 effective_parent_id = (
@@ -3384,7 +3486,7 @@ class PageService:
                 # Bytes, not content_hash: the hash ignores trailing spaces, so
                 # a save that only added or removed a hard break (two trailing
                 # spaces) was answered as succeeded and silently not stored.
-                if prepared.body_md == current.body_md and not metadata_patch:
+                if prepared.body == current.body_md and not metadata_patch:
                     # P2.2/P2.6: `current` is the page-global pointer -- returning
                     # it unchanged is only safe when it is published (anyone with
                     # read access already sees it) or genuinely this actor's own
@@ -3415,8 +3517,7 @@ class PageService:
                         session=session,
                         page=page,
                         current=current,
-                        body_md=prepared.body_md,
-                        new_hash=new_hash,
+                        prepared=prepared,
                         actor_kind=actor_kind,
                         actor_id=actor_id,
                         actor_provenance=actor_provenance,
@@ -3428,8 +3529,7 @@ class PageService:
                     session=session,
                     page=page,
                     current=current,
-                    body_md=prepared.body_md,
-                    new_hash=new_hash,
+                    prepared=prepared,
                     next_title=next_title,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -3595,30 +3695,47 @@ class PageService:
         *,
         session: Session,
         page: ContextPage,
+        current: ContextPageVersion,
         title: str,
         body_md: str,
         page_type: str | None,
         tags: list[str] | None,
         aliases: list[str] | None,
+        actor_kind: str,
+        actor_id: str,
         actor_provenance: str,
         is_stale: bool,
-    ) -> PreparedPageWrite:
+    ) -> PreparedBody:
         workspace = self._workspace_for(session, page.workspace_id)
-        return prepare_page_write(
-            body_md=body_md,
-            title=title,
-            slug=page.slug,
-            page_type=page_type,
-            tags=tags,
-            aliases=aliases,
-            fallback_page_type=page.page_type,
-            fallback_tags=list(page.tags or []),
-            fallback_aliases=list(page.aliases or []),
-            # TRANSITIONAL(R6): preserve the existing stale-browser/AI policy
-            # until the workspace Auto-fix policy is unified in R6.
-            auto_fix=(
-                workspace.auto_fix_enabled
-                and (is_stale or actor_provenance in AI_PROVENANCES)
+        return self._prepare_body(
+            BodyInput(
+                body_md=body_md,
+                metadata=PageMetadataInput(
+                    title=title,
+                    slug=page.slug,
+                    page_type=page_type,
+                    tags=tags,
+                    aliases=aliases,
+                ),
+                fallback_metadata=PreparedMetadata(
+                    page_type=page.page_type,
+                    tags=list(page.tags or []),
+                    aliases=list(page.aliases or []),
+                ),
+            ),
+            WriteContext(
+                workspace=workspace,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                page=page,
+                version=current,
+                session=session,
+            ),
+            # TRANSITIONAL(R6): ordinary browser autosaves keep their
+            # existing formatting policy until R6.
+            transitional_skip_fixes=(
+                not is_stale and actor_provenance not in AI_PROVENANCES
             ),
         )
 
@@ -3629,7 +3746,7 @@ class PageService:
         page: ContextPage,
         current: ContextPageVersion,
         title: str | None,
-        prepared: PreparedPageWrite,
+        prepared: PreparedBody,
         actor_kind: str,
         actor_id: str,
         base_version_id: UUID | None,
@@ -3641,15 +3758,11 @@ class PageService:
             page=page,
             current=current,
             title=title,
-            body_md=prepared.body_md,
-            content_hash=calculate_content_hash(prepared.body_md),
+            prepared=prepared,
             actor_kind=actor_kind,
             actor_id=actor_id,
             base_version_id=base_version_id,
             base_content_hash=base_content_hash,
-            page_type=prepared.page_type,
-            tags=prepared.tags,
-            aliases=prepared.aliases,
             actor_provenance=actor_provenance,
         )
 
@@ -3659,8 +3772,7 @@ class PageService:
         session: Session,
         page: ContextPage,
         current: ContextPageVersion,
-        body_md: str,
-        new_hash: str,
+        prepared: PreparedBody,
         next_title: str,
         actor_kind: str,
         actor_id: str,
@@ -3670,6 +3782,7 @@ class PageService:
         baseline_patch: dict[str, object] | None,
         metadata_patch: dict[str, object],
     ) -> PagePayload:
+        body_md = prepared.body
         staged_patch = dict(baseline_patch or {})
         staged_patch.update(metadata_patch)
 
@@ -3704,8 +3817,7 @@ class PageService:
                 session,
                 page_id=page.id,
                 parent_version_id=current.id,
-                body_md=body_md,
-                content_hash=new_hash,
+                body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status="draft",
@@ -3775,7 +3887,7 @@ class PageService:
         else:
             opened_session_ledger = False
 
-        self._rewrite_body_in_place(version, body_md, new_hash)
+        self._rewrite_body_in_place(version, prepared)
         version.actor_type = actor_kind
         version.actor_id = parse_uuid_or_none(actor_id)
         version.actor_display_name = resolve_actor_display_name(
@@ -3844,8 +3956,7 @@ class PageService:
         session: Session,
         page: ContextPage,
         current: ContextPageVersion,
-        body_md: str,
-        new_hash: str,
+        prepared: PreparedBody,
         actor_kind: str,
         actor_id: str,
         actor_provenance: str,
@@ -3853,6 +3964,7 @@ class PageService:
         metadata_patch: dict[str, object],
     ) -> PagePayload:
         """Stage an AI autosave without mutating any published projection."""
+        body_md = prepared.body
 
         targeting_reviews = self._context_reviews_for_version(
             session=session,
@@ -3874,7 +3986,7 @@ class PageService:
         before_hash = current.content_hash
         if same_actor_unreviewed_draft:
             version = current
-            self._rewrite_body_in_place(version, body_md, new_hash)
+            self._rewrite_body_in_place(version, prepared)
             version.actor_type = actor_kind
             version.actor_id = parse_uuid_or_none(actor_id)
             version.actor_display_name = resolve_actor_display_name(
@@ -3896,8 +4008,7 @@ class PageService:
                 session,
                 page_id=page.id,
                 parent_version_id=current.id,
-                body_md=body_md,
-                content_hash=new_hash,
+                body=prepared,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status="draft",
@@ -4034,15 +4145,11 @@ class PageService:
         page: ContextPage,
         current: ContextPageVersion,
         title: str | None,
-        body_md: str,
-        content_hash: str,
+        prepared: PreparedBody,
         actor_kind: str,
         actor_id: str,
         base_version_id: UUID,
         base_content_hash: str,
-        page_type: str | None,
-        tags: list[str] | None,
-        aliases: list[str] | None,
         actor_provenance: str,
     ) -> PagePayload:
         base_version = self._require_page_version(session, page, base_version_id)
@@ -4067,8 +4174,7 @@ class PageService:
             session,
             page_id=page.id,
             parent_version_id=base_version.id,
-            body_md=body_md,
-            content_hash=content_hash,
+            body=prepared,
             actor_kind=actor_kind,
             actor_id=actor_id,
             version_status="draft",
@@ -4117,9 +4223,9 @@ class PageService:
                 "server_version_id": str(current.id),
                 "server_content_hash": current.content_hash,
                 "proposed_title": title,
-                "proposed_page_type": page_type,
-                "proposed_tags": tags,
-                "proposed_aliases": aliases,
+                "proposed_page_type": prepared.metadata.page_type,
+                "proposed_tags": prepared.metadata.tags,
+                "proposed_aliases": prepared.metadata.aliases,
             },
             actor_provenance=actor_provenance,
         )
@@ -4230,8 +4336,7 @@ class PageService:
     @staticmethod
     def _rewrite_body_in_place(
         version: ContextPageVersion,
-        body_md: str,
-        content_hash: str,
+        prepared: PreparedBody,
         *,
         base_block_map: list[dict] | None = None,
         prepared_block_map: list[dict] | None = None,
@@ -4246,6 +4351,9 @@ class PageService:
         previous body and (healed) map, carrying ids of unchanged blocks.
         """
 
+        if not isinstance(prepared, PreparedBody):
+            raise TypeError("_rewrite_body_in_place requires a PreparedBody")
+        body_md = prepared.body
         validate_page_markdown_input(body_md)
         if prepared_block_map is None:
             previous_map = base_block_map
@@ -4263,7 +4371,7 @@ class PageService:
             )
         version.block_map = prepared_block_map
         version.body_md = body_md
-        version.content_hash = content_hash
+        version.content_hash = prepared.content_hash
 
     def _settle_autosave_reviews_of_open_edit(
         self,
@@ -5316,86 +5424,6 @@ def _published_or_visible_instant(
     return published.created_at if published is not None else visible_version.created_at
 
 
-def prepare_page_write(
-    *,
-    body_md: str,
-    title: str,
-    slug: str,
-    page_type: str | None,
-    tags: list[str] | None,
-    aliases: list[str] | None,
-    fallback_page_type: str | None = None,
-    fallback_tags: list[str] | None = None,
-    fallback_aliases: list[str] | None = None,
-    auto_fix: bool = False,
-) -> PreparedPageWrite:
-    from backend.utils.page_frontmatter import validate_frontmatter_input
-
-    validate_frontmatter_input(body_md)
-    from backend.domain.input_policy import validate_labels
-
-    validate_labels(tags, field="tags", max_length=48)
-    validate_labels(aliases, field="aliases", max_length=80)
-    parsed = parse_page_frontmatter(body_md)
-    next_page_type = page_type or parsed.page_type
-    next_tags = normalize_page_tags(tags) if tags is not None else parsed.tags
-    next_aliases = (
-        normalize_page_aliases(aliases) if aliases is not None else parsed.aliases
-    )
-    has_meaningful_fallback = (
-        (fallback_page_type is not None and fallback_page_type != "overview")
-        or bool(normalize_page_tags(fallback_tags))
-        or bool(normalize_page_aliases(fallback_aliases))
-    )
-    should_sync_frontmatter = (
-        parsed.has_frontmatter
-        or page_type is not None
-        or tags is not None
-        or aliases is not None
-        or has_meaningful_fallback
-    )
-    if should_sync_frontmatter:
-        effective_page_type = next_page_type or fallback_page_type or "overview"
-        effective_tags = (
-            next_tags if next_tags is not None else normalize_page_tags(fallback_tags)
-        )
-        effective_aliases = (
-            next_aliases
-            if next_aliases is not None
-            else normalize_page_aliases(fallback_aliases)
-        )
-        body_md = upsert_page_frontmatter(
-            body_md,
-            title=title,
-            slug=slug,
-            page_type=effective_page_type,
-            tags=effective_tags,
-            aliases=effective_aliases,
-        )
-        parsed = parse_page_frontmatter(body_md)
-        next_page_type = next_page_type or parsed.page_type
-        next_tags = next_tags if next_tags is not None else parsed.tags
-        next_aliases = next_aliases if next_aliases is not None else parsed.aliases
-    # I7: with Auto-fix on, normalize the prepared body (managed frontmatter is
-    # already injected above and is preserved by the normalizer) so the regular
-    # page editor's saves are formatted like ContextWrite drafts — not only the
-    # manual "Format now" button. Fail-closed: a normalizer fault leaves it as-is.
-    if auto_fix:
-        body_md = safe_normalize_markdown(body_md)
-    validate_body(body_md)
-    if title is not None:
-        validate_title(title)
-    heading_title = title_from_markdown_heading(parse_page_frontmatter(body_md).body)
-    if heading_title is not None:
-        validate_title(heading_title)
-    return PreparedPageWrite(
-        body_md=body_md,
-        page_type=next_page_type,
-        tags=next_tags,
-        aliases=next_aliases,
-    )
-
-
 def metadata_for_payload(
     page: ContextPage,
     version: ContextPageVersion,
@@ -5974,37 +6002,6 @@ def apply_page_metadata(
             page.aliases = next_aliases
             changed = True
     return changed
-
-
-def normalize_page_tags(tags: list[str] | None) -> list[str]:
-    if not tags:
-        return []
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for tag in tags:
-        value = str(tag).strip()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        normalized.append(value)
-    return normalized
-
-
-def normalize_page_aliases(aliases: list[str] | None) -> list[str]:
-    if not aliases:
-        return []
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for alias in aliases:
-        value = " ".join(str(alias).strip().split())[:80]
-        key = value.casefold()
-        if not value or key in seen:
-            continue
-        seen.add(key)
-        normalized.append(value)
-        if len(normalized) >= 32:
-            break
-    return normalized
 
 
 def snippet_around_match(body_md: str, match: re.Match[str], radius: int = 90) -> str:

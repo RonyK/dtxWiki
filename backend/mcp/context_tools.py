@@ -269,6 +269,8 @@ def _context_edit_page_service(ctx: ToolCallContext) -> PageService:
     return PageService(
         ctx.session_factory,
         job_queue=ctx.services.job_queue,
+        body_preparer=ctx.services.body_preparer,
+        lint_registry=ctx.services.lint_registry,
         context_media_repository_factory=ctx.services.context_media_repository_factory,
     )
 

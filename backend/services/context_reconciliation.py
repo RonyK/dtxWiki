@@ -45,7 +45,8 @@ from backend.services.context_push import (
 )
 from backend.services.context_visibility import editable_context_version_id
 from backend.services.db_write_intent import acquire_write_intent
-from backend.services.lint.autofix import safe_normalize_markdown
+from backend.services.lint.base import LintContext
+from backend.services.lint.rules_format import safe_format_body
 from backend.services.read_errors import (
     ReadNotFoundError,
     ReadServiceError,
@@ -265,13 +266,21 @@ def load_verified_reconciliation_manifest(
             "diverged branch manifest operations do not recreate the branch",
             error_code="reconcile_target_invalid",
         )
+    # Replay the durable proof with the format transform that originally
+    # produced it, independent of today's workspace Auto-fix policy.
+    lint_ctx = LintContext(
+        session=session,
+        workspace_id=page.workspace_id,
+        page=page,
+        version=base,
+    )
     original_final = (
-        safe_normalize_markdown(original_replay)
+        safe_format_body(original_replay, lint_ctx)
         if normalized and original_replay
         else original_replay
     )
     replayed_final = (
-        safe_normalize_markdown(active_replay)
+        safe_format_body(active_replay, lint_ctx)
         if normalized and active_replay
         else active_replay
     )

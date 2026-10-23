@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -81,12 +82,15 @@ class LintModule:
     module_id: str
     order: int
     rules: tuple[LintRule, ...]
+    fixer: Callable[[str, LintContext], str] | None = None
+    fix_on_save_setting: str | None = None
 
 
 class LintPolicy:
     """Resolve workspace rule toggles and their configured defaults."""
 
     def __init__(self, workspace: object | None) -> None:
+        self.workspace = workspace
         self._overrides = dict(getattr(workspace, "lint_policy", None) or {})
 
     @classmethod
@@ -97,3 +101,8 @@ class LintPolicy:
 
     def rule_enabled(self, rule_id: str, *, default_enabled: bool = True) -> bool:
         return self._overrides.get(rule_id, default_enabled)
+
+    def fix_on_save(self, module: LintModule) -> bool:
+        if module.fix_on_save_setting == "auto_fix":
+            return bool(getattr(self.workspace, "auto_fix_enabled", False))
+        return bool(self._overrides.get(module.fix_on_save_setting, False))

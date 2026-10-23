@@ -5,7 +5,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -37,6 +38,9 @@ from backend.services.library_canonical import (
     get_canonical_markdown_artifact,
 )
 from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
+
+if TYPE_CHECKING:
+    from backend.services.context_write_service import ContextWriteService
 
 MAX_BATCH = 8
 TASK_TOKEN_BUDGET = 2000
@@ -346,6 +350,7 @@ def submit_answers(
     actor_kind: str,
     actor_id: str,
     now: datetime | None = None,
+    context_write_service: ContextWriteService | None = None,
 ) -> AnswerOutcome:
     now = now or datetime.now(UTC)
     claims = codec.verify(resume_token, workspace_id=workspace_id)
@@ -374,6 +379,12 @@ def submit_answers(
     staged: list[UUID] = []
     lint_run: LintRun | None = None
     finding_count = 0
+    stagers = dict(TASK_STAGERS)
+    if context_write_service is not None:
+        stagers["folder_overview_draft"] = partial(
+            stagers["folder_overview_draft"],
+            context_write_service=context_write_service,
+        )
     for task_id, answer in parsed_answers:
         task = tasks.get(task_id)
         if task is None or task.status != "leased":
@@ -385,7 +396,7 @@ def submit_answers(
             rejected.append((task_id, "lease_expired"))
             continue
         validator = TASK_VALIDATORS.get(task.task_type)
-        stager = TASK_STAGERS.get(task.task_type)
+        stager = stagers.get(task.task_type)
         normalized = validator(answer) if validator is not None else None
         if normalized is None or stager is None:
             transition_task(session, task, "pending")
@@ -1284,10 +1295,17 @@ def _stage_folder_overview_draft(
     actor_kind: str,
     actor_id: str,
     now: datetime,
+    *,
+    context_write_service: ContextWriteService | None = None,
 ) -> DraftStageResult:
     from backend.services.context_write_service import ContextWriteService
 
-    result = ContextWriteService().write_draft(
+    writer = (
+        context_write_service
+        if context_write_service is not None
+        else ContextWriteService()
+    )
+    result = writer.write_draft(
         session=session,
         workspace_id=task.workspace_id,
         request=WriteDraftRequest(

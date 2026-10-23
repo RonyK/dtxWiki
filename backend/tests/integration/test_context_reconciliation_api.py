@@ -27,8 +27,8 @@ from backend.services.context_reconciliation import discard_reconciliation_branc
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import ReadValidationError
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.block_identity import block_map_for_version
-from backend.utils.content_hash import content_hash as calculate_content_hash
 
 
 def _client(page_service, *, role: str = "owner", email: str = "owner@example.com"):
@@ -1335,8 +1335,13 @@ def test_reconciliation_never_discloses_a_different_authors_private_editing_head
             session,
             page_id=page.id,
             parent_version_id=head.version_id,
-            body_md=private_body,
-            content_hash=calculate_content_hash(private_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=private_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000ee",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
@@ -1403,8 +1408,13 @@ def test_review_item_detail_never_discloses_a_different_authors_private_editing_
             session,
             page_id=page.id,
             parent_version_id=head.version_id,
-            body_md=private_body,
-            content_hash=calculate_content_hash(private_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=private_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000ee",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",

@@ -21,6 +21,7 @@ from backend.services.change_propagation import (
 )
 from backend.services.context_write_service import ContextWriteService
 from backend.services.lint_service import LintService
+from backend.tests.utils.prepared_body import prepare_context_body
 
 
 def _page(session, workspace_id, slug):
@@ -277,8 +278,13 @@ def test_mcp_publish_service_path_triggers_stale_propagation(session_factory):
             session,
             page_id=source.id,
             parent_version_id=source_version.id,
-            body_md="# MCP source\n\nChanged through publish_draft.",
-            content_hash="a" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=source.id,
+                body_md="# MCP source\n\nChanged through publish_draft.",
+                actor_kind="human",
+                actor_id="test",
+            ),
             actor_kind="human",
             actor_id="test",
             version_status="draft",

@@ -10,6 +10,7 @@ from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.workspace import Workspace
 from backend.services.audit_service import AuditService
 from backend.services.auto_approval import evaluate_context_write
+from backend.services.lint import LintRegistry
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.review_risk_policy import (
     ReviewRiskResolver,
@@ -66,7 +67,15 @@ def _bypass_decision(review: ReviewItem, change_set: ChangeSet) -> ReviewDecisio
 
 
 class ChangeReviewAuditRecorder:
-    def __init__(self, audit_service: AuditService | None = None) -> None:
+    def __init__(
+        self,
+        audit_service: AuditService | None = None,
+        *,
+        lint_registry: LintRegistry | None = None,
+    ) -> None:
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else LintRegistry.builtin()
+        )
         self.audit_service = audit_service or AuditService()
         self.risk_resolver = ReviewRiskResolver()
 
@@ -87,7 +96,11 @@ class ChangeReviewAuditRecorder:
         ai_authored = actor_provenance in AI_PROVENANCES
         operation_kind = "create" if action == "page.create" else "update"
         gate = evaluate_context_write(
-            session, workspace_id=workspace_id, needs_review=needs_review, body=body
+            session,
+            workspace_id=workspace_id,
+            needs_review=needs_review,
+            body=body,
+            lint_registry=self.lint_registry,
         )
         # Report the fact -- who wrote it -- and let the resolver decide whether
         # that needs a person. Forcing `review_required` here was the same
@@ -108,9 +121,7 @@ class ChangeReviewAuditRecorder:
             workspace_id=workspace_id,
             reason=action,
             trigger_type=(
-                "agent_authenticated_write"
-                if review_required
-                else "manual_edit"
+                "agent_authenticated_write" if review_required else "manual_edit"
             ),
             actor_type=actor_kind,
             actor_id=parse_uuid_or_none(actor_id),

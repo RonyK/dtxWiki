@@ -136,6 +136,16 @@ def _near_duplicate_finding(session, workspace_id, page, candidate):
 def test_m3_catalog_stages_findings_and_reviewed_overview_draft(
     session_factory, media_installer_factory
 ):
+    from backend.services.context_write_service import ContextWriteService
+
+    written_bodies = []
+
+    class RecordingWriter(ContextWriteService):
+        def write_draft(self, **kwargs):
+            written_bodies.append(kwargs["request"].body_markdown)
+            return super().write_draft(**kwargs)
+
+    writer = RecordingWriter()
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         page, version = _page(session, workspace_id, "maintenance-source")
@@ -198,7 +208,9 @@ def test_m3_catalog_stages_findings_and_reviewed_overview_draft(
             raw_text="Imported source text for classification.",
             format_hint="pdf",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -279,7 +291,11 @@ def test_m3_catalog_stages_findings_and_reviewed_overview_draft(
             actor_kind="mcp_client",
             actor_id="maintenance-client",
             now=NOW,
+            context_write_service=writer,
         )
+        assert written_bodies == [
+            "# Maintenance Overview\n\nA review-only overview draft."
+        ]
         assert set(outcome.staged) == {
             page_meta.id,
             overview.id,
@@ -337,7 +353,9 @@ def test_m3_invalid_answers_return_every_task_to_pending(
             raw_text="Imported source text for invalid answer validation.",
             format_hint="pdf",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -535,9 +553,7 @@ def test_closed_source_rejects_late_stale_and_duplicate_answers(session_factory)
         workspace_id = _workspace_id(session)
         page, _ = _page(session, workspace_id, "closed-source")
         candidate, _ = _page(session, workspace_id, "closed-candidate")
-        stale_finding = _near_duplicate_finding(
-            session, workspace_id, page, candidate
-        )
+        stale_finding = _near_duplicate_finding(session, workspace_id, page, candidate)
         stale_finding.rule_id = "kb.dependent_maybe_stale"
         stale_finding.fingerprint = "closed-stale"
         stale_finding.suggested_action = json.dumps({"confidence": "unreviewed"})
@@ -610,7 +626,8 @@ def test_closed_source_rejects_late_stale_and_duplicate_answers(session_factory)
 
 
 def test_import_classification_is_format_scoped_and_staged_deduplicated(
-    session_factory, media_installer_factory,
+    session_factory,
+    media_installer_factory,
 ):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -622,16 +639,21 @@ def test_import_classification_is_format_scoped_and_staged_deduplicated(
             raw_text="Markdown source.",
             format_hint="markdown",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=markdown.version.id,
         )
-        assert session.scalar(
+        assert (
+            session.scalar(
                 select(ClientDelegatedTask).where(
                     ClientDelegatedTask.target_id == markdown.library_item.id,
-                ClientDelegatedTask.task_type == "import_batch_classify",
+                    ClientDelegatedTask.task_type == "import_batch_classify",
+                )
             )
-        ) is None
+            is None
+        )
 
         pdf = LibraryService().register_library_item(
             session=session,
@@ -641,18 +663,22 @@ def test_import_classification_is_format_scoped_and_staged_deduplicated(
             raw_text="PDF source.",
             format_hint="pdf",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=pdf.version.id,
         )
         task = session.scalar(
-                select(ClientDelegatedTask).where(
-                    ClientDelegatedTask.target_id == pdf.library_item.id,
+            select(ClientDelegatedTask).where(
+                ClientDelegatedTask.target_id == pdf.library_item.id,
                 ClientDelegatedTask.task_type == "import_batch_classify",
             )
         )
         task.status = "staged"
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=pdf.version.id,
         )

@@ -20,6 +20,7 @@ from backend.context_media.domain import (
 )
 from backend.context_media.ports import ContextMediaRepository
 from backend.domain.input_policy import InputPolicyError
+from backend.domain.prepared_body import PreparedBody
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
@@ -76,6 +77,7 @@ from backend.services.actor_visible_read import (
 )
 from backend.services.audit_service import AuditService
 from backend.services.auto_approval import AutoApprovalDecision, evaluate_context_write
+from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.change_propagation import process_page_publish_maintenance
 from backend.services.context_editing import (
     ContextEditError,
@@ -127,7 +129,6 @@ from backend.services.library_canonical import (
 )
 from backend.services.library_storage import INLINE_TEXT_PREFIX
 from backend.services.lint import publish_floor_findings
-from backend.services.lint.autofix import safe_normalize_markdown
 from backend.services.lint.rules_format import (
     body_relative_message,
 )
@@ -192,13 +193,17 @@ class _ContextUpdateClassification:
 
 @dataclass(frozen=True)
 class _PreparedDivergedPatch:
-    body: str
+    prepared_body: PreparedBody
     pre_normalize_body: str
     normalized: bool
     outside_target_changed: bool
     risk_resolution: ReviewRiskResolution
     predicted_block_map: list[dict]
     operation_receipts: list[PatchOperationResolution]
+
+    @property
+    def body(self) -> str:
+        return self.prepared_body.body
 
 
 @dataclass(frozen=True)
@@ -639,12 +644,91 @@ class ContextWriteService:
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
         media_installer_factory: Callable[[Session, UUID], object] | None = None,
+        body_preparer: BodyPreparer | None = None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
         self.risk_resolver = ReviewRiskResolver()
         self.job_queue = job_queue or JobQueueService()
         self.context_media_repository_factory = context_media_repository_factory
         self.media_installer_factory = media_installer_factory
+        self.body_preparer = body_preparer or BodyPreparer()
+
+    def _prepare_body(
+        self,
+        markdown: str,
+        *,
+        workspace: Workspace,
+        actor_kind: str,
+        actor_id: str,
+        session: Session,
+        page: ContextPage | None = None,
+        version: ContextPageVersion | None = None,
+    ) -> PreparedBody:
+        try:
+            return self.body_preparer.prepare(
+                BodyInput(markdown),
+                WriteContext(
+                    workspace=workspace,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance="mcp_client",
+                    page=page,
+                    version=version,
+                    session=session,
+                ),
+            )
+        except MarkdownMediaPolicyError as exc:
+            raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
+
+    def preview_body(
+        self,
+        session: Session,
+        *,
+        workspace_id: UUID,
+        markdown: str,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+    ) -> PreparedBody:
+        return self.body_preparer.preview(
+            markdown,
+            WriteContext(
+                workspace=self._require_workspace(session, workspace_id),
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                session=session,
+            ),
+        )
+
+    def _prepared_base_matches(
+        self,
+        base_version: ContextPageVersion,
+        new_body: str,
+        *,
+        workspace: Workspace,
+        page: ContextPage,
+        session: Session,
+        actor_kind: str,
+        actor_id: str,
+    ) -> bool:
+        try:
+            return (
+                self._prepare_body(
+                    base_version.body_md,
+                    workspace=workspace,
+                    session=session,
+                    page=page,
+                    version=base_version,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                ).body
+                == new_body
+            )
+        except (InputPolicyError, RejectedByPolicyError):
+            # Historical invalid bytes can still be repaired by a valid new
+            # write. They cannot establish a format-only auto-approval proof.
+            return False
 
     def _enqueue_embed(
         self,
@@ -738,15 +822,14 @@ class ContextWriteService:
         self._lock_context_media_usage_intent(session, workspace_id)
         with session.begin_nested():
             workspace = self._require_workspace(session, workspace_id)
-            # F2c: Auto-fix mode normalizes the body before the gate + persistence
-            # so the saved draft is already well-formatted.
-            if workspace.auto_fix_enabled and request.body_markdown:
-                request = request.model_copy(
-                    update={
-                        "body_markdown": safe_normalize_markdown(request.body_markdown)
-                    }
-                )
-            self._validate_media_markdown(request.body_markdown)
+            prepared_body = self._prepare_body(
+                request.body_markdown,
+                workspace=workspace,
+                session=session,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+            request = request.model_copy(update={"body_markdown": prepared_body.body})
             missing_citation_warnings = self._citation_warnings(
                 workspace,
                 request.citations,
@@ -768,6 +851,7 @@ class ContextWriteService:
                 workspace_id=workspace_id,
                 needs_review=request.needs_review,
                 body=request.body_markdown,
+                lint_registry=self.body_preparer.registry,
             )
             risk_resolution = self.risk_resolver.resolve(
                 workspace=workspace,
@@ -819,7 +903,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 parent_version_id=parent_version_id,
-                body_markdown=request.body_markdown,
+                body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 change_set_id=change_set.id,
@@ -1537,6 +1621,10 @@ class ContextWriteService:
                     ) from exc
                 prepared_stale_patch = self._prepare_diverged_patch(
                     workspace=workspace,
+                    session=session,
+                    page=page,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
                     base_version=requested_base_version,
                     new_body=stale_body,
                     edits=stale_base_edits,
@@ -1634,8 +1722,8 @@ class ContextWriteService:
                     return project_caller_receipts(
                         UpdateDraftResult(
                             diff_summary=request.reason,
-                            persisted_content_hash=calculate_content_hash(
-                                prepared_diverged.body
+                            persisted_content_hash=(
+                                prepared_diverged.prepared_body.content_hash
                             ),
                             persisted_character_count=len(prepared_diverged.body),
                             outcome="updated_draft",
@@ -1859,9 +1947,16 @@ class ContextWriteService:
                         error_code="body_length_exceeded",
                     )
                 pre_normalize_body = new_body
-                if workspace.auto_fix_enabled and new_body:
-                    new_body = safe_normalize_markdown(new_body)
-                self._validate_media_markdown(new_body)
+                prepared_body = self._prepare_body(
+                    new_body,
+                    workspace=workspace,
+                    session=session,
+                    page=page,
+                    version=base_version,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                )
+                new_body = prepared_body.body
                 outside_target_changed = _body_changed_outside_edit_ranges(
                     base_version.body_md,
                     pre_normalize_body,
@@ -1903,14 +1998,14 @@ class ContextWriteService:
                     or not (engine_noop or normalized_noop)
                 )
                 would_create_version = would_create_workflow and (
-                    calculate_content_hash(new_body) != base_version.content_hash
+                    prepared_body.content_hash != base_version.content_hash
                     or requires_fork
                 )
                 return project_head_receipts(
                     UpdateDraftResult(
                         draft_version_id=None,
                         diff_summary=request.reason,
-                        persisted_content_hash=calculate_content_hash(new_body),
+                        persisted_content_hash=prepared_body.content_hash,
                         persisted_character_count=len(new_body),
                         outcome=(
                             "no_change"
@@ -1920,8 +2015,7 @@ class ContextWriteService:
                             else "review_only"
                         ),
                         body_changed=(
-                            calculate_content_hash(new_body)
-                            != base_version.content_hash
+                            prepared_body.content_hash != base_version.content_hash
                         ),
                         metadata_changed=False,
                         version_status=(
@@ -2090,6 +2184,7 @@ class ContextWriteService:
             workspace_id=workspace.id,
             needs_review=needs_review,
             body=new_body,
+            lint_registry=self.body_preparer.registry,
         )
         declared_defaults = normalized_review_policy(workspace.review_policy)[
             "defaults"
@@ -2268,6 +2363,10 @@ class ContextWriteService:
         self,
         *,
         workspace: Workspace,
+        session: Session,
+        page: ContextPage,
+        actor_kind: str,
+        actor_id: str,
         base_version: ContextPageVersion,
         new_body: str,
         edits: tuple[ResolvedEdit, ...],
@@ -2281,9 +2380,16 @@ class ContextWriteService:
                 error_code="body_length_exceeded",
             )
         pre_normalize_body = new_body
-        if workspace.auto_fix_enabled and new_body:
-            new_body = safe_normalize_markdown(new_body)
-        self._validate_media_markdown(new_body)
+        prepared_body = self._prepare_body(
+            new_body,
+            workspace=workspace,
+            session=session,
+            page=page,
+            version=base_version,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        new_body = prepared_body.body
         outside_target_changed = _body_changed_outside_edit_ranges(
             base_version.body_md,
             pre_normalize_body,
@@ -2296,7 +2402,7 @@ class ContextWriteService:
             signals={"review_required": True},
         )
         return _PreparedDivergedPatch(
-            body=new_body,
+            prepared_body=prepared_body,
             pre_normalize_body=pre_normalize_body,
             normalized=new_body != pre_normalize_body,
             outside_target_changed=outside_target_changed,
@@ -2363,7 +2469,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=requested_base_version.id,
-            body_markdown=prepared.body,
+            body=prepared.prepared_body,
             actor_kind=actor_kind,
             actor_id=actor_id,
             change_set_id=change_set.id,
@@ -2690,9 +2796,17 @@ class ContextWriteService:
         # F2c: Auto-fix mode normalizes the resulting body before the gate +
         # persistence (append/replace results are normalized as a whole).
         pre_normalize_body = new_body
-        if workspace.auto_fix_enabled and new_body:
-            new_body = safe_normalize_markdown(new_body)
-            self._validate_media_markdown(new_body)
+        prepared_body = self._prepare_body(
+            new_body,
+            workspace=workspace,
+            session=session,
+            page=page,
+            version=base_version,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        new_body = prepared_body.body
+        if workspace.auto_fix_enabled and pre_normalize_body:
             # I13 (re-review r2 findings 3-7): a true no-op under Auto-fix
             # (the normalized body is byte-identical to the stored base,
             # nothing else to apply) must not mint a change_set / review —
@@ -2764,8 +2878,6 @@ class ContextWriteService:
                         else None
                     ),
                 )
-        else:
-            self._validate_media_markdown(new_body)
         normalized = new_body != pre_normalize_body
         outside_target_changed = (
             _body_changed_outside_edit_ranges(
@@ -2825,7 +2937,15 @@ class ContextWriteService:
             and not citations
             and bool(new_body)
             and base_version is not None
-            and safe_normalize_markdown(base_version.body_md) == new_body
+            and self._prepared_base_matches(
+                base_version,
+                new_body,
+                workspace=workspace,
+                session=session,
+                page=page,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
             and not gate.force_signals()
             and not risk_at_or_above("low", review_from)
         )
@@ -2857,7 +2977,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 rejected_version=base_version,
-                body_markdown=new_body,
+                body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 change_set_id=change_set.id,
@@ -2871,7 +2991,7 @@ class ContextWriteService:
                 session=session,
                 page=page,
                 base_version=base_version,
-                body_markdown=new_body,
+                body=prepared_body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 change_set_id=change_set.id,
@@ -3212,7 +3332,9 @@ class ContextWriteService:
                                 version.body_md,
                             ),
                         )
-                        for finding in publish_floor_findings(version.body_md)
+                        for finding in publish_floor_findings(
+                            version.body_md, registry=self.body_preparer.registry
+                        )
                     ],
                 )
             assert_context_publish_candidate(
@@ -3238,7 +3360,9 @@ class ContextWriteService:
                         version.body_md,
                     ),
                 )
-                for finding in publish_floor_findings(version.body_md)
+                for finding in publish_floor_findings(
+                    version.body_md, registry=self.body_preparer.registry
+                )
             ]
             if findings and not publish_despite_findings:
                 # Carry the defects out with the refusal: the author is looking
@@ -3586,7 +3710,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         parent_version_id: UUID | None,
-        body_markdown: str,
+        body: PreparedBody,
         actor_kind: str,
         actor_id: str,
         change_set_id: UUID,
@@ -3603,8 +3727,7 @@ class ContextWriteService:
                 session,
                 page_id=page.id,
                 parent_version_id=parent_version_id,
-                body_md=body_markdown,
-                content_hash=calculate_content_hash(body_markdown),
+                body=body,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 version_status=version_status,
@@ -3625,7 +3748,7 @@ class ContextWriteService:
         except ContextMediaError as exc:
             raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
         except ValueError as exc:
-            if "dtx-media://asset/" in body_markdown:
+            if "dtx-media://asset/" in body.body:
                 raise RejectedByPolicyError(
                     str(exc),
                     error_code=MarkdownMediaPolicyError.error_code,
@@ -3953,6 +4076,7 @@ class ContextWriteService:
         ReviewService(
             audit_service=self.audit_service,
             context_media_repository_factory=self.context_media_repository_factory,
+            body_preparer=self.body_preparer,
         ).apply_decision(
             session=session,
             workspace_id=workspace_id,
@@ -3973,7 +4097,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         base_version: ContextPageVersion,
-        body_markdown: str,
+        body: PreparedBody,
         actor_kind: str,
         actor_id: str,
         change_set_id: UUID,
@@ -3987,7 +4111,7 @@ class ContextWriteService:
         prepared_block_map: PreparedBlockMap | None = None,
         force_new_version: bool = False,
     ) -> ContextPageVersion:
-        same_body = calculate_content_hash(body_markdown) == base_version.content_hash
+        same_body = body.content_hash == base_version.content_hash
         identical_body_requires_fork = self._identical_body_requires_fork(
             session, base_version
         )
@@ -4006,9 +4130,9 @@ class ContextWriteService:
         next_block_map = _next_block_map_for_edits(
             base_version=base_version,
             provisional_body=(
-                body_markdown if provisional_body is None else provisional_body
+                body.body if provisional_body is None else provisional_body
             ),
-            final_body=body_markdown,
+            final_body=body.body,
             edits=edits,
             identity_seed=identity_seed,
             prepared_block_map=prepared_block_map,
@@ -4017,7 +4141,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=base_version.id,
-            body_markdown=body_markdown,
+            body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,
             change_set_id=change_set_id,
@@ -4037,7 +4161,7 @@ class ContextWriteService:
         session: Session,
         page: ContextPage,
         rejected_version: ContextPageVersion,
-        body_markdown: str,
+        body: PreparedBody,
         actor_kind: str,
         actor_id: str,
         change_set_id: UUID,
@@ -4058,7 +4182,7 @@ class ContextWriteService:
             session=session,
             page=page,
             parent_version_id=rejected_version.id,
-            body_markdown=body_markdown,
+            body=body,
             actor_kind=actor_kind,
             actor_id=actor_id,
             change_set_id=change_set_id,

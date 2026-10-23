@@ -903,6 +903,7 @@ class ServiceRegistry:
         from backend.services.context_ingress_service import ContextIngressService
 
         return ContextIngressService(
+            body_preparer=self.body_preparer,
             tree_read_service=self.tree_read,
             context_media_repository_factory=self.context_media_repository_factory,
         )
@@ -924,6 +925,7 @@ class ServiceRegistry:
         from backend.services.context_write_service import ContextWriteService
 
         return ContextWriteService(
+            body_preparer=self.body_preparer,
             context_media_repository_factory=self.context_media_repository_factory,
             media_installer_factory=self.validated_media_installer_for_session,
         )
@@ -945,8 +947,15 @@ class ServiceRegistry:
         from backend.services.review_service import ReviewService
 
         return ReviewService(
-            context_media_repository_factory=self.context_media_repository_factory
+            context_media_repository_factory=self.context_media_repository_factory,
+            body_preparer=self.body_preparer,
         )
+
+    @cached_property
+    def body_preparer(self):
+        from backend.services.body_preparer import BodyPreparer
+
+        return BodyPreparer(registry=self.lint_registry)
 
     @cached_property
     def lint_registry(self):
@@ -1040,6 +1049,8 @@ class AppContainer:
             self.page_service = PageService(
                 self.db.control_session_factory(),
                 job_queue=self.services.job_queue,
+                body_preparer=self.services.body_preparer,
+                lint_registry=self.services.lint_registry,
                 context_media_repository_factory=(
                     self.services.context_media_repository_factory
                 ),
@@ -1109,6 +1120,10 @@ def assemble(
 ) -> AppContainer:
     if db is not None and session_factory is not None:
         raise ValueError("db and session_factory cannot both be provided")
+    if lint_modules and services is not None and "lint_registry" in services.__dict__:
+        raise ValueError(
+            "lint modules must be injected before the lint registry is constructed"
+        )
     resolved_db = (
         db
         if db is not None

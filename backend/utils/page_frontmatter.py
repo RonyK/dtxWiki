@@ -10,6 +10,35 @@ PAGE_METADATA_FIELDS = {"title", "slug", "type", "tags", "aliases"}
 TAG_MAX_LENGTH = 48
 ALIAS_MAX_LENGTH = 80
 METADATA_LIST_MAX_ITEMS = 32
+
+
+def normalize_page_tags(tags: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in tags or []:
+        value = str(tag).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def normalize_page_aliases(aliases: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases or []:
+        value = " ".join(str(alias).strip().split())[:80]
+        key = value.casefold()
+        if not value or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(value)
+        if len(normalized) >= 32:
+            break
+    return normalized
+
+
 PAGE_TYPES = {
     "overview",
     "source",
