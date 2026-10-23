@@ -2,38 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.domain.lint import LintFindingDraft as LintFindingDraft
+
+if TYPE_CHECKING:
+    from backend.models.context import ContextPage, ContextPageVersion
+
 LINT_LAYERS = ("format", "knowledge", "nav", "maintenance")
 LINT_SEVERITIES = ("error", "warning", "info")
-
-
-@dataclass(frozen=True)
-class LintFindingDraft:
-    """A single rule hit, before it is persisted as a ``LintFinding``.
-
-    ``LintFinding`` has no free-text message column, so the specific, human-facing
-    detail (e.g. "heading level jumps from H1 to H3") goes in
-    ``suggested_action``; ``rule_id`` identifies which rule produced it.
-    """
-
-    rule_id: str
-    severity: str  # one of LINT_SEVERITIES
-    target_type: str
-    target_id: UUID | None = None
-    suggested_action: str | None = None
-    message_key: str | None = None
-    message_args: dict[str, Any] | None = None
-    # Stable identity for current-state reconciliation (M3): excludes volatile
-    # line numbers so an acknowledged/dismissed finding survives unrelated edits.
-    # Convention: "{rule_id}|{anchor}" where anchor is a rule-specific stable
-    # locator (slug, heading text, …) or "" for one-per-target rules.
-    fingerprint: str = ""
 
 
 class LintStage(StrEnum):
@@ -50,8 +32,12 @@ class LintContext:
     session: Session | None
     workspace_id: UUID | None
     actor: object | None = None
-    page: object | None = None
-    version: object | None = None
+    page: ContextPage | None = None
+    version: ContextPageVersion | None = None
+    # Parser results live only for this invocation and key on the exact body.
+    body_analysis: dict[tuple[str, str], object] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
 
 @dataclass(frozen=True)
@@ -84,6 +70,13 @@ class TargetRule(LintRule, Protocol):
     def check_target(
         self, target: object, ctx: LintContext
     ) -> list[LintFindingDraft]: ...
+
+
+@runtime_checkable
+class VersionScopedTargetRule(TargetRule, Protocol):
+    """A target rule evaluated once for each visible Context version."""
+
+    version_scoped: bool
 
 
 @dataclass(frozen=True)

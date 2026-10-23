@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from backend.domain.lint import LintFindingDraft
+
 
 @dataclass(frozen=True)
 class PreparedMetadata:
@@ -16,4 +18,4 @@ class PreparedBody:
     content_hash: str
     metadata: PreparedMetadata = field(default_factory=PreparedMetadata)
     fixes: tuple[str, ...] = ()
-    findings: tuple = ()
+    findings: tuple[LintFindingDraft, ...] = ()

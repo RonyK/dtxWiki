@@ -103,13 +103,12 @@ class LintService:
         # severity/layer/status filters but stays subject to it.
         workspace = session.get(Workspace, workspace_id)
         policy = LintPolicy(workspace)
+        enabled_ids = {rule.rule_id for rule in self.lint_registry.enabled(policy)}
         disabled_ids = [
             rule.rule_id
             for rule in self.lint_registry.rules()
             if getattr(rule, "runtime_checkable", True)
-            if not policy.rule_enabled(
-                rule.rule_id, default_enabled=rule.default_enabled
-            )
+            if rule.rule_id not in enabled_ids
         ]
         base = select(LintFinding).where(LintFinding.workspace_id == workspace_id)
         if disabled_ids:
@@ -340,11 +339,12 @@ class LintService:
         counts: dict[str, int] = {}
         produced_keys: set[tuple[UUID | None, str]] = set()
         for target_type, target, target_id in targets:
+            ctx = LintContext(session, workspace_id, page=target)
             for rule in registry.rules_for(
                 LintStage.RUN, policy, target_type=target_type
             ):
                 for draft in findings_for_target(
-                    rule, target, LintContext(session, workspace_id, page=target)
+                    rule, target, ctx
                 ):
                     tid = draft.target_id if draft.target_id is not None else target_id
                     key = (tid, draft.fingerprint)

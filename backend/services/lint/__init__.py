@@ -17,6 +17,7 @@ from backend.services.lint.base import (
     LintRule,
     LintStage,
     TargetRule,
+    VersionScopedTargetRule,
 )
 from backend.services.lint.registry import LintRegistry
 
@@ -41,10 +42,9 @@ def page_format_warnings_for_body(
     if not body:
         return []
     messages: list[str] = []
+    ctx = LintContext(session, workspace_id, page=page)
     for rule in registry.rules_for(LintStage.READ, policy, target_type="context_page"):
-        for draft in rule.check_body(
-            body, LintContext(session, workspace_id, page=page)
-        ):
+        for draft in rule.check_body(body, ctx):
             messages.append(draft.suggested_action or draft.rule_id)
     return messages
 
@@ -77,6 +77,7 @@ __all__ = [
     "LintRule",
     "LintStage",
     "TargetRule",
+    "VersionScopedTargetRule",
     "page_format_warnings_for_body",
     "publish_floor_findings",
 ]

@@ -128,6 +128,15 @@ def _parse(body: str) -> _Parsed:
     return out
 
 
+def _parsed_body(body: str, ctx: LintContext) -> _Parsed:
+    key = (__name__, body)
+    parsed = ctx.body_analysis.get(key)
+    if not isinstance(parsed, _Parsed):
+        parsed = _parse(body)
+        ctx.body_analysis[key] = parsed
+    return parsed
+
+
 def _finding(
     rule_id: str,
     severity: str,
@@ -189,7 +198,7 @@ class _HeadingHierarchyRule:
     def check_body(self, body: str, ctx: LintContext) -> list[LintFindingDraft]:
         if not body:
             return []
-        parsed = _parse(body)
+        parsed = _parsed_body(body, ctx)
         findings: list[LintFindingDraft] = []
         prev: int | None = None
         for level, line, text in parsed.headings:
@@ -225,7 +234,7 @@ class _CodeFenceBalanceRule:
     def check_body(self, body: str, ctx: LintContext) -> list[LintFindingDraft]:
         if not body:
             return []
-        parsed = _parse(body)
+        parsed = _parsed_body(body, ctx)
         if parsed.unclosed_fence_line is not None:
             return [
                 _finding(
@@ -249,7 +258,7 @@ class _TableWellformedRule:
     def check_body(self, body: str, ctx: LintContext) -> list[LintFindingDraft]:
         if not body:
             return []
-        parsed = _parse(body)
+        parsed = _parsed_body(body, ctx)
         findings: list[LintFindingDraft] = []
         for start, block in parsed.table_blocks:
             if not _has_table_separator(block):
@@ -276,7 +285,7 @@ class _ImageRefRule:
     def check_body(self, body: str, ctx: LintContext) -> list[LintFindingDraft]:
         if not body:
             return []
-        parsed = _parse(body)
+        parsed = _parsed_body(body, ctx)
         return [
             _finding(
                 self.rule_id,
@@ -300,7 +309,7 @@ class _MermaidBlockRule:
     def check_body(self, body: str, ctx: LintContext) -> list[LintFindingDraft]:
         if not body:
             return []
-        parsed = _parse(body)
+        parsed = _parsed_body(body, ctx)
         findings: list[LintFindingDraft] = []
         for open_line, content in parsed.mermaid_blocks:
             nonempty = [c.strip() for c in content if c.strip()]

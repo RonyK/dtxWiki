@@ -168,14 +168,35 @@ def test_list_findings_hides_disabled_rule_findings(session_factory):
             ContextPage(workspace_id=ws.id, slug="lf", title="LF", page_type="concept")
         )
         session.flush()
-        lint.create_run(session, ws.id, req, "human", "t")
+        run = lint.create_run(session, ws.id, req, "human", "t")
+        floor_finding = LintFinding(
+            workspace_id=ws.id,
+            lint_run_id=run.id,
+            rule_id="md.code_fence_balance",
+            target_type="context_page",
+            severity="error",
+            fingerprint="md.code_fence_balance|unclosed",
+        )
+        session.add(floor_finding)
+        session.flush()
         listed = lint.list_findings(session, ws.id, rule="test.policy_rule")
         assert listed.total == 1
         # disable the rule -> its findings are hidden (but the row remains)
-        ws.lint_policy = {"test.policy_rule": False}
+        ws.lint_policy = {
+            "test.policy_rule": False,
+            "md.code_fence_balance": False,
+        }
         session.flush()
         hidden = lint.list_findings(session, ws.id, rule="test.policy_rule")
         assert hidden.total == 0
+        # Publication-floor rules stay enabled in both lists and deep links,
+        # including databases containing an older false policy override.
+        assert (
+            lint.list_findings(session, ws.id, rule="md.code_fence_balance").total == 1
+        )
+        assert (
+            lint.list_findings(session, ws.id, finding_id=floor_finding.id).total == 1
+        )
         assert (
             session.scalar(
                 select(func.count())

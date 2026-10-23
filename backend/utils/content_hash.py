@@ -7,6 +7,25 @@ def content_hash(markdown: str) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def same_authored_markdown(left: str, right: str) -> bool:
+    """Retain hard breaks while preserving NFC, newline, and EOF equivalence.
+
+    The public content hash strips every line's trailing spaces. Persistence
+    and merge decisions also need to distinguish Markdown hard breaks, so
+    they use this narrower equivalence without changing the hash contract.
+    """
+
+    def normalized(markdown: str) -> str:
+        return (
+            unicodedata.normalize("NFC", markdown)
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .rstrip("\n")
+        )
+
+    return normalized(left) == normalized(right)
+
+
 def canonicalize_markdown(markdown: str) -> str:
     # Used to also strip a leading `---` block's `version_no`/
     # `last_modified_at` lines, on the theory that the server would someday

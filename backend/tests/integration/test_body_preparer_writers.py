@@ -15,7 +15,11 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.context_edit import PatchDraftRequest, ReplaceTextOperation
 from backend.schemas.context_ingress import ContextIngressAcceptRequest
-from backend.schemas.context_write import UpdateDraftRequest, WriteDraftRequest
+from backend.schemas.context_write import (
+    CitationInput,
+    UpdateDraftRequest,
+    WriteDraftRequest,
+)
 from backend.services.context_ingress_service import ContextIngressService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.okf import import_okf_bundle
@@ -109,6 +113,47 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
         )
         _assert_stored(session_factory, updated.version_id, expected, f"W3 {suffix}")
 
+        # Whitespace-insensitive content hashes intentionally collide for these
+        # bodies, but a Markdown hard break is a real authored byte change.
+        for writer in ("write", "update"):
+            slug = f"hard-break-{suffix}-{writer}"
+            initial = _published(page_service, slug, "a\nb\n")
+            save = (
+                page_service.write_page
+                if writer == "write"
+                else page_service.update_page
+            )
+            save_args = dict(
+                title="Golden",
+                body_md="a  \nb\n",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+                actor_provenance="browser_session",
+            )
+            if writer == "write":
+                save_args.update(workspace_slug="default", slug=slug)
+            else:
+                save_args.update(page_id=initial.id)
+            changed = save(
+                **save_args,
+                base_version_id=initial.version_id,
+                base_content_hash=initial.content_hash,
+            )
+            repeated = save(
+                **save_args,
+                base_version_id=changed.version_id,
+                base_content_hash=changed.content_hash,
+            )
+            assert changed.version_id != initial.version_id
+            assert changed.content_hash == initial.content_hash
+            assert repeated.version_id == changed.version_id
+            _assert_stored(
+                session_factory,
+                changed.version_id,
+                "a  \nb\n",
+                f"hard break {suffix} {writer}",
+            )
+
         # W4: browser and AI autosaves use the same Workspace Auto-fix policy.
         for provenance in ("browser_session", "mcp_client"):
             editing = page_service.create_page_first(
@@ -119,7 +164,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 actor_id=ACTOR_ID,
                 actor_provenance="browser_session",
             )
-            saved = page_service.autosave_page(
+            autosave_args = dict(
                 page_id=editing.id,
                 workspace_id=workspace_id,
                 title="Golden",
@@ -130,13 +175,22 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 base_version_id=editing.version_id,
                 base_content_hash=editing.content_hash,
                 idempotency_key=f"w4-{suffix}-{provenance}",
+                with_edit_receipt=True,
             )
+            saved = page_service.autosave_page(**autosave_args)
             _assert_stored(
                 session_factory,
                 saved.version_id,
                 expected,
                 f"W4 {suffix} {provenance}",
             )
+            if provenance == "mcp_client":
+                replay = page_service.autosave_page(**autosave_args)
+                assert saved._edit_receipt is not None
+                assert replay._edit_receipt == saved._edit_receipt
+                assert replay.version_id == saved.version_id
+                assert replay.body_md == saved.body_md
+                assert replay.editing_revision == saved.editing_revision
 
         # W5: both stale-base alternative paths use the same Workspace policy.
         for writer in ("update", "autosave"):
@@ -288,6 +342,47 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             session_factory, updated.draft_version_id, expected, f"W10 {suffix}"
         )
 
+        hard_break = _published(page_service, f"w10-hard-break-{suffix}", "a\nb\n")
+        with session_factory.begin() as session:
+            changed = service.update_draft(
+                session=session,
+                workspace_id=workspace_id,
+                request=UpdateDraftRequest(
+                    page_id=hard_break.id,
+                    base_version_id=hard_break.version_id,
+                    base_content_hash=hard_break.content_hash,
+                    update_mode="full_rewrite",
+                    body_markdown="a  \nb\n",
+                    reason="save a semantic hard break with an unchanged hash",
+                ),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+            repeated = service.update_draft(
+                session=session,
+                workspace_id=workspace_id,
+                request=UpdateDraftRequest(
+                    page_id=hard_break.id,
+                    base_version_id=changed.draft_version_id,
+                    base_content_hash=changed.persisted_content_hash,
+                    update_mode="full_rewrite",
+                    body_markdown="a  \nb\n",
+                    reason="repeat the same authored hard break",
+                ),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+        assert changed.draft_version_id != hard_break.version_id
+        assert changed.body_changed is True
+        assert changed.persisted_content_hash == hard_break.content_hash
+        assert repeated.draft_version_id == changed.draft_version_id
+        _assert_stored(
+            session_factory,
+            changed.draft_version_id,
+            "a  \nb\n",
+            f"W10 hard break {suffix}",
+        )
+
         # A valid rewrite can repair historical unsafe bytes. Preparing the
         # old base for an auto-approval comparison must not reject that write.
         legacy = _published(page_service, f"w10-legacy-{suffix}")
@@ -317,6 +412,59 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             repaired.draft_version_id,
             expected,
             f"W10 legacy repair {suffix}",
+        )
+
+        # Context writers historically accepted legacy frontmatter that newer
+        # managed page metadata would reject. Citation-only updates and dry-run
+        # patches must remain usable without silently tightening that contract.
+        legacy_body = (
+            "---\ntags: [" + "x" * 60 + "]\n---\n# " + "h" * 257 + "\n\nbase\n"
+        )
+        legacy = _published(page_service, f"legacy-frontmatter-{suffix}")
+        with session_factory.begin() as session:
+            stored = session.get(ContextPageVersion, legacy.version_id)
+            stored.body_md = legacy_body
+            stored.content_hash = content_hash(legacy_body)
+        with session_factory.begin() as session:
+            preview = service.patch_draft(
+                session=session,
+                workspace_id=workspace_id,
+                request=PatchDraftRequest(
+                    page_id=legacy.id,
+                    base=str(legacy.version_id),
+                    operations=[_replace_base()],
+                    reason="preview a legacy frontmatter page",
+                    dry_run=True,
+                ),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+            assert preview.body_changed is True
+            cited = service.update_draft(
+                session=session,
+                workspace_id=workspace_id,
+                request=UpdateDraftRequest(
+                    page_id=legacy.id,
+                    base_version_id=legacy.version_id,
+                    base_content_hash=content_hash(legacy_body),
+                    update_mode="citation_update",
+                    citations=[
+                        CitationInput(
+                            target_kind="context_page_whole",
+                            citation_type="context_page",
+                            cited_context_page_version_id=written.version_id,
+                        )
+                    ],
+                    reason="cite without rewriting legacy frontmatter",
+                ),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            )
+        _assert_stored(
+            session_factory,
+            cited.draft_version_id,
+            legacy_body,
+            f"W10 legacy citation {suffix}",
         )
 
         # W11: ingress acceptance follows workspace Auto-fix.

@@ -284,6 +284,7 @@ class ContextIngressService:
             change_set=change_set,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor.provenance if actor is not None else "internal",
         )
         review = None
         if risk_resolution.review_required:
@@ -380,6 +381,7 @@ class ContextIngressService:
         change_set: ChangeSet,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
     ) -> tuple[
         ContextPage | None,
         ContextPageVersion | None,
@@ -473,7 +475,7 @@ class ContextIngressService:
                 workspace=session.get(Workspace, workspace_id),
                 actor_kind=actor_kind,
                 actor_id=actor_id,
-                actor_provenance="internal",
+                actor_provenance=actor_provenance,
                 page=page,
                 session=session,
             ),

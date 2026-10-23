@@ -5,10 +5,12 @@ from types import MappingProxyType
 
 from backend.services.lint.base import (
     LINT_LAYERS,
+    BodyRule,
     LintModule,
     LintPolicy,
     LintRule,
     LintStage,
+    TargetRule,
 )
 
 
@@ -30,6 +32,43 @@ class LintRegistry:
                     raise ValueError(f"default_enabled must be bool for {rule.rule_id}")
                 if not rule.applies_to:
                     raise ValueError(f"applies_to must be non-empty for {rule.rule_id}")
+                stages = getattr(rule, "stages", None)
+                if not isinstance(stages, frozenset) or any(
+                    not isinstance(stage, LintStage) for stage in stages
+                ):
+                    raise ValueError(f"invalid lint stages for {rule.rule_id}")
+                if not stages and getattr(rule, "runtime_checkable", True):
+                    raise ValueError(
+                        f"runtime stages cannot be empty for {rule.rule_id}"
+                    )
+                body_rule = isinstance(rule, BodyRule)
+                target_rule = isinstance(rule, TargetRule)
+                if (
+                    stages
+                    & {
+                        LintStage.SAVE,
+                        LintStage.READ,
+                        LintStage.PUBLISH_FLOOR,
+                    }
+                    and not body_rule
+                ):
+                    raise ValueError(
+                        f"body stages require check_body for {rule.rule_id}"
+                    )
+                if LintStage.RUN in stages and not (body_rule or target_rule):
+                    raise ValueError(
+                        f"RUN requires check_body or check_target for {rule.rule_id}"
+                    )
+                if body_rule and rule.applies_to != frozenset({"context_page"}):
+                    raise ValueError(
+                        f"body rules must target context_page for {rule.rule_id}"
+                    )
+                if hasattr(rule, "version_scoped") and (
+                    not isinstance(rule.version_scoped, bool)
+                    or not target_rule
+                    or rule.applies_to != frozenset({"context_page"})
+                ):
+                    raise ValueError(f"invalid version scope for {rule.rule_id}")
                 if rule.rule_id in rules:
                     raise ValueError(f"duplicate lint rule_id: {rule.rule_id}")
                 rules[rule.rule_id] = rule

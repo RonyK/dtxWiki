@@ -3,8 +3,14 @@
 ## Unreleased
 
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
-  Writers, readers and the worker share the assembled registry. Supply modules
-  before that registry is first used; late injection raises `ValueError`.
+  Writers and readers share that container's registry. Workers passed the same
+  `services` use it too; standalone CLI worker processes build their own builtin
+  registry and do not inherit another process's injected modules. Supply modules
+  before the registry is first used; late injection raises `ValueError`.
+- Preserve Markdown hard breaks during formatting and block identities after
+  formatted patches. Whole-body edit retries retain their original receipt.
+- Keep legacy citation-only updates and patch previews compatible with stored
+  frontmatter, and verify reconciliation independently of current fixer settings.
 
 ## 0.1.4 — 2026-10-23
 

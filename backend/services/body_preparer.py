@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from backend.context_media.domain import validate_markdown_media_policy
-from backend.domain.input_policy import validate_labels, validate_title
+from backend.domain.input_policy import validate_body, validate_labels, validate_title
 from backend.domain.prepared_body import PreparedBody, PreparedMetadata
 from backend.services.lint.base import LintContext, LintPolicy, LintStage
 from backend.services.lint.registry import LintRegistry
@@ -19,6 +21,14 @@ from backend.utils.page_frontmatter import (
     validate_frontmatter_input,
     validate_page_markdown_input,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from backend.models.context import ContextPage, ContextPageVersion
+    from backend.models.workspace import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,20 +49,20 @@ class BodyInput:
 
 @dataclass(frozen=True)
 class WriteContext:
-    workspace: object
+    workspace: Workspace
     actor_kind: str
     actor_id: str
     actor_provenance: str
-    page: object | None = None
-    version: object | None = None
-    session: object | None = None
+    page: ContextPage | None = None
+    version: ContextPageVersion | None = None
+    session: Session | None = None
 
 
 class BodyPreparer:
     def __init__(
         self,
         registry: LintRegistry | None = None,
-        policy_factory: Callable[[object], LintPolicy] = LintPolicy,
+        policy_factory: Callable[[Workspace], LintPolicy] = LintPolicy,
     ) -> None:
         self.registry = registry if registry is not None else LintRegistry.builtin()
         self.policy_factory = policy_factory
@@ -76,13 +86,15 @@ class BodyPreparer:
         preview: bool = False,
     ) -> PreparedBody:
         body = input.body_md
-        # Validate authored metadata before its forgiving read parser deduplicates.
-        if not preview:
-            validate_frontmatter_input(body)
         if input.metadata is not None:
+            # Managed page writes validate authored frontmatter before the
+            # forgiving parser deduplicates it. Context preparation must keep
+            # citation-only updates and dry-run patches compatible with
+            # historical frontmatter and derived titles; actual body inserts
+            # still enforce the repository's full Markdown input policy.
+            validate_frontmatter_input(body)
             validate_labels(input.metadata.tags, field="tags", max_length=48)
             validate_labels(input.metadata.aliases, field="aliases", max_length=80)
-            validate_title(input.metadata.title)
 
         metadata = PreparedMetadata()
         if input.metadata is not None:
@@ -98,12 +110,31 @@ class BodyPreparer:
         )
         fixes: list[str] = []
         for module in self.registry.fixers_for_save(policy, preview=preview):
-            result = module.fixer.fix(body, lint_ctx)
-            body = result.body
-            fixes.extend(result.fixes)
+            try:
+                result = module.fixer.fix(body, lint_ctx)
+                next_body = result.body
+                next_fixes = tuple(result.fixes)
+                if not isinstance(next_body, str) or not all(
+                    isinstance(fix, str) for fix in next_fixes
+                ):
+                    raise TypeError("Lint fixer must return body text and fix labels")
+            except Exception:
+                logger.exception(
+                    "Lint fixer %s failed; retaining the prior body", module.module_id
+                )
+                continue
+            body = next_body
+            fixes.extend(next_fixes)
 
         if not preview:
-            validate_page_markdown_input(body)
+            if input.metadata is not None:
+                # Preserve managed writes' error precedence: final body budget,
+                # explicit title, then derived frontmatter/heading metadata.
+                validate_body(body)
+                validate_title(input.metadata.title)
+                validate_page_markdown_input(body)
+            else:
+                validate_body(body)
             validate_markdown_media_policy(body)
         findings = tuple(
             finding

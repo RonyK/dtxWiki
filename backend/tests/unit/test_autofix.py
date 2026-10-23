@@ -2,6 +2,7 @@ from backend.services.lint.autofix import (
     MarkdownBlockKind,
     analyze_markdown,
     normalize_markdown,
+    safe_normalize_markdown_legacy_v1,
     table_row_semantic_key,
 )
 
@@ -14,6 +15,7 @@ SAMPLES = [
     "* one\n+ two\n- three\n",
     "para\n\n\n\n\nafter many blanks\n",
     "trailing spaces here    \nand a tab\there\t\n",
+    "a  \nb\n\n* first  \n  continuation\n",
     "```python\n   x = 1   \n## not a heading inside code\n* not a list\n```\n",
     "---\ntitle: Keep\nslug: keep-me\n---\n\n# Body\n\ntext\n",
     "| a | bbbb |\n|---|---|\n| 1 | 2 |\n",
@@ -64,8 +66,19 @@ def test_unordered_markers_normalized_to_dash():
     assert normalize_markdown("* a\n+ b\n- c\n") == "- a\n- b\n- c\n"
 
 
-def test_trailing_whitespace_stripped():
+def test_trailing_whitespace_stripped_without_losing_markdown_hard_breaks():
     assert normalize_markdown("text    \n") == "text\n"
+    assert normalize_markdown("a  \nb") == "a  \nb\n"
+    assert normalize_markdown("a    \nb\t\n") == "a  \nb\n"
+    assert normalize_markdown("a\t\nb\n") == "a\nb\n"
+    assert normalize_markdown("* first  \n  continuation\n") == (
+        "- first  \n  continuation\n"
+    )
+    assert normalize_markdown("foo | bar  \nbaz | qux\n") == (
+        "foo | bar  \nbaz | qux\n"
+    )
+    assert normalize_markdown("a\\\nb\n") == "a\\\nb\n"
+    assert safe_normalize_markdown_legacy_v1("a  \nb\n") == "a\nb\n"
 
 
 def test_blank_lines_collapsed():

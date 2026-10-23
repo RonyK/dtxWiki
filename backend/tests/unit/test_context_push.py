@@ -70,6 +70,44 @@ def test_different_base_and_head_with_touched_target_is_diverged():
     assert decision.outcome == "diverged"
     assert decision.changed_ids == frozenset({"b_1"})
 
+    base_body = "caf\u00e9\ncontinued\n\nbeta\n"
+    head_body = "caf\u00e9  \ncontinued\n\nbeta\n"
+    base_map = compute_block_map_with_ids(
+        base_body, previous_body_md=None, previous_block_map=None
+    )
+    head_map = compute_block_map_with_ids(
+        head_body, previous_body_md=base_body, previous_block_map=base_map
+    )
+    target = base_map[0]
+    assert head_map[0]["hash"] == target["hash"]
+    hard_break = decide_push_outcome(
+        base_version_id=_BASE_ID,
+        head_version_id=_HEAD_ID,
+        base_block_map=base_map,
+        head_block_map=head_map,
+        target_ids=frozenset({target["id"]}),
+        base_body_md=base_body,
+        head_body_md=head_body,
+    )
+    assert hard_break.outcome == "diverged"
+    assert hard_break.changed_ids == frozenset({target["id"]})
+
+    equivalent_body = "cafe\u0301\r\ncontinued\r\n\r\nbeta\r\n"
+    equivalent_map = compute_block_map_with_ids(
+        equivalent_body, previous_body_md=base_body, previous_block_map=base_map
+    )
+    equivalent = decide_push_outcome(
+        base_version_id=_BASE_ID,
+        head_version_id=_HEAD_ID,
+        base_block_map=base_map,
+        head_block_map=equivalent_map,
+        target_ids=frozenset({target["id"]}),
+        base_body_md=base_body,
+        head_body_md=equivalent_body,
+    )
+    assert equivalent.outcome == "rebased"
+    assert equivalent.changed_ids == frozenset()
+
 
 def test_unaddressable_operations_always_diverge_when_base_is_stale():
     decision = decide_push_outcome(
@@ -123,6 +161,31 @@ def test_insert_actual_delta_is_proven_per_anchor_not_by_an_unrelated_insert():
         candidate_block_map=candidate_map,
     ) == frozenset({"b_2"})
 
+    base_body = "alpha\ncontinued\n\nbeta\n"
+    candidate_body = "alpha  \ncontinued\n\nbeta\n"
+    base_map = compute_block_map_with_ids(
+        base_body, previous_body_md=None, previous_block_map=None
+    )
+    candidate_map = compute_block_map_with_ids(
+        candidate_body, previous_body_md=base_body, previous_block_map=base_map
+    )
+    target = base_map[0]
+    assert candidate_map[0]["hash"] == target["hash"]
+    assert actual_target_ids_for_operations(
+        [
+            ReplaceBlockOperation(
+                op="replace_block",
+                block=target["id"],
+                expected=target["hash"],
+                content="alpha  \ncontinued",
+            )
+        ],
+        base_block_map=base_map,
+        candidate_block_map=candidate_map,
+        base_body_md=base_body,
+        candidate_body_md=candidate_body,
+    ) == frozenset({target["id"]})
+
 
 def test_target_ids_for_operations_collects_block_and_row_ids():
     ops = [
@@ -164,12 +227,12 @@ def test_hash_map_includes_both_block_and_row_ids():
 
 
 def test_reconciliation_replace_and_delete_convergence_is_already_satisfied():
-    base_body = "alpha\n\nbeta\n"
+    base_body = "alpha\ncontinued\n\nbeta\n"
     base_map = compute_block_map_with_ids(
         base_body, previous_body_md=None, previous_block_map=None
     )
     alpha, beta = base_map
-    replace_body = "alpha desired\n\nbeta\n"
+    replace_body = "alpha desired\ncontinued\n\nbeta\n"
     replace_map = compute_block_map_with_ids(
         replace_body,
         previous_body_md=base_body,
@@ -179,7 +242,7 @@ def test_reconciliation_replace_and_delete_convergence_is_already_satisfied():
         op="replace_block",
         block=alpha["id"],
         expected=alpha["hash"],
-        content="alpha desired",
+        content="alpha desired\ncontinued",
     )
     replacement = reconciliation_target_sets(
         operations=[replace],
@@ -187,9 +250,28 @@ def test_reconciliation_replace_and_delete_convergence_is_already_satisfied():
         authored_body_md=replace_body,
         authored_block_map=replace_map,
         head_block_map=replace_map,
+        base_body_md=base_body,
+        head_body_md=replace_body,
     )
     assert replacement.conflict_ids == frozenset()
     assert replacement.already_satisfied_ids == frozenset({alpha["id"]})
+
+    different_break_body = "alpha desired  \ncontinued\n\nbeta\n"
+    different_break_map = compute_block_map_with_ids(
+        different_break_body, previous_body_md=base_body, previous_block_map=base_map
+    )
+    assert different_break_map[0]["hash"] == replace_map[0]["hash"]
+    different_break = reconciliation_target_sets(
+        operations=[replace],
+        base_block_map=base_map,
+        authored_body_md=replace_body,
+        authored_block_map=replace_map,
+        head_block_map=different_break_map,
+        base_body_md=base_body,
+        head_body_md=different_break_body,
+    )
+    assert different_break.conflict_ids == frozenset({alpha["id"]})
+    assert different_break.already_satisfied_ids == frozenset()
 
     delete_body = "beta\n"
     delete_map = compute_block_map_with_ids(
@@ -208,6 +290,8 @@ def test_reconciliation_replace_and_delete_convergence_is_already_satisfied():
         authored_body_md=delete_body,
         authored_block_map=delete_map,
         head_block_map=delete_map,
+        base_body_md=base_body,
+        head_body_md=delete_body,
     )
     assert deletion.conflict_ids == frozenset()
     assert deletion.already_satisfied_ids == frozenset({alpha["id"]})

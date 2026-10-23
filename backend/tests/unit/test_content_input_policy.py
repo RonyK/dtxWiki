@@ -217,6 +217,16 @@ def test_final_managed_frontmatter_counts_against_stored_body_budget():
                 actor_provenance="browser_session",
             ),
         )
+    with pytest.raises(InputPolicyError, match="body must contain"):
+        BodyPreparer().prepare(
+            BodyInput("x" * 1_000_001, PageMetadataInput("x" * 257, "title")),
+            WriteContext(
+                workspace=SimpleNamespace(id=uuid4(), auto_fix_enabled=False),
+                actor_kind="human",
+                actor_id="fixture",
+                actor_provenance="browser_session",
+            ),
+        )
 
 
 def test_long_h1_cannot_bypass_title_limit():

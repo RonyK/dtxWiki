@@ -77,6 +77,7 @@ from backend.services.change_review_audit import ChangeReviewAuditRecorder
 from backend.services.context_editing import (
     ContextEditError,
     apply_operations_with_block_map,
+    block_operation_provenance,
 )
 from backend.services.context_lifecycle import (
     apply_context_publication,
@@ -2417,17 +2418,14 @@ class PageService:
                     else None
                 )
                 if new_body != applied.body:
-                    if next_block_map is None:
-                        next_block_map = compute_block_map_with_ids(
-                            applied.body,
-                            previous_body_md=current_body,
-                            previous_block_map=block_map,
-                            identity_seed=str(version.id),
-                        )
+                    # The explicit operation proves identity continuity even
+                    # when formatting changes a replacement beyond fuzzy
+                    # similarity (for example, aligning a rewritten table).
                     next_block_map = compute_block_map_with_ids(
                         new_body,
-                        previous_body_md=applied.body,
-                        previous_block_map=next_block_map,
+                        previous_body_md=current_body,
+                        previous_block_map=block_map,
+                        operation_provenance=block_operation_provenance(applied.edits),
                         identity_seed=str(version.id),
                     )
                 self._rewrite_body_in_place(
@@ -2575,7 +2573,6 @@ class PageService:
                 actor_provenance=actor_provenance,
                 body_md=body_md,
             )
-            new_hash = prepared.content_hash
             page_created = False
 
             if page is None:
@@ -2616,7 +2613,6 @@ class PageService:
                         ),
                     )
                     body_md = prepared.body
-                    new_hash = prepared.content_hash
 
             if page_created:
                 create_as_draft = requires_human_review or as_draft
@@ -2713,7 +2709,8 @@ class PageService:
                 metadata_patch["placement_parent_node_id"] = str(
                     placement_parent_node_id
                 )
-            if new_hash == current.content_hash and (
+            # The content hash ignores trailing spaces, including hard breaks.
+            if body_md == current.body_md and (
                 (
                     current.version_status not in ("editing", "draft")
                     and not requires_human_review
@@ -2927,8 +2924,6 @@ class PageService:
                 actor_provenance=actor_provenance,
                 body_md=body_md,
             )
-            new_hash = prepared.content_hash
-
             # Not actor-scoped: `update_page` always targets the page's own
             # shared head, same as before P8.1 -- unlike `autosave_page`, it
             # inserts a fresh "draft" and may publish it immediately
@@ -2956,12 +2951,19 @@ class PageService:
                     session=session,
                     page=page,
                     current=current,
+                    base_version=self._require_alternative_base(
+                        session=session,
+                        page=page,
+                        current=current,
+                        base_version_id=base_version_id,
+                        base_content_hash=base_content_hash,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                    ),
                     title=title,
                     prepared=prepared,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    base_version_id=base_version_id,
-                    base_content_hash=base_content_hash,
                     actor_provenance=actor_provenance,
                 )
             placement_changed = (
@@ -3002,7 +3004,8 @@ class PageService:
             if placement_changed:
                 metadata_patch["placement_parent_node_id"] = str(destination_node_id)
 
-            if new_hash == current.content_hash and (
+            # A hard-break-only edit changes Markdown even when its hash matches.
+            if body_md == current.body_md and (
                 (
                     current.version_status not in ("editing", "draft")
                     and not requires_human_review
@@ -3422,7 +3425,7 @@ class PageService:
                 )
                 receipt_base["body"] = current.body_md
                 receipt_base["revision"] = current.editing_revision
-                is_stale = self._autosave_check_base(
+                alternative_base = self._autosave_check_base(
                     session=session,
                     page=page,
                     current=current,
@@ -3447,17 +3450,16 @@ class PageService:
                     aliases=aliases,
                     actor_provenance=actor_provenance,
                 )
-                if is_stale:
-                    return self._autosave_persist_alternative(
+                if alternative_base is not None:
+                    return self._preserve_alternative(
                         session=session,
                         page=page,
                         current=current,
+                        base_version=alternative_base,
                         title=title,
                         prepared=prepared,
                         actor_kind=actor_kind,
                         actor_id=actor_id,
-                        base_version_id=base_version_id,
-                        base_content_hash=base_content_hash,
                         actor_provenance=actor_provenance,
                     )
                 baseline_patch = (
@@ -3547,7 +3549,7 @@ class PageService:
                     metadata_patch=metadata_patch,
                 )
 
-            result = execute_idempotent_write(
+            return execute_idempotent_write(
                 session,
                 workspace_id=workspace_id,
                 actor_kind=actor_kind,
@@ -3586,13 +3588,12 @@ class PageService:
                     }
                 ),
                 result_model=PagePayload,
-                execute=_execute,
+                execute=lambda: self._autosave_receipt(
+                    result=_execute(),
+                    receipt_base=receipt_base,
+                    with_edit_receipt=with_edit_receipt,
+                ),
                 retry_only=retry_only,
-            )
-            return self._autosave_receipt(
-                result=result,
-                receipt_base=receipt_base,
-                with_edit_receipt=with_edit_receipt,
             )
 
     def _autosave_lock_and_load(
@@ -3679,7 +3680,7 @@ class PageService:
         actor_kind: str,
         actor_id: str,
         on_stale: str,
-    ) -> bool:
+    ) -> ContextPageVersion | None:
         try:
             self._validate_base(
                 session,
@@ -3694,8 +3695,18 @@ class PageService:
         except PageConflictError:
             if on_stale != "preserve_as_alternative":
                 raise
-            return True
-        return False
+            # A stale ID must still identify the exact historical bytes the
+            # caller read before preparation can validate the proposed body.
+            return self._require_alternative_base(
+                session=session,
+                page=page,
+                current=current,
+                base_version_id=base_version_id,
+                base_content_hash=base_content_hash,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+        return None
 
     def _autosave_prepare(
         self,
@@ -3738,33 +3749,6 @@ class PageService:
                 version=current,
                 session=session,
             ),
-        )
-
-    def _autosave_persist_alternative(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        current: ContextPageVersion,
-        title: str | None,
-        prepared: PreparedBody,
-        actor_kind: str,
-        actor_id: str,
-        base_version_id: UUID | None,
-        base_content_hash: str | None,
-        actor_provenance: str,
-    ) -> PagePayload:
-        return self._preserve_alternative(
-            session=session,
-            page=page,
-            current=current,
-            title=title,
-            prepared=prepared,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            base_version_id=base_version_id,
-            base_content_hash=base_content_hash,
-            actor_provenance=actor_provenance,
         )
 
     def _autosave_persist_editing_row(
@@ -4140,19 +4124,17 @@ class PageService:
             operation.diff_summary = "page.autosave.draft"
         session.add(operation)
 
-    def _preserve_alternative(
+    def _require_alternative_base(
         self,
+        *,
         session: Session,
         page: ContextPage,
         current: ContextPageVersion,
-        title: str | None,
-        prepared: PreparedBody,
         actor_kind: str,
         actor_id: str,
-        base_version_id: UUID,
-        base_content_hash: str,
-        actor_provenance: str,
-    ) -> PagePayload:
+        base_version_id: UUID | None,
+        base_content_hash: str | None,
+    ) -> ContextPageVersion:
         base_version = self._require_page_version(session, page, base_version_id)
         # A base that is the current head itself means the caller's own tab
         # overwrote the draft row in place (page.updated_at, current session
@@ -4171,6 +4153,20 @@ class PageService:
                 server_version_id=disclosed_version_id,
                 server_content_hash=disclosed_content_hash,
             )
+        return base_version
+
+    def _preserve_alternative(
+        self,
+        session: Session,
+        page: ContextPage,
+        current: ContextPageVersion,
+        base_version: ContextPageVersion,
+        title: str | None,
+        prepared: PreparedBody,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+    ) -> PagePayload:
         version = self._insert_version(
             session,
             page_id=page.id,

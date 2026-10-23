@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
+from backend.domain.input_policy import InputPolicyError
 from backend.services.body_preparer import (
     BodyInput,
     BodyPreparer,
@@ -57,6 +60,14 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     workspace.auto_fix_enabled = False
     historical = "---\ntitle: Old\ncustom: keep\n---\n" + raw
     assert preparer.prepare(BodyInput(historical), ctx).body == historical
+    # Context drafts retain the historical frontmatter acceptance boundary;
+    # managed page writes still enforce authored metadata limits.
+    legacy = "---\ntags: [" + "x" * 60 + "]\n---\n" + raw
+    assert preparer.prepare(BodyInput(legacy), ctx).body == legacy
+    with pytest.raises(InputPolicyError):
+        preparer.prepare(BodyInput(legacy, metadata=metadata), ctx)
+    with pytest.raises(InputPolicyError):
+        preparer.prepare(BodyInput("body\x00invalid"), ctx)
     assert preparer.preview(raw, ctx).body == fixed
     # Explicit formatting also accepts an unsaved image placeholder, as the
     # pre-extraction endpoint did; save-time media policy is a different gate.
@@ -97,11 +108,16 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
             fixed = body.replace("* canonical-link", "- canonical-link")
             return FixResult(fixed, ("format.list_marker",) if fixed != body else ())
 
+    class BrokenFixer:
+        def fix(self, body, _ctx):
+            raise ValueError("plugin failed")
+
     # Deliberately reverse registration order. The later formatter can only
     # produce the expected body after the earlier link module has run.
     registry = LintRegistry(
         (
             LintModule("format", 900, (FinalBodyRule(),), fixer=FormatList()),
+            LintModule("broken", 500, (), fixer=BrokenFixer()),
             LintModule("links", 100, (), fixer=CanonicalizeLink()),
         )
     )

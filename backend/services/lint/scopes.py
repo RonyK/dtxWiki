@@ -6,7 +6,13 @@ from dataclasses import replace
 from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion
-from backend.services.lint.base import BodyRule, LintContext, LintFindingDraft, LintRule
+from backend.services.lint.base import (
+    BodyRule,
+    LintContext,
+    LintFindingDraft,
+    LintRule,
+    VersionScopedTargetRule,
+)
 
 
 def lint_visible_versions(
@@ -54,7 +60,7 @@ def findings_for_target(
 ) -> list[LintFindingDraft]:
     """Execute one rule, expanding body/version scopes only when it needs them."""
     body_rule = isinstance(rule, BodyRule)
-    if body_rule or getattr(rule, "version_scoped", False):
+    if body_rule or (isinstance(rule, VersionScopedTargetRule) and rule.version_scoped):
         return collapse_by_fingerprint(
             (
                 scope,

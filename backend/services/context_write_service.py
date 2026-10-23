@@ -4,7 +4,6 @@ import unicodedata
 from bisect import bisect_right
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from hashlib import sha256
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -83,6 +82,7 @@ from backend.services.context_editing import (
     ContextEditError,
     PreparedBlockMap,
     ResolvedEdit,
+    apply_operations,
     apply_operations_with_block_map,
     apply_resolved_edits,
     block_map_edit_plan,
@@ -175,7 +175,7 @@ from backend.utils.block_identity import (
     validated_block_map_for_version,
 )
 from backend.utils.block_map import compute_blocks
-from backend.utils.content_hash import canonicalize_markdown
+from backend.utils.content_hash import canonicalize_markdown, same_authored_markdown
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_outline import parse_outline
 from backend.utils.markdown_parser import parse_markdown
@@ -512,6 +512,8 @@ def stale_pages_for_conversation(
                         head_version.block_map,
                         head_version.body_md,
                     ),
+                    base_body_md=read_version.body_md,
+                    candidate_body_md=head_version.body_md,
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -1009,7 +1011,9 @@ class ContextWriteService:
                 outcome="created_draft" if page_created else "updated_draft",
                 body_changed=(
                     parent_version is None
-                    or parent_version.content_hash != version.content_hash
+                    or not same_authored_markdown(
+                        parent_version.body_md, version.body_md
+                    )
                 ),
                 metadata_changed=page_created or bool(metadata_patch),
                 version_status=version.version_status,
@@ -1635,6 +1639,8 @@ class ContextWriteService:
                     effective_operations,
                     base_block_map=requested_base_map,
                     candidate_block_map=prepared_stale_patch.predicted_block_map,
+                    base_body_md=requested_base_version.body_md,
+                    candidate_body_md=prepared_stale_patch.body,
                 )
                 if prepared_stale_patch.body != requested_base_version.body_md:
                     actual_target_ids = frozenset(
@@ -1648,6 +1654,8 @@ class ContextWriteService:
                 base_block_map=requested_base_map,
                 head_block_map=head_block_map,
                 target_ids=actual_target_ids,
+                base_body_md=requested_base_version.body_md,
+                head_body_md=base_version.body_md,
             )
 
             if (
@@ -1998,7 +2006,7 @@ class ContextWriteService:
                     or not (engine_noop or normalized_noop)
                 )
                 would_create_version = would_create_workflow and (
-                    prepared_body.content_hash != base_version.content_hash
+                    not same_authored_markdown(new_body, base_version.body_md)
                     or requires_fork
                 )
                 return project_head_receipts(
@@ -2014,8 +2022,8 @@ class ContextWriteService:
                             if would_create_version
                             else "review_only"
                         ),
-                        body_changed=(
-                            prepared_body.content_hash != base_version.content_hash
+                        body_changed=not same_authored_markdown(
+                            new_body, base_version.body_md
                         ),
                         metadata_changed=False,
                         version_status=(
@@ -2454,6 +2462,10 @@ class ContextWriteService:
         `requested_base_version.body_md`, NOT head's -- a diverged push must
         never silently land on content the caller never saw.
         """
+        from backend.services.context_reconciliation import (
+            build_reconciliation_normalization_proof,
+        )
+
         change_set = self._create_change_set(
             session=session,
             workspace_id=workspace_id,
@@ -2508,17 +2520,29 @@ class ContextWriteService:
         original_operations = [
             operation.model_dump(mode="json") for operation in operations
         ]
-        clean_operations = [
-            operation.model_dump(mode="json")
+        clean_operation_models = [
+            operation
             for operation in operations
             if operation_target_id(operation) in actual_target_ids
             and operation_target_id(operation) not in conflicting_ids
         ]
-        conflict_operations = [
-            operation.model_dump(mode="json")
+        conflict_operation_models = [
+            operation
             for operation in operations
             if operation_target_id(operation) in conflicting_ids
         ]
+        active_body, _active_edits = apply_operations(
+            requested_base_version.body_md,
+            None,
+            [*clean_operation_models, *conflict_operation_models],
+            block_map=base_block_map,
+        )
+        normalization_proof = build_reconciliation_normalization_proof(
+            prepared.pre_normalize_body, prepared.body
+        )
+        normalization_proof["active"] = build_reconciliation_normalization_proof(
+            active_body, prepared.body
+        )
         manifest = {
             "schema": _DIVERGED_MANIFEST_SCHEMA,
             "branch_version_id": str(version.id),
@@ -2538,13 +2562,7 @@ class ContextWriteService:
                 "content_hash": version.content_hash,
                 "parent_version_id": str(version.parent_version_id),
             },
-            "normalization": {
-                "applied": prepared.normalized,
-                "pre_normalize_body_sha256": sha256(
-                    prepared.pre_normalize_body.encode("utf-8")
-                ).hexdigest(),
-                "final_body_sha256": sha256(prepared.body.encode("utf-8")).hexdigest(),
-            },
+            "normalization": normalization_proof,
             "target_ids": sorted(target_ids_for_operations(operations) or frozenset()),
             "changed_since_base_ids": sorted(changed_ids),
             "conflicting_ids": sorted(conflicting_ids),
@@ -2557,8 +2575,14 @@ class ContextWriteService:
                 for entry in conflicts
             ],
             "original_operations": original_operations,
-            "clean_operations": clean_operations,
-            "conflict_operations": conflict_operations,
+            "clean_operations": [
+                operation.model_dump(mode="json")
+                for operation in clean_operation_models
+            ],
+            "conflict_operations": [
+                operation.model_dump(mode="json")
+                for operation in conflict_operation_models
+            ],
             "operation_receipts": [
                 receipt.model_dump(mode="json")
                 for receipt in prepared.operation_receipts
@@ -3004,7 +3028,9 @@ class ContextWriteService:
                 prepared_block_map=prepared_block_map,
                 force_new_version=force_new_version,
             )
-        body_changed = version.content_hash != base_version.content_hash
+        body_changed = not same_authored_markdown(
+            version.body_md, base_version.body_md
+        )
         metadata_changed = self._metadata_patch_changes(
             session=session,
             page=page,
@@ -4111,7 +4137,10 @@ class ContextWriteService:
         prepared_block_map: PreparedBlockMap | None = None,
         force_new_version: bool = False,
     ) -> ContextPageVersion:
-        same_body = body.content_hash == base_version.content_hash
+        # The canonical hash ignores trailing spaces, including Markdown hard
+        # breaks. Keep the established NFC/newline equivalence without losing
+        # a hard-break-only save.
+        same_body = same_authored_markdown(body.body, base_version.body_md)
         identical_body_requires_fork = self._identical_body_requires_fork(
             session, base_version
         )
@@ -4605,6 +4634,8 @@ class ContextWriteService:
             authored_body_md=branch.body_md,
             authored_block_map=branch_map,
             head_block_map=reconcile_base_map,
+            base_body_md=verified_manifest.base.body_md,
+            head_body_md=reconcile_base_version.body_md,
         )
         dynamic_conflict_ids = set(target_sets.conflict_ids)
         already_satisfied_ids = set(target_sets.already_satisfied_ids)

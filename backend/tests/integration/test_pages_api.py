@@ -638,6 +638,21 @@ def test_pages_api_stale_autosave_preserve_rejects_unsafe_media_without_mutation
     page_id = UUID(created["id"])
     before = page_version_and_pointer_snapshot(page_service, page_id)
 
+    invalid_base = client.post(
+        f"{pages_url(page_service)}/{created['id']}/autosave",
+        json={
+            "idempotency_key": "t-14-invalid-base",
+            "title": created["title"],
+            "body_md": "![inline](data:image/png;base64,aGVsbG8=)",
+            "base_version_id": created["version_id"],
+            "base_content_hash": "0" * 64,
+            "expected_editing_revision": created["editing_revision"],
+            "on_stale": "preserve_as_alternative",
+        },
+    )
+    assert invalid_base.status_code == 409, invalid_base.text
+    assert page_version_and_pointer_snapshot(page_service, page_id) == before
+
     response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={

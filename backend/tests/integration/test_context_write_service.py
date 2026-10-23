@@ -2704,14 +2704,14 @@ def test_patch_draft_dry_run_returns_preview_without_persistence(session_factory
 
     with session_factory.begin() as session:
         workspace = _workspace(session)
-        workspace.auto_fix_enabled = False
+        workspace.auto_fix_enabled = True
         created = service.write_draft(
             session=session,
             workspace_id=workspace.id,
             request=WriteDraftRequest(
                 title="Patch Dry Run",
                 page_type="overview",
-                body_markdown="# Patch Dry Run\n\noriginal\n",
+                body_markdown="# Patch Dry Run\n\noriginal\ncontinued\n",
                 reason="create dry-run fixture",
             ),
             actor_kind="human",
@@ -2723,25 +2723,31 @@ def test_patch_draft_dry_run_returns_preview_without_persistence(session_factory
         )
         change_count = session.scalar(select(func.count()).select_from(ChangeSet))
         review_count = session.scalar(select(func.count()).select_from(ReviewItem))
-        preview_body = "# Patch Dry Run\n\npreviewed\n"
-        original_body = "# Patch Dry Run\n\noriginal\n"
+        # Canonical hashes ignore this semantic hard break. Preview and save
+        # must still recognize and preserve its exact authored bytes.
+        preview_body = "# Patch Dry Run\n\noriginal  \ncontinued\n"
+        original_body = "# Patch Dry Run\n\noriginal\ncontinued\n"
+        assert calculate_content_hash(preview_body) == calculate_content_hash(
+            original_body
+        )
+        request = PatchDraftRequest(
+            page_id=created.page_id,
+            base=str(created.draft_version_id),
+            operations=[
+                {
+                    "op": "replace_document",
+                    "content": preview_body,
+                    "expected_content_hash": section_content_hash(original_body),
+                }
+            ],
+            reason="preview replacement without writing",
+            dry_run=True,
+        )
 
         preview = service.patch_draft(
             session=session,
             workspace_id=workspace.id,
-            request=PatchDraftRequest(
-                page_id=created.page_id,
-                base=str(created.draft_version_id),
-                operations=[
-                    {
-                        "op": "replace_document",
-                        "content": preview_body,
-                        "expected_content_hash": section_content_hash(original_body),
-                    }
-                ],
-                reason="preview replacement without writing",
-                dry_run=True,
-            ),
+            request=request,
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
@@ -2757,10 +2763,22 @@ def test_patch_draft_dry_run_returns_preview_without_persistence(session_factory
         assert (
             session.scalar(select(func.count()).select_from(ReviewItem)) == review_count
         )
+        assert page.latest_draft_version_id == created.draft_version_id
+        assert preview.outcome == "updated_draft"
+        saved = service.patch_draft(
+            session=session,
+            workspace_id=workspace.id,
+            request=request.model_copy(update={"dry_run": False}),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+        )
+        stored = session.get(ContextPageVersion, saved.draft_version_id)
+        assert stored.body_md == preview.preview_body_markdown == preview_body
+        assert saved.body_changed is True
+        assert saved.draft_version_id != created.draft_version_id
 
     assert preview.body_changed is True
     assert preview.persisted_content_hash == calculate_content_hash(preview_body)
-    assert page.latest_draft_version_id == created.draft_version_id
 
 
 def test_draft_update_preserves_published_pagelinks_until_publish(session_factory):

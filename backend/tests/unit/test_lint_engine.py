@@ -89,6 +89,21 @@ def test_registry_rejects_empty_applies_to_and_nonbool_default():
         LintRegistry(
             (LintModule("test", 0, (_Dummy("t.nonbool", default_enabled="yes"),)),)
         )
+    invalid_stage = _Dummy("t.invalid_stage")
+    invalid_stage.stages = frozenset({"unknown"})
+    with pytest.raises(ValueError, match="invalid lint stages"):
+        LintRegistry((LintModule("test", 0, (invalid_stage,)),))
+    invalid_stage.stages = frozenset()
+    with pytest.raises(ValueError, match="runtime stages cannot be empty"):
+        LintRegistry((LintModule("test", 0, (invalid_stage,)),))
+    target_only = _Dummy("t.target_only")
+    target_only.stages = frozenset({LintStage.READ})
+    with pytest.raises(ValueError, match="body stages require check_body"):
+        LintRegistry((LintModule("test", 0, (target_only,)),))
+    invalid_scope = _Dummy("t.invalid_scope")
+    invalid_scope.version_scoped = "yes"
+    with pytest.raises(ValueError, match="invalid version scope"):
+        LintRegistry((LintModule("test", 0, (invalid_scope,)),))
 
 
 def test_builtin_registry_and_container_module_injection_preserve_publication_floor():
@@ -186,7 +201,6 @@ def test_builtin_registry_and_container_module_injection_preserve_publication_fl
     ] == [
         "md.code_fence_balance",
     ]
-    assert LintStage.PUBLISH_FLOOR in registry.rule("md.code_fence_balance").stages
     catalogue = services.lint.list_rules(
         SimpleNamespace(
             get=lambda *_: SimpleNamespace(
