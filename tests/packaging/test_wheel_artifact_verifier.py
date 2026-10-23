@@ -13,7 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
-CURRENT_HEAD = "19db79d3e622"
+CURRENT_HEAD = "ef53a0a7061c"
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"
@@ -290,7 +290,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
         assert (
             f"{name}: alembic head {CURRENT_HEAD}, "
             f"{REVISION_MODULES} packaged core revision modules, "
-            "15 frozen migration files intact, "
+            "19 frozen migration files intact, "
             "frontend bundle intact"
         ) in result.stdout
 
