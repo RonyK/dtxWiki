@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.4 — 2026-10-23
+
+### Search results
+
+- Show search results with readable summaries and folder locations, distinct
+  match explanations, and a clear link indicator. Context results retain their
+  correct destination styling when opened through workspace permalinks.
+- Put the result type above the title on mobile and allow longer titles to
+  wrap. Hide duplicate matched names, generated UUID paths, stale markers, and
+  citation-availability labels; clean Markdown syntax from displayed snippets.
+- Exclude changes and feedback from general search and remove the browser's
+  change-history search option. Explicit API and MCP change and feedback
+  scopes remain available, and old browser change-search links open all results
+  with guidance to Activity and Review.
+- Add optional `summary` and `location` search fields with permission-aware
+  batch location reads. Skip metadata lists when deriving page summaries and
+  advance the MCP tool contract to revision 14.
+
+### Database
+
+- Index `change_operation.change_set_id` for Review, explicit change searches,
+  and cascading deletion. Upgrade from the unchanged 0.1.3 revision and retain
+  all existing change-operation rows when adding or removing the index.
+- Freeze the 0.1.3 migration and its helper modules together with the new
+  0.1.4 revision in both source and package artifact checks.
+
 ## 0.1.3 — 2026-10-23
 
 ### Runtime and upgrades
