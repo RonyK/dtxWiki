@@ -328,6 +328,10 @@ def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
 
     advertised = {tool.name for tool in list_dtxwiki_tools()}
     assert advertised == set(mcp_schemas)
+    ranked = mcp_schemas["search"]["output"]["$defs"]["RankedResult"]
+    assert {"summary", "location"}.issubset(ranked["properties"])
+    assert {"summary", "location"}.isdisjoint(ranked.get("required", []))
+    assert ranked["properties"]["stale"]["deprecated"] is True
 
 
 def test_mcp_schema_export_includes_review_tools(mcp_schemas):

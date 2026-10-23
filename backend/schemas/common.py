@@ -138,7 +138,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  13 -- Bundle categories now expose the supported enum, review notes reject
 #        invalid Unicode, and body budgets describe the final stored Markdown.
 #        Refresh tools/list before submitting content and bundle requests.
-MCP_TOOL_CONTRACT_REVISION = 13
+#  14 -- General search excludes feedback and changes; explicit audit scopes
+#        remain available. Search results gain optional summary and location,
+#        and the always-false stale field is deprecated. Refresh tools/list.
+MCP_TOOL_CONTRACT_REVISION = 14
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

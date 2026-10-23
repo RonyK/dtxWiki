@@ -15263,6 +15263,20 @@
             "title": "Id",
             "type": "string"
           },
+          "location": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
           "match_reason": {
             "anyOf": [
               {
@@ -15331,8 +15345,20 @@
           },
           "stale": {
             "default": false,
+            "deprecated": true,
             "title": "Stale",
             "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           },
           "title": {
             "title": "Title",
@@ -20052,7 +20078,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.1.3"
+    "version": "0.1.4"
   },
   "openapi": "3.1.0",
   "paths": {

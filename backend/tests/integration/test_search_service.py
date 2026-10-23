@@ -3,7 +3,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from backend.models.agent import AgentPage, AgentPageVersion
@@ -28,6 +28,7 @@ from backend.services.indexing.fts5 import sync_agent_page_doc_sources
 from backend.services.library_service import LibraryService
 from backend.services.page_service import PageService, sync_page_projections
 from backend.services.read_errors import UnsupportedRetrievalModeError
+from backend.services.search_result_metadata import enrich_search_result_metadata
 from backend.services.search_service import SearchService, ranked_result_types
 from backend.services.tree_service import TreeService
 from backend.utils.content_hash import content_hash as calculate_content_hash
@@ -116,7 +117,9 @@ def test_search_service_returns_keyword_results_across_read_domains(
             title="Search Source",
             raw_text="# Search Source\n\nNeedle artifact body",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -135,16 +138,27 @@ def test_search_service_returns_keyword_results_across_read_domains(
             scope="all",
             actor=audit_actor(workspace.id),
         )
+        feedback_results = search_service.search(
+            session=session,
+            workspace_id=workspace.id,
+            query="needle",
+            scope="feedback",
+            actor=audit_actor(workspace.id),
+        )
 
     assert ranked_result_types(results.ranked_results) >= {
         "context_page",
         "library_artifact",
-        "feedback",
     }
+    assert ranked_result_types(results.ranked_results).isdisjoint(
+        {"feedback", "change_set"}
+    )
     assert results.supported_retrieval_modes == ["keyword"]
     assert results.ranked_results[0].score >= results.ranked_results[-1].score
     feedback_hit = next(
-        result for result in results.ranked_results if result.type == "feedback"
+        result
+        for result in feedback_results.ranked_results
+        if result.type == "feedback"
     )
     assert feedback_hit.source_ref == {
         "kind": "library_item",
@@ -241,10 +255,18 @@ def test_search_service_change_set_links_review_item_when_available():
                 role="owner",
             ),
         )
+        all_results = search_service.search(
+            session=session,
+            workspace_id=workspace.id,
+            query="needle",
+            scope="all",
+            actor=audit_actor(workspace.id),
+        )
 
     [hit] = results.ranked_results
     assert hit.type == "change_set"
     assert hit.source_ref == {"kind": "review_item", "id": str(review.id)}
+    assert "change_set" not in ranked_result_types(all_results.ranked_results)
 
 
 def test_search_service_change_lane_hides_draft_version_autosave_from_viewer():
@@ -549,16 +571,18 @@ def test_feedback_search_filters_before_limit():
             created_at=utc_now() - timedelta(days=2),
         )
         session.add(old_match)
-        session.add_all([
-            FeedbackItem(
-                workspace_id=workspace.id,
-                target_type="context_page",
-                target_id=uuid4(),
-                body=f"recent unrelated feedback {index}",
-                created_at=utc_now() - timedelta(minutes=index),
-            )
-            for index in range(12)
-        ])
+        session.add_all(
+            [
+                FeedbackItem(
+                    workspace_id=workspace.id,
+                    target_type="context_page",
+                    target_id=uuid4(),
+                    body=f"recent unrelated feedback {index}",
+                    created_at=utc_now() - timedelta(minutes=index),
+                )
+                for index in range(12)
+            ]
+        )
         results = search_service.search(
             session=session,
             workspace_id=workspace.id,
@@ -1139,7 +1163,9 @@ def test_search_service_artifact_title_uses_parent_item_title(media_installer_fa
             title="Quarterly Report",
             raw_text="# Quarterly Report\n\nNeedle artifact body",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -1171,7 +1197,9 @@ def test_search_service_artifact_title_falls_back_to_humanized_type(
             title=None,
             raw_text="# Untitled\n\nNeedle artifact body",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -1241,7 +1269,9 @@ def test_search_service_excludes_restricted_library_items_and_artifacts(
             trust_level="restricted",
             raw_text="# Restricted Source\n\nNeedle restricted artifact body",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -1283,7 +1313,9 @@ def test_search_service_can_include_restricted_library_items_for_authorized_acto
             trust_level="restricted",
             raw_text="# Restricted Source\n\nNeedle restricted artifact body",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -1319,7 +1351,9 @@ def test_search_service_excludes_archived_sources_and_artifacts(
             trust_level="trusted",
             raw_text="# Archived Source\n\nNeedle archived artifact body",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -1368,6 +1402,7 @@ def test_search_service_agent_page_snippet_omits_title_and_slug():
     assert "Needle agent body guidance" in snippet
     assert "release-checklist-prompt" not in snippet
     assert "Release Checklist Prompt" not in snippet
+    assert results.ranked_results[0].summary == "Needle agent body guidance"
 
     with session_factory.begin() as session:
         slug_results = search_service.search(
@@ -1858,6 +1893,215 @@ def test_search_service_rejects_unsupported_retrieval_mode():
             query="anything",
             retrieval_mode="semantic",
         )
+
+
+def _metadata_page(session, workspace_id, *, slug, title, body, published=True):
+    page = ContextPage(workspace_id=workspace_id, slug=slug, title=title)
+    session.add(page)
+    session.flush()
+    version = ContextPageVersion(
+        workspace_id=workspace_id,
+        page_id=page.id,
+        body_md=body,
+        content_hash=calculate_content_hash(body),
+        actor_type="human",
+        version_status="published_snapshot" if published else "draft",
+        created_by_actor_kind="human",
+        created_by_actor_id="author",
+    )
+    session.add(version)
+    session.flush()
+    page.current_version_id = version.id
+    if published:
+        page.current_published_version_id = version.id
+        page.lifecycle_status = "published"
+    else:
+        page.latest_draft_version_id = version.id
+    session.flush()
+    sync_page_projections(session, page=page, version=version)
+    # Reproduce a row saved before the prose-only summary rule. Projection
+    # sync deliberately recomputes this field for current writes.
+    version.nav_description = "- 상태: draft - 작성자: owner"
+    session.flush()
+    return page, version
+
+
+def _metadata_node(session, workspace_id, title, *, parent=None, page=None):
+    node = WorkspaceTreeNode(
+        workspace_id=workspace_id,
+        section="context",
+        node_kind="page_ref" if page is not None else "folder",
+        target_kind="context_page" if page is not None else None,
+        target_id=page.id if page is not None else None,
+        parent_id=parent.id if parent is not None else None,
+        title=title,
+        sort_key=title,
+    )
+    session.add(node)
+    session.flush()
+    return node
+
+
+def test_search_metadata_query_count_is_bounded_for_cold_one_and_twenty_results():
+    session_factory = make_session_factory()
+    results = []
+    with session_factory.begin() as session:
+        workspace_id = seed_default_workspace(session).id
+        folder = _metadata_node(session, workspace_id, "Plans")
+        parent, _ = _metadata_page(
+            session,
+            workspace_id,
+            slug="parent",
+            title="Parent document",
+            body="Parent subject.",
+        )
+        document = _metadata_node(
+            session, workspace_id, parent.title, parent=folder, page=parent
+        )
+        for index in range(20):
+            body = f"# Result {index}\n\n- 상태: draft\n\nSubject {index}."
+            page, version = _metadata_page(
+                session,
+                workspace_id,
+                slug=f"result-{index}",
+                title=f"Result {index}",
+                body=body,
+            )
+            _metadata_node(
+                session, workspace_id, page.title, parent=document, page=page
+            )
+            result = RankedResult(
+                id=page.id,
+                type="context_page",
+                title=page.title,
+                snippet="",
+                score=1,
+                citation_available=True,
+                version_id=version.id,
+            )
+            result._summary_markdown = body
+            results.append(result)
+    viewer = ActorContext(
+        actor_kind="human", actor_id="reader", workspace_role="viewer"
+    )
+    counts = []
+    engine = session_factory.kw["bind"]
+    for size in (1, 20):
+        statements = []
+
+        def record(
+            _conn,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _many,
+            _statements=statements,
+        ):
+            _statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            with session_factory() as session:
+                assert not session.identity_map
+                enrich_search_result_metadata(
+                    session, workspace_id, results[:size], viewer
+                )
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        counts.append(len(statements))
+        assert all(
+            result.location == ["Plans", "Parent document"] for result in results[:size]
+        )
+        assert all(
+            result.summary == f"Subject {index}."
+            for index, result in enumerate(results[:size])
+        )
+    # One leaf query, two ancestor levels, one batched document visibility query.
+    # Counting the whole stage also catches accidental body reads in summaries.
+    assert counts == [4, 4]
+
+
+def test_search_metadata_hides_unreadable_ancestor_and_repairs_legacy_summary():
+    session_factory = make_session_factory()
+    body = (
+        "# Result heading\n\n- 상태: draft\n- 작성자: owner\n\n"
+        "**Updated**: today\n\nNeedle subject description.\n\nLater paragraph."
+    )
+    with session_factory.begin() as session:
+        workspace_id = seed_default_workspace(session).id
+        root = _metadata_node(session, workspace_id, "Plans")
+        leaves = []
+        for hidden in (False, True):
+            parent, _ = _metadata_page(
+                session,
+                workspace_id,
+                slug=f"parent-{hidden}",
+                title="Private parent" if hidden else "Public parent",
+                body="Parent subject.",
+                published=not hidden,
+            )
+            parent_node = _metadata_node(
+                session, workspace_id, parent.title, parent=root, page=parent
+            )
+            folder = _metadata_node(
+                session, workspace_id, "Nested folder", parent=parent_node
+            )
+            leaf, version = _metadata_page(
+                session,
+                workspace_id,
+                slug=f"leaf-{hidden}",
+                title=f"Result {hidden}",
+                body=body,
+            )
+            _metadata_node(session, workspace_id, leaf.title, parent=folder, page=leaf)
+            leaves.append((leaf.id, version.id))
+    viewer = ActorContext(
+        actor_kind="human", actor_id="reader", workspace_role="viewer"
+    )
+    with session_factory() as session:
+        payload = SearchService().search(
+            session=session,
+            workspace_id=workspace_id,
+            query="needle",
+            scope="context_page",
+            actor=viewer,
+        )
+        anonymous_payload = SearchService().search(
+            session=session,
+            workspace_id=workspace_id,
+            query="needle",
+            scope="context_page",
+        )
+    hits = {hit.id: hit for hit in payload.ranked_results}
+    assert hits.keys() == {leaf_id for leaf_id, _ in leaves}
+    assert hits[leaves[0][0]].location == ["Plans", "Public parent", "Nested folder"]
+    assert hits[leaves[1][0]].location is None
+    assert "Private parent" not in payload.model_dump_json()
+    assert "Private parent" not in anonymous_payload.model_dump_json()
+    assert all(hit.summary == "Needle subject description." for hit in hits.values())
+    assert all("_summary_markdown" not in hit.model_dump() for hit in hits.values())
+    with session_factory() as session:
+        # Search cleanup never mutates the stored legacy summaries.
+        assert all(
+            session.get(ContextPageVersion, version_id).nav_description.startswith(
+                "- 상태"
+            )
+            for _, version_id in leaves
+        )
+        owner_payload = SearchService().search(
+            session=session,
+            workspace_id=workspace_id,
+            query="needle",
+            scope="context_page",
+            actor=ActorContext(
+                actor_kind="human", actor_id="editor", workspace_role="editor"
+            ),
+        )
+    private_hit = next(
+        hit for hit in owner_payload.ranked_results if hit.id == leaves[1][0]
+    )
+    assert private_hit.location == ["Plans", "Private parent", "Nested folder"]
 
 
 def test_search_service_paginates_ranked_results_with_cursor():

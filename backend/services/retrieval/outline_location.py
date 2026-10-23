@@ -44,7 +44,7 @@ def heading_location_for_offset(body_md: str, char_offset: int) -> Section | Non
         and section.char_start <= char_offset < section.subtree_char_end
     ]
     if not candidates:
-        return _first_heading(body_md)
+        return None
     return max(candidates, key=lambda section: (section.level, section.char_start))
 
 
@@ -68,7 +68,7 @@ def heading_location_for_query(body_md: str, query: str) -> Section | None:
         match = re.search(re.escape(token), body_md, re.IGNORECASE)
         if match is not None:
             return heading_location_for_offset(body_md, match.start())
-    return _first_heading(body_md)
+    return None
 
 
 def public_heading_path(section: Section | None) -> list[str] | None:
@@ -83,14 +83,3 @@ def _query_tokens(query: str) -> list[str]:
         if token not in tokens:
             tokens.append(token)
     return sorted(tokens, key=len, reverse=True)
-
-
-def _first_heading(body_md: str) -> Section | None:
-    return next(
-        (
-            section
-            for section in outline_for_body(body_md).sections
-            if section.kind == "heading"
-        ),
-        None,
-    )

@@ -128,8 +128,10 @@ TOOL_META = {
     "search": (
         "Search workspace knowledge",
         "Resolve direct paths, ids, exact names, and fuzzy page names before "
-        "ranked retrieval across context, Library, feedback, changes, and "
-        "Agent pages. Keyword mode is always available; semantic and hybrid "
+        "ranked retrieval across Context, Library, and Agent pages. The all "
+        "scope excludes feedback and changes; use the explicit feedback or "
+        "change scope for authorized audit searches. Keyword mode is always "
+        "available; semantic and hybrid "
         "modes are available when an embedding provider is configured. MRTR "
         "preview clients may optionally return a relevance ranking for large "
         "fallback result sets.",

@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 DEFAULT_REST_ROLE = "owner"
 ActorProvenance = Literal[
@@ -105,8 +105,10 @@ class RankedResult(BaseModel):
     snippet: str
     score: float
     citation_available: bool
-    stale: bool = False
+    stale: bool = Field(default=False, deprecated=True)
     archived: bool = False
+    summary: str | None = None
+    location: list[str] | None = None
     concept_path: str | None = None
     concept_type: str | None = None
     version_id: UUID | None = None
@@ -116,6 +118,11 @@ class RankedResult(BaseModel):
     match_reason: SearchMatchReason | None = None
     matched_name: str | None = None
     entity_ref: dict[str, str] | None = None
+
+    # Hydrators already read the actor-visible body. Retain it privately until
+    # the dispatcher paginates, so summary cleanup needs no additional reads.
+    _summary_markdown: str | None = PrivateAttr(default=None)
+    _location_fallback: tuple[str, UUID] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(extra="forbid")
 
