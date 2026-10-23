@@ -37,6 +37,11 @@ const ContextEditPermalinkResolver = lazy(() =>
     default: module.ContextEditPermalinkResolver,
   })),
 );
+const PagePermalinkRedirect = lazy(() =>
+  import("../features/pages/PagePermalinkRedirect").then((module) => ({
+    default: module.PagePermalinkRedirect,
+  })),
+);
 const PublishedPageReader = lazy(() =>
   import("../features/pages/PublishedPageReader").then((module) => ({
     default: module.PublishedPageReader,
@@ -205,6 +210,14 @@ export const appRoutes = createRoutesFromElements(
         element={
           <RequireAuth>
             <ContextScreen />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/p/:pageId"
+        element={
+          <RequireAuth>
+            <PagePermalinkRedirect />
           </RequireAuth>
         }
       />
@@ -550,7 +563,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (status === "anonymous") {
-    const next = `${location.pathname}${location.search}`;
+    const next = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
 
