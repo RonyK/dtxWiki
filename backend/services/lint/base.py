@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -55,6 +54,18 @@ class LintContext:
     version: object | None = None
 
 
+@dataclass(frozen=True)
+class FixResult:
+    body: str
+    fixes: tuple[str, ...] = ()
+
+
+class LintFixer(Protocol):
+    """A meaning-preserving, idempotent transform that fails closed."""
+
+    def fix(self, body: str, ctx: LintContext) -> FixResult: ...
+
+
 class LintRule(Protocol):
     rule_id: str
     layer: str
@@ -82,7 +93,7 @@ class LintModule:
     module_id: str
     order: int
     rules: tuple[LintRule, ...]
-    fixer: Callable[[str, LintContext], str] | None = None
+    fixer: LintFixer | None = None
     fix_on_save_setting: str | None = None
 
 

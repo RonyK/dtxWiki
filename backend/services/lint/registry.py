@@ -88,3 +88,16 @@ class LintRegistry:
             for rule in self.enabled(policy, target_type=target_type)
             if stage in rule.stages
         ]
+
+    def fixers_for_save(
+        self,
+        policy: LintPolicy,
+        *,
+        preview: bool = False,
+    ) -> list[LintModule]:
+        """Select configured fixers in execution order; explicit preview runs all."""
+        return [
+            module
+            for module in sorted(self.modules, key=lambda module: module.order)
+            if module.fixer is not None and (preview or policy.fix_on_save(module))
+        ]

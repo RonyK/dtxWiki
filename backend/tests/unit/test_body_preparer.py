@@ -8,6 +8,7 @@ from backend.services.body_preparer import (
     WriteContext,
 )
 from backend.services.lint.base import (
+    FixResult,
     LintFindingDraft,
     LintModule,
     LintPolicy,
@@ -86,18 +87,22 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
         def fix_on_save(self, module):
             return True
 
-    def canonicalize_link(body, _ctx):
-        return body.replace("draft-link", "canonical-link")
+    class CanonicalizeLink:
+        def fix(self, body, _ctx):
+            fixed = body.replace("draft-link", "canonical-link")
+            return FixResult(fixed, ("links",) if fixed != body else ())
 
-    def format_list(body, _ctx):
-        return body.replace("* canonical-link", "- canonical-link")
+    class FormatList:
+        def fix(self, body, _ctx):
+            fixed = body.replace("* canonical-link", "- canonical-link")
+            return FixResult(fixed, ("format",) if fixed != body else ())
 
     # Deliberately reverse registration order. The later formatter can only
     # produce the expected body after the earlier link module has run.
     registry = LintRegistry(
         (
-            LintModule("format", 900, (FinalBodyRule(),), fixer=format_list),
-            LintModule("links", 100, (), fixer=canonicalize_link),
+            LintModule("format", 900, (FinalBodyRule(),), fixer=FormatList()),
+            LintModule("links", 100, (), fixer=CanonicalizeLink()),
         )
     )
     injected = BodyPreparer(registry=registry, policy_factory=EnabledPolicy)

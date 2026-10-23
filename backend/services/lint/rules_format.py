@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from backend.services.lint.base import (
+    FixResult,
     LintContext,
     LintFindingDraft,
     LintModule,
@@ -336,6 +337,12 @@ def safe_format_body(body: str, ctx: LintContext | None = None) -> str:
     return safe_normalize_markdown(body)
 
 
+class _FormatFixer:
+    def fix(self, body: str, ctx: LintContext) -> FixResult:
+        normalized = safe_format_body(body, ctx)
+        return FixResult(normalized, ("format",) if normalized != body else ())
+
+
 MODULE = LintModule(
     "format",
     900,
@@ -346,6 +353,6 @@ MODULE = LintModule(
         _ImageRefRule(),
         _MermaidBlockRule(),
     ),
-    fixer=safe_format_body,
+    fixer=_FormatFixer(),
     fix_on_save_setting="auto_fix",
 )

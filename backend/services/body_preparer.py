@@ -100,15 +100,12 @@ class BodyPreparer:
             version=ctx.version,
         )
         fixes: list[str] = []
-        for module in sorted(self.registry.modules, key=lambda module: module.order):
-            if module.fixer is None or skip_fixes:
+        for module in self.registry.fixers_for_save(policy, preview=preview):
+            if skip_fixes:
                 continue
-            if not preview and not policy.fix_on_save(module):
-                continue
-            fixed = module.fixer(body, lint_ctx)
-            if fixed != body:
-                fixes.append(module.module_id)
-                body = fixed
+            result = module.fixer.fix(body, lint_ctx)
+            body = result.body
+            fixes.extend(result.fixes)
 
         if not preview:
             validate_page_markdown_input(body)
