@@ -1,16 +1,6 @@
 # Changelog
 
-## 0.1.2 — Unreleased
-
-### Release distribution
-
-- Fix the npm publish command to use an explicit local tarball path. The
-  release workflow publishes PyPI first, then the matching npm launcher,
-  and creates the GitHub Release after both uploads succeed.
-- Version 0.1.1 reached PyPI, but its npm upload failed and no GitHub Release
-  was created. Version 0.1.2 replaces that interrupted distribution; the
-  temporary 0.1.1 recovery workflow is removed.
-- Desktop installers remain outside this release.
+## 0.1.3 — Unreleased
 
 ### Runtime and upgrades
 
@@ -48,7 +38,7 @@
   Finalization verifies the updater's live data-directory and database guards
   before migrating, while retaining compatibility with older updaters.
 
-### Fixes
+### Input validation
 
 - Apply shared input limits across browser, REST, MCP, CLI, services and storage:
   display names use 1–32 Unicode code points, email uses at most 254 UTF-8
@@ -72,13 +62,9 @@
 - Separate upgrade-blocking input findings from preserved history, support
   baseline audits and independent Library label repairs, and honor runtime
   activity locks during maintenance.
-- Select the Context publish replay audit by version and change-set identity.
-- Persist changes to nested workspace settings policies.
-- Prevent Settings draft resets from overwriting the user's first edit.
-- Accept OAuth access tokens across backward clock steps while retaining
-  expiration, not-before, signature, issuer, and audience validation.
-- Avoid deleting Preview runs, attempts, and detail rows twice during a
-  Library hard delete.
+
+### MCP access settings
+
 - Settings > MCP Access judges each connected client by its own Personal
   Access Token or OAuth grant, so an expired or revoked credential no longer
   shows as active because a sibling grant is valid. Cards separate
@@ -95,13 +81,49 @@
 - Cancel stalled workspace-list reads after 30 seconds, including incomplete
   response bodies, so a failed refresh can finish and a later attempt can retry.
 
+### Test coverage
+
+- Include MCP connection facets in the PostgreSQL pull-request gate, and bound
+  browser operations with request lifecycle diagnostics for workspace access.
+
+### Documentation
+
+- Write the English and Korean READMEs for 0.1.3, covering installation, web
+  server startup, administrator grants, local and remote access, and background
+  execution with the managed worker.
+- Include Claude Code and Codex MCP registration commands, endpoint selection,
+  token environment handling, scope and workspace permissions, and practical
+  setup troubleshooting. Link SMTP and advanced operations to the docs.
+- Align the npm guide with the same release and runtime behavior.
+- Correct deployment-guide recovery and SMTP instructions and stale README links.
+
+## 0.1.2 — 2026-10-14
+
+### Release distribution
+
+- Fix the npm publish command to use an explicit local tarball path. The
+  release workflow publishes PyPI first, then the matching npm launcher,
+  and creates the GitHub Release after both uploads succeed.
+- Version 0.1.1 reached PyPI, but its npm upload failed and no GitHub Release
+  was created. Version 0.1.2 replaces that interrupted distribution; the
+  temporary 0.1.1 recovery workflow is removed.
+- Desktop installers remain outside this release.
+
+### Fixes
+
+- Select the Context publish replay audit by version and change-set identity.
+- Persist changes to nested workspace settings policies.
+- Prevent Settings draft resets from overwriting the user's first edit.
+- Accept OAuth access tokens across backward clock steps while retaining
+  expiration, not-before, signature, issuer, and audience validation.
+- Avoid deleting Preview runs, attempts, and detail rows twice during a
+  Library hard delete.
+
 ### Tests
 
 - Replace flaky timing and ordering assumptions with deterministic checks,
   isolate shared test state, and keep benchmark timing in its separate lane.
 - Reduce backend test setup time through isolated SQLite schema templates.
-- Include MCP connection facets in the PostgreSQL pull-request gate, and bound
-  browser operations with request lifecycle diagnostics for workspace access.
 
 ## 0.1.1 — 2026-10-13
 

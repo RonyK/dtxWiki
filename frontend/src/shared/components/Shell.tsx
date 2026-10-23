@@ -136,7 +136,7 @@ const SIDEBAR_NAV_GROUPS: Array<{ key: NavGroupKey; items: SidebarNavItem[] }> =
         { icon: ListChecks, key: "review", preview: true, to: "/review" },
         // The lint queue is the other half of the review workflow, and used to be
         // reachable only from three levels inside Settings.
-        { icon: SpellCheck, key: "lint", to: "/lint" },
+        { icon: SpellCheck, key: "lint", preview: true, to: "/lint" },
         { icon: Activity, key: "activity", to: "/activity" },
         { icon: Search, key: "search", to: "/search" },
       ],
