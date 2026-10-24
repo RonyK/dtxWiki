@@ -63,8 +63,7 @@ export function AdminJobsSection({
   const [error, setError] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
-  // Epic-2 Phase 6a (doc/design/workspace-database-separation-plan.md §4):
-  // the server-admin summary/list endpoints fan out across every workspace's
+  // The server-admin summary/list endpoints fan out across every workspace's
   // Job table and skip a shard that cannot be reached rather than 500ing.
   // A full load() replaces this with the fresh snapshot from that reload;
   // loadMore() unions into it, because a later page can hit a shard an

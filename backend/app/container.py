@@ -338,8 +338,7 @@ class ServiceRegistry:
     """
 
     settings: Settings | None = None
-    # D-7 (doc/design/workspace-database-separation-plan.md): Context media
-    # is workspace-owned data, so this holds a routing callable
+    # Context media is workspace-owned data, so this holds a routing callable
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
     context_media_session_for: object | None = None
@@ -661,7 +660,6 @@ class ServiceRegistry:
     def _new_validated_media_installer(self, journal, *, workspace_id: UUID):
         from backend.media.application import InstallValidatedBlob
 
-        # D-5 (doc/design/workspace-database-separation-plan.md): the seam
         # BlobStoreProvider.store_for(workspace_id) existed but nothing
         # called it with a real workspace_id -- every caller of the four
         # factory methods above already knows which workspace it is acting

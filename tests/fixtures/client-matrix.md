@@ -26,8 +26,6 @@
   - `claude mcp add --help` → `--scope user`, `--transport http`,
     `--header`, `--callback-port`, `--client-id`, `--client-secret`
   - `claude mcp login --help` → named-server OAuth login command availability
-  - `git show <Phase-0 commit>:doc/Epic-0/Sprint-5/evidence/phase0-client-matrix.md`
-    (cross-branch read of the original)
   - `grep '@router' backend/api/oauth.py` for OAuth endpoint surface
   - `grep 'Mcp-Session-Id' backend/api/mcp_http.py` for session handling
   - `grep 'dtxw_' backend/services/api_token_service.py` for PAT prefix
@@ -69,7 +67,7 @@
 | Config 파일 경로 | `~/.codex/config.toml` | MEASURED — `codex mcp --help` and `codex mcp add --help` on dev PC 2026-09-13 |
 | Transport | dtxWiki supports `Streamable HTTP` via `--url`; no client-side fallback transport is part of the dtxWiki contract. | MEASURED — `codex mcp add --help` on dev PC 2026-09-13 |
 | Accept negotiation 동작 | Server contract is the same as for Claude Code (Section 1); the dtxWiki MCP HTTP transport must accept JSON-only, SSE-only, dual, and `*/*` Accept values regardless of which client sends them. Codex CLI's exact `Accept` header value is not pinned in this revision. | Mixed: server contract **MEASURED** (`backend/api/mcp_http.py`); Codex CLI client header **DEFERRED — requires a live client packet capture in Phase_5 Task 5.5** |
-| OAuth 지원 여부 | Native OAuth command surfaces are present: `codex mcp login`, `codex mcp logout`, and `--oauth-client-registration auto|cimd|dcr`. dtxWiki-side OAuth endpoints (DCR `/oauth/register`, authorize `/oauth/authorize`, token `/oauth/token`, consent revoke `DELETE /oauth/consents?client_id=...`) are MEASURED. | Mixed: native command availability and server endpoints **MEASURED**; full client-to-server OAuth flow **DEFERRED — requires a live remote dtxWiki instance and browser-driven login in Phase_5 Task 5.5** |
+| OAuth 지원 여부 | Native OAuth command surfaces are present: `codex mcp login`, `codex mcp logout`, and `--oauth-client-registration auto\|cimd\|dcr`. dtxWiki-side OAuth endpoints (DCR `/oauth/register`, authorize `/oauth/authorize`, token `/oauth/token`, consent revoke `DELETE /oauth/consents?client_id=...`) are MEASURED. | Mixed: native command availability and server endpoints **MEASURED**; full client-to-server OAuth flow **DEFERRED — requires a live remote dtxWiki instance and browser-driven login in Phase_5 Task 5.5** |
 | PAT header 형식 | `--bearer-token-env-var DTXWIKI_MCP_PAT` is the native env-indirected PAT registration flag. The dtxWiki side requires the literal token to start with `dtxw_`. | Mixed: CLI flag and dtxWiki PAT prefix **MEASURED** (`codex mcp add --help`; `backend/services/api_token_service.py`); outbound header and authenticated round trip **DEFERRED — requires a live client run in Phase_5 Task 5.5** |
 | `Mcp-Session-Id` 필요 여부 | Same server-side contract as Section 1: optional at registration, validated at runtime per `backend/api/mcp_http.py:589-720`. Codex CLI's session-id emission behaviour is **DEFERRED**. | Mixed: server contract **MEASURED**; client behaviour **DEFERRED — re-measured in Phase_5 Task 5.5** |
 | Callback URL 형식 | Codex CLI does not expose a callback URL option in the measured `mcp login` help surface. | DEFERRED — requires a browser-driven live OAuth login to observe the callback in Phase_5 Task 5.5 |

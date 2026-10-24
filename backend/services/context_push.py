@@ -1,5 +1,4 @@
-"""patch_draft push-outcome decision (design doc
-doc/design/block-provenance-contract.md section 4).
+"""patch_draft push-outcome decision.
 
 `request.base` names the version a client's edit was computed against; the
 page's current editable head may have moved since. This module decides what

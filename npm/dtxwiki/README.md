@@ -47,8 +47,9 @@ includes administrator grants, external access, background execution, MCP client
 registration commands, and setup troubleshooting. Replace foreground `dtxwiki`
 commands with `npx @dtxsuite/dtxwiki@0.1.3`.
 
-Use a direct uv/pipx installation for the manual background PID examples. The npm
-launcher starts child processes; its PID is not the server PID.
+Use a direct Python installation, such as the README's pip virtual environment,
+for the manual background PID examples. The npm launcher starts child processes;
+its PID is not the server PID.
 
 ## Updating
 

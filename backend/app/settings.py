@@ -281,8 +281,7 @@ class Settings(BaseSettings):
     librarian_tick_interval_days: int = Field(default=7, ge=0)
     search_associative_lane: bool = False
 
-    # Epic-2 D-7 (doc/design/workspace-database-separation-plan.md): how long
-    # a Context media asset must sit as a derived orphan before the sweep
+    # How long a Context media asset must sit as a derived orphan before the sweep
     # reclaims it. The retention clock runs BEFORE tombstoning -- the asset
     # stays active and rescuable (simply by being used) for this whole
     # window; nothing is at risk until it elapses.

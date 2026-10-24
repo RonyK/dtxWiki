@@ -196,8 +196,7 @@ class LibraryContentService:
     ) -> None:
         if max_http_range_bytes <= 0:
             raise ValueError("max_http_range_bytes must be positive")
-        # D-5 (doc/design/workspace-database-separation-plan.md): every method
-        # below already carries workspace_id (it authorizes against a
+        # Every method below already carries workspace_id (it authorizes against a
         # workspace-owned association before touching a blob), so the store
         # is resolved per call via BlobStoreProvider.store_for -- never
         # cached at construction -- the way session_for(workspace_id) already

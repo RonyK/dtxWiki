@@ -234,14 +234,17 @@ def test_gitignore_has_no_duplicate_rules() -> None:
 # "does a tracked file tell a reader to open a document this repository is
 # required never to track".
 
+_PATH_CONTINUATION = re.compile(r"[ \t]*\r?\n[ \t]*(?:(?:#|//|\*)[ \t]*)?")
+_PATH_WRAP = rf"(?:{_PATH_CONTINUATION.pattern})?"
 CITATION = re.compile(
-    r"(?<![A-Za-z0-9_/.-])(?:doc|docs|review)/[A-Za-z0-9_./-]+\.[a-z]{2,5}\b"
+    rf"(?<![A-Za-z0-9_/.-])(?:doc|docs|review)/{_PATH_WRAP}"
+    rf"(?:[A-Za-z0-9_.-]+/{_PATH_WRAP})*[A-Za-z0-9_.-]+\.[a-z]{{2,5}}\b"
 )
 
 # The leading lookbehind is what separates a citation from a URL: the character
 # before `docs/` in an https path is `/`, so the pattern does not match.
 
-# This module has to spell the roots out in order to guard them.
+# This module uses synthetic paths to test the guard, not real private documents.
 SELF = "tests/static/test_design_source_contract.py"
 
 
@@ -262,202 +265,79 @@ def unresolvable_citations(paths: list[str]) -> dict[str, list[tuple[int, str]]]
             text = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        hits: list[tuple[int, str]] = []
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            for match in CITATION.finditer(line):
-                hits.append((lineno, match.group(0)))
+        hits = [
+            (
+                text.count("\n", 0, match.start()) + 1,
+                _PATH_CONTINUATION.sub("", match.group(0)),
+            )
+            for match in CITATION.finditer(text)
+        ]
         if hits:
             found[path] = hits
     return found
 
 
-def citation_pairs(paths: list[str]) -> set[tuple[str, str]]:
-    """Each distinct (tracked file, private path it cites) pair."""
-
-    return {
-        (path, cited)
-        for path, hits in unresolvable_citations(paths).items()
-        for _, cited in hits
-    }
-
-
-def citations_outside(
-    baseline: frozenset[tuple[str, str]], paths: list[str]
-) -> list[tuple[str, str]]:
-    return sorted(citation_pairs(paths) - baseline)
-
-
-# Generated from the tree, not hand-written. May only shrink. Keyed by the cited
-# path, not the file: a file-level entry let a grandfathered file add new private
-# citations without failing.
-CITATION_BASELINE: frozenset[tuple[str, str]] = frozenset(
-    {
-        (
-            "backend/api/context_media.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        ("backend/api/deps.py", "doc/design/workspace-database-separation-plan.md"),
-        (
-            "backend/app/container.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        ("backend/app/settings.py", "doc/design/workspace-database-separation-plan.md"),
-        (
-            "backend/context_media/ports/repository.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        ("backend/mcp/read_tools.py", "doc/design/block-provenance-contract.md"),
-        (
-            "backend/mcp/upload_tools.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/models/context_media.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        ("backend/models/job.py", "doc/design/workspace-database-separation-plan.md"),
-        ("backend/schemas/common.py", "doc/design/block-provenance-contract.md"),
-        (
-            "backend/schemas/common.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/services/context_media_access.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/services/context_media_orphan_sweep.py",
-            "doc/design/api-surface-redesign.md",
-        ),
-        (
-            "backend/services/context_media_orphan_sweep.py",
-            "review/2026-09-04-minor-fixes-vs-feature-epic1-code-review.md",
-        ),
-        ("backend/services/context_push.py", "doc/design/block-provenance-contract.md"),
-        (
-            "backend/services/job_hints.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/services/job_queue.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/services/job_read_service.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/services/library_content_service.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "backend/utils/actor_display.py",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        ("backend/utils/block_map.py", "doc/design/block-provenance-contract.md"),
-        (
-            "backend/utils/markdown_outline.py",
-            "doc/design/block-provenance-contract.md",
-        ),
-        ("backend/worker/entry.py", "doc/design/workspace-database-separation-plan.md"),
-        (
-            "frontend/src/features/settings/AdminJobsSection.tsx",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "frontend/src/shared/api/adminJobs.ts",
-            "doc/design/workspace-database-separation-plan.md",
-        ),
-        (
-            "frontend/src/shared/lib/activityLabels.ts",
-            "doc/design/activity-classification-contract.md",
-        ),
-        ("playwright.config.ts", "docs/reviews/phase5/FINAL-REVIEW.md"),
-        (
-            "shared/fixtures/content_hash_vectors.json",
-            "doc/sw-design/06_mcp_and_agent_contracts.md",
-        ),
-        (
-            "tests/fixtures/client-matrix.md",
-            "doc/Epic-0/Sprint-5/evidence/phase0-client-matrix.md",
-        ),
-        ("tests/static/test_public_schema_path_leak.py", "doc/Epic-2/...md"),
-        (
-            "tests/static/test_public_schema_path_leak.py",
-            "doc/Epic-2/260828_workspace_db_isolation_plan.md",
-        ),
-        ("tests/static/test_public_schema_path_leak.py", "doc/Epic-2/plan.md"),
-    }
-)
-
-
-def _format_pairs(pairs: list[tuple[str, str]]) -> str:
-    return "\n  ".join(f"{path}: {cited}" for path, cited in pairs)
-
-
 def test_no_tracked_file_cites_an_untrackable_document_root() -> None:
-    new = citations_outside(CITATION_BASELINE, tracked_paths())
-    assert new == [], (
-        "These tracked files tell a reader to open a document under doc/, docs/ "
-        "or review/. This repository is required never to track those roots "
-        "(see test_detailed_design_documents_are_not_tracked), so the citation "
-        "cannot resolve for anyone who clones it:\n  " + _format_pairs(new)
+    citations = unresolvable_citations(tracked_paths())
+    details = "\n  ".join(
+        f"{path}:{line}: {cited}"
+        for path, hits in sorted(citations.items())
+        for line, cited in hits
     )
-
-
-def test_the_citation_baseline_only_shrinks() -> None:
-    stale = sorted(CITATION_BASELINE - citation_pairs(tracked_paths()))
-    assert stale == [], (
-        "These baseline entries no longer occur -- the citation was removed or "
-        "the file deleted. Remove them from CITATION_BASELINE so it keeps "
-        "shrinking:\n  " + _format_pairs(stale)
+    assert citations == {}, (
+        "Tracked files must not cite documents under doc/, docs/ or review/. "
+        "Those roots are private and absent from a clean clone. Describe the "
+        "behavior directly or cite tracked source instead:\n  " + details
     )
 
 
 @pytest.mark.counterexample(
-    "unresolvable_citations reports a bare citation of doc/ and does not report "
-    "the same path inside an http URL; both halves die if CITATION's leading "
-    "lookbehind is removed"
+    "bare citations and paths wrapped in Python/TypeScript comments are reported "
+    "without opening targets; bare and wrapped URLs are excluded"
 )
 def test_the_resolver_separates_a_citation_from_a_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Calls the production function. A counterexample that re-implements the
-    logic it is checking passes no matter what the production copy does -- which
-    is the defect class this registry exists to catch."""
+    """Use synthetic paths whose target documents do not exist."""
 
     (tmp_path / "cites.py").write_text(
-        "# see doc/design/whatever.md for the rationale\n", encoding="utf-8"
-    )
-    (tmp_path / "links.py").write_text(
-        "# see https://example.com/repo/blob/main/docs/tools/thing.md\n",
+        "# see doc/\n"
+        "# example.md for the rationale\n"
+        "# see docs/nested/example.md for the rationale\n"
+        '"""see review/\n'
+        '    example.md for the rationale"""\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "tests.static.test_design_source_contract.ROOT", tmp_path, raising=False
+    (tmp_path / "links.py").write_text(
+        "# see https://example.com/repo/blob/main/docs/tools/example.md\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "cites.ts").write_text(
+        "// see doc/design/\n"
+        "// example.md for the rationale\n"
+        "/** see review/\n"
+        " * nested/\n"
+        " * example.md for the rationale\n"
+        " */\n"
+        "// see https://example.com/docs/\n"
+        "// tools/example.md\n",
+        encoding="utf-8",
     )
     monkeypatch.setitem(globals(), "ROOT", tmp_path)
 
-    reported = unresolvable_citations(["cites.py", "links.py"])
+    reported = unresolvable_citations(["cites.py", "links.py", "cites.ts"])
 
-    assert reported == {"cites.py": [(1, "doc/design/whatever.md")]}, (
-        "unresolvable_citations must report the bare citation and must not "
-        f"report the one inside a URL. Got: {reported}"
+    assert reported == {
+        "cites.py": [
+            (1, "doc/example.md"),
+            (3, "docs/nested/example.md"),
+            (4, "review/example.md"),
+        ],
+        "cites.ts": [
+            (1, "doc/design/example.md"),
+            (3, "review/nested/example.md"),
+        ],
+    }, (
+        "unresolvable_citations must report every bare citation and exclude "
+        f"the URL. Got: {reported}"
     )
-
-
-@pytest.mark.counterexample(
-    "a grandfathered file that gains a new private citation is reported; dies if "
-    "the baseline is keyed by file instead of by (file, cited path)"
-)
-def test_a_baselined_file_cannot_add_a_new_citation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    (tmp_path / "old.py").write_text(
-        "# see doc/design/old.md\n# see doc/design/new.md\n", encoding="utf-8"
-    )
-    monkeypatch.setitem(globals(), "ROOT", tmp_path)
-
-    baseline = frozenset({("old.py", "doc/design/old.md")})
-
-    assert citations_outside(baseline, ["old.py"]) == [("old.py", "doc/design/new.md")]

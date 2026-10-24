@@ -177,8 +177,7 @@ ERROR_CODES = (
     "text_match_low_confidence",
     "section_not_found",
     "section_hash_mismatch",
-    # Block-addressed operations (design doc
-    # doc/design/block-provenance-contract.md section 2).
+    # Block-addressed operations.
     "block_not_found",
     "block_hash_mismatch",
     "row_not_found",
@@ -321,8 +320,7 @@ WARNING_CODES = (
     # deterministic evidence pack; these say why it is not the composed one.
     "llm_provider_unavailable",
     "llm_composer_failed",
-    # Epic-2 Phase 6a fan-out (doc/design/workspace-database-separation-plan.md
-    # §4): one or more workspace shards could not be reached while building a
+    # One or more workspace shards could not be reached while building a
     # cross-workspace admin job listing/summary, so the result is a partial
     # one -- the reachable workspaces' data, not every workspace's.
     "job_fanout_incomplete",

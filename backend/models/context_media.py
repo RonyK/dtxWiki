@@ -318,8 +318,7 @@ class ContextMediaUploadRequest(Base):
 class ContextMediaGcCandidate(Base):
     """Queued row-level teardown work for a tombstoned asset.
 
-    ``state='cancelled'`` has no writer today (Epic-2 D-7,
-    doc/design/workspace-database-separation-plan.md). It was designed as a
+    ``state='cancelled'`` has no writer today. It was designed as a
     rescue for a candidate whose asset regained a usage edge before being
     drained, but that can never happen: ``replace_version_usage`` only
     attaches usage to ``association_state='active'`` assets, and both
