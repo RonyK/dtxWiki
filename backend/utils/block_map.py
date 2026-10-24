@@ -1,5 +1,4 @@
-"""Content-derived half of a page version's block map (design doc
-doc/design/block-provenance-contract.md section 2).
+"""Content-derived half of a page version's block map.
 
 A block map is the persisted, ID-addressed replacement for absolute-position
 addressing: an ordered list of top-level (CommonMark level-0) blocks, each

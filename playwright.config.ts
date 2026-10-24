@@ -190,8 +190,8 @@ export default defineConfig({
     // credential from the environment, so a published token authenticates
     // against a database that no longer exists. Treat it as a hygiene and
     // contract defect. The only mitigation that reaches index.html is a
-    // redaction step before upload-artifact in the e2e job -- see
-    // docs/reviews/phase5/FINAL-REVIEW.md S1.
+    // redaction step before upload-artifact in the e2e job; see
+    // scripts/redact_evidence.sh --dir playwright-report.
     trace: "retain-on-failure",
   },
   projects: [

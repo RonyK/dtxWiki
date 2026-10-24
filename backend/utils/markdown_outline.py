@@ -138,8 +138,7 @@ def parse_outline(body_md: str) -> Outline:
 def _find_headings(parsed: ParsedMarkdown) -> list[_Heading]:
     """Collect document-level headings from a single CommonMark parse.
 
-    markdown-it is the sole structural authority (design doc
-    doc/design/block-provenance-contract.md section 2): a
+    markdown-it is the sole structural authority: a
     `heading_open` token is a real ATX or Setext heading exactly when
     CommonMark says so, `token.level == 0` excludes one nested inside a
     list/blockquote, and a fenced code block or raw HTML block never emits

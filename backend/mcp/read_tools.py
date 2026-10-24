@@ -1256,11 +1256,10 @@ def _structure_map_preview(lines: tuple[RawLine, ...], line_start: int) -> str:
 def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapOutput:
     """Return a version's block-level structure map: one entry per top-level
     block (id/kind/hash/line_span/preview, plus row ids for tables) -- the
-    generalization and replacement of the tier-1 outline (design doc
-    doc/design/block-provenance-contract.md section 3).
+    generalization and replacement of the tier-1 outline.
 
     ``line_span`` and ``preview`` are computed fresh from the current body at
-    serve time, never persisted (section 2.1); ``id``/``hash`` come from the
+    serve time, never persisted; ``id``/``hash`` come from the
     stored, carried-forward block map.
     """
 

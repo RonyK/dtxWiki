@@ -1,7 +1,6 @@
 """Phase 6b advisory job hints.
 
-doc/design/workspace-database-separation-plan.md §3 D-2, §4 Phase 6: 6a's
-round-robin fan-out made the worker correct once ``Job`` lives on a
+Round-robin fan-out made the worker correct once ``Job`` lives on a
 per-workspace plane, at the cost of up to N round trips (one ``claim_next``
 per workspace) to conclude "nothing to do", where N tracks subscriber count
 (every user gets a personal workspace).

@@ -54,8 +54,7 @@ def render_scoped_llms_txt(
 
     ``Workspace`` (slug + ``visibility``) is identity-plane data and is
     resolved on the control session; ``ContextPage``/``ContextPageVersion``
-    (and the legacy-cutover marker) are workspace-plane data (doc/design/
-    workspace-database-separation-plan.md D-1) and are read afterward on
+    (and the legacy-cutover marker) are workspace-plane data and are read afterward on
     ``db.session_for(workspace.id)``, once the target workspace is known.
     This mirrors ``ContextMediaAccessPolicy`` in
     ``backend/services/context_media_access.py``. On an unsharded deployment

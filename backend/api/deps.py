@@ -73,8 +73,7 @@ def get_database_provider(request: Request) -> DatabaseProvider:
     WorkspaceSessionFactoryDep above resolves a single session_for(workspace_id)
     from a path/query workspace_id -- fine for a route scoped to one
     workspace. A route that fans out across the whole workspace roster itself
-    (Phase 6a, doc/design/workspace-database-separation-plan.md -- the
-    server-admin job listing/summary) needs to call session_for(workspace_id)
+    (the server-admin job listing/summary) needs to call session_for(workspace_id)
     once per roster entry, so it needs the provider, not one bound factory.
     """
     return get_container_from_app(request).db

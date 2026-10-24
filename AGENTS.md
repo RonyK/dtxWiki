@@ -49,7 +49,7 @@ share them through dtxWiki.
   `tests/packaging/test_evidence_redaction.py`. Do not ignore or remove it.
 - `tests/static/test_design_source_contract.py` enforces this. It fails if a
   private root is tracked, if a top-level directory outside `SOURCE_TREE_DIRS`
-  is tracked, or if a tracked file cites a private path not in its baseline.
+  is tracked, or if a tracked file cites a private document path.
 
 ## Sources of Current Behavior
 

@@ -263,8 +263,7 @@ export function isMcpActivityItem(item: ActivityItem) {
 // Second-level sub-type filter (v3). Each top-level Type (kind) splits into a
 // small, fixed set of sub-types; "all" is the per-kind default. Classification
 // is purely client-side off existing item fields (audit action prefix in body,
-// MCP tool name parsed from the title, job via target_kind) — see
-// doc/design/activity-classification-contract.md.
+// MCP tool name parsed from the title, job via target_kind).
 export const ACTIVITY_SUBTYPES: Record<string, readonly string[]> = {
   workspace: ["all", "library", "context", "agent", "ask", "review", "chat"],
   mcp: ["all", "read", "write", "search"],

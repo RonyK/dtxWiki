@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "rule_doc": "doc/sw-design/06_mcp_and_agent_contracts.md#appendix-a-content_hash-normalization-rule",
+  "rule_doc": "backend/utils/content_hash.py",
   "vectors": [
     {
       "id": "v01",
