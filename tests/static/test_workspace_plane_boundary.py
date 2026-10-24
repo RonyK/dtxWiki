@@ -75,6 +75,11 @@ from tests.static.test_architecture_boundaries import (
 # file (relative to repo root, posix) -> one-line reason this file is allowed
 # to call `.control_session_factory()`. Each entry records the allowed routing.
 CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
+    "backend/services/page_location.py": (
+        "Permalink routing resolves page -> workspace through WorkspaceDirectory "
+        "on control, checks live membership and token grants there, then reads "
+        "the page and visible head only through session_for(workspace_id)."
+    ),
     "backend/services/admin_context_media.py": (
         "FIXED. Control sessions read only Workspace roster/existence and users "
         "uploader labels, after shard sessions close. Metadata and cleanup route "

@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
+from threading import Lock
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -329,10 +330,11 @@ class WorkspaceDirectory:
 class ServiceRegistry:
     """Container-owned domain services (R1′ — replaces module singletons).
 
-    Every service is stateless (a session is passed per call), so one shared
-    instance per container is safe; the registry is the single rebinding
-    point an overlay swaps instead of monkeypatching module globals. Imports
-    stay lazy so importing the container never drags the service graph in.
+    Services receive sessions or a routed provider per call. Container-owned
+    state, such as the permalink request budget, persists across requests.
+    The registry is the single rebinding point an overlay swaps instead of
+    monkeypatching module globals. Imports stay lazy so importing the
+    container never drags the service graph in.
     """
 
     settings: Settings | None = None
@@ -341,10 +343,22 @@ class ServiceRegistry:
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
     context_media_session_for: object | None = None
+    _page_locations_lock = Lock()
 
     @cached_property
     def workspace_directory(self) -> WorkspaceDirectory:
         return WorkspaceDirectory()
+
+    @property
+    def page_locations(self):
+        # This service owns request budgets, so concurrent first requests
+        # must share one instance. Keep the existing dictionary override seam.
+        with self._page_locations_lock:
+            if "page_locations" not in self.__dict__:
+                from backend.services.page_location import PageLocationService
+
+                self.__dict__["page_locations"] = PageLocationService()
+            return self.__dict__["page_locations"]
 
     @cached_property
     def tree_read(self):

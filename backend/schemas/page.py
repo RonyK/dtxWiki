@@ -52,6 +52,19 @@ CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD = Field(
 )
 
 
+class ContextPageLocation(BaseModel):
+    workspace_id: UUID
+    page_id: UUID
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextPageLocationResponse(RESTResponseBase):
+    data: ContextPageLocation
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class PageSummary(BaseModel):
     id: UUID
     slug: str
