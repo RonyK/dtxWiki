@@ -1,10 +1,11 @@
 {
-  "description": "Frozen migration implementations through 0.1.3. The 0.0.1 and 0.1.1 schemas were renamed and regrouped in 0.1.2 without changing schema or data operations; 0.1.3 extends that baseline. Frozen files must not be edited after publication; new database changes extend the chain.",
-  "released_in": "0.1.3",
+  "description": "Frozen migration implementations through 0.1.4. The 0.0.1 and 0.1.1 schemas were renamed and regrouped in 0.1.2 without changing schema or data operations; 0.1.3 and 0.1.4 extend that baseline. Frozen files must not be edited after publication; new database changes extend the chain.",
+  "released_in": "0.1.4",
   "schema_origins": [
     "0.0.1",
     "0.1.1",
-    "0.1.3"
+    "0.1.3",
+    "0.1.4"
   ],
   "sha256": {
     "revision_modules/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
@@ -24,6 +25,7 @@
     "revision_modules/v0_1/input_restrictions_v1.py": "14f50082552dc8490e2ee2ac239983f4224cbbce80758df6ce498f9cacef26d5",
     "versions/v0_0/bd62193d5cf6_initial_schema.py": "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8",
     "versions/v0_1/19db79d3e622_release_0_1_3.py": "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c",
+    "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py": "4ca7da3416959c22c15d39b453bb7d72024c9efca56e68253ea1e244a2066547",
     "versions/v0_1/efcbcf724889_core_schema.py": "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
   }
 }

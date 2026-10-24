@@ -308,7 +308,7 @@ def test_consolidated_release_schema_round_trip(migration_database):
     head_schema = None
 
     for stage in ("first", "again"):
-        command.upgrade(config, "head")
+        command.upgrade(config, INPUTS)
         assert _stamp(engine) == INPUTS
         assert _row(engine, key) == {**expected, "context_media_policy": {}}
         actual_content = _existing_rows(engine)

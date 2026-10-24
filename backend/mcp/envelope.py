@@ -522,10 +522,6 @@ ADVISORY_WARNING_MESSAGES = {
     "unsupported_filter_date": (
         "The date_from/date_to filters are not applied by any retriever yet."
     ),
-    "disambiguation_required": (
-        "Multiple pages match this exact name; pick a candidate from "
-        "disambiguation.candidates."
-    ),
     "semantic_fallback_used": "Results came from the semantic fallback lane.",
     "keyword_lane_unavailable": (
         "Tier-B FTS5 symbolic lanes are unavailable for this database; "

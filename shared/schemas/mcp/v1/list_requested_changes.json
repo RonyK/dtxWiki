@@ -79,7 +79,6 @@
               "text_not_found",
               "unsupported_filter_tag",
               "unsupported_filter_date",
-              "disambiguation_required",
               "semantic_fallback_used",
               "keyword_lane_unavailable",
               "coverage_gap_recorded",

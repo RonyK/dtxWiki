@@ -95,6 +95,9 @@ FROZEN_MIGRATIONS = {
     "versions/v0_1/19db79d3e622_release_0_1_3.py": (
         "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c"
     ),
+    "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py": (
+        "4ca7da3416959c22c15d39b453bb7d72024c9efca56e68253ea1e244a2066547"
+    ),
     "versions/v0_1/efcbcf724889_core_schema.py": (
         "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
     ),
@@ -271,6 +274,7 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "0.1.1": {"group": "v0_1", "head": "efcbcf724889"},
             "0.1.2": {"group": "v0_1", "head": "efcbcf724889"},
             "0.1.3": {"group": "v0_1", "head": "19db79d3e622"},
+            "0.1.4": {"group": "v0_1", "head": "ef53a0a7061c"},
         }
         aliases = {
             "0001_initial_release": "bd62193d5cf6",

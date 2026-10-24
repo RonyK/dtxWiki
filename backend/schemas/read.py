@@ -498,13 +498,6 @@ class DisambiguationCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DisambiguationPayload(BaseModel):
-    status: Literal["ambiguous"] = "ambiguous"
-    candidates: list[DisambiguationCandidate]
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class SearchPayload(BaseModel):
     # Every field is always present in a search response, so the REST/MCP
     # contract declares them required (the frontend `operations.ts` SearchPayload
@@ -523,7 +516,6 @@ class SearchPayload(BaseModel):
     tried_lanes: list[str] = Field(default_factory=list)
     raw_query: str = ""
     normalized_query: str = ""
-    disambiguation: DisambiguationPayload | None = None
     # Actor-visible, low-confidence entity hints retained for a true miss.
     # These are advisory inputs for coverage-gap/Q-4 review, not search hits.
     nearest_candidates: list[dict[str, str]] = Field(default_factory=list)

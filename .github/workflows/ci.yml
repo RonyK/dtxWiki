@@ -37,7 +37,7 @@ jobs:
       # self-runners when node_modules is present, which it is not here), so
       # the job pins the same node as every other job instead of taking
       # whatever the runner image ships.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
       - name: Install Python dependencies
@@ -111,7 +111,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       # The release-gate validator tests start node (the gate script's i18n
       # coverage check), so pin it rather than inherit the runner's.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
       - name: Install Python dependencies
@@ -148,7 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Pinned, not the floating major. The "Run e2e helper self-runners"
           # step below imports tests/e2e/*.ts and is only correct on a node
@@ -191,7 +191,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
           cache: npm

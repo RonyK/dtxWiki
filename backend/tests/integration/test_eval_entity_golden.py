@@ -3,7 +3,7 @@
 CI-pinned quality bars for exact-name retrieval:
 
 - exact title/slug/alias queries resolve the target page at rank 1 (100%),
-- ambiguous names return disambiguation for every ambiguous query (100%),
+- exact name collisions retain every matching page in the ranked list,
 - a renamed page is exact-hit by title under its new name and alias under its old one.
 
 Sprint-4 N3 adds explicit per-lane metrics over the FTS5 projections.
@@ -127,7 +127,7 @@ def test_entity_exact_golden_top1_is_100_percent(session_factory):
     assert metrics.mrr == 1.0  # top-1 for every exact query
 
 
-def test_entity_ambiguous_golden_disambiguates_100_percent(session_factory):
+def test_entity_name_collision_golden_returns_all_ranked_matches(session_factory):
     service = build_search_service(Settings())
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -167,10 +167,10 @@ def test_entity_ambiguous_golden_disambiguates_100_percent(session_factory):
                 retrieval_mode="keyword",
                 limit=8,
             )
-            assert payload.disambiguation is not None, query
-            assert "disambiguation_required" in payload.warnings, query
-            candidates = payload.disambiguation.candidates
-            assert len(candidates) == 2, query
+            assert len(payload.ranked_results) == payload.total_count == 2, query
+            assert [hit.match_reason for hit in payload.ranked_results] == [
+                "exact_title", "exact_alias"
+            ], query
 
 
 def test_entity_rename_golden_retires_old_title_immediately(session_factory):

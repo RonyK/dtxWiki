@@ -121,7 +121,7 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
     assert report[0]["count"] == 1
     assert "x" * 33 not in str(report)
     with pytest.raises(RuntimeError, match="preflight failed"):
-        command.upgrade(config, "head")
+        command.upgrade(config, REVISION)
     with engine.connect() as connection:
         assert connection.execute(
             sa.text("SELECT version_num, display_name FROM alembic_version, users")
@@ -158,9 +158,9 @@ def test_preupgrade_user_repairs_preserve_stamp_and_unlock_upgrade(
     # A pre-existing orphan is not the migration's doing and must neither be
     # deleted nor block this or any later (including no-op) Alembic run.
     # The policy round trip lives in test_input_migration_parent.py; here the
-    # rebuild runs with FK defaults ON, then a no-op run at head.
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    # rebuild runs with FK defaults ON, then a no-op at the policy revision.
+    command.upgrade(config, REVISION)
+    command.upgrade(config, REVISION)
     with engine.connect() as connection:
         assert (
             connection.execute(

@@ -176,6 +176,8 @@ SPI_PAYLOAD_FIELD_SHAPES = {
         "citation_available": "<class 'bool'>",
         "stale": "<class 'bool'>",
         "archived": "<class 'bool'>",
+        "summary": "str | None",
+        "location": "list[str] | None",
         "concept_path": "str | None",
         "concept_type": "str | None",
         "version_id": "uuid.UUID | None",
@@ -191,6 +193,7 @@ SPI_PAYLOAD_FIELD_SHAPES = {
         "entity_ref": "dict[str, str] | None",
     },
     "SearchFilters": {
+        "include_agents": "<class 'bool'>",
         "context_type": "list[str] | None",
         "connector_type": "list[str] | None",
         "format_hint": "list[str] | None",

@@ -5254,6 +5254,43 @@
         "title": "ContextPageListResponse",
         "type": "object"
       },
+      "ContextPageLocation": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "page_id"
+        ],
+        "title": "ContextPageLocation",
+        "type": "object"
+      },
+      "ContextPageLocationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ContextPageLocation"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ContextPageLocationResponse",
+        "type": "object"
+      },
       "ContextPageSummary": {
         "additionalProperties": false,
         "properties": {
@@ -6740,65 +6777,6 @@
         "title": "DeploymentStatusResponse",
         "type": "object"
       },
-      "DisambiguationCandidate": {
-        "additionalProperties": false,
-        "properties": {
-          "concept_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Concept Path"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "match_reason": {
-            "title": "Match Reason",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "match_reason"
-        ],
-        "title": "DisambiguationCandidate",
-        "type": "object"
-      },
-      "DisambiguationPayload": {
-        "additionalProperties": false,
-        "properties": {
-          "candidates": {
-            "items": {
-              "$ref": "#/components/schemas/DisambiguationCandidate"
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "status": {
-            "const": "ambiguous",
-            "default": "ambiguous",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "candidates"
-        ],
-        "title": "DisambiguationPayload",
-        "type": "object"
-      },
       "DiscardContextEditRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6926,7 +6904,6 @@
               "text_not_found",
               "unsupported_filter_tag",
               "unsupported_filter_date",
-              "disambiguation_required",
               "semantic_fallback_used",
               "keyword_lane_unavailable",
               "coverage_gap_recorded",
@@ -15263,6 +15240,20 @@
             "title": "Id",
             "type": "string"
           },
+          "location": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
           "match_reason": {
             "anyOf": [
               {
@@ -15331,8 +15322,20 @@
           },
           "stale": {
             "default": false,
+            "deprecated": true,
             "title": "Stale",
             "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           },
           "title": {
             "title": "Title",
@@ -16843,6 +16846,12 @@
             ],
             "title": "Format Hint"
           },
+          "include_agents": {
+            "default": true,
+            "description": "Whether Agent pages are included in search results.",
+            "title": "Include Agents",
+            "type": "boolean"
+          },
           "status": {
             "anyOf": [
               {
@@ -16892,16 +16901,6 @@
       "SearchPayload": {
         "additionalProperties": false,
         "properties": {
-          "disambiguation": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DisambiguationPayload"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "has_more": {
             "default": false,
             "title": "Has More",
@@ -20052,7 +20051,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.1.3"
+    "version": "0.1.4"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -22899,6 +22898,97 @@
         "summary": "Delete Revoked Api Token",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/context/pages/{page_id}/location": {
+      "get": {
+        "operationId": "read_page_location_api_v1_context_pages__page_id__location_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextPageLocationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Page Location",
+        "tags": [
+          "context-pages"
         ]
       }
     },

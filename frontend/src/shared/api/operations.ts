@@ -159,6 +159,7 @@ export type AskSessionDetail = components["schemas"]["AskSessionDetail"];
 export type EnvelopeWarning = components["schemas"]["EnvelopeWarning"];
 export type GraphNeighborEntry = components["schemas"]["GraphNeighborEntry"];
 export type GraphNeighborsPayload = components["schemas"]["GraphNeighborsPayload"];
+export type ContextPageLocation = components["schemas"]["ContextPageLocation"];
 
 export type McpChatArtifactKind =
   | "context_page"
@@ -626,6 +627,13 @@ export async function createAskTurn(
     data: response.data,
     warnings: response.envelope?.warnings ?? [],
   };
+}
+
+export async function getContextPageLocation(pageId: string) {
+  const response = await apiRequest<{ data: ContextPageLocation }>(
+    `/api/v1/context/pages/${encodeURIComponent(pageId)}/location`,
+  );
+  return response.data;
 }
 
 export async function getContextPageNeighbors(
