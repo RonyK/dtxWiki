@@ -1,5 +1,4 @@
 """nav_description write-time derivation (Sprint-3 C1-T2, fixes A-1)."""
-
 import pytest
 from sqlalchemy import select
 
@@ -12,6 +11,7 @@ from backend.services.context_write_service import ContextWriteService
 from backend.services.indexing import Fts5Indexer, reindex_workspace
 from backend.services.okf import build_workspace_index
 from backend.services.page_service import PageService
+from backend.tests.utils.prepared_body import prepare_context_body
 
 pytestmark = pytest.mark.integration
 
@@ -159,8 +159,13 @@ def test_insert_version_derives_from_frontmatter_stripped_body(session_factory):
             session,
             page_id=page.id,
             parent_version_id=None,
-            body_md=body,
-            content_hash="seam-1",
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=body,
+                actor_kind="human",
+                actor_id="tester",
+            ),
             actor_kind="human",
             actor_id="tester",
             version_status="draft",

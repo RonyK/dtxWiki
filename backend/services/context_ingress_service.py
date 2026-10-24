@@ -14,6 +14,7 @@ from backend.context_media.domain import (
 )
 from backend.context_media.ports import ContextMediaRepository
 from backend.domain.input_policy import fit_generated_title, validate_text
+from backend.domain.prepared_body import PreparedBody
 from backend.models.ask import (
     AskSession,
     AskTurn,
@@ -40,6 +41,7 @@ from backend.schemas.context_ingress import (
 )
 from backend.schemas.input_policy import validate_request_inputs
 from backend.services.audit_service import AuditService
+from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.page_service import refresh_page_links
 from backend.services.read_errors import (
@@ -54,7 +56,6 @@ from backend.services.review_risk_policy import (
 from backend.services.tree_read import TreeReadService
 from backend.services.tree_service import ensure_primary_tree_placement
 from backend.spi.types import AI_PROVENANCES
-from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.uuid import parse_uuid_or_none
 
 
@@ -65,10 +66,12 @@ class ContextIngressService:
         tree_read_service: TreeReadService | None = None,
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
+        body_preparer: BodyPreparer | None = None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
         self.tree_read_service = tree_read_service or TreeReadService()
         self.risk_resolver = ReviewRiskResolver()
+        self.body_preparer = body_preparer or BodyPreparer()
         self.context_media_repository_factory = context_media_repository_factory
 
     def promote_ask_turn(
@@ -281,6 +284,7 @@ class ContextIngressService:
             change_set=change_set,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor.provenance if actor is not None else "internal",
         )
         review = None
         if risk_resolution.review_required:
@@ -377,6 +381,7 @@ class ContextIngressService:
         change_set: ChangeSet,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
     ) -> tuple[
         ContextPage | None,
         ContextPageVersion | None,
@@ -464,10 +469,21 @@ class ContextIngressService:
                 can_have_children=True,
                 move_existing=True,
             )
+        prepared = self.body_preparer.prepare(
+            BodyInput(body),
+            WriteContext(
+                workspace=session.get(Workspace, workspace_id),
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                page=page,
+                session=session,
+            ),
+        )
         version = insert_context_version(
             session=session,
             page=page,
-            body_markdown=body,
+            body=prepared,
             change_set_id=change_set.id,
             actor_kind=actor_kind,
             actor_id=actor_id,
@@ -856,7 +872,7 @@ def create_ingress_change_set(
 def insert_context_version(
     session: Session,
     page: ContextPage,
-    body_markdown: str,
+    body: PreparedBody,
     change_set_id: UUID,
     actor_kind: str,
     actor_id: str,
@@ -866,8 +882,7 @@ def insert_context_version(
         session,
         page_id=page.id,
         parent_version_id=page.latest_draft_version_id or page.current_version_id,
-        body_md=body_markdown,
-        content_hash=calculate_content_hash(body_markdown),
+        body=body,
         actor_kind=actor_kind,
         actor_id=actor_id,
         version_status="draft",

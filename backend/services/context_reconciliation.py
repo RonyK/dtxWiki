@@ -13,8 +13,11 @@ from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewItem
 from backend.schemas.context_edit import (
+    DeleteBlockOperation,
     EditOperation,
     InsertAfterOperation,
+    InsertRowOperation,
+    ReplaceBlockOperation,
     ResolveConflictOperation,
     without_legacy_operation_fields,
 )
@@ -45,7 +48,7 @@ from backend.services.context_push import (
 )
 from backend.services.context_visibility import editable_context_version_id
 from backend.services.db_write_intent import acquire_write_intent
-from backend.services.lint.autofix import safe_normalize_markdown
+from backend.services.lint.autofix import safe_normalize_markdown_legacy_v1
 from backend.services.read_errors import (
     ReadNotFoundError,
     ReadServiceError,
@@ -60,7 +63,80 @@ from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_parser import parse_markdown
 
 _DIVERGED_MANIFEST_SCHEMA = "context_push_diverged_manifest.v1"
+_BODY_TRANSFORM_SCHEMA = "context_body_transform.v1"
 _EDIT_OPERATIONS_ADAPTER = TypeAdapter(list[EditOperation])
+
+
+def build_reconciliation_normalization_proof(
+    original: str, final: str
+) -> dict[str, object]:
+    """Record the exact save-time transformation, without executable fixers.
+
+    A single replacement between the common prefix and suffix is linear to
+    construct and stores at most one body's worth of replacement text.  The
+    source hash binds it to the authored operations; the final hash binds it
+    to the persisted branch.  Reconciliation can therefore verify a branch
+    after a fixer is changed, disabled, or removed.
+    """
+
+    start = 0
+    while start < min(len(original), len(final)) and original[start] == final[start]:
+        start += 1
+    original_end = len(original)
+    final_end = len(final)
+    while (
+        original_end > start
+        and final_end > start
+        and original[original_end - 1] == final[final_end - 1]
+    ):
+        original_end -= 1
+        final_end -= 1
+    return {
+        "applied": original != final,
+        "pre_normalize_body_sha256": _sha256_text(original),
+        "final_body_sha256": _sha256_text(final),
+        "transform": {
+            "schema": _BODY_TRANSFORM_SCHEMA,
+            "start": start,
+            "end": original_end,
+            "replacement": final[start:final_end],
+        },
+    }
+
+
+def _replay_body_transform(body: str, proof: object) -> str:
+    if not isinstance(proof, dict) or set(proof) != {
+        "schema", "start", "end", "replacement"
+    }:
+        raise ValueError("invalid body transformation proof")
+    start, end, replacement = proof["start"], proof["end"], proof["replacement"]
+    if (
+        proof["schema"] != _BODY_TRANSFORM_SCHEMA
+        or type(start) is not int
+        or type(end) is not int
+        or not 0 <= start <= end <= len(body)
+        or not isinstance(replacement, str)
+    ):
+        raise ValueError("invalid body transformation range")
+    return body[:start] + replacement + body[end:]
+
+
+def _replay_normalization_proof(body: str, proof: object) -> str:
+    if (
+        not isinstance(proof, dict)
+        or not isinstance(proof.get("applied"), bool)
+        or not _is_sha256(proof.get("pre_normalize_body_sha256"))
+        or not _is_sha256(proof.get("final_body_sha256"))
+        or _sha256_text(body) != proof["pre_normalize_body_sha256"]
+    ):
+        raise ValueError("normalization source proof is invalid")
+    final = _replay_body_transform(body, proof["transform"])
+    if (
+        proof["applied"] != (final != body)
+        or _sha256_text(final) != proof["final_body_sha256"]
+    ):
+        raise ValueError("normalization result proof is invalid")
+    return final
 
 
 @dataclass(frozen=True)
@@ -265,16 +341,36 @@ def load_verified_reconciliation_manifest(
             "diverged branch manifest operations do not recreate the branch",
             error_code="reconcile_target_invalid",
         )
-    original_final = (
-        safe_normalize_markdown(original_replay)
-        if normalized and original_replay
-        else original_replay
-    )
-    replayed_final = (
-        safe_normalize_markdown(active_replay)
-        if normalized and active_replay
-        else active_replay
-    )
+    try:
+        if "transform" in normalization:
+            original_final = _replay_normalization_proof(
+                original_replay, normalization
+            )
+            # Normalization-only operations are intentionally omitted from
+            # the active partition. Its distinct source must independently
+            # prove the same persisted result, without rerunning today's fixes.
+            replayed_final = _replay_normalization_proof(
+                active_replay, normalization["active"]
+            )
+        else:
+            # Older manifests only recorded whether the original format-only
+            # normalizer changed the body. Keep that exact algorithm for them;
+            # current policy, fixers, and formatting semantics cannot replay it.
+            original_final = (
+                safe_normalize_markdown_legacy_v1(original_replay)
+                if normalized and original_replay
+                else original_replay
+            )
+            replayed_final = (
+                safe_normalize_markdown_legacy_v1(active_replay)
+                if normalized and active_replay
+                else active_replay
+            )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReadValidationError(
+            "diverged branch body transformation proof is invalid",
+            error_code="reconcile_target_invalid",
+        ) from exc
     if (
         original_final != branch.body_md
         or replayed_final != branch.body_md
@@ -289,8 +385,83 @@ def load_verified_reconciliation_manifest(
         original_head=original_head,
         base_map=base_map,
         branch_map=branch_map,
-        active_operations=active_operations,
+        active_operations=(
+            _stored_authored_operations(
+                active_operations, base_map, branch_map, branch.body_md
+            )
+            if normalized
+            else active_operations
+        ),
     )
+
+
+def _stored_authored_operations(
+    operations: list[EditOperation],
+    base_map: list[dict],
+    branch_map: list[dict],
+    body: str,
+) -> list[EditOperation]:
+    """Use the saved contribution when replaying a verified branch.
+
+    Raw authored operations prove the manifest's origin, but their content
+    predates save-time fixing. Restoring or carrying them must use the bytes
+    displayed from the branch even when today's policy disables that fixer.
+    """
+
+    lookup = text_by_id(body, branch_map)
+    base_ids = set(hash_map(base_map))
+    parsed = parse_markdown(body)
+    result: list[EditOperation] = []
+    for operation in operations:
+        content: str | None = None
+        if isinstance(operation, ReplaceBlockOperation):
+            authored_id = resolve_target_id_between_maps(
+                base_map, branch_map, operation.block
+            )
+            entry = lookup.get(authored_id)
+            content = entry[3] if entry is not None else None
+        elif isinstance(operation, InsertAfterOperation):
+            anchor = resolve_target_id_between_maps(
+                base_map, branch_map, operation.block
+            )
+            anchor_index = next(
+                (i for i, block in enumerate(branch_map) if block["id"] == anchor),
+                None,
+            )
+            inserted: list[dict] = []
+            if anchor_index is not None:
+                for block in branch_map[anchor_index + 1 :]:
+                    if block["id"] in base_ids:
+                        break
+                    inserted.append(block)
+            if inserted:
+                first, last = lookup[inserted[0]["id"]], lookup[inserted[-1]["id"]]
+                start = parsed.char_offset(first[1] - 1)
+                end = parsed.char_offset(last[1] - 1) + len(last[3])
+                content = body[start:end]
+        elif isinstance(operation, InsertRowOperation):
+            sides = authored_sides_by_target(
+                operations=[operation],
+                base_block_map=base_map,
+                authored_body_md=body,
+                authored_block_map=branch_map,
+            )
+            content = sides.get(operation.row, {}).get("text")
+        elif isinstance(operation, DeleteBlockOperation):
+            result.append(operation)
+            continue
+        else:
+            raise ReadValidationError(
+                "diverged branch has an unaddressable authored operation",
+                error_code="reconcile_target_invalid",
+            )
+        if not isinstance(content, str) or not content.strip():
+            raise ReadValidationError(
+                "diverged branch has no durable authored operation content",
+                error_code="reconcile_target_invalid",
+            )
+        result.append(operation.model_copy(update={"content": content}))
+    return result
 
 
 def _sha256_text(value: str) -> str:
@@ -424,6 +595,8 @@ def load_reconciliation_snapshot(
         authored_body_md=branch.body_md,
         authored_block_map=branch_map,
         head_block_map=head_map,
+        base_body_md=base.body_md,
+        head_body_md=head.body_md,
     )
     return ReconciliationSnapshot(
         page=page,
@@ -793,7 +966,12 @@ def _project_clean_changes(
                 yours=_side(authored.get(target_id), version=snapshot.branch),
             )
         )
-    changed_ids = changed_ids_between_maps(snapshot.base_map, snapshot.head_map)
+    changed_ids = changed_ids_between_maps(
+        snapshot.base_map,
+        snapshot.head_map,
+        base_body_md=snapshot.base.body_md,
+        candidate_body_md=snapshot.head.body_md,
+    )
     for target_id in sorted(changed_ids - snapshot.conflict_ids - active_ids):
         descriptor = target_descriptor(
             snapshot.head_map, target_id
@@ -834,7 +1012,12 @@ def _project_blocks(
     branch_lookup = text_by_id(snapshot.branch.body_md, snapshot.branch_map)
     base_ids = set(hash_map(snapshot.base_map))
     active_ids = target_ids_for_operations(snapshot.active_operations) or frozenset()
-    changed_ids = changed_ids_between_maps(snapshot.base_map, snapshot.head_map)
+    changed_ids = changed_ids_between_maps(
+        snapshot.base_map,
+        snapshot.head_map,
+        base_body_md=snapshot.base.body_md,
+        candidate_body_md=snapshot.head.body_md,
+    )
     conflict_display_ids = set(snapshot.conflict_ids)
     for conflict_id in snapshot.conflict_ids:
         for candidate_map in (snapshot.head_map, snapshot.branch_map):

@@ -4070,16 +4070,21 @@ def list_lint_rules(
 def format_markdown(
     workspace_id: UUID,
     request_body: LintFormatRequest,
+    svc: ServicesDep,
     _actor: RestActorDep,
     _access: WorkspaceViewerAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
 ):
-    # F2d: on-demand "Format now" — a stateless, deterministic normalization of
-    # the supplied Markdown (same normalizer as Auto-fix mode). No persistence;
-    # the editor replaces its buffer with the result and the author saves.
-    # Fail-closed (I1/I9): a normalizer fault returns the input unchanged, not 500.
-    from backend.services.lint.autofix import safe_normalize_markdown
-
-    return {"data": {"markdown": safe_normalize_markdown(request_body.markdown)}}
+    with session_factory() as session:
+        prepared = svc.context_write.preview_body(
+            session,
+            workspace_id=workspace_id,
+            markdown=request_body.markdown,
+            actor_kind=_actor.actor_kind,
+            actor_id=_actor.actor_id,
+            actor_provenance=_actor.provenance,
+        )
+    return {"data": {"markdown": prepared.body}}
 
 
 @router.post(

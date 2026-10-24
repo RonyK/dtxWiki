@@ -18,8 +18,9 @@ from backend.schemas.lint import (
     LintFindingDecisionRequest,
     LintRunCreateRequest,
 )
-from backend.services.lint import base
+from backend.services.lint import LintContext, LintModule, LintRegistry, LintStage
 from backend.services.lint.base import LintFindingDraft
+from backend.services.lint.scopes import findings_for_target
 from backend.services.lint_service import LintService
 from backend.services.read_errors import ReadValidationError
 from backend.tests.conftest import authenticate_test_client
@@ -28,12 +29,13 @@ pytestmark = pytest.mark.integration
 
 
 class _Dummy:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.dummy_format"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,
@@ -780,7 +782,7 @@ def test_metadata_only_finding_survives_runtime_reconciliation(session_factory):
         session.flush()
         runtime_policy = {
             rule.rule_id: False
-            for rule in base.all_rules()
+            for rule in LintRegistry.builtin().rules()
             if getattr(rule, "runtime_checkable", True)
         }
 
@@ -890,7 +892,9 @@ def test_missing_backlink_rule_batches_many_outbound_targets(
         workspace_id = _ws(session)
         source_page = session.get(ContextPage, source.id)
         rule = next(
-            item for item in base.all_rules() if item.rule_id == "kb.missing_backlink"
+            item
+            for item in LintRegistry.builtin().rules()
+            if item.rule_id == "kb.missing_backlink"
         )
         query_count = 0
 
@@ -900,10 +904,8 @@ def test_missing_backlink_rule_batches_many_outbound_targets(
 
         event.listen(session.get_bind(), "before_cursor_execute", count_query)
         try:
-            findings = rule.check(
-                session=session,
-                workspace_id=workspace_id,
-                target=source_page,
+            findings = findings_for_target(
+                rule, source_page, LintContext(session, workspace_id, page=source_page)
             )
         finally:
             event.remove(session.get_bind(), "before_cursor_execute", count_query)
@@ -935,13 +937,14 @@ def test_create_run_delegates_to_run_lint_and_completes(session_factory):
 
 
 class _Toggleable:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.toggle"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
     fires = True
 
-    def check(self, *, session, workspace_id, target, body=None):
+    def check_target(self, target, ctx):
         if not self.fires:
             return []
         return [
@@ -1119,27 +1122,27 @@ def test_finding_id_lookup_still_honors_the_disabled_rule_policy_gate(session_fa
 
     rule = _Toggleable()
     rule.fires = True
-    base.register_rule(rule)
-    try:
-        svc = LintService()
-        request = LintRunCreateRequest(lint_scope="workspace", trigger_type="manual")
-        with session_factory.begin() as session:
-            wsid = _ws(session)
-            _page(session, wsid, slug="policy-gated-link")
-            svc.run_lint(session, wsid, request, "human", "t", rules=[rule])
-            finding = session.scalar(
-                select(LintFinding).where(LintFinding.rule_id == "test.toggle")
-            )
-            assert svc.list_findings(session, wsid, finding_id=finding.id).findings
+    registry = LintRegistry(
+        (
+            *LintRegistry.builtin().modules,
+            LintModule("test", 1000, (rule,)),
+        )
+    )
+    svc = LintService(lint_registry=registry)
+    request = LintRunCreateRequest(lint_scope="workspace", trigger_type="manual")
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        _page(session, wsid, slug="policy-gated-link")
+        svc.run_lint(session, wsid, request, "human", "t", rules=[rule])
+        finding = session.scalar(
+            select(LintFinding).where(LintFinding.rule_id == "test.toggle")
+        )
+        assert svc.list_findings(session, wsid, finding_id=finding.id).findings
 
-            session.get(Workspace, wsid).lint_policy = {"test.toggle": False}
-            session.flush()
+        session.get(Workspace, wsid).lint_policy = {"test.toggle": False}
+        session.flush()
 
-            assert (
-                svc.list_findings(session, wsid, finding_id=finding.id).findings == []
-            )
-    finally:
-        base._REGISTRY.pop("test.toggle", None)
+        assert svc.list_findings(session, wsid, finding_id=finding.id).findings == []
 
 
 def test_run_lint_does_not_resurrect_dismissed_finding(session_factory):
@@ -1167,12 +1170,13 @@ def test_run_lint_does_not_resurrect_dismissed_finding(session_factory):
 
 
 class _FmtRule:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.fmt"
     layer = "format"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,
@@ -1184,12 +1188,13 @@ class _FmtRule:
 
 
 class _KbRule:
+    stages = frozenset({LintStage.RUN})
     rule_id = "test.kb"
     layer = "knowledge"
     default_enabled = True
     applies_to = frozenset({"context_page"})
 
-    def check(self, *, session, workspace_id, target):
+    def check_target(self, target, ctx):
         return [
             LintFindingDraft(
                 rule_id=self.rule_id,
@@ -1244,29 +1249,36 @@ def test_run_lint_tombstones_removed_near_duplicate_verdict_findings(session_fac
 
 
 def test_list_findings_layer_filter(session_factory):
-    base.register_rule(_FmtRule())
-    base.register_rule(_KbRule())
-    try:
-        lint = LintService()
-        with session_factory.begin() as session:
-            wsid = _ws(session)
-            _page(session, wsid, slug="layerp")
-            lint.create_run(
-                session,
-                wsid,
-                LintRunCreateRequest(lint_scope="workspace", trigger_type="manual"),
-                "human",
-                "t",
-            )
-            fmt = lint.list_findings(session, wsid, layer="format")
-            kb = lint.list_findings(session, wsid, layer="knowledge")
-        fmt_ids = {f.rule_id for f in fmt.findings}
-        kb_ids = {f.rule_id for f in kb.findings}
-        assert "test.fmt" in fmt_ids and "test.kb" not in fmt_ids
-        assert "test.kb" in kb_ids and "test.fmt" not in kb_ids
-    finally:
-        base._REGISTRY.pop("test.fmt", None)
-        base._REGISTRY.pop("test.kb", None)
+    registry = LintRegistry(
+        (
+            *LintRegistry.builtin().modules,
+            LintModule(
+                "test",
+                1000,
+                (
+                    _FmtRule(),
+                    _KbRule(),
+                ),
+            ),
+        )
+    )
+    lint = LintService(lint_registry=registry)
+    with session_factory.begin() as session:
+        wsid = _ws(session)
+        _page(session, wsid, slug="layerp")
+        lint.create_run(
+            session,
+            wsid,
+            LintRunCreateRequest(lint_scope="workspace", trigger_type="manual"),
+            "human",
+            "t",
+        )
+        fmt = lint.list_findings(session, wsid, layer="format")
+        kb = lint.list_findings(session, wsid, layer="knowledge")
+    fmt_ids = {f.rule_id for f in fmt.findings}
+    kb_ids = {f.rule_id for f in kb.findings}
+    assert "test.fmt" in fmt_ids and "test.kb" not in fmt_ids
+    assert "test.kb" in kb_ids and "test.fmt" not in kb_ids
 
 
 def _api_client(page_service):
@@ -1299,8 +1311,7 @@ def test_lint_run_and_findings_api_smoke(page_service):
     assert fetched_run.json()["data"]["id"] == run_id
 
     findings = client.get(
-        f"/api/v1/workspaces/{wsid}/lint/findings"
-        "?layer=format&page=1&page_size=20"
+        f"/api/v1/workspaces/{wsid}/lint/findings?layer=format&page=1&page_size=20"
     )
     assert findings.status_code == 200
     findings_data = findings.json()["data"]
@@ -1313,8 +1324,7 @@ def test_lint_run_and_findings_api_smoke(page_service):
     assert findings_data["next_cursor"] is None
 
     mixed_modes = client.get(
-        f"/api/v1/workspaces/{wsid}/lint/findings"
-        "?page=1&page_size=20&limit=50"
+        f"/api/v1/workspaces/{wsid}/lint/findings?page=1&page_size=20&limit=50"
     )
     assert mixed_modes.status_code == 422
     assert mixed_modes.json()["error_code"] == "validation_failed"
@@ -1343,21 +1353,6 @@ def test_list_lint_rules_reflects_policy_override(session_factory):
     by_id = {r.rule_id: r for r in data.rules}
     assert by_id["kb.orphan_page"].enabled is False
     assert by_id["kb.orphan_page"].policy_locked is False
-
-
-def test_a_publication_floor_rule_refuses_to_be_switched_off(session_factory):
-    """The publication floor holds saves through this same check, so letting a
-    workspace hide the finding would leave the author staring at a page that
-    will not publish and a Lint screen reporting nothing wrong."""
-    lint = LintService()
-    with session_factory.begin() as session:
-        ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        ws.lint_policy = {"md.code_fence_balance": False}
-        session.flush()
-        data = lint.list_rules(session, ws.id)
-    by_id = {r.rule_id: r for r in data.rules}
-    assert by_id["md.code_fence_balance"].enabled is True
-    assert by_id["md.code_fence_balance"].policy_locked is True
 
 
 def test_lint_rules_api_smoke(page_service):

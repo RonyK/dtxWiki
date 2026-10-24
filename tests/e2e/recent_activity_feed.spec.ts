@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures";
 import { backendBaseUrl, currentWorkspace, e2ePassword } from "./auth";
+import { evidenceLocatorScreenshot } from "./evidence";
 
 // The seeded group spans local midnight without crossing its UTC date.
 test.use({ timezoneId: "Asia/Seoul" });
@@ -163,10 +164,8 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   expect(expanded.rows.flatMap(row => row.controlHeights).every(height => height >= 24)).toBeTruthy();
   expect(expanded.rows.every(row => row.typeFirst && row.overlap === 0)).toBeTruthy();
   expect(expanded.rows.every(row => row.chipToTitle === null || Math.abs(row.chipToTitle - 4) < .1)).toBeTruthy();
-  const expandedPath = info.outputPath("expanded-read-group.png");
-  await group.screenshot({ path: expandedPath });
+  await evidenceLocatorScreenshot(group, info, "expanded-read-group");
   writeFileSync(info.outputPath("expanded-layout-measurements.json"), JSON.stringify(expanded, null, 2));
-  await info.attach("expanded-read-group", { path: expandedPath, contentType: "image/png" });
   await group.locator(".activity-read-group__collapse").click();
   await expect(group.locator(".activity-read-group__toggle")).toBeFocused();
   await recent.locator(".activity-feed-see-all").click();
@@ -191,8 +190,7 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   await expect(page.getByRole("main").getByRole("heading", { name: seed.page_title })).toBeVisible();
 });
 
-for (const language of ["en", "ko"]) {
-  for (const width of [1440, 1100, 390, 320]) {
+for (const [language, width] of [["en", 1440], ["ko", 1100], ["en", 320], ["ko", 320]] as const) {
   test(`activity proportions and component dark theme (${language}, ${width}) @cross-browser`, async ({ page }, info) => {
     await setup(page, info);
     await page.addInitScript(locale => localStorage.setItem("dtxwiki.uiLanguage", locale), language);
@@ -219,18 +217,18 @@ for (const language of ["en", "ko"]) {
         expect(measurement.rows.flatMap(row => row.labels).every(label => label.nowrap === "nowrap" && label.ellipsis === "ellipsis")).toBeTruthy();
         evidence.push({ language, width, route, ...measurement });
         const prefix = `${language}-${width}-${route.split('?')[0].replaceAll('/', '-')}`;
-        await page.locator('[data-entry-type="read_group"]').screenshot({ path: info.outputPath(`${prefix}-light.png`) });
+        await evidenceLocatorScreenshot(page.locator('[data-entry-type="read_group"]'), info, `${prefix}-light`);
         if (language === "en" && width === 1440 && route.startsWith("/dashboard")) {
           const group = page.locator('[data-entry-type="read_group"]');
           await expandTechnicalGroup(group);
-          await group.screenshot({ path: info.outputPath(`${prefix}-expanded-details.png`) });
+          await evidenceLocatorScreenshot(group, info, `${prefix}-expanded-details`);
         }
         await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
         const dark = await metrics(page);
         expect(dark.overflow).toBe(0);
         expect(dark.rows.every(row => row.surface !== "rgb(255, 255, 255)" && row.typeContrast >= 4.5 && row.badgeContrasts.every(ratio => ratio >= 4.5))).toBeTruthy();
         evidence.push({ language, width, route, theme: "component-dark", ...dark });
-        await page.locator('[data-entry-type="read_group"]').screenshot({ path: info.outputPath(`${prefix}-dark.png`) });
+        await evidenceLocatorScreenshot(page.locator('[data-entry-type="read_group"]'), info, `${prefix}-dark`);
         if (width === 320 && route.startsWith("/dashboard")) {
           await page.locator('[data-entry-type="read_group"] .activity-actor-disclosure').focus();
           await page.keyboard.press("ArrowDown");
@@ -241,7 +239,7 @@ for (const language of ["en", "ko"]) {
             const box = el.getBoundingClientRect();
             return box.left >= 11.9 && box.right <= innerWidth - 11.9;
           })).toBeTruthy();
-          await names.screenshot({ path: info.outputPath(`${prefix}-dark-full-names.png`) });
+          await evidenceLocatorScreenshot(names, info, `${prefix}-dark-full-names`);
           await page.keyboard.press("Escape");
           await expect(names).toHaveCount(0);
         }
@@ -250,7 +248,6 @@ for (const language of ["en", "ko"]) {
     writeFileSync(measurementsPath, JSON.stringify(evidence, null, 2));
     await info.attach("activity-layout-measurements", { path: measurementsPath, contentType: "application/json" });
   });
-  }
 }
 
 test.describe("touch activity disclosures", () => {

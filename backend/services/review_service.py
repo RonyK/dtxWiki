@@ -52,6 +52,7 @@ from backend.services.actor_visible_read import (
     context_page_visible,
 )
 from backend.services.audit_service import AuditService
+from backend.services.body_preparer import BodyPreparer
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
     ChatOwnerUnresolvableError,
@@ -101,8 +102,12 @@ class ReviewService:
         audit_service: AuditService | None = None,
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
+        body_preparer: BodyPreparer | None = None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
+        self.body_preparer = (
+            body_preparer if body_preparer is not None else BodyPreparer()
+        )
         self.context_media_repository_factory = context_media_repository_factory
 
     def list_reviews(
@@ -1274,6 +1279,7 @@ class ReviewService:
                 )
                 ContextWriteService(
                     audit_service=self.audit_service,
+                    body_preparer=self.body_preparer,
                     context_media_repository_factory=(
                         self.context_media_repository_factory
                     ),
@@ -1338,6 +1344,7 @@ class ReviewService:
 
             published = ContextWriteService(
                 audit_service=self.audit_service,
+                body_preparer=self.body_preparer,
                 context_media_repository_factory=self.context_media_repository_factory,
             ).publish_draft(
                 session=session,
@@ -1627,6 +1634,7 @@ class ReviewService:
         principal_role: str | None = None,
         *,
         context_write_service,
+        actor_provenance: str = "internal",
         update: UpdateDraftRequest | None = None,
         create: WriteDraftRequest | None = None,
         note: str | None = None,
@@ -1722,6 +1730,7 @@ class ReviewService:
             request=update,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor_provenance,
             origin_chat_session_id=origin_chat_session_id,
             # A revision answering a change request must never auto-approve — it
             # goes back to a human ("the AI never approves" — Risk 6). (re-review

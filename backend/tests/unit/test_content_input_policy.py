@@ -10,6 +10,7 @@ from backend.domain.input_policy import (
     fit_generated_title,
     validate_title,
 )
+from backend.domain.prepared_body import PreparedBody
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.schemas.agent import AgentPageDraftRequest, BuildBundleRequest
 from backend.schemas.ask import AskTurnCreate
@@ -21,12 +22,18 @@ from backend.schemas.page import ContextPageCreateRequest
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
 from backend.services import context_ingress_service
 from backend.services.ask_service import InvalidUserMessageError, _validate_user_message
+from backend.services.body_preparer import (
+    BodyInput,
+    BodyPreparer,
+    PageMetadataInput,
+    WriteContext,
+)
 from backend.services.bundle_service import AgentInputBundleService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.library_semantic_overlay_service import (
     LibrarySemanticOverlayService,
 )
-from backend.services.page_service import PageService, prepare_page_write
+from backend.services.page_service import PageService
 from backend.services.review_service import ReviewService
 from backend.services.tree_service import TreeService
 from backend.utils.page_frontmatter import (
@@ -198,25 +205,43 @@ def test_valid_frontmatter_quoted_commas_and_escapes_round_trip_without_loss():
 
 def test_final_managed_frontmatter_counts_against_stored_body_budget():
     with pytest.raises(InputPolicyError):
-        prepare_page_write(
-            body_md="x" * 1_000_000,
-            title="Title",
-            slug="title",
-            page_type="guide",
-            tags=[],
-            aliases=[],
+        BodyPreparer().prepare(
+            BodyInput(
+                "x" * 1_000_000,
+                PageMetadataInput("Title", "title", "guide", [], []),
+            ),
+            WriteContext(
+                workspace=SimpleNamespace(id=uuid4(), auto_fix_enabled=False),
+                actor_kind="human",
+                actor_id="fixture",
+                actor_provenance="browser_session",
+            ),
+        )
+    with pytest.raises(InputPolicyError, match="body must contain"):
+        BodyPreparer().prepare(
+            BodyInput("x" * 1_000_001, PageMetadataInput("x" * 257, "title")),
+            WriteContext(
+                workspace=SimpleNamespace(id=uuid4(), auto_fix_enabled=False),
+                actor_kind="human",
+                actor_id="fixture",
+                actor_provenance="browser_session",
+            ),
         )
 
 
 def test_long_h1_cannot_bypass_title_limit():
     with pytest.raises(InputPolicyError):
-        prepare_page_write(
-            body_md="# " + "x" * 257,
-            title="Title",
-            slug="title",
-            page_type="guide",
-            tags=[],
-            aliases=[],
+        BodyPreparer().prepare(
+            BodyInput(
+                "# " + "x" * 257,
+                PageMetadataInput("Title", "title", "guide", [], []),
+            ),
+            WriteContext(
+                workspace=SimpleNamespace(id=uuid4(), auto_fix_enabled=False),
+                actor_kind="human",
+                actor_id="fixture",
+                actor_provenance="browser_session",
+            ),
         )
     # A longer closing fence, tildes and indented fences all keep code out of
     # the derived title. Prose after the fence still receives title validation.
@@ -248,7 +273,9 @@ def test_context_edit_invalid_metadata_does_not_mutate_body_or_staged_title():
     )
     for body in ("# " + "x" * 257, "---\ntags: [" + "a" * 49 + "]\n---\nBody"):
         with pytest.raises(InputPolicyError):
-            PageService._rewrite_body_in_place(version, body, "changed")
+            # Deliberately forge a token to pin the final mutation guard as
+            # well as the preparer's ordinary authored-input validation.
+            PageService._rewrite_body_in_place(version, PreparedBody(body, "changed"))
         assert (version.body_md, version.content_hash, version.block_map) == (
             "# Original",
             "original",

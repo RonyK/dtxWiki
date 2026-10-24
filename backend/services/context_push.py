@@ -7,9 +7,9 @@ since `base_not_found` is a lookup failure the caller handles directly)
 decision table -- merge unit is the block (or table row), never the line:
 
   base == head                                -> committed (today's only path)
-  base != head, every target id's hash is
+  base != head, every target id's stored content is
     unchanged between base and head           -> rebased (apply at head, parent=head)
-  base != head, some target id's hash changed  -> diverged (branch: apply at
+  base != head, some target's content changed -> diverged (branch: apply at
                                                    base, parent=base)
 
 `target_ids` is None when the request contains any operation this module
@@ -43,7 +43,7 @@ from backend.schemas.context_edit import (
     ReplaceBlockOperation,
 )
 from backend.utils.block_map import compute_blocks
-from backend.utils.content_hash import content_hash
+from backend.utils.content_hash import content_hash, same_authored_markdown
 from backend.utils.markdown_parser import parse_markdown
 
 PushOutcome = Literal["committed", "rebased", "diverged"]
@@ -112,16 +112,41 @@ def hash_map(block_map: list[dict]) -> dict[str, str]:
 
 
 def changed_ids_between_maps(
-    base_block_map: list[dict], candidate_block_map: list[dict]
+    base_block_map: list[dict],
+    candidate_block_map: list[dict],
+    *,
+    base_body_md: str | None = None,
+    candidate_body_md: str | None = None,
 ) -> frozenset[str]:
-    """Return the exact persisted block/row identity delta between two maps."""
+    """Supplement map deltas with authored text when both bodies are available.
+
+    The persisted hash deliberately ignores trailing spaces. Authored text
+    distinguishes Markdown hard breaks while retaining NFC/newline equivalence.
+    """
     base_hashes = hash_map(base_block_map)
     candidate_hashes = hash_map(candidate_block_map)
-    return frozenset(
+    changed = {
         target_id
         for target_id in base_hashes.keys() | candidate_hashes.keys()
         if base_hashes.get(target_id) != candidate_hashes.get(target_id)
-    )
+    }
+    if (
+        base_body_md is not None
+        and candidate_body_md is not None
+        and not same_authored_markdown(base_body_md, candidate_body_md)
+    ):
+        base_text = _text_by_id(base_body_md, base_block_map)
+        candidate_text = _text_by_id(candidate_body_md, candidate_block_map)
+        for target_id in base_hashes.keys() & candidate_hashes.keys():
+            before, after = base_text.get(target_id), candidate_text.get(target_id)
+            if (
+                before is None
+                or after is None
+                or before[0] != after[0]
+                or not same_authored_markdown(before[3], after[3])
+            ):
+                changed.add(target_id)
+    return frozenset(changed)
 
 
 def actual_target_ids_for_operations(
@@ -129,16 +154,23 @@ def actual_target_ids_for_operations(
     *,
     base_block_map: list[dict],
     candidate_block_map: list[dict],
+    base_body_md: str | None = None,
+    candidate_body_md: str | None = None,
 ) -> frozenset[str]:
     """Named merge targets whose authored operation survives normalization.
 
-    Replacement/deletion targets must themselves differ in the final map.
+    Replacement/deletion targets must differ in the final stored content.
     Inserts preserve their anchor hash, so a surviving inserted block/row is
     the proof that the anchor operation changed the candidate. This prevents a
     raw or normalization-induced no-op from conflicting merely because it
     happened to name a block that somebody else changed at head.
     """
-    delta_ids = changed_ids_between_maps(base_block_map, candidate_block_map)
+    delta_ids = changed_ids_between_maps(
+        base_block_map,
+        candidate_block_map,
+        base_body_md=base_body_md,
+        candidate_body_md=candidate_body_md,
+    )
     base_ids = set(hash_map(base_block_map))
     actual: set[str] = set()
     for operation in operations:
@@ -295,11 +327,18 @@ def decide_push_outcome(
     base_block_map: list[dict],
     head_block_map: list[dict],
     target_ids: frozenset[str] | None,
+    base_body_md: str | None = None,
+    head_body_md: str | None = None,
 ) -> PushDecision:
     if base_version_id == head_version_id:
         return PushDecision("committed", frozenset())
 
-    changed_ids = changed_ids_between_maps(base_block_map, head_block_map)
+    changed_ids = changed_ids_between_maps(
+        base_block_map,
+        head_block_map,
+        base_body_md=base_body_md,
+        candidate_body_md=head_body_md,
+    )
 
     if target_ids is None or (target_ids & changed_ids):
         return PushDecision("diverged", changed_ids)
@@ -431,12 +470,15 @@ def reconciliation_target_sets(
     authored_body_md: str,
     authored_block_map: list[dict],
     head_block_map: list[dict],
+    base_body_md: str | None = None,
+    head_body_md: str | None = None,
 ) -> ReconciliationTargetSets:
     """Classify current conflicts and safely converged branch targets.
 
     A replace is already satisfied only when the durable authored result and
-    the current HEAD target have the same persisted block hash. A delete is
-    already satisfied only when the target's old slot is provably empty.
+    the current HEAD target have the same persisted block hash and authored
+    text when supplied. A delete is already satisfied only when the target's
+    old slot is provably empty.
     Insert operations remain conflicts when their anchor changed because
     content equality alone cannot prove insertion position or identity.
     """
@@ -445,7 +487,13 @@ def reconciliation_target_sets(
     if active_target_ids is None:
         return ReconciliationTargetSets(frozenset(), frozenset())
     candidate_conflicts = set(
-        changed_ids_between_maps(base_block_map, head_block_map) & active_target_ids
+        changed_ids_between_maps(
+            base_block_map,
+            head_block_map,
+            base_body_md=base_body_md,
+            candidate_body_md=head_body_md,
+        )
+        & active_target_ids
     )
     for operation in operations:
         if isinstance(operation, InsertAfterOperation | InsertRowOperation) and (
@@ -465,6 +513,9 @@ def reconciliation_target_sets(
         authored_block_map=authored_block_map,
     )
     head_hashes = hash_map(head_block_map)
+    head_text = (
+        _text_by_id(head_body_md, head_block_map) if head_body_md is not None else None
+    )
     already_satisfied: set[str] = set()
     for operation in operations:
         target_id = operation_target_id(operation)
@@ -478,10 +529,21 @@ def reconciliation_target_sets(
             )
             authored = authored_sides.get(target_id)
             authored_hash = authored.get("hash") if authored is not None else None
+            authored_text = authored.get("text") if authored is not None else None
             if (
                 current_id is not None
                 and isinstance(authored_hash, str)
                 and head_hashes.get(current_id) == authored_hash
+                and (
+                    head_text is None
+                    or (
+                        current_id in head_text
+                        and isinstance(authored_text, str)
+                        and same_authored_markdown(
+                            head_text[current_id][3], authored_text
+                        )
+                    )
+                )
             ):
                 already_satisfied.add(target_id)
         elif isinstance(operation, DeleteBlockOperation) and (

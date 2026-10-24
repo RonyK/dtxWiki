@@ -3,10 +3,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-import backend.services.lint  # noqa: F401
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
 from backend.models.workspace import Workspace
-from backend.services.lint import base
+from backend.services.lint import LintContext, LintRegistry
+from backend.services.lint.scopes import findings_for_target
 from backend.services.page_service import refresh_page_links
 
 pytestmark = pytest.mark.integration
@@ -42,8 +42,10 @@ def _page(session, workspace_id, slug, body):
 
 
 def _check(session, rule_id, page):
-    return base.get_rule(rule_id).check(
-        session=session, workspace_id=page.workspace_id, target=page
+    return findings_for_target(
+        LintRegistry.builtin().rule(rule_id),
+        page,
+        LintContext(session, page.workspace_id, page=page),
     )
 
 
@@ -116,7 +118,7 @@ def test_link_finding_body_scopes_track_which_body_the_defect_is_in(session_fact
     # LEAK-01: list_findings hides a finding whose defect exists ONLY in a
     # draft an actor cannot read, keyed off message_args["body_scopes"]. A
     # link finding must carry that provenance exactly like a format finding
-    # (rules_format.page_findings_across_bodies) or the exclusion cannot
+    # (scopes.collapse_by_fingerprint) or the exclusion cannot
     # distinguish a draft-only broken wikilink from a published one.
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -141,6 +143,22 @@ def test_link_finding_body_scopes_track_which_body_the_defect_is_in(session_fact
         both_findings = _check(session, "link.unresolved", both)
         assert len(both_findings) == 1
         assert both_findings[0].message_args["body_scopes"] == ["published", "draft"]
+
+        # A page-global pointer can name another author's private editing row.
+        # Both link rules must keep scanning only the shared published head.
+        target, _ = _page(session, workspace_id, "private-old", "Target.\n")
+        private_source, shared = _page(
+            session, workspace_id, "private-source", "Clean.\n"
+        )
+        private = _stage_draft(
+            session, private_source, shared, "[[private-missing]] [[private-old]]\n"
+        )
+        private.version_status = "editing"
+        private.created_by_actor_id = "other-author"
+        target.slug = "private-new"
+        session.flush()
+        assert _check(session, "link.unresolved", private_source) == []
+        assert _check(session, "link.broken-slug", private_source) == []
 
 
 def test_rebuild_coalesces_two_repaired_slugs_without_losing_pin(session_factory):

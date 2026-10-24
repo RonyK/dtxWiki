@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from backend.models.base import utc_now
 from backend.models.mcp_trace import MCPWriteIdempotency
+from backend.schemas.edit_receipt import EditReceipt
+from backend.schemas.page import PagePayload
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
     IdempotencyKeyConflictError,
@@ -129,7 +131,12 @@ def execute_idempotent_write[ResultT: BaseModel](
         # outer transaction; rolling back this savepoint prevents that outer
         # commit from preserving a visible pending claim or partial side effect.
         result = execute()
-        claim.result_payload = result.model_dump(mode="json")
+        payload = result.model_dump(mode="json")
+        if isinstance(result, PagePayload) and result._edit_receipt is not None:
+            # Keep command metadata internal; PagePayload's REST schema and
+            # ordinary model serialization still omit this private receipt.
+            payload["_edit_receipt"] = result._edit_receipt.model_dump(mode="json")
+        claim.result_payload = payload
         session.flush()
     except BaseException:
         nested.rollback()
@@ -156,7 +163,11 @@ def _replay_result[ResultT: BaseModel](
         # transaction. If one is ever observable, fail closed instead of
         # executing a second mutation against an indeterminate first attempt.
         raise RuntimeError("idempotency claim has no committed result")
-    result = result_model.model_validate(row.result_payload)
+    payload = dict(row.result_payload)
+    receipt = payload.pop("_edit_receipt", None)
+    result = result_model.model_validate(payload)
+    if isinstance(result, PagePayload) and receipt is not None:
+        result._edit_receipt = EditReceipt.model_validate(receipt)
     if replay_transform is not None:
         return replay_transform(result)
     return result

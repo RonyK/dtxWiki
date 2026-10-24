@@ -29,6 +29,7 @@ from backend.tests.conftest import (
     authenticate_test_client,
     authenticate_test_client_in_workspace,
 )
+from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.page_frontmatter import upsert_page_frontmatter
 
@@ -310,14 +311,20 @@ def test_browser_editing_publish_does_not_replace_a_competing_submitted_draft(
         page = session.get(ContextPage, page_id)
         assert page is not None
         competing_body = "# Submitted draft\n\nAwaiting review."
+        fixture_actor_id = str(uuid4())
         competing = context_page_repo.insert_version(
             session,
             page_id=page.id,
             parent_version_id=None,
-            body_md=competing_body,
-            content_hash=calculate_content_hash(competing_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=competing_body,
+                actor_kind="human",
+                actor_id=fixture_actor_id,
+            ),
             actor_kind="human",
-            actor_id=str(uuid4()),
+            actor_id=fixture_actor_id,
             version_status="draft",
         )
         page.latest_draft_version_id = competing.id
@@ -445,7 +452,8 @@ def test_pages_api_update_and_autosave_reject_unsafe_media_without_mutation(
     created = created_response.json()["data"]
     draft_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-12",
+        json={
+            "idempotency_key": "t-12",
             "title": created["title"],
             "body_md": "# Safe draft body",
             "base_version_id": created["version_id"],
@@ -516,7 +524,8 @@ def test_pages_api_update_and_autosave_reject_unsafe_media_without_mutation(
 
     autosave_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-13",
+        json={
+            "idempotency_key": "t-13",
             "title": created["title"],
             "body_md": unsafe_body,
             "base_version_id": draft["version_id"],
@@ -629,9 +638,25 @@ def test_pages_api_stale_autosave_preserve_rejects_unsafe_media_without_mutation
     page_id = UUID(created["id"])
     before = page_version_and_pointer_snapshot(page_service, page_id)
 
+    invalid_base = client.post(
+        f"{pages_url(page_service)}/{created['id']}/autosave",
+        json={
+            "idempotency_key": "t-14-invalid-base",
+            "title": created["title"],
+            "body_md": "![inline](data:image/png;base64,aGVsbG8=)",
+            "base_version_id": created["version_id"],
+            "base_content_hash": "0" * 64,
+            "expected_editing_revision": created["editing_revision"],
+            "on_stale": "preserve_as_alternative",
+        },
+    )
+    assert invalid_base.status_code == 409, invalid_base.text
+    assert page_version_and_pointer_snapshot(page_service, page_id) == before
+
     response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-14",
+        json={
+            "idempotency_key": "t-14",
             "title": created["title"],
             "body_md": "![inline](data:image/png;base64,aGVsbG8=)",
             "base_version_id": created["version_id"],
@@ -666,7 +691,8 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
 
     first = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-15",
+        json={
+            "idempotency_key": "t-15",
             "title": created["title"],
             "body_md": "# First autosave\n",
             "base_version_id": created["version_id"],
@@ -680,7 +706,8 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
 
     second = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-16",
+        json={
+            "idempotency_key": "t-16",
             "title": created["title"],
             "body_md": "# Second autosave\n",
             "base_version_id": first_data["version_id"],
@@ -818,7 +845,8 @@ def test_second_editors_own_save_lands_on_their_own_row_not_the_first_drafts(
 
     other_saved = other_client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-23",
+        json={
+            "idempotency_key": "t-23",
             "body_md": "# Two Editor Target\n\nSecond editor's own edit.",
             "base_version_id": other_editing["version_id"],
             "base_content_hash": other_editing["content_hash"],
@@ -869,7 +897,8 @@ def test_second_authors_submit_conflicts_instead_of_orphaning_the_first_draft(
     ).json()["data"]
     owner_submitted = owner_client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={"idempotency_key": "t-25",
+        json={
+            "idempotency_key": "t-25",
             "version_id": owner_editing["version_id"],
             "expected_editing_revision": owner_editing["editing_revision"],
         },
@@ -891,7 +920,8 @@ def test_second_authors_submit_conflicts_instead_of_orphaning_the_first_draft(
     ).json()["data"]
     other_submitted = other_client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={"idempotency_key": "t-27",
+        json={
+            "idempotency_key": "t-27",
             "version_id": other_editing["version_id"],
             "expected_editing_revision": other_editing["editing_revision"],
         },
@@ -1000,7 +1030,8 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
 
     saved = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-29",
+        json={
+            "idempotency_key": "t-29",
             "body_md": "# Full Flow Target\n\nEdited body.",
             "base_version_id": editing_version_id,
             "base_content_hash": begun["content_hash"],
@@ -1016,7 +1047,8 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
     # A stale expected_editing_revision must conflict, not silently apply.
     stale = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-30",
+        json={
+            "idempotency_key": "t-30",
             "body_md": "# Full Flow Target\n\nShould not land.",
             "base_version_id": editing_version_id,
             "base_content_hash": saved_data["content_hash"],
@@ -1032,14 +1064,15 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         assert editing_row.version_status == "editing"
 
     # Still invisible to the other editor -- editing, not yet submitted.
-    still_hidden = other_client.get(
-        f"{pages_url(page_service)}/{page_id}"
-    ).json()["data"]
+    still_hidden = other_client.get(f"{pages_url(page_service)}/{page_id}").json()[
+        "data"
+    ]
     assert still_hidden["body_md"] == "# Full Flow Target\n\nPublished body."
 
     submitted = client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={"idempotency_key": "t-31",
+        json={
+            "idempotency_key": "t-31",
             "version_id": editing_version_id,
             "expected_editing_revision": current_revision,
         },
@@ -1128,7 +1161,33 @@ def test_page_first_creation_defaults_title_slug_and_allows_empty_body(page_serv
     """P2.3: omitting slug creates page + a private "editing" first version
     with server defaults, never upserting into an existing page."""
 
-    client = make_client(page_service)
+    from backend.app.container import assemble
+    from backend.services.lint import LintModule, LintStage
+
+    checked_bodies = []
+
+    class SaveObserver:
+        rule_id = "test.injected_save"
+        layer = "format"
+        default_enabled = True
+        applies_to = frozenset({"context_page"})
+        stages = frozenset({LintStage.SAVE})
+
+        def check_body(self, body, ctx):
+            checked_bodies.append((body, ctx.workspace_id))
+            return []
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        session_secret="test-session-secret",
+    )
+    container = assemble(
+        settings,
+        session_factory=page_service.session_factory,
+        lint_modules=(LintModule("save_observer", 1000, (SaveObserver(),)),),
+    )
+    client = TestClient(create_app(container=container))
+    authenticate_test_client_in_workspace(client, page_service.session_factory)
 
     first = client.post(
         pages_url(page_service),
@@ -1140,6 +1199,8 @@ def test_page_first_creation_defaults_title_slug_and_allows_empty_body(page_serv
     assert first_data["slug"] == f"p-{first_data['id']}"
     assert first_data["body_md"] == ""
     assert first_data["version_status"] == "editing"
+    # The workspace-scoped REST service must use the container's extra module.
+    assert ("", UUID(first_data["workspace_id"])) in checked_bodies
 
     # The create response alone isn't proof the page is actually readable
     # afterward -- a stored head pointer is a separate thing from what the
@@ -1257,7 +1318,8 @@ def test_begin_context_edit_never_bases_a_second_authors_row_on_a_private_editin
 
     owner_saved = owner_client.post(
         f"{pages_url}/{page_id}/autosave",
-        json={"idempotency_key": "t-32",
+        json={
+            "idempotency_key": "t-32",
             "body_md": "# Never Published Race\n\nOwner's private in-progress body.",
             "base_version_id": created["version_id"],
             "base_content_hash": created["content_hash"],
@@ -1319,7 +1381,8 @@ def test_patch_conflict_response_never_discloses_another_authors_private_editing
 
     owner_saved = owner_client.post(
         f"{pages_url}/{page_id}/autosave",
-        json={"idempotency_key": "t-34",
+        json={
+            "idempotency_key": "t-34",
             "body_md": "# Patch Conflict Race\n\nOwner's private in-progress body.",
             "base_version_id": created["version_id"],
             "base_content_hash": created["content_hash"],
@@ -1405,8 +1468,13 @@ def test_autosave_session_version_mismatch_never_discloses_another_authors_editi
             session,
             page_id=page.id,
             parent_version_id=UUID(owner_version_id),
-            body_md="# Unrelated historical body",
-            content_hash=calculate_content_hash("# Unrelated historical body"),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md="# Unrelated historical body",
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000aa",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000aa",
             version_status="discarded",
@@ -1427,9 +1495,7 @@ def test_autosave_session_version_mismatch_never_discloses_another_authors_editi
             "idempotency_key": "t-session-mismatch-other",
             "body_md": "# Session Mismatch Race\n\nSomeone else's guess.",
             "base_version_id": unrelated_version_id,
-            "base_content_hash": calculate_content_hash(
-                "# Unrelated historical body"
-            ),
+            "base_content_hash": calculate_content_hash("# Unrelated historical body"),
             "expected_editing_revision": 1,
             "session_version_id": unrelated_version_id,
         },
@@ -1529,7 +1595,8 @@ def test_editing_autosave_does_not_leak_into_the_page_name_index(page_service):
 
     saved = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-35",
+        json={
+            "idempotency_key": "t-35",
             "title": "Zebra Confidential Draft Name",
             "body_md": "# Zebra Confidential Draft Name\n\nNot shared yet.",
             "base_version_id": version_id,
@@ -1557,7 +1624,8 @@ def test_editing_autosave_does_not_leak_into_the_page_name_index(page_service):
     # pointer shape at all.
     submitted = client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={"idempotency_key": "t-36",
+        json={
+            "idempotency_key": "t-36",
             "version_id": version_id,
             "expected_editing_revision": saved_data["editing_revision"],
         },
@@ -1568,9 +1636,7 @@ def test_editing_autosave_does_not_leak_into_the_page_name_index(page_service):
         rows_after_submit = session.scalars(
             select(PageNameIndex).where(PageNameIndex.page_id == page_id)
         ).all()
-    assert {
-        (r.name, r.visibility_scope) for r in rows_after_submit
-    } >= {
+    assert {(r.name, r.visibility_scope) for r in rows_after_submit} >= {
         ("Zebra Confidential Draft Name", "draft"),
         (created["slug"], "draft"),
     }, [(r.name, r.visibility_scope) for r in rows_after_submit]
@@ -1605,7 +1671,8 @@ def test_second_editing_session_does_not_contaminate_an_already_submitted_draft(
 
     submitted = client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={"idempotency_key": "t-38",
+        json={
+            "idempotency_key": "t-38",
             "version_id": d_version_id,
             "expected_editing_revision": created["editing_revision"],
         },
@@ -1621,7 +1688,8 @@ def test_second_editing_session_does_not_contaminate_an_already_submitted_draft(
 
     saved_e = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-40",
+        json={
+            "idempotency_key": "t-40",
             "title": "Confidential Second Session Title",
             "body_md": "# Confidential Second Session Title\n\nNot shared yet.",
             "base_version_id": e_version_id,
@@ -1683,7 +1751,8 @@ def test_editing_row_is_excluded_from_fts_doc_sources(page_service):
 
     saved = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
-        json={"idempotency_key": "t-41",
+        json={
+            "idempotency_key": "t-41",
             "body_md": "# Confidential FTS Body\n\nPrivate content not shared yet.",
             "base_version_id": version_id,
             "base_content_hash": created["content_hash"],
@@ -1847,7 +1916,8 @@ def test_pages_api_create_list_read_update(page_service):
 
     autosave_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-42",
+        json={
+            "idempotency_key": "t-42",
             "title": "Hello v3",
             "body_md": "# Hello v3",
             "page_type": "guide",
@@ -1868,7 +1938,8 @@ def test_pages_api_create_list_read_update(page_service):
 
     session_autosave_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-43",
+        json={
+            "idempotency_key": "t-43",
             "title": "Hello v4",
             "body_md": "# Hello v4",
             "page_type": "guide",
@@ -2066,9 +2137,7 @@ def test_mcp_foreign_workspace_page_id_and_slug_match_missing(page_service):
     try:
         hidden_id = owner.get(f"{pages_url(page_service)}/{created['id']}")
         missing_id = owner.get(f"{pages_url(page_service)}/{uuid4()}")
-        hidden_slug = owner.get(
-            f"{pages_url(page_service)}/by-slug/mcp-hidden-target"
-        )
+        hidden_slug = owner.get(f"{pages_url(page_service)}/by-slug/mcp-hidden-target")
         missing_slug = owner.get(
             f"{pages_url(page_service)}/by-slug/mcp-missing-target"
         )
@@ -2276,9 +2345,9 @@ def test_pages_api_can_preserve_stale_update_as_alternative(page_service):
     assert alternative_read.json()["data"]["page_type"] == "source"
     assert alternative_read.json()["data"]["tags"] == ["local", "alternative"]
 
-    versions = client.get(
-        f"{pages_url(page_service)}/{created['id']}/versions"
-    ).json()["data"]
+    versions = client.get(f"{pages_url(page_service)}/{created['id']}/versions").json()[
+        "data"
+    ]
     alternative = next(
         item for item in versions if item["version_id"] == data["version_id"]
     )
@@ -2311,7 +2380,8 @@ def test_preserve_alternative_after_in_place_autosave_conflict_rebases_editable_
     # First autosave forks a draft D off the published head.
     first_autosave = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-44",
+        json={
+            "idempotency_key": "t-44",
             "title": "Hello",
             "body_md": "# Draft H0",
             "base_version_id": created["version_id"],
@@ -2326,7 +2396,8 @@ def test_preserve_alternative_after_in_place_autosave_conflict_rebases_editable_
     # (same version id, new hash H1) rather than forking a new version.
     second_autosave = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-45",
+        json={
+            "idempotency_key": "t-45",
             "title": "Hello",
             "body_md": "# Draft H1",
             "base_version_id": draft_id,
@@ -2358,15 +2429,16 @@ def test_preserve_alternative_after_in_place_autosave_conflict_rebases_editable_
 
     # The branch is parked, not adopted: the page's editable head is still D,
     # not the new branch E, so a session cannot keep autosaving onto E.
-    current_read = client.get(
-        f"{pages_url(page_service)}/{created['id']}"
-    ).json()["data"]
+    current_read = client.get(f"{pages_url(page_service)}/{created['id']}").json()[
+        "data"
+    ]
     assert current_read["current_version_id"] == draft_id
     assert current_read["body_md"] == "# Draft H1"
 
     stuck = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-46",
+        json={
+            "idempotency_key": "t-46",
             "title": "Alternative title",
             "body_md": "# Local alternative, continued",
             "base_version_id": branch_id,
@@ -2397,7 +2469,8 @@ def test_autosave_updates_title_on_never_published_page(page_service):
 
     autosaved = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-47",
+        json={
+            "idempotency_key": "t-47",
             "title": "Retitled draft",
             "body_md": "# Draft body v2",
             "base_version_id": created["version_id"],
@@ -2410,9 +2483,9 @@ def test_autosave_updates_title_on_never_published_page(page_service):
     reread = client.get(f"{pages_url(page_service)}/{created['id']}").json()["data"]
     assert reread["title"] == "Retitled draft"
 
-    by_slug = client.get(
-        f"{pages_url(page_service)}/by-slug/{created['slug']}"
-    ).json()["data"]
+    by_slug = client.get(f"{pages_url(page_service)}/by-slug/{created['slug']}").json()[
+        "data"
+    ]
     assert by_slug["title"] == "Retitled draft"
 
 
@@ -2435,7 +2508,8 @@ def test_autosave_title_change_on_published_page_stays_staged_not_published(
 
     autosaved = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-48",
+        json={
+            "idempotency_key": "t-48",
             "title": "Staged title",
             "body_md": "# Staged body",
             "base_version_id": created["version_id"],
@@ -2821,8 +2895,13 @@ def test_backlinks_include_latest_draft_projection_for_draft_actor(page_service)
             session,
             page_id=source_page.id,
             parent_version_id=source_page.current_published_version_id,
-            body_md=draft_body,
-            content_hash=calculate_content_hash(draft_body),
+            body=prepare_context_body(
+                session,
+                page_id=source_page.id,
+                body_md=draft_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-000000000010",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000010",
             version_status="draft",
@@ -3113,8 +3192,13 @@ def test_pages_api_signals_metadata_only_diff(page_service):
             session,
             page_id=page.id,
             parent_version_id=UUID(created["version_id"]),
-            body_md=body,
-            content_hash=calculate_content_hash(body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-000000000010",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000010",
             version_status="draft",
@@ -3243,8 +3327,13 @@ def test_version_metadata_is_actor_aware_and_batched(page_service):
             session,
             page_id=page.id,
             parent_version_id=UUID(published["version_id"]),
-            body_md="# Version metadata\n\nneither",
-            content_hash=calculate_content_hash("# Version metadata\n\nneither"),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md="# Version metadata\n\nneither",
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-000000000011",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000011",
             version_status="superseded_snapshot",
@@ -3264,8 +3353,13 @@ def test_version_metadata_is_actor_aware_and_batched(page_service):
             session,
             page_id=page.id,
             parent_version_id=UUID(published["version_id"]),
-            body_md="# Version metadata\n\nrejected",
-            content_hash=calculate_content_hash("# Version metadata\n\nrejected"),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md="# Version metadata\n\nrejected",
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-000000000012",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000012",
             version_status="draft",

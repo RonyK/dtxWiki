@@ -3,11 +3,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-# Importing the package registers the format rules.
-import backend.services.lint  # noqa: F401
+# Built-in rules are constructed explicitly by each registry.
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.workspace import Workspace
-from backend.services.lint import base
+from backend.services.lint import LintContext, LintRegistry
+from backend.services.lint.scopes import findings_for_target
 from backend.services.page_service import refresh_page_links
 
 pytestmark = pytest.mark.integration
@@ -44,10 +44,12 @@ def _seed_page(session, wsid, body):
 
 
 def _run(session, rule_id, body):
-    rule = base.get_rule(rule_id)
+    rule = LintRegistry.builtin().rule(rule_id)
     assert rule is not None, f"{rule_id} not registered"
     page = _seed_page(session, _ws(session), body)
-    return rule.check(session=session, workspace_id=page.workspace_id, target=page)
+    return findings_for_target(
+        rule, page, LintContext(session, page.workspace_id, page=page)
+    )
 
 
 @pytest.mark.parametrize(
@@ -122,15 +124,14 @@ def test_frontmatter_content_not_misparsed_as_body(session_factory):
         assert _run(session, "link.unresolved", body) == []
 
 
-def test_unclosed_frontmatter_never_gates_a_write(session_factory):
+def test_unclosed_frontmatter_never_gates_a_write():
     # LG-F4 + Sweep-1: there is no md.frontmatter rule (an unclosed leading '---'
     # is indistinguishable from a valid rule + colon line like "Note: ..."), and
-    # body_error_findings — the auto-approval gate floor — must produce no veto for
+    # publish_floor_findings — the auto-approval gate floor — must produce no veto for
     # any of these valid pages. Closed frontmatter is stripped, not flagged.
-    from backend.services.lint import base
-    from backend.services.lint.rules_format import body_error_findings
+    from backend.services.lint import LintRegistry, publish_floor_findings
 
-    assert base.get_rule("md.frontmatter") is None
+    assert LintRegistry.builtin().rule("md.frontmatter") is None
     cases = [
         "---\n\nJust prose under a horizontal rule.\n",
         "---\n\nNote: this is normal prose.\n",
@@ -139,7 +140,7 @@ def test_unclosed_frontmatter_never_gates_a_write(session_factory):
         "---\ntitle: x\n---\n\nClosed frontmatter, valid body.\n",
     ]
     for body in cases:
-        assert body_error_findings(body) == [], body
+        assert publish_floor_findings(body) == [], body
 
 
 def test_code_fence_close_is_length_aware(session_factory):
@@ -185,12 +186,15 @@ def test_format_rules_skip_page_without_body(session_factory):
             "md.code_fence_balance",
             "md.table_wellformed",
         ):
-            rule = base.get_rule(rule_id)
-            assert rule.check(session=session, workspace_id=wsid, target=page) == []
+            rule = LintRegistry.builtin().rule(rule_id)
+            assert (
+                findings_for_target(rule, page, LintContext(session, wsid, page=page))
+                == []
+            )
 
 
 def test_unresolved_wikilink_is_flagged(session_factory):
-    rule = base.get_rule("link.unresolved")
+    rule = LintRegistry.builtin().rule("link.unresolved")
     with session_factory.begin() as session:
         wsid = _ws(session)
         session.add(
@@ -200,7 +204,7 @@ def test_unresolved_wikilink_is_flagged(session_factory):
         )
         session.flush()
         src = _seed_page(session, wsid, "See [[real-target]] and [[ghost-page]].\n")
-        findings = rule.check(session=session, workspace_id=wsid, target=src)
+        findings = findings_for_target(rule, src, LintContext(session, wsid, page=src))
     assert len(findings) == 1
     assert findings[0].rule_id == "link.unresolved"
     # M6/DEC-2: advisory warning, not a gating error (forward-ref false positives).
@@ -209,7 +213,7 @@ def test_unresolved_wikilink_is_flagged(session_factory):
 
 
 def test_internal_link_all_resolve_no_findings(session_factory):
-    rule = base.get_rule("link.unresolved")
+    rule = LintRegistry.builtin().rule("link.unresolved")
     with session_factory.begin() as session:
         wsid = _ws(session)
         session.add(
@@ -217,16 +221,16 @@ def test_internal_link_all_resolve_no_findings(session_factory):
         )
         session.flush()
         src = _seed_page(session, wsid, "Link to [[alpha]] only.\n")
-        findings = rule.check(session=session, workspace_id=wsid, target=src)
+        findings = findings_for_target(rule, src, LintContext(session, wsid, page=src))
     assert findings == []
 
 
 def test_internal_link_ignores_wikilinks_in_code(session_factory):
-    rule = base.get_rule("link.unresolved")
+    rule = LintRegistry.builtin().rule("link.unresolved")
     with session_factory.begin() as session:
         wsid = _ws(session)
         src = _seed_page(session, wsid, "```\n[[ghost-in-code]]\n```\n")
-        findings = rule.check(session=session, workspace_id=wsid, target=src)
+        findings = findings_for_target(rule, src, LintContext(session, wsid, page=src))
     assert findings == []
 
 
@@ -260,11 +264,15 @@ def test_format_rules_see_both_the_live_body_and_the_staged_draft(session_factor
         page.current_version_id = draft.id
         session.flush()
 
-        floor = base.get_rule("md.code_fence_balance").check(
-            session=session, workspace_id=wsid, target=page
+        floor = findings_for_target(
+            LintRegistry.builtin().rule("md.code_fence_balance"),
+            page,
+            LintContext(session, wsid, page=page),
         )
-        advisory = base.get_rule("md.heading_hierarchy").check(
-            session=session, workspace_id=wsid, target=page
+        advisory = findings_for_target(
+            LintRegistry.builtin().rule("md.heading_hierarchy"),
+            page,
+            LintContext(session, wsid, page=page),
         )
 
     assert [finding.rule_id for finding in floor] == ["md.code_fence_balance"]
@@ -309,11 +317,15 @@ def test_format_rules_never_scan_a_private_editing_row(session_factory):
         refresh_page_links(session, page=page, version=editing)
         session.flush()
 
-        advisory = base.get_rule("md.heading_hierarchy").check(
-            session=session, workspace_id=wsid, target=page
+        advisory = findings_for_target(
+            LintRegistry.builtin().rule("md.heading_hierarchy"),
+            page,
+            LintContext(session, wsid, page=page),
         )
-        unresolved = base.get_rule("link.unresolved").check(
-            session=session, workspace_id=wsid, target=page
+        unresolved = findings_for_target(
+            LintRegistry.builtin().rule("link.unresolved"),
+            page,
+            LintContext(session, wsid, page=page),
         )
 
     assert advisory == []
@@ -363,11 +375,15 @@ def test_a_defect_in_only_one_body_is_still_reported(session_factory):
         draft_defect.current_version_id = broken_draft.id
         session.flush()
 
-        live = base.get_rule("md.table_wellformed").check(
-            session=session, workspace_id=wsid, target=published_defect
+        live = findings_for_target(
+            LintRegistry.builtin().rule("md.table_wellformed"),
+            published_defect,
+            LintContext(session, wsid, page=published_defect),
         )
-        staged = base.get_rule("md.code_fence_balance").check(
-            session=session, workspace_id=wsid, target=draft_defect
+        staged = findings_for_target(
+            LintRegistry.builtin().rule("md.code_fence_balance"),
+            draft_defect,
+            LintContext(session, wsid, page=draft_defect),
         )
 
     assert [finding.rule_id for finding in live] == ["md.table_wellformed"]
@@ -400,8 +416,10 @@ def test_the_same_defect_in_both_bodies_is_one_finding(session_factory):
         page.current_version_id = draft.id
         session.flush()
 
-        findings = base.get_rule("md.table_wellformed").check(
-            session=session, workspace_id=wsid, target=page
+        findings = findings_for_target(
+            LintRegistry.builtin().rule("md.table_wellformed"),
+            page,
+            LintContext(session, wsid, page=page),
         )
 
     assert len(findings) == 1

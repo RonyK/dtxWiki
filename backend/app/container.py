@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from threading import Lock
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
 from backend.spi.context import ToolCallContext
+
+if TYPE_CHECKING:
+    from backend.services.lint.base import LintModule
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +341,7 @@ class ServiceRegistry:
     """
 
     settings: Settings | None = None
+    lint_modules: tuple[LintModule, ...] = ()
     # Context media is workspace-owned data, so this holds a routing callable
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
@@ -390,6 +394,7 @@ class ServiceRegistry:
         return DomainReadService(
             self.tree_read,
             library_blob_repository_factory=self.library_blob_repository_factory,
+            lint_registry=self.lint_registry,
         )
 
     @cached_property
@@ -887,6 +892,7 @@ class ServiceRegistry:
         from backend.services.settings_service import SettingsService
 
         return SettingsService(
+            lint_registry=self.lint_registry,
             library_family_policy=self.library_family_policy,
             orphan_retention_hours=(
                 self.settings.context_media_orphan_retention_hours
@@ -900,6 +906,7 @@ class ServiceRegistry:
         from backend.services.context_ingress_service import ContextIngressService
 
         return ContextIngressService(
+            body_preparer=self.body_preparer,
             tree_read_service=self.tree_read,
             context_media_repository_factory=self.context_media_repository_factory,
         )
@@ -921,6 +928,7 @@ class ServiceRegistry:
         from backend.services.context_write_service import ContextWriteService
 
         return ContextWriteService(
+            body_preparer=self.body_preparer,
             context_media_repository_factory=self.context_media_repository_factory,
             media_installer_factory=self.validated_media_installer_for_session,
         )
@@ -942,14 +950,28 @@ class ServiceRegistry:
         from backend.services.review_service import ReviewService
 
         return ReviewService(
-            context_media_repository_factory=self.context_media_repository_factory
+            context_media_repository_factory=self.context_media_repository_factory,
+            body_preparer=self.body_preparer,
         )
+
+    @cached_property
+    def body_preparer(self):
+        from backend.services.body_preparer import BodyPreparer
+
+        return BodyPreparer(registry=self.lint_registry)
+
+    @cached_property
+    def lint_registry(self):
+        from backend.services.lint.modules import BUILTIN_LINT_MODULES
+        from backend.services.lint.registry import LintRegistry
+
+        return LintRegistry((*BUILTIN_LINT_MODULES, *self.lint_modules))
 
     @cached_property
     def lint(self):
         from backend.services.lint_service import LintService
 
-        return LintService(job_queue=self.job_queue)
+        return LintService(job_queue=self.job_queue, lint_registry=self.lint_registry)
 
     @cached_property
     def job_queue(self):
@@ -1030,6 +1052,8 @@ class AppContainer:
             self.page_service = PageService(
                 self.db.control_session_factory(),
                 job_queue=self.services.job_queue,
+                body_preparer=self.services.body_preparer,
+                lint_registry=self.services.lint_registry,
                 context_media_repository_factory=(
                     self.services.context_media_repository_factory
                 ),
@@ -1094,16 +1118,26 @@ def assemble(
     ask_service: object | None = None,
     directory: WorkspaceDirectory | None = None,
     services: ServiceRegistry | None = None,
+    lint_modules: tuple[LintModule, ...] = (),
     blob_store_provider: BlobStoreProvider | None = None,
 ) -> AppContainer:
     if db is not None and session_factory is not None:
         raise ValueError("db and session_factory cannot both be provided")
+    if lint_modules and services is not None and "lint_registry" in services.__dict__:
+        raise ValueError(
+            "lint modules must be injected before the lint registry is constructed"
+        )
     resolved_db = (
         db
         if db is not None
         else DatabaseProvider(settings, session_factory=session_factory)
     )
     resolved_services = services if services is not None else ServiceRegistry()
+    if lint_modules:
+        resolved_services.lint_modules = (
+            *resolved_services.lint_modules,
+            *lint_modules,
+        )
     if directory is not None:
         # WorkspaceDirectory is a cached_property on the default registry.
         # Seeding the cache gives overlays one explicit rebinding point while

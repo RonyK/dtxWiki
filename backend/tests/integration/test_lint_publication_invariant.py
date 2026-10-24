@@ -646,8 +646,7 @@ def test_ai_semantic_noop_skips_ledger_but_material_revision_records(page_servic
         after_revision = _page_ledger_counts(session, page_id)
     assert revised["version_id"] != first["version_id"]
     assert tuple(
-        after - before
-        for after, before in zip(after_revision, after_noop, strict=True)
+        after - before for after, before in zip(after_revision, after_noop, strict=True)
     ) == (1, 1, 1, 1)
 
 
@@ -860,6 +859,8 @@ def test_autosave_does_not_adopt_a_ledger_row_that_carries_a_review(page_service
         assert after[operation_id] == recorded, (
             "autosave rewrote a ledger row belonging to a reviewed write"
         )
+
+
 def test_pat_review_cannot_approve_browser_replacement_bytes(page_service):
     """A review stays bound to the immutable bytes the PAT submitted."""
 

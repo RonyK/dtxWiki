@@ -8,7 +8,12 @@ from uuid import UUID
 from sqlalchemy import exists, func, select
 
 from backend.models.context import ContextPage, PageLink, PageNameIndex
-from backend.services.lint.base import LintFindingDraft, register_rule
+from backend.services.lint.base import (
+    LintContext,
+    LintFindingDraft,
+    LintModule,
+    LintStage,
+)
 
 _TARGETS = frozenset({"context_page"})
 
@@ -39,8 +44,10 @@ class _OrphanPageRule:
     layer = "knowledge"
     default_enabled = True
     applies_to = _TARGETS
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target) -> list[LintFindingDraft]:
+    def check_target(self, target, ctx: LintContext) -> list[LintFindingDraft]:
+        session, workspace_id = ctx.session, ctx.workspace_id
         if (
             target.lifecycle_status == "archived"
             or target.current_published_version_id is None
@@ -75,8 +82,10 @@ class _MissingBacklinkRule:
     layer = "knowledge"
     default_enabled = True
     applies_to = _TARGETS
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target) -> list[LintFindingDraft]:
+    def check_target(self, target, ctx: LintContext) -> list[LintFindingDraft]:
+        session, workspace_id = ctx.session, ctx.workspace_id
         if (
             target.lifecycle_status == "archived"
             or target.current_published_version_id is None
@@ -132,8 +141,10 @@ class _DuplicateConceptRule:
     layer = "knowledge"
     default_enabled = True
     applies_to = _TARGETS
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target) -> list[LintFindingDraft]:
+    def check_target(self, target, ctx: LintContext) -> list[LintFindingDraft]:
+        session, workspace_id = ctx.session, ctx.workspace_id
         title = (target.title or "").strip().casefold()
         if (
             not title
@@ -168,8 +179,10 @@ class _TermCollisionRule:
     layer = "knowledge"
     default_enabled = True
     applies_to = _TARGETS
+    stages = frozenset({LintStage.RUN})
 
-    def check(self, *, session, workspace_id, target) -> list[LintFindingDraft]:
+    def check_target(self, target, ctx: LintContext) -> list[LintFindingDraft]:
+        session, workspace_id = ctx.session, ctx.workspace_id
         cache_key = "_lint_term_collision_map"
         collisions_by_page = session.info.get(cache_key)
         if collisions_by_page is None:
@@ -204,7 +217,13 @@ class _TermCollisionRule:
         ]
 
 
-register_rule(_OrphanPageRule())
-register_rule(_MissingBacklinkRule())
-register_rule(_DuplicateConceptRule())
-register_rule(_TermCollisionRule())
+MODULE = LintModule(
+    "knowledge",
+    200,
+    (
+        _OrphanPageRule(),
+        _MissingBacklinkRule(),
+        _DuplicateConceptRule(),
+        _TermCollisionRule(),
+    ),
+)

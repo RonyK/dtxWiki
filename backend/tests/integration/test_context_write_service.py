@@ -51,6 +51,7 @@ from backend.services.read_errors import (
 from backend.services.review_risk_policy import _preset_policy
 from backend.services.review_service import ReviewService
 from backend.tests.integration import test_context_media_repository as media_fixtures
+from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_outline import parse_outline
 
@@ -859,69 +860,6 @@ def test_update_draft_metadata_only_stale_write_conflicts_on_editing_revision(
     assert page.title == "Patched After Re-Read"
 
 
-def test_update_draft_regression_calls_extracted_persistence_tail(
-    session_factory,
-    monkeypatch,
-):
-    service = ContextWriteService()
-    persist_calls = []
-    original_persist = service._persist_context_update
-
-    def tracking_persist(**kwargs):
-        persist_calls.append(kwargs)
-        return original_persist(**kwargs)
-
-    monkeypatch.setattr(service, "_persist_context_update", tracking_persist)
-
-    with session_factory.begin() as session:
-        workspace = _workspace(session)
-        workspace.auto_fix_enabled = False
-        created = service.write_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=WriteDraftRequest(
-                title="Extracted Tail Regression",
-                page_type="overview",
-                body_markdown="# Extracted Tail Regression\n\nOriginal.",
-                reason="create extraction regression fixture",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-            actor_role="owner",
-        )
-        page = session.get(ContextPage, created.page_id)
-        base_version = page.latest_draft_version
-        result = service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=page.id,
-                base_version_id=base_version.id,
-                base_content_hash=base_version.content_hash,
-                update_mode="append_section",
-                body_markdown="## Added\n\nAdded through the extracted tail.",
-                reason="exercise the extracted persistence tail",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-        )
-        persisted = session.get(ContextPageVersion, result.draft_version_id)
-        operation = session.scalar(
-            select(ChangeOperation).where(
-                ChangeOperation.change_set_id == result.change_set_id
-            )
-        )
-
-    assert len(persist_calls) == 1
-    assert persist_calls[0]["base_version"].id == base_version.id
-    assert persist_calls[0]["new_body"].endswith(
-        "## Added\n\nAdded through the extracted tail."
-    )
-    assert persisted.body_md == persist_calls[0]["new_body"]
-    assert operation.operation == "append_section"
-    assert result.outcome == "updated_draft"
-
-
 def test_patch_draft_resolves_fresh_head_for_sequential_non_overlapping_edits(
     session_factory,
 ):
@@ -1120,8 +1058,13 @@ def test_update_draft_stale_base_error_never_discloses_a_foreign_private_editing
             session,
             page_id=page.id,
             parent_version_id=created.draft_version_id,
-            body_md=private_body,
-            content_hash=calculate_content_hash(private_body),
+            body=prepare_context_body(
+                session,
+                page_id=page.id,
+                body_md=private_body,
+                actor_kind="human",
+                actor_id="00000000-0000-0000-0000-0000000000ee",
+            ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
@@ -2698,14 +2641,14 @@ def test_patch_draft_dry_run_returns_preview_without_persistence(session_factory
 
     with session_factory.begin() as session:
         workspace = _workspace(session)
-        workspace.auto_fix_enabled = False
+        workspace.auto_fix_enabled = True
         created = service.write_draft(
             session=session,
             workspace_id=workspace.id,
             request=WriteDraftRequest(
                 title="Patch Dry Run",
                 page_type="overview",
-                body_markdown="# Patch Dry Run\n\noriginal\n",
+                body_markdown="# Patch Dry Run\n\noriginal\ncontinued\n",
                 reason="create dry-run fixture",
             ),
             actor_kind="human",
@@ -2717,25 +2660,31 @@ def test_patch_draft_dry_run_returns_preview_without_persistence(session_factory
         )
         change_count = session.scalar(select(func.count()).select_from(ChangeSet))
         review_count = session.scalar(select(func.count()).select_from(ReviewItem))
-        preview_body = "# Patch Dry Run\n\npreviewed\n"
-        original_body = "# Patch Dry Run\n\noriginal\n"
+        # Canonical hashes ignore this semantic hard break. Preview and save
+        # must still recognize and preserve its exact authored bytes.
+        preview_body = "# Patch Dry Run\n\noriginal  \ncontinued\n"
+        original_body = "# Patch Dry Run\n\noriginal\ncontinued\n"
+        assert calculate_content_hash(preview_body) == calculate_content_hash(
+            original_body
+        )
+        request = PatchDraftRequest(
+            page_id=created.page_id,
+            base=str(created.draft_version_id),
+            operations=[
+                {
+                    "op": "replace_document",
+                    "content": preview_body,
+                    "expected_content_hash": section_content_hash(original_body),
+                }
+            ],
+            reason="preview replacement without writing",
+            dry_run=True,
+        )
 
         preview = service.patch_draft(
             session=session,
             workspace_id=workspace.id,
-            request=PatchDraftRequest(
-                page_id=created.page_id,
-                base=str(created.draft_version_id),
-                operations=[
-                    {
-                        "op": "replace_document",
-                        "content": preview_body,
-                        "expected_content_hash": section_content_hash(original_body),
-                    }
-                ],
-                reason="preview replacement without writing",
-                dry_run=True,
-            ),
+            request=request,
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
@@ -2751,10 +2700,22 @@ def test_patch_draft_dry_run_returns_preview_without_persistence(session_factory
         assert (
             session.scalar(select(func.count()).select_from(ReviewItem)) == review_count
         )
+        assert page.latest_draft_version_id == created.draft_version_id
+        assert preview.outcome == "updated_draft"
+        saved = service.patch_draft(
+            session=session,
+            workspace_id=workspace.id,
+            request=request.model_copy(update={"dry_run": False}),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+        )
+        stored = session.get(ContextPageVersion, saved.draft_version_id)
+        assert stored.body_md == preview.preview_body_markdown == preview_body
+        assert saved.body_changed is True
+        assert saved.draft_version_id != created.draft_version_id
 
     assert preview.body_changed is True
     assert preview.persisted_content_hash == calculate_content_hash(preview_body)
-    assert page.latest_draft_version_id == created.draft_version_id
 
 
 def test_draft_update_preserves_published_pagelinks_until_publish(session_factory):
@@ -2899,6 +2860,11 @@ def test_update_draft_appends_and_links_feedback(
         )
         updated_version = session.get(ContextPageVersion, result.draft_version_id)
         change_set = session.get(ChangeSet, result.change_set_id)
+        operation = session.scalar(
+            select(ChangeOperation).where(
+                ChangeOperation.change_set_id == result.change_set_id
+            )
+        )
         citation = session.scalar(
             select(ContextCitation).where(
                 ContextCitation.target_id.in_(
@@ -2911,6 +2877,7 @@ def test_update_draft_appends_and_links_feedback(
 
     assert "## Added" in updated_version.body_markdown
     assert updated_version.parent_version_id == base_version.id
+    assert operation.operation == "append_section"
     assert result.review_item_id is not None
     assert change_set.cite_call_skipped is True
     assert citation.created_via == "manual_input"
@@ -3841,8 +3808,13 @@ def test_publish_draft_without_bound_review_publishes(session_factory):
             session,
             page_id=created.page_id,
             parent_version_id=created.draft_version_id,
-            body_md="# Review Free Publish Target\n\nUnreviewed body.",
-            content_hash="0" * 64,
+            body=prepare_context_body(
+                session,
+                page_id=created.page_id,
+                body_md="# Review Free Publish Target\n\nUnreviewed body.",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+            ),
             actor_kind="human",
             actor_id=ACTOR_ID,
             version_status="draft",
@@ -3915,9 +3887,12 @@ def test_publish_revalidates_stored_unsafe_body_without_moving_published_pointer
             session,
             page_id=created.page_id,
             parent_version_id=published_id_before,
-            body_md="# Stored unsafe publish target\n\nSafe staged body.",
-            content_hash=calculate_content_hash(
-                "# Stored unsafe publish target\n\nSafe staged body."
+            body=prepare_context_body(
+                session,
+                page_id=created.page_id,
+                body_md="# Stored unsafe publish target\n\nSafe staged body.",
+                actor_kind="human",
+                actor_id=ACTOR_ID,
             ),
             actor_kind="human",
             actor_id=ACTOR_ID,

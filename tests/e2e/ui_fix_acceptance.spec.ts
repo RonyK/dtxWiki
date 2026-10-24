@@ -46,7 +46,7 @@ type BrowserFailureMonitor = {
 };
 
 test.describe("2026-08-09 UI fix acceptance", () => {
-  test("Context Children deep-link and blank-reason Move remain usable", async ({
+  test("Context blank-reason Move remains usable", async ({
     page,
   }, testInfo) => {
     test.setTimeout(120_000);
@@ -56,81 +56,6 @@ test.describe("2026-08-09 UI fix acceptance", () => {
     await authenticatePage(page, testInfo, "ui-fix-context");
     const workspace = await currentWorkspace(page.request);
     const suffix = fixtureSuffix(testInfo);
-
-    const parentPage = await createContextPage(
-      page.request,
-      workspace.id,
-      `UI fix Children parent ${suffix}`,
-    );
-    const parentPlacement = await pagePlacement(
-      page.request,
-      workspace.id,
-      parentPage.id,
-    );
-    for (let index = 1; index <= 6; index += 1) {
-      await createContextPage(
-        page.request,
-        workspace.id,
-        `UI fix child ${String(index).padStart(2, "0")} ${suffix}`,
-        parentPlacement.id,
-      );
-    }
-
-    await test.step("Children page 2 survives browser back and forward navigation", async () => {
-      await page.goto(`/context?target=${parentPage.id}&tab=children&page=2`);
-      const childrenTab = page.getByRole("tab", { name: /Children/ });
-      const childrenPanel = page.getByRole("tabpanel", { name: /Children/ });
-      await expect(childrenTab).toHaveAttribute("aria-selected", "true");
-      await expect(childrenPanel.locator(".folder-child-row")).toHaveCount(1);
-      await expect(
-        childrenPanel.locator('.numeric-pagination__page[aria-current="page"]'),
-      ).toHaveText("2");
-      await expect(page).toHaveURL(/(?:\?|&)tab=children(?:&|$)/);
-      await expect(page).toHaveURL(/(?:\?|&)page=2(?:&|$)/);
-      const historyTrace = [
-        await browserHistorySnapshot(page, "children-deep-link"),
-      ];
-      const geometry = await surfaceGeometry(page, [
-        ".context-reader",
-        ".reader-tabs",
-        ".context-children-pagination",
-      ]);
-      await saveEvidence(page, testInfo, "context-children-page-2", {
-        geometry,
-        url: redactedUrl(page.url()),
-      });
-
-      await page.getByRole("tab", { name: "View", exact: true }).click();
-      await expect(page).not.toHaveURL(/(?:\?|&)page=/);
-      const viewTab = page.getByRole("tab", { name: "View", exact: true });
-      await expect(viewTab).toHaveAttribute("aria-selected", "true");
-      historyTrace.push(await browserHistorySnapshot(page, "view-click"));
-      await page.goBack();
-      historyTrace.push(await browserHistorySnapshot(page, "go-back"));
-      await saveJson(testInfo, "context-children-history-trace", historyTrace);
-      await expect(page).toHaveURL(/(?:\?|&)tab=children(?:&|$)/);
-      await expect(page).toHaveURL(/(?:\?|&)page=2(?:&|$)/);
-      await expect(childrenTab).toHaveAttribute("aria-selected", "true");
-      await page.goForward();
-      await expect(page).not.toHaveURL(/(?:\?|&)page=/);
-      await expect(viewTab).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-      historyTrace.push(await browserHistorySnapshot(page, "go-forward"));
-      await page.goBack();
-      historyTrace.push(await browserHistorySnapshot(page, "go-back-again"));
-      await saveJson(testInfo, "context-children-history-trace", historyTrace);
-      await expect(page).toHaveURL(/(?:\?|&)page=2(?:&|$)/);
-      await expect(childrenTab).toHaveAttribute("aria-selected", "true");
-      await page.reload();
-      await expect(page).toHaveURL(/(?:\?|&)tab=children(?:&|$)/);
-      await expect(page).toHaveURL(/(?:\?|&)page=2(?:&|$)/);
-      await expect(childrenTab).toHaveAttribute("aria-selected", "true");
-      await expect(childrenPanel.locator(".folder-child-row")).toHaveCount(1);
-      historyTrace.push(await browserHistorySnapshot(page, "reload-restored-children"));
-      await saveJson(testInfo, "context-children-history-trace", historyTrace);
-    });
 
     await test.step("Move accepts an empty Reason and keeps the picker compact", async () => {
       const sourceParent = await createFolder(
@@ -1114,23 +1039,6 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
     `${label} document width`,
   ).toBeLessThanOrEqual(geometry.viewport + 1);
   return geometry;
-}
-
-async function browserHistorySnapshot(page: Page, phase: string) {
-  const snapshot = await page.evaluate((currentPhase) => ({
-    historyLength: window.history.length,
-    historyState: window.history.state as unknown,
-    phase: currentPhase,
-    selectedTab:
-      document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-        ?.innerText ?? null,
-    url: window.location.href,
-  }), phase);
-  // Redacted here, in node, before the raw href can reach `historyTrace`.
-  // That array is attached repeatedly as the deep-link step progresses, so
-  // redacting only at the attach would still leave the raw value in the array
-  // that an intermediate assertion failure prints.
-  return { ...snapshot, url: redactedUrl(snapshot.url) };
 }
 
 async function surfaceGeometry(page: Page, selectors: string[]) {

@@ -83,7 +83,7 @@ from backend.schemas.page import (
     SubmitContextEditRequest,
 )
 from backend.schemas.read import ContextPageListResponse
-from backend.services.lint.base import PUBLICATION_FLOOR_RULES
+from backend.services.lint import LintRegistry, LintStage
 from backend.services.page_service import (
     PageConflictError,
     PageContextMediaError,
@@ -188,6 +188,8 @@ def read_page_by_slug(
     page_service = PageService(
         session_factory,
         job_queue=services.job_queue,
+        body_preparer=services.body_preparer,
+        lint_registry=services.lint_registry,
         context_media_repository_factory=services.context_media_repository_factory,
     )
     try:
@@ -202,7 +204,11 @@ def read_page_by_slug(
         )
     except PageServiceError as exc:
         return service_error_response(exc)
-    return page_write_response(_to_detail(page), write_operation=False)
+    return page_write_response(
+        _to_detail(page),
+        write_operation=False,
+        lint_registry=page_service.lint_registry,
+    )
 
 
 @router.post(
@@ -242,7 +248,9 @@ def create_context_page(
         )
     except PageServiceError as exc:
         return service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 @router.get(
@@ -282,7 +290,9 @@ def get_context_page(
         latest_draft_version_id=latest_draft_version_id,
         **enrichment,
     )
-    return page_write_response(detail, write_operation=False)
+    return page_write_response(
+        detail, write_operation=False, lint_registry=page_service.lint_registry
+    )
 
 
 @router.get(
@@ -456,7 +466,9 @@ def publish_page_version(
     except ReadServiceError as exc:
         return read_service_error_response(exc)
     return page_write_response(
-        _to_detail(result.page), published_findings=result.findings
+        _to_detail(result.page),
+        published_findings=result.findings,
+        lint_registry=page_service.lint_registry,
     )
 
 
@@ -577,7 +589,9 @@ def begin_context_edit(
         return service_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 @router.post(
@@ -614,7 +628,9 @@ def submit_context_edit_for_review(
         return service_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 @router.post(
@@ -683,7 +699,9 @@ def restore_page_version(
         )
     except PageServiceError as exc:
         return service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 @router.post(
@@ -716,7 +734,9 @@ def set_page_public(
         )
     except PageServiceError as exc:
         return service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 @router.patch(
@@ -755,7 +775,9 @@ def update_page(
         return service_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 @router.post(
@@ -798,7 +820,9 @@ def autosave_page(
         return service_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
-    return page_write_response(_to_detail(page))
+    return page_write_response(
+        _to_detail(page), lint_registry=page_service.lint_registry
+    )
 
 
 def _to_detail(page) -> ContextPageDetail:
@@ -821,11 +845,14 @@ def page_write_response(
     *,
     published_findings=None,
     write_operation: bool = True,
+    lint_registry: LintRegistry | None = None,
 ) -> dict:
     """Wrap a page with operation-accurate warnings for unpublished content."""
     warnings = []
+    registry = lint_registry if lint_registry is not None else LintRegistry.builtin()
     for reason in page.publish_blocked_reasons:
-        if reason.code in PUBLICATION_FLOOR_RULES:
+        rule = registry.rule(reason.code)
+        if rule is not None and LintStage.PUBLISH_FLOOR in rule.stages:
             message = (
                 f"Saved as a draft, not published. {reason.message}"
                 if write_operation
@@ -955,6 +982,8 @@ def _workspace_page_service(
         PageService(
             container.db.session_for(workspace_id),
             job_queue=services.job_queue,
+            body_preparer=services.body_preparer,
+            lint_registry=services.lint_registry,
             context_media_repository_factory=services.context_media_repository_factory,
         ),
     )
