@@ -498,6 +498,9 @@ def test_selection_approves_newest_selected_draft_and_settles_earlier_one(
     selection = _selection(client, workspace_id, review_item_ids=[older, newest])
     assert selection["review_item_ids"] == [newest, older]
     assert selection["eligible_count"] == 1
+    # The earlier draft's review shows its own version, not the newest one.
+    settled = next(item for item in selection["items"] if item["id"] == older)
+    assert (settled["will_auto_settle"], settled["target_version_no"]) == (True, 1)
     result = _execute_selection(client, workspace_id, selection["selection_token"])
     assert result.status_code == 200, result.text
     data = result.json()["data"]

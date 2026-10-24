@@ -66,17 +66,12 @@ SELECTION_EXPIRED_REASON = (
 )
 
 
-def order_newest_candidates_first(
+def review_candidate_versions(
     session: Session, workspace_id: UUID, review_ids: list[UUID]
-) -> list[UUID]:
-    """Put each Context page's newest reviewed version first.
-
-    Approving the newest selected draft of a page publishes the changes up
-    to it and settles its earlier drafts, instead of publishing each draft
-    in turn. Pages keep their first position and other reviews their order.
-    """
-    if len(review_ids) < 2:
-        return list(review_ids)
+) -> dict[UUID, tuple[UUID, int]]:
+    """Each Context review's reviewed (page, version_no), in three queries."""
+    if not review_ids:
+        return {}
     change_sets = dict(session.execute(
         select_in_workspace(
             ReviewItem, workspace_id=workspace_id,
@@ -112,13 +107,35 @@ def order_newest_candidates_first(
             )
         ).all()
     }
+    return {
+        review_id: versions[version_id]
+        for review_id, change_set_id in change_sets.items()
+        if (version_id := version_by_change_set.get(change_set_id)) in versions
+    }
+
+
+def order_newest_candidates_first(
+    session: Session,
+    workspace_id: UUID,
+    review_ids: list[UUID],
+    *,
+    candidates: dict[UUID, tuple[UUID, int]] | None = None,
+) -> list[UUID]:
+    """Put each Context page's newest reviewed version first.
+
+    Approving the newest selected draft of a page publishes the changes up
+    to it and settles its earlier drafts, instead of publishing each draft
+    in turn. Pages keep their first position and other reviews their order.
+    """
+    if len(review_ids) < 2:
+        return list(review_ids)
+    if candidates is None:
+        candidates = review_candidate_versions(session, workspace_id, review_ids)
     page_rank: dict[UUID, int] = {}
 
     def key(item: tuple[int, UUID]) -> tuple[int, int, int]:
         position, review_id = item
-        target = versions.get(
-            version_by_change_set.get(change_sets.get(review_id))
-        )
+        target = candidates.get(review_id)
         if target is None:
             return position, 0, position
         page_id, version_no = target
@@ -316,9 +333,10 @@ class ReviewSelectionService:
         actor: ActorContext,
         actor_role: str,
     ) -> ReviewSelectionPayload:
+        selected = self.target_ids(session, workspace_id, request, actor, actor_role)
+        candidates = review_candidate_versions(session, workspace_id, selected)
         target_ids = order_newest_candidates_first(
-            session, workspace_id,
-            self.target_ids(session, workspace_id, request, actor, actor_role),
+            session, workspace_id, selected, candidates=candidates
         )
         entries: list[list[Any]] = []
         items: list[ReviewSelectionItem] = []
@@ -349,7 +367,13 @@ class ReviewSelectionService:
                         reason_code="superseded_by_approved_publish",
                         reason="Settled with the selected approved version.",
                         target_title=representative.target_title,
-                        target_version_no=representative.target_version_no,
+                        # Its own version: an earlier draft settled with a
+                        # later one is not that later version.
+                        target_version_no=(
+                            candidates[review_id][1]
+                            if review_id in candidates
+                            else representative.target_version_no
+                        ),
                     )
                 )
                 continue

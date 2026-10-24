@@ -3736,12 +3736,20 @@ class ReviewService:
 
     @staticmethod
     def _settlement(session: Session, review: ReviewItem) -> ReviewSettlement | None:
-        """Why this superseded review closed, from the audit that closed it."""
+        """Why this superseded review closed, from the audit that closed it.
 
+        Supersession writes the review and its audit together, so a window
+        around the review's last update finds that audit through the
+        (workspace_id, created_at) index instead of scanning the workspace.
+        """
+
+        window = timedelta(minutes=10)
         event = session.scalar(
             select(AuditEvent)
             .where(
                 AuditEvent.workspace_id == review.workspace_id,
+                AuditEvent.created_at >= review.updated_at - window,
+                AuditEvent.created_at <= review.updated_at + window,
                 AuditEvent.target_kind == "review_item",
                 AuditEvent.target_id == review.id,
                 AuditEvent.action.in_(_SETTLEMENT_REASONS),

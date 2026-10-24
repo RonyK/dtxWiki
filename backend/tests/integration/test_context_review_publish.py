@@ -467,6 +467,20 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
         ).version_id
         == version_id
     )
+    # From history, the rejected bytes start a new draft on the emptied page.
+    restored = pages.restore_version(
+        page_id=page_id,
+        version_id=version_id,
+        actor_kind="human",
+        actor_id=ACTOR,
+        actor_provenance="browser_session",
+    )
+    with session_factory() as session:
+        new_version = session.get(ContextPageVersion, restored.version_id)
+        assert new_version.parent_version_id is None
+        assert session.get(ContextPage, page_id).latest_draft_version_id == (
+            new_version.id
+        )
 
 
 def test_reject_off_chain_draft_closes_review_without_moving_head(session_factory):

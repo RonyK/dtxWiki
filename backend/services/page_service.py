@@ -1463,8 +1463,14 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             target = self._require_page_version(session, page, version_id)
-            current = self._require_page_version(session, page, page.current_version_id)
-            if target.id == current.id:
+            # Rejecting every draft of a never-published page leaves it with no
+            # version at all; restoring then starts a new root draft.
+            current = (
+                self._require_page_version(session, page, page.current_version_id)
+                if page.current_version_id is not None
+                else None
+            )
+            if current is not None and target.id == current.id:
                 return self._payload_from_page(session, page, target)
 
             parsed = parse_page_frontmatter(target.body_md)
@@ -1473,7 +1479,7 @@ class PageService:
             version = self._insert_version(
                 session,
                 page_id=page.id,
-                parent_version_id=current.id,
+                parent_version_id=current.id if current is not None else None,
                 body_md=target.body_md,
                 content_hash=target.content_hash,
                 actor_kind=actor_kind,
@@ -1524,10 +1530,10 @@ class PageService:
                 page_id=page.id,
                 version_id=version.id,
                 payload={
-                    "from_version_id": str(current.id),
+                    "from_version_id": str(current.id) if current else None,
                     "restored_from_version_id": str(target.id),
                     "draft_version_id": str(version.id),
-                    "before_content_hash": current.content_hash,
+                    "before_content_hash": current.content_hash if current else None,
                     "after_content_hash": version.content_hash,
                     "staged_metadata": stage_metadata and bool(metadata_patch),
                 },
@@ -1549,6 +1555,8 @@ class PageService:
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                 )
+                if current is not None
+                else 0
             )
             if metadata_patch:
                 stage_page_metadata_patch(
