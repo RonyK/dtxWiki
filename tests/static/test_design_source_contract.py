@@ -292,7 +292,6 @@ def citations_outside(
 # citations without failing.
 CITATION_BASELINE: frozenset[tuple[str, str]] = frozenset(
     {
-        ("AGENTS.md", "doc/design/epic1-core-contract.md"),
         (
             "backend/api/context_media.py",
             "doc/design/workspace-database-separation-plan.md",

@@ -26,6 +26,8 @@ def test_query_matching_stays_case_insensitive():
     section = heading_location_for_query(body, "mixedcase")
     assert section is not None
     assert section.heading_path == ("Doc", "Alpha")
+    assert heading_location_for_query(body, "not-in-the-body") is None
+    assert heading_location_for_query("Preamble token\n\n# Doc", "token") is None
 
 
 def test_query_hit_is_credited_to_the_section_with_the_distinctive_token():

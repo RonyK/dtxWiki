@@ -138,7 +138,15 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  13 -- Bundle categories now expose the supported enum, review notes reject
 #        invalid Unicode, and body budgets describe the final stored Markdown.
 #        Refresh tools/list before submitting content and bundle requests.
-MCP_TOOL_CONTRACT_REVISION = 13
+#  14 -- General search excludes feedback and changes; explicit audit scopes
+#        remain available. Search results gain optional summary and location,
+#        and the always-false stale field is deprecated. Refresh tools/list.
+#  15 -- Search returns exact-name matches only through ranked_results and no
+#        longer emits a separate disambiguation projection or search warning.
+#        Optional filters.include_agents defaults true; false excludes Agent
+#        pages before result counts and pagination. Refresh tools/list.
+#        Explicit read_concept and write-target ambiguity policies are retained.
+MCP_TOOL_CONTRACT_REVISION = 15
 ERROR_CODES = (
     "not_found",
     "stale_base_version",
@@ -297,12 +305,11 @@ WARNING_CODES = (
     # without re-reading the page, which is the cost patching removes.
     "text_occurrence_mismatch",
     "text_not_found",
-    # Search advisory codes (design §8.2). unsupported_filter_*,
-    # disambiguation_required, and explicit semantic/hybrid fallback fire
-    # today; coverage_gap_recorded is emitted by Ask/REST/MCP zero-hit paths.
+    # Search advisory codes (design §8.2). unsupported_filter_* and explicit
+    # semantic/hybrid fallback fire today; coverage_gap_recorded is emitted by
+    # Ask/REST/MCP zero-hit paths.
     "unsupported_filter_tag",
     "unsupported_filter_date",
-    "disambiguation_required",
     "semantic_fallback_used",
     "keyword_lane_unavailable",
     "coverage_gap_recorded",

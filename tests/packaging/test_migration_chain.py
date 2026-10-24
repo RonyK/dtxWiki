@@ -29,7 +29,8 @@ RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
 # Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
-CURRENT_HEAD = "19db79d3e622"
+RELEASE_013_REVISION = "19db79d3e622"
+CURRENT_HEAD = "ef53a0a7061c"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -74,7 +75,7 @@ def _revision_graph(script: ScriptDirectory) -> dict[str, object]:
 
 
 def test_graph_has_one_release_revision_after_the_frozen_boundaries():
-    """Preserve the released schemas and consolidate unreleased 0.1.3 changes."""
+    """Keep each release boundary immutable as new schema revisions extend it."""
 
     script = _script_directory()
     graph = _revision_graph(script)
@@ -85,13 +86,15 @@ def test_graph_has_one_release_revision_after_the_frozen_boundaries():
     assert graph == {
         INITIAL_REVISION: None,
         CORE_REVISION: INITIAL_REVISION,
-        CURRENT_HEAD: CORE_REVISION,
+        RELEASE_013_REVISION: CORE_REVISION,
+        CURRENT_HEAD: RELEASE_013_REVISION,
     }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES
     assert manifest["schema_releases"]["0.1.2"]["head"] == CORE_REVISION
-    assert manifest["schema_releases"]["0.1.3"]["head"] == CURRENT_HEAD
+    assert manifest["schema_releases"]["0.1.3"]["head"] == RELEASE_013_REVISION
+    assert manifest["schema_releases"]["0.1.4"]["head"] == CURRENT_HEAD
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"
@@ -143,6 +146,10 @@ def test_the_freeze_covers_every_released_migration_file():
         "revision_modules/v0_1/__init__.py",
         "versions/v0_0/bd62193d5cf6_initial_schema.py",
         "versions/v0_1/efcbcf724889_core_schema.py",
+        "versions/v0_1/19db79d3e622_release_0_1_3.py",
+        "revision_modules/v0_1/content_event_backfill_v1.py",
+        "revision_modules/v0_1/input_restrictions_v1.py",
+        "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py",
         *(
             f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
             for path in CORE_REVISION_DIR.glob("*.py")

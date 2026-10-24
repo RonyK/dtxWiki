@@ -89,6 +89,18 @@ FROZEN_MIGRATIONS = {
     "versions/v0_1/efcbcf724889_core_schema.py": (
         "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
     ),
+    "versions/v0_1/19db79d3e622_release_0_1_3.py": (
+        "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c"
+    ),
+    "revision_modules/v0_1/content_event_backfill_v1.py": (
+        "0321e31467fa8112e133b39a197b9456ea39795a684aaae0c8934eeb1f655995"
+    ),
+    "revision_modules/v0_1/input_restrictions_v1.py": (
+        "14f50082552dc8490e2ee2ac239983f4224cbbce80758df6ce498f9cacef26d5"
+    ),
+    "versions/v0_1/ef53a0a7061c_index_change_operation_change_set_id.py": (
+        "4ca7da3416959c22c15d39b453bb7d72024c9efca56e68253ea1e244a2066547"
+    ),
 }
 FROZEN_MANIFEST = Path("backend") / "migrations" / "frozen_revisions.json"
 # A local env file can hold SMTP passwords and session secrets. Only the

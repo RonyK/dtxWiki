@@ -5323,31 +5323,6 @@ export interface components {
             data: components["schemas"]["DeploymentStatus"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
-        /** DisambiguationCandidate */
-        DisambiguationCandidate: {
-            /** Concept Path */
-            concept_path?: string | null;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Match Reason */
-            match_reason: string;
-            /** Title */
-            title: string;
-        };
-        /** DisambiguationPayload */
-        DisambiguationPayload: {
-            /** Candidates */
-            candidates: components["schemas"]["DisambiguationCandidate"][];
-            /**
-             * Status
-             * @default ambiguous
-             * @constant
-             */
-            status: "ambiguous";
-        };
         /** DiscardContextEditRequest */
         DiscardContextEditRequest: {
             /**
@@ -5417,7 +5392,7 @@ export interface components {
              * @description Stable warning code; must be drawn from WARNING_CODES.
              * @enum {string}
              */
-            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "disambiguation_required" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete";
+            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete";
             /** Message */
             message: string;
         };
@@ -8376,6 +8351,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Location */
+            location?: string[] | null;
             /** Match Reason */
             match_reason?: ("exact_id" | "exact_slug" | "exact_title" | "exact_alias" | "trigram" | "keyword" | "semantic" | "hybrid" | "associative") | null;
             /** Matched Name */
@@ -8392,9 +8369,12 @@ export interface components {
             } | null;
             /**
              * Stale
+             * @deprecated
              * @default false
              */
             stale: boolean;
+            /** Summary */
+            summary?: string | null;
             /** Title */
             title: string;
             /**
@@ -8893,6 +8873,12 @@ export interface components {
             date_to?: string | null;
             /** Format Hint */
             format_hint?: string[] | null;
+            /**
+             * Include Agents
+             * @description Whether Agent pages are included in search results.
+             * @default true
+             */
+            include_agents: boolean;
             /** Status */
             status?: string[] | null;
             /** Tag */
@@ -8902,7 +8888,6 @@ export interface components {
         };
         /** SearchPayload */
         SearchPayload: {
-            disambiguation?: components["schemas"]["DisambiguationPayload"] | null;
             /**
              * Has More
              * @default false
