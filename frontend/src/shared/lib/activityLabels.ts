@@ -299,6 +299,9 @@ export function auditCodeLabel(
   title: string,
   body: string | null | undefined,
 ): string {
+  if (body === "review.decision.undo") {
+    return i18n.t("activity:auditCode.reviewUndo");
+  }
   const prefix = (body ?? "").split(".")[0];
   const subtype = WORKSPACE_SUBTYPE_BY_PREFIX[prefix];
   const humanized = humanizeEnum(title);

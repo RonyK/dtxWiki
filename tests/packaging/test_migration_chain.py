@@ -32,7 +32,8 @@ CORE_REVISION = "efcbcf724889"
 TREE_RAIL_REVISION = "c7a4e91b2d60"
 RETENTION_REVISION = "d148b9746ff5"
 MERGE_REVISION = "49d9c0776c5a"
-CURRENT_HEAD = "19db79d3e622"
+INPUTS_REVISION = "19db79d3e622"
+CURRENT_HEAD = "333a67e22cd7"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -77,7 +78,7 @@ def _revision_graph(script: ScriptDirectory) -> dict[str, object]:
 
 
 def test_graph_has_one_head_and_preserves_both_branches_and_released_boundaries():
-    """Preserve the published merge and append input restrictions after it."""
+    """Preserve released boundaries while appending revisions after the merge."""
 
     script = _script_directory()
     graph = _revision_graph(script)
@@ -91,12 +92,13 @@ def test_graph_has_one_head_and_preserves_both_branches_and_released_boundaries(
         TREE_RAIL_REVISION: CORE_REVISION,
         RETENTION_REVISION: CORE_REVISION,
         MERGE_REVISION: (TREE_RAIL_REVISION, RETENTION_REVISION),
-        CURRENT_HEAD: MERGE_REVISION,
+        INPUTS_REVISION: MERGE_REVISION,
+        CURRENT_HEAD: INPUTS_REVISION,
     }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES
-    assert manifest["schema_releases"]["0.1.2"]["head"] == CURRENT_HEAD
+    assert manifest["schema_releases"]["0.1.2"]["head"] == INPUTS_REVISION
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"

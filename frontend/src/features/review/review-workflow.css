@@ -48,20 +48,20 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  display: grid;
-  grid-template-columns: 28px 28px minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px;
+  padding: 6px;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
   border-bottom: 1px solid var(--border);
   background: var(--surface-subtle);
 }
 
-.review-document-group-check,
-.review-group-collapse {
+/* Beat the shared wrapping-checkbox label rule, which has a 24px minimum. */
+.review-document-group-header .review-document-group-check {
   display: inline-grid;
   place-items: center;
+  flex: 0 0 28px;
   min-height: 28px;
   min-width: 28px;
   color: var(--ink-muted);
@@ -69,11 +69,32 @@
 }
 
 .review-document-group-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--review); }
-.review-document-group-title { display: grid; gap: 3px; min-width: 0; }
+.review-document-group-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 4px;
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  text-align: start;
+}
+.review-document-group-toggle:is(button) { cursor: pointer; }
+.review-document-group-toggle:not(button) { grid-template-columns: minmax(0, 1fr); }
+.review-document-group-toggle > svg { color: var(--ink-muted); }
+.review-document-group-header > .count-chip { flex: none; }
+/* The type and title share one hit area, so a 44px title button cannot
+   introduce extra space between their actual text lines on touch screens. */
+.review-document-group-title { display: grid; align-content: start; gap: 2px; min-width: 0; }
+.review-document-group-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .review-document-kind { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 12px; }
 .review-document-kind .tree-row-state-dot { flex: none; }
-.review-group-title-toggle { color: var(--ink); font-size: 13px; font-weight: 600; text-align: start; overflow-wrap: anywhere; cursor: pointer; padding: 0; }
-.review-document-group-title > strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.review-document-group-title .review-document-kind { line-height: 16px; }
+.review-group-title-text { font-size: 14px; font-weight: 600; line-height: 20px; overflow-wrap: anywhere; }
+.review-document-group-meta .review-current-label { line-height: 16px; }
 .review-document-group-body { display: grid; gap: 4px; padding: 6px; }
 .review-document-group-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--ink-muted); }
 .review-document-group-footer .icon-button { min-height: 30px; font-size: 12px; }
@@ -97,10 +118,10 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--review) 45%, transparent);
 }
 
-.review-group-collapse:hover,
-.review-group-title-toggle:hover { color: var(--ink); }
-.review-group-collapse:focus-visible,
-.review-group-title-toggle:focus-visible,
+@media (hover: hover) {
+  button.review-document-group-toggle:hover { background: var(--surface-hover); }
+}
+.review-document-group-toggle:focus-visible,
 .review-row:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
 .review-risk-explanation,
 .review-diagnostics,
@@ -133,12 +154,11 @@
 @media (max-width: 1024px), (any-pointer: coarse) {
   .review-row-select { width: 44px; height: 44px; top: 6px; }
   .review-row-shell.has-bulk-select .review-row { padding-inline-start: 60px; }
-  .review-document-group-header { grid-template-columns: 44px 44px minmax(0, 1fr) auto; padding: 6px 4px; }
-  .review-document-group-check,
-  .review-group-collapse,
+  .review-document-group-header .review-document-group-check { flex-basis: 44px; }
+  .review-document-group-header .review-document-group-check,
+  .review-document-group-toggle,
   .review-document-group-footer .icon-button,
   .review-group-controls .text-button,
-  .review-group-title-toggle,
   .review-active-filters .text-button,
   .review-recovery-actions .icon-button,
   .review-bulk-outcomes .icon-button { min-height: 44px; min-width: 44px; }

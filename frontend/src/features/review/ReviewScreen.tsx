@@ -1172,6 +1172,7 @@ export function ReviewScreen() {
       if (generation === loadMoreGenerationRef.current) {
         setError(reviewErrorMessage(exc, t("undo.failed")));
         detailCacheRef.current.clear();
+        setCompletedReview((current) => current?.id === reviewId ? null : current);
         setDetailReload((value) => value + 1);
       }
       return false;
@@ -3864,6 +3865,18 @@ function ReviewDocumentGroup({
     };
   }, []);
   const hidden = canCollapse && collapsed;
+  const titleContent = (
+    <span className="review-document-group-title">
+      <span className="review-document-group-meta">
+        <span className="review-document-kind" id={`${bodyId}-kind`}>
+          {kind === "context" || kind === "agent" || kind === "library" ? <span className={`tree-row-state-dot lc-dot-${kind}`} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}
+          {t(`workflow.documentKinds.${kind}`)}
+        </span>
+        {hidden && current ? <span className="review-current-label" id={`${bodyId}-viewing`}>{t("workflow.viewing")}</span> : null}
+      </span>
+      <span className="review-group-title-text">{title}</span>
+    </span>
+  );
   return (
     <section className="review-document-group" aria-label={title} aria-busy={busy}>
       <header className="review-document-group-header" ref={headerRef}>
@@ -3878,22 +3891,16 @@ function ReviewDocumentGroup({
               onChange={onSelect}
             />
           </label>
-        ) : <span />}
+        ) : null}
         {canCollapse ? (
-          <button className="review-group-collapse" type="button" onClick={onToggle}
+          <button className="review-document-group-toggle" type="button" onClick={onToggle}
             aria-controls={bodyId} aria-expanded={!hidden}
+            aria-describedby={`${bodyId}-kind${hidden && current ? ` ${bodyId}-viewing` : ""}`}
             aria-label={t(hidden ? "workflow.expandGroup" : "workflow.collapseGroup", { title })}>
+            {titleContent}
             {hidden ? <ChevronRight size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
           </button>
-        ) : <span />}
-        <div className="review-document-group-title">
-          <span className="review-document-kind">
-            {kind === "context" || kind === "agent" || kind === "library" ? <span className={`tree-row-state-dot lc-dot-${kind}`} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}
-            {t(`workflow.documentKinds.${kind}`)}
-          </span>
-          {canCollapse ? <button className="review-group-title-toggle" aria-controls={bodyId} aria-expanded={!hidden} onClick={onToggle} type="button">{title}</button> : <strong>{title}</strong>}
-          {hidden && current ? <span className="review-current-label">{t("workflow.viewing")}</span> : null}
-        </div>
+        ) : <div className="review-document-group-toggle">{titleContent}</div>}
         <CountChip value={loadedCount} approxMore={!complete} compact />
       </header>
       <div className="review-document-group-body" hidden={hidden} id={bodyId}>{children}</div>

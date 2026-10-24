@@ -6,9 +6,11 @@ from sqlalchemy import (
     JSON,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Text,
     UniqueConstraint,
     Uuid,
+    column,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -94,6 +96,13 @@ class ReviewItem(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 class ReviewDecision(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "review_decision"
     __table_args__ = (
+        # Match history/latest-decision reads, including timestamp ties.
+        Index(
+            "ix_review_decision_review_created_id",
+            "review_item_id",
+            column("created_at").desc(),
+            column("id").desc(),
+        ),
         # Epic-3 D-3 final schema: workspace-scoped, not just item-scoped.
         ForeignKeyConstraint(
             ["workspace_id", "review_item_id"],

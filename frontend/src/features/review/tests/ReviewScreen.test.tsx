@@ -2994,6 +2994,16 @@ describe("ReviewScreen", () => {
     expect(group.querySelector(".review-document-group-header .review-current-label")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Expand all" }));
     expect(group.querySelector(".review-document-group-body")).toBeVisible();
+    const groupToggle = within(group).getByRole("button", { name: "Collapse Grouped document" });
+    expect(groupToggle).toHaveAccessibleDescription("Context");
+    groupToggle.focus();
+    await user.keyboard(" ");
+    expect(groupToggle).toHaveAttribute("aria-expanded", "false");
+    expect(groupToggle).toHaveAccessibleDescription("Context Viewing");
+    expect(group.querySelector(".review-document-group-body")).not.toBeVisible();
+    await user.keyboard("{Enter}");
+    expect(groupToggle).toHaveAttribute("aria-expanded", "true");
+    expect(group.querySelector(".review-document-group-body")).toBeVisible();
     const groupCheck = within(group).getByRole("checkbox", { name: /Select all reviews matching/ });
     await user.click(within(group).getByRole("checkbox", { name: /^Select Grouped document/ }));
     expect(groupCheck).toBePartiallyChecked();

@@ -2728,7 +2728,8 @@ class ReviewService:
                 include_undo=True,
             )
         candidate = self._undo_candidate(
-            session, review, actor_user_id=principal, actor_role=actor_role
+            session, review, latest[0] if latest else None,
+            actor_user_id=principal, actor_role=actor_role,
         )
         if candidate is None or candidate.decision.id != decision_id:
             raise ReviewDecisionUndoUnavailableError("not_undoable")
@@ -2971,6 +2972,7 @@ class ReviewService:
         self,
         session: Session,
         review: ReviewItem,
+        decision: ReviewDecision | None,
         *,
         actor_user_id: UUID | None,
         actor_role: str | None,
@@ -2985,8 +2987,6 @@ class ReviewService:
             actor_role or "none", "editor"
         ):
             return None
-        latest = self._latest_decisions(session, review, limit=1)
-        decision = latest[0] if latest else None
         if (
             decision is None
             or decision.decision_type not in REVIEW_STATUS_BY_DECISION
@@ -3024,12 +3024,14 @@ class ReviewService:
         self,
         session: Session,
         review: ReviewItem,
+        decision: ReviewDecision | None,
         *,
         actor_user_id: UUID | None,
         actor_role: str | None,
     ) -> ReviewDecisionUndo | None:
         candidate = self._undo_candidate(
-            session, review, actor_user_id=actor_user_id, actor_role=actor_role
+            session, review, decision,
+            actor_user_id=actor_user_id, actor_role=actor_role,
         )
         if candidate is None:
             return None
@@ -4204,6 +4206,7 @@ class ReviewService:
                 self._undo_payload(
                     session,
                     review,
+                    decisions[0] if decisions else None,
                     actor_user_id=actor_user_id,
                     actor_role=actor_role,
                 )
