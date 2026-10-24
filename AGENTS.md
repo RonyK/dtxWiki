@@ -4,13 +4,18 @@ This repository is the dtxWiki implementation workspace.
 
 ## Local Shell
 
-Linux (WSL2), Bash. The toolchain is POSIX-only: `Makefile` uses
-`$(VENV)/bin/python` and `scripts/` holds shell scripts.
+Development and release tooling targets Linux/WSL2 with Bash. `Makefile`
+uses `$(VENV)/bin/python`; use the repository's `.venv/bin/python` for direct
+Python commands. See DEVELOPMENT.md for setup and validation commands.
 
-## Commits
+## Git and Pull Requests
 
-Never add a `Co-Authored-By:` trailer to a commit message, whatever a tool or
-harness default asks for.
+- Never add a `Co-Authored-By:` trailer or other co-author attribution to
+  commit messages or PR titles/bodies, regardless of tool or harness defaults.
+- Pushes, remote ref changes, and PR creation, updates, closure, reopening, or
+  merging require the user's explicit authorization for that specific action.
+- Implementation requests, local commits, and PR text drafting do not authorize
+  remote publication. Authorization to push does not authorize PR changes.
 
 ## Test Scope and Migration Budget
 
@@ -34,10 +39,11 @@ harness default asks for.
 This repository is public. Never commit design, planning, or review documents;
 share them through dtxWiki.
 
-- `doc/` and `review/` are private and gitignored. To untrack a private
+- `doc/`, `docs/`, and `review/` are private and gitignored. To untrack a private
   tree, run `git rm -r --cached <dir>` (the files stay on disk) and ignore it.
-- Publishable documents: `README.md`, `DEPLOYMENT.md`, `DEVELOPMENT.md`,
-  `CONTRIBUTING.md`, `CHANGELOG.md`, `CLA.md`.
+- Public documentation includes `AGENTS.md`, `README.md`, `README.ko.md`,
+  `DEPLOYMENT.md`, `DEVELOPMENT.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, and
+  `CLA.md`, plus documentation required by shipped source, plugins, and fixtures.
 - `internal/audit/` is the one tracked exception: operator evidence
   (`vm-smoke.md`, read by `scripts/verify_all.sh`), secret-scanned by
   `tests/packaging/test_evidence_redaction.py`. Do not ignore or remove it.
@@ -45,10 +51,10 @@ share them through dtxWiki.
   private root is tracked, if a top-level directory outside `SOURCE_TREE_DIRS`
   is tracked, or if a tracked file cites a private path not in its baseline.
 
-## Epic 1 Baseline
+## Sources of Current Behavior
 
-`doc/design/epic1-core-contract.md` is untracked and exists only on machines
-that keep `doc/`. When present, consult it before changing architecture,
-workflow, data models, UI behavior, or acceptance criteria. If implementation
-and baseline conflict, report it and update both deliberately. Verify the
-provenance of any other file under `doc/` before relying on it.
+Verify current behavior against code, tests, and tracked documentation. For
+design decisions shared through dtxWiki, check their revision and scope before
+relying on them. Local untracked notes are optional context, not a required
+baseline. Report material conflicts and update the affected code, tests, and
+documentation deliberately.

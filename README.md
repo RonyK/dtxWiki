@@ -52,15 +52,51 @@ starting the new server.
 
 ### 1. Install and start the web server
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+Install the published package with **pip** or **npm**.
+
+#### Install with pip
+
+Install Python **3.12 or newer** with pip. Create a virtual environment and
+install dtxWiki there.
+
+Linux or macOS (`python3` must be Python 3.12 or newer):
 
 ```bash
-uv tool install --python 3.12 "dtxwiki==0.1.3"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install "dtxwiki==0.1.3"
 dtxwiki
 ```
 
-uv downloads Python 3.12 if needed. If `dtxwiki` is not found, run
-`uv tool update-shell`, open a new terminal, and run `dtxwiki` again.
+Windows PowerShell (with Python 3.12 installed):
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install "dtxwiki==0.1.3"
+dtxwiki
+```
+
+When you open another terminal, activate this virtual environment again before
+running `dtxwiki` commands.
+
+#### Install with npm
+
+Requires **Node.js 22 or newer** and either
+[pipx](https://pipx.pypa.io/stable/installation/) with Python 3.12 or newer,
+or [uv](https://docs.astral.sh/uv/getting-started/installation/).
+The npm package launches the matching Python release through one of these tools.
+
+```bash
+npx @dtxsuite/dtxwiki@0.1.3
+```
+
+With npm, replace `dtxwiki` in foreground CLI commands below with
+`npx @dtxsuite/dtxwiki@0.1.3`. For a global installation, use
+`npm install --global @dtxsuite/dtxwiki@0.1.3`, then run `dtxwiki`.
+The manual background examples use a direct Python installation, such as the
+pip environment above. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)
+for launcher details.
 
 The browser opens **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)**.
 If it does not, open that address yourself. It is accessible only from this
@@ -71,17 +107,23 @@ and other queued work run automatically; do not start a separate worker.
 Your data is stored in the `.dtxwiki` folder in your home directory by default.
 
 <details>
-<summary>Use pipx or npm instead of uv</summary>
+<summary>Run from source with uv (Linux/WSL2)</summary>
 
-| Method | Requirements | Install and start |
-| --- | --- | --- |
-| pipx | pipx and Python 3.12 or newer | `pipx install dtxwiki==0.1.3`, then `dtxwiki` |
-| npm | Node.js 22 or newer, plus uv, or pipx with Python 3.12 or newer | `npx @dtxsuite/dtxwiki@0.1.3` |
+To run or modify the source, install Git, [uv](https://docs.astral.sh/uv/getting-started/installation/),
+Node.js 22.18 or newer with npm, and GNU Make. Clone the release, install its
+dependencies, and build the web UI:
 
-With npm, replace `dtxwiki` in foreground CLI commands with
-`npx @dtxsuite/dtxwiki@0.1.3`. The manual background examples below use a direct
-uv/pipx installation. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)
-for launcher details.
+```bash
+git clone --branch v0.1.3 https://github.com/dtxSuite/dtxWiki.git
+cd dtxWiki
+uv sync --locked --extra dev --python 3.12
+npm ci
+make bundle-frontend
+source .venv/bin/activate
+dtxwiki
+```
+
+For development servers and contributing, see [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/DEVELOPMENT.md).
 
 </details>
 
@@ -186,7 +228,7 @@ for private certificates, an existing proxy, or a package mirror.
 
 ### 4. Run in the background
 
-#### Local uv/pipx installation: Linux or macOS
+#### Local pip installation: Linux or macOS
 
 Stop the foreground server before starting another instance. Use the same OS
 account and data settings. For access from other devices, keep the environment
@@ -221,7 +263,7 @@ The managed worker stops with the server. Confirm exit before removing the PID
 file or restarting. `nohup` survives terminal closure but does not restart the
 app after a crash or reboot; use the HTTPS service installation for that.
 
-#### Local uv/pipx installation: Windows PowerShell
+#### Local pip installation: Windows PowerShell
 
 From a terminal with the same data and network environment settings, run:
 
@@ -370,7 +412,7 @@ Other clients and OAuth compatibility are covered in
 
 | Symptom | Check |
 | --- | --- |
-| `dtxwiki` command not found | Run `uv tool update-shell` and open a new terminal. |
+| `dtxwiki` command not found | For pip, activate the virtual environment from step 1. For npm, use `npx @dtxsuite/dtxwiki@0.1.3`. |
 | Local access works, another device cannot connect | Bind with `--host 0.0.0.0`; check TCP 21080, router forwarding, and WSL/VM forwarding. |
 | Host validation rejects an IP or domain | Set `DTXWIKI_PUBLIC_BASE_URL` to the browser-visible base URL and add other IPs/names to `DTXWIKI_ALLOWED_HOSTS`. Do not use `/mcp` or `0.0.0.0` as the base URL. Restart after changing environment variables. |
 | `admin grant` cannot find the account | Use the same OS user and data directory as the server, and make sure the account already exists. |
@@ -389,8 +431,9 @@ for the deployment-specific update steps. For local installations, read the
 [release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md), stop
 the server and every separately managed worker, then back up the database,
 files, and configuration. Install 0.1.3 using your existing installation method
-without starting the new server. For an existing uv installation, use
-`uv tool install --force --python 3.12 "dtxwiki==0.1.3"`.
+without starting the new server. For pip, activate the existing virtual
+environment and run `python -m pip install --upgrade "dtxwiki==0.1.3"`.
+For npm, follow the [npm update instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md#updating).
 
 Using the server's OS account, environment settings, and database, run the
 **new version's** audit before starting it:

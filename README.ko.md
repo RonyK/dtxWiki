@@ -50,15 +50,50 @@ Claude Code나 Codex CLI를 등록하려면
 
 ### 1. 설치하고 웹 서버 실행하기
 
-[uv](https://docs.astral.sh/uv/getting-started/installation/)를 설치한 뒤 실행하세요.
+배포된 패키지를 **pip** 또는 **npm**으로 설치하세요.
+
+#### pip로 설치하기
+
+pip가 포함된 **Python 3.12 이상**을 설치하세요. 가상환경을 만들고 그 안에
+dtxWiki를 설치합니다.
+
+Linux 또는 macOS (`python3`가 Python 3.12 이상이어야 합니다):
 
 ```bash
-uv tool install --python 3.12 "dtxwiki==0.1.3"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install "dtxwiki==0.1.3"
 dtxwiki
 ```
 
-필요하면 uv가 Python 3.12를 함께 내려받습니다. `dtxwiki` 명령을 찾지 못하면
-`uv tool update-shell`을 실행하고 새 터미널에서 `dtxwiki`를 다시 실행하세요.
+Windows PowerShell (Python 3.12가 설치된 환경):
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install "dtxwiki==0.1.3"
+dtxwiki
+```
+
+새 터미널을 열 때는 이 가상환경을 다시 활성화한 뒤 `dtxwiki` 명령을 실행하세요.
+
+#### npm으로 설치하기
+
+**Node.js 22 이상**과 다음 중 하나가 필요합니다:
+Python 3.12 이상이 있는 [pipx](https://pipx.pypa.io/stable/installation/),
+또는 [uv](https://docs.astral.sh/uv/getting-started/installation/).
+npm 패키지는 이 도구를 통해 같은 버전의 Python 패키지를 실행합니다.
+
+```bash
+npx @dtxsuite/dtxwiki@0.1.3
+```
+
+npm을 쓸 때는 아래에서 터미널에 직접 실행하는 `dtxwiki` 명령을
+`npx @dtxsuite/dtxwiki@0.1.3`으로 바꾸세요. 전역 설치를 원하면
+`npm install --global @dtxsuite/dtxwiki@0.1.3`을 실행한 뒤 `dtxwiki`를 사용하세요.
+수동 백그라운드 실행 예시는 위의 pip 가상환경처럼 Python 패키지를 직접 설치한
+환경을 사용합니다. 실행기 설명은
+[npm 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)를 참고하세요.
 
 브라우저에서 **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)**이 열립니다.
 자동으로 열리지 않으면 직접 접속하세요. 이 주소는 실행한 컴퓨터에서만 접속할 수
@@ -69,17 +104,23 @@ dtxwiki
 디렉터리의 `.dtxwiki` 폴더에 저장됩니다.
 
 <details>
-<summary>uv 대신 pipx나 npm 사용하기</summary>
+<summary>소스에서 실행하기: uv (Linux/WSL2)</summary>
 
-| 방식 | 요구 사항 | 설치와 실행 |
-| --- | --- | --- |
-| pipx | pipx와 Python 3.12 이상 | `pipx install dtxwiki==0.1.3` 후 `dtxwiki` |
-| npm | Node.js 22 이상과 uv, 또는 Python 3.12 이상이 있는 pipx | `npx @dtxsuite/dtxwiki@0.1.3` |
+소스를 실행하거나 수정하려면 Git, [uv](https://docs.astral.sh/uv/getting-started/installation/),
+npm이 포함된 Node.js 22.18 이상, GNU Make를 준비하세요.
+릴리스 소스를 clone한 뒤 의존성을 설치하고 웹 UI를 빌드합니다.
 
-npm을 쓸 때는 터미널에서 직접 실행하는 `dtxwiki` 명령을
-`npx @dtxsuite/dtxwiki@0.1.3`으로 바꾸세요. 아래의 수동 백그라운드 실행 예시는
-uv/pipx로 직접 설치한 명령을 사용합니다. 실행기 설명은
-[npm 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md)를 참고하세요.
+```bash
+git clone --branch v0.1.3 https://github.com/dtxSuite/dtxWiki.git
+cd dtxWiki
+uv sync --locked --extra dev --python 3.12
+npm ci
+make bundle-frontend
+source .venv/bin/activate
+dtxwiki
+```
+
+개발 서버와 기여 절차는 [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/DEVELOPMENT.md)를 참고하세요.
 
 </details>
 
@@ -182,7 +223,7 @@ sudo bash install-dtxwiki.sh \
 
 ### 4. 백그라운드 실행
 
-#### 로컬 uv/pipx 설치: Linux 또는 macOS
+#### 로컬 pip 설치: Linux 또는 macOS
 
 기존 서버를 종료하고 같은 OS 계정과 데이터 설정으로 실행하세요. 다른 기기에서도
 접속하려면 3단계의 환경변수를 유지하고 `serve --no-open` 뒤에
@@ -216,7 +257,7 @@ kill -TERM "$(cat "$DTXWIKI_RUN_DIR/server.pid")"
 확인하세요. `nohup`은 터미널 종료 후 실행을 유지하지만 오류나 재부팅 후 자동으로
 시작하지는 않습니다. 자동 시작이 필요하면 HTTPS 서비스 설치를 사용하세요.
 
-#### 로컬 uv/pipx 설치: Windows PowerShell
+#### 로컬 pip 설치: Windows PowerShell
 
 같은 데이터·네트워크 환경변수가 설정된 터미널에서 실행하세요.
 
@@ -363,7 +404,7 @@ Context 변경은 검토할 초안으로 준비됩니다.
 
 | 증상 | 확인할 내용 |
 | --- | --- |
-| `dtxwiki` 명령을 찾지 못함 | `uv tool update-shell` 실행 후 새 터미널을 여세요. |
+| `dtxwiki` 명령을 찾지 못함 | pip 설치는 1단계의 가상환경을 활성화하세요. npm은 `npx @dtxsuite/dtxwiki@0.1.3`으로 실행하세요. |
 | 로컬에서는 되지만 다른 기기에서 접속 안 됨 | `--host 0.0.0.0`, TCP 21080 방화벽, 공유기 포트 전달, WSL·가상 머신 전달을 확인하세요. |
 | IP·도메인 접속이 Host 검사에서 거절됨 | `DTXWIKI_PUBLIC_BASE_URL`에 브라우저에서 접속하는 기본 주소를 넣고 추가 IP·이름은 `DTXWIKI_ALLOWED_HOSTS`에 허용하세요. 대표 URL에 `/mcp`나 `0.0.0.0`을 넣지 마세요. 환경변수 변경 후 재시작해야 합니다. |
 | `admin grant`가 계정을 찾지 못함 | 서버와 같은 OS 사용자·데이터 경로인지, 계정이 이미 생성되어 있는지 확인하세요. |
@@ -381,8 +422,9 @@ systemd나 Docker 설치는 [백업과 유지보수](https://docs.dtxwiki.com/ko
 [변경 내역](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/CHANGELOG.md)을 읽고
 서버와 별도로 실행한 모든 worker를 중지한 뒤 DB·파일·설정을 백업하세요.
 기존 설치 방식을 사용해 0.1.3을 설치하되 새 서버를 시작하지 마세요.
-기존 uv 설치를 바꿀 때는
-`uv tool install --force --python 3.12 "dtxwiki==0.1.3"`을 사용하세요.
+pip 설치는 기존 가상환경을 활성화한 뒤
+`python -m pip install --upgrade "dtxwiki==0.1.3"`을 실행하세요.
+npm은 [npm 업데이트 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md#updating)를 따르세요.
 
 서버와 같은 OS 계정·환경 설정·DB로, 시작 전에 **새 버전의** 검사를 실행하세요.
 
