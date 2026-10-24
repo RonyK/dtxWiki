@@ -69,7 +69,14 @@ logger = logging.getLogger("dtxwiki.search")
 
 _CURSOR_VERSION = 1
 APPLIED_SEARCH_FILTERS = frozenset(
-    {"context_type", "status", "connector_type", "format_hint", "trust_level"}
+    {
+        "include_agents",
+        "context_type",
+        "status",
+        "connector_type",
+        "format_hint",
+        "trust_level",
+    }
 )
 ADVISORY_SEARCH_FILTERS = frozenset({"tag", "date_from", "date_to"})
 _TRIGRAM_CANDIDATE_LIMIT = 200
