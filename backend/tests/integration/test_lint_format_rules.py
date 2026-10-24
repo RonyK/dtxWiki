@@ -124,7 +124,7 @@ def test_frontmatter_content_not_misparsed_as_body(session_factory):
         assert _run(session, "link.unresolved", body) == []
 
 
-def test_unclosed_frontmatter_never_gates_a_write(session_factory):
+def test_unclosed_frontmatter_never_gates_a_write():
     # LG-F4 + Sweep-1: there is no md.frontmatter rule (an unclosed leading '---'
     # is indistinguishable from a valid rule + colon line like "Note: ..."), and
     # publish_floor_findings — the auto-approval gate floor — must produce no veto for

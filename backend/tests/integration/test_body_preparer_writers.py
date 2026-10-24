@@ -144,18 +144,17 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 save_args.update(workspace_slug="default", slug=slug)
             else:
                 save_args.update(page_id=initial.id)
-            for equivalent in (
-                authored.replace("\n", "\r\n"),
-                authored.rstrip("\n"),
-                normalize("NFD", authored),
-            ):
-                unchanged = save(
-                    **save_args,
-                    body_md=equivalent,
-                    base_version_id=initial.version_id,
-                    base_content_hash=initial.content_hash,
-                )
-                assert unchanged.version_id == initial.version_id
+            # One input exposes failures to ignore NFD, CRLF or the final
+            # newline. Auto-fix handles CRLF/EOF first; NFD still reaches the
+            # authored-body comparison with either policy setting.
+            equivalent = normalize("NFD", authored).rstrip("\n").replace("\n", "\r\n")
+            unchanged = save(
+                **save_args,
+                body_md=equivalent,
+                base_version_id=initial.version_id,
+                base_content_hash=initial.content_hash,
+            )
+            assert unchanged.version_id == initial.version_id
             with session_factory() as session:
                 version_count = session.scalar(
                     select(func.count(ContextPageVersion.id)).where(

@@ -13,9 +13,10 @@
   reconciliation and MCP revision and maintenance writes.
 - Preserve Markdown hard breaks during formatting and block identities after
   formatted patches. Whole-body edit retries retain their original receipt.
-- With auto-fix disabled, page writes preserve authored trailing whitespace.
-  NFC/NFD differences, line endings and the final newline still do not create
-  a new version on their own.
+- With auto-fix disabled, `write_page`/`update_page` and Context writes preserve
+  authored trailing whitespace. For those writes, NFC/NFD differences, line
+  endings and the final newline do not create a new version on their own.
+  Autosave retains its existing exact-text comparison.
 - Autosave checks the supplied base before preparing content. A stale base takes
   precedence when both the base and save-time content checks would fail.
 - Keep legacy citation-only updates and patch previews compatible with stored

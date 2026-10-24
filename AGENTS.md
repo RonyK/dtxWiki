@@ -19,6 +19,9 @@ Python commands. See DEVELOPMENT.md for setup and validation commands.
 
 ## Test Scope and Migration Budget
 
+- Per ordinary PR, default to 0–2 new backend cases (DB/transport: at most 1)
+  and 0 E2E cases; see DEVELOPMENT.md for exceptions and validation scope.
+- Count parameter and loop inputs, including viewport, locale and writer combinations.
 - Add only tests with a distinct, observable failure mechanism. Do not add
   duplicate checks, implementation-mirroring assertions, or tests that cannot fail.
 - Combine compatible cases in one unit test. Use real database integration only

@@ -231,7 +231,7 @@ def test_run_lint_clears_rule_caches_between_runs(session_factory):
     assert still_open == []
 
 
-def test_knowledge_rules_are_default_on(session_factory):
+def test_knowledge_rules_are_default_on():
     # Sprint-6 decision: knowledge checks apply to existing and new workspaces.
     ids = {
         r.rule_id

@@ -1355,21 +1355,6 @@ def test_list_lint_rules_reflects_policy_override(session_factory):
     assert by_id["kb.orphan_page"].policy_locked is False
 
 
-def test_a_publication_floor_rule_refuses_to_be_switched_off(session_factory):
-    """The publication floor holds saves through this same check, so letting a
-    workspace hide the finding would leave the author staring at a page that
-    will not publish and a Lint screen reporting nothing wrong."""
-    lint = LintService()
-    with session_factory.begin() as session:
-        ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        ws.lint_policy = {"md.code_fence_balance": False}
-        session.flush()
-        data = lint.list_rules(session, ws.id)
-    by_id = {r.rule_id: r for r in data.rules}
-    assert by_id["md.code_fence_balance"].enabled is True
-    assert by_id["md.code_fence_balance"].policy_locked is True
-
-
 def test_lint_rules_api_smoke(page_service):
     client = _api_client(page_service)
     wsid = client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]

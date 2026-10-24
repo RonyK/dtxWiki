@@ -860,69 +860,6 @@ def test_update_draft_metadata_only_stale_write_conflicts_on_editing_revision(
     assert page.title == "Patched After Re-Read"
 
 
-def test_update_draft_regression_calls_extracted_persistence_tail(
-    session_factory,
-    monkeypatch,
-):
-    service = ContextWriteService()
-    persist_calls = []
-    original_persist = service._persist_context_update
-
-    def tracking_persist(**kwargs):
-        persist_calls.append(kwargs)
-        return original_persist(**kwargs)
-
-    monkeypatch.setattr(service, "_persist_context_update", tracking_persist)
-
-    with session_factory.begin() as session:
-        workspace = _workspace(session)
-        workspace.auto_fix_enabled = False
-        created = service.write_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=WriteDraftRequest(
-                title="Extracted Tail Regression",
-                page_type="overview",
-                body_markdown="# Extracted Tail Regression\n\nOriginal.",
-                reason="create extraction regression fixture",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-            actor_role="owner",
-        )
-        page = session.get(ContextPage, created.page_id)
-        base_version = page.latest_draft_version
-        result = service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=page.id,
-                base_version_id=base_version.id,
-                base_content_hash=base_version.content_hash,
-                update_mode="append_section",
-                body_markdown="## Added\n\nAdded through the extracted tail.",
-                reason="exercise the extracted persistence tail",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-        )
-        persisted = session.get(ContextPageVersion, result.draft_version_id)
-        operation = session.scalar(
-            select(ChangeOperation).where(
-                ChangeOperation.change_set_id == result.change_set_id
-            )
-        )
-
-    assert len(persist_calls) == 1
-    assert persist_calls[0]["base_version"].id == base_version.id
-    assert persist_calls[0]["new_body"].endswith(
-        "## Added\n\nAdded through the extracted tail."
-    )
-    assert persisted.body_md == persist_calls[0]["new_body"]
-    assert operation.operation == "append_section"
-    assert result.outcome == "updated_draft"
-
-
 def test_patch_draft_resolves_fresh_head_for_sequential_non_overlapping_edits(
     session_factory,
 ):
@@ -2923,6 +2860,11 @@ def test_update_draft_appends_and_links_feedback(
         )
         updated_version = session.get(ContextPageVersion, result.draft_version_id)
         change_set = session.get(ChangeSet, result.change_set_id)
+        operation = session.scalar(
+            select(ChangeOperation).where(
+                ChangeOperation.change_set_id == result.change_set_id
+            )
+        )
         citation = session.scalar(
             select(ContextCitation).where(
                 ContextCitation.target_id.in_(
@@ -2935,6 +2877,7 @@ def test_update_draft_appends_and_links_feedback(
 
     assert "## Added" in updated_version.body_markdown
     assert updated_version.parent_version_id == base_version.id
+    assert operation.operation == "append_section"
     assert result.review_item_id is not None
     assert change_set.cite_call_skipped is True
     assert citation.created_via == "manual_input"

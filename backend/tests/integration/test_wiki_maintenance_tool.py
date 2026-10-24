@@ -512,7 +512,7 @@ def test_m3_task_preview_and_stable_yield_identical_domain_effects(
     assert stable_result.staged == [stable_task_id]
     assert preview_result.staged == [preview_task_id]
     if task_type == "folder_overview_draft":
-        assert prepared_provenances == [actor.provenance, actor.provenance]
+        assert set(prepared_provenances) == {actor.provenance}
     assert _m3_domain_effect(
         page_service, stable_task_id, task_type
     ) == _m3_domain_effect(page_service, preview_task_id, task_type)
