@@ -90,7 +90,8 @@
       "approve": "승인",
       "request_changes": "변경 요청",
       "reject": "거부",
-      "comment": "코멘트"
+      "comment": "코멘트",
+      "undo": "결정 취소"
     }
   },
   "decisionSummary": {
@@ -268,7 +269,8 @@
       "request_changes": "변경 요청됨",
       "reject": "거절됨",
       "comment": "코멘트 작성됨",
-      "revision_submitted": "수정본 제출됨"
+      "revision_submitted": "수정본 제출됨",
+      "undo": "결정 취소됨"
     },
     "actorType": {
       "human": "사용자",
@@ -290,7 +292,8 @@
       "tree_reorder": "트리 순서 변경",
       "tree_delete": "트리 삭제",
       "tree_place": "트리 배치",
-      "restore_after_rejection": "거절 후 되돌림"
+      "restore_after_rejection": "거절 후 되돌림",
+      "publish_revert": "게시 되돌림"
     },
     "triggerType": {
       "mcp_write_draft": "MCP 초안 작성",
@@ -306,7 +309,8 @@
       "library_registration": "Library 등록",
       "source_deleted": "원본 삭제",
       "schedule": "예약",
-      "context_draft_restore": "초안 되돌림"
+      "context_draft_restore": "초안 되돌림",
+      "context_page_publish_revert": "게시 되돌림"
     },
     "changeSetStatus": {
       "draft_created": "초안 생성됨",
@@ -371,7 +375,7 @@
       "restore_published": "검토 초안은 현재 문서에서 제외되고 게시본 v{{version}}가 유지됩니다.",
       "hide_unpublished": "게시본이 없어 거절 후 일반 문서 reader에서 표시되지 않습니다.",
       "no_head_change": "이 거절은 현재 문서의 head를 변경하지 않습니다.",
-      "restore_previous_draft": "v{{version}}로 돌아갑니다."
+      "restore_previous_draft": "편집 기준이 v{{version}}로 돌아갑니다."
     },
     "outcomes": {
       "approved": "승인",
@@ -431,7 +435,18 @@
       "superseded_by_newer_draft": "더 새로운 초안이 작성되어 정리된 리뷰입니다.",
       "generic": "정리된 리뷰입니다.",
       "openReview": "v{{version}} 리뷰 열기",
-      "openDecidingReview": "결정한 리뷰 열기"
+      "openDecidingReview": "결정한 리뷰 열기",
+      "superseded_by_decision_undo": "이 리뷰를 연 결정이 취소되어 정리된 리뷰입니다."
+    },
+    "firstPublicationNotice": "처음 게시합니다 · 게시본 없음 → v{{version}}",
+    "replacePublicationNotice": "승인하면 게시본이 v{{from}}에서 v{{version}}로 바뀝니다.",
+    "reopenedByUndo": "결정 취소로 다시 열림",
+    "settlementShort": {
+      "superseded_by_approved_publish": "v{{version}} 승인으로 정리",
+      "superseded_by_rejected_ancestor": "v{{version}} 거절로 정리",
+      "superseded_by_rejected_candidate": "같은 버전 거절로 정리",
+      "superseded_by_newer_draft": "새 초안으로 정리",
+      "superseded_by_decision_undo": "결정 취소로 정리"
     }
   },
   "document": {
@@ -486,5 +501,32 @@
     "publishingChange": "게시되면 바뀌는 내용 (게시본 v{{baseline}} → v{{candidate}})",
     "publishingEmptyChange": "게시되면 바뀌는 내용 (빈 문서 → v{{candidate}})",
     "draftParentBaseline": "직전 초안 v{{version}}"
+  },
+  "undo": {
+    "action": {
+      "approve": "승인 취소",
+      "reject": "거절 취소",
+      "request_changes": "변경 요청 취소"
+    },
+    "available": {
+      "approve": "승인을 취소하면 문서가 게시 전 상태로 돌아가고, 이 리뷰와 함께 정리된 리뷰가 다시 대기합니다.",
+      "reject": "거절을 취소하면 거절된 초안과 그 위에 쓰인 초안이 되살아나고, 이 리뷰가 다시 대기합니다.",
+      "request_changes": "변경 요청을 취소하면 받은 사람에게서 요청이 철회되고, 이 리뷰가 다시 대기합니다."
+    },
+    "laterChanges": {
+      "approve": "이 승인 뒤에 문서가 바뀌어 승인을 취소할 수 없습니다.",
+      "reject": "이 거절 뒤에 문서가 바뀌어 거절을 취소할 수 없습니다.",
+      "request_changes": "이 변경 요청 뒤에 문서가 바뀌어 요청을 취소할 수 없습니다."
+    },
+    "viewLaterChanges": "이후 변경 확인",
+    "startDraft": "v{{version}} 내용으로 새 초안 만들기",
+    "done": {
+      "approve": "승인을 취소했습니다. 리뷰가 다시 대기 중입니다.",
+      "reject": "거절을 취소했습니다. 리뷰가 다시 대기 중입니다.",
+      "request_changes": "변경 요청을 취소했습니다. 리뷰가 다시 대기 중입니다."
+    },
+    "failed": "결정을 취소하지 못했습니다",
+    "startDraftFailed": "새 초안을 만들지 못했습니다",
+    "undone": "취소됨"
   }
 }

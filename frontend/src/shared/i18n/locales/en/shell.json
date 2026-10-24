@@ -406,7 +406,7 @@
     "close": "Close diff",
     "closeAction": "Close",
     "removedLine": "Removed line",
-    "restore": "Restore this version",
+    "restore": "Start a new draft from this version",
     "restoring": "Restoring"
   }
 }

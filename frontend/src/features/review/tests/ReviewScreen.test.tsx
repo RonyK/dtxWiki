@@ -936,7 +936,7 @@ describe("ReviewScreen", () => {
     expect(within(dialog).getByText("v4–v7 (4 versions) · later drafts written on v3 (2 reviews settled)")).toBeVisible();
     expect(within(dialog).queryByText(/v4, v5/)).not.toBeInTheDocument();
     expect(within(dialog).getByText("Edit head")).toBeVisible();
-    expect(within(dialog).getByText("Returns to v2. Its review stays open.")).toBeVisible();
+    expect(within(dialog).getByText("The edit base returns to v2. Its review stays open.")).toBeVisible();
     expect(within(dialog).getByText("Published")).toBeVisible();
     expect(within(dialog).getByText("v1 stays published")).toBeVisible();
     expect(within(dialog).getByText(i18n.t("review:workflow.rejectSiblingImpact", { count: 1 }))).toBeVisible();
@@ -953,7 +953,7 @@ describe("ReviewScreen", () => {
     await act(async () => { finishImpactRefresh(); });
     expect(await within(dialog).findByText("The rejection's impact changed while you were confirming. Check the updated impact and reject again.")).toBeVisible();
     expect(within(dialog).getByText("v4–v7, v9 (5 versions) · later drafts written on v3 (2 reviews settled)")).toBeVisible();
-    expect(within(dialog).getByText("Returns to v2. Its review was already closed, so a new review opens.")).toBeVisible();
+    expect(within(dialog).getByText("The edit base returns to v2. Its review was already closed, so a new review opens.")).toBeVisible();
     expect(within(dialog).getByRole("textbox", { name: "Decision reason" })).toHaveValue("Keep this reason");
     expect(within(dialog).getByRole("textbox", { name: "Decision reason" })).toHaveFocus();
     await user.click(within(dialog).getByRole("button", { name: "Reject" }));
@@ -3084,7 +3084,7 @@ describe("ReviewScreen", () => {
     render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Exact candidate", level: 2 });
     expect(screen.getByText(/Current published version v2 → Review version v3/)).toBeVisible();
-    expect(await screen.findByText("Approving publishes review version v3.")).toBeVisible();
+    expect(await screen.findByText("Approving publishes v3 in place of v2.")).toBeVisible();
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve).toBeDisabled();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
@@ -3113,19 +3113,19 @@ describe("ReviewScreen", () => {
     current.review_type = "inline_comment";
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
-    await waitFor(() => expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Approving publishes v3 in place of v2.")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     current.review_type = "context_update";
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     current.actions!.approve = { allowed: false, reason_code: "claim_conflict" };
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled());
-    expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approving publishes v3 in place of v2.")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     current.actions!.approve = { allowed: true };
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
-    expect(await screen.findByText("Approving publishes review version v3.")).toBeVisible();
+    expect(await screen.findByText("Approving publishes v3 in place of v2.")).toBeVisible();
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     const otherCandidate: ReviewEvidenceOperation = {
       ...placement, operation_id: "other-candidate-placement", diff_summary: "Metadata for a different candidate.",
@@ -3135,7 +3135,7 @@ describe("ReviewScreen", () => {
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(document.querySelectorAll(".review-evidence-document")).toHaveLength(2));
-    expect(screen.queryByText("Approving publishes review version v3.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approving publishes v3 in place of v2.")).not.toBeInTheDocument();
     const evidenceCards = document.querySelectorAll<HTMLElement>(".review-evidence-document");
     expect(within(evidenceCards[0]).getByText(placement.diff_summary!)).toBeVisible();
     expect(within(evidenceCards[0]).queryByText(otherCandidate.diff_summary!)).not.toBeInTheDocument();
@@ -3231,6 +3231,36 @@ describe("ReviewScreen", () => {
     expect(decisions).toHaveLength(1);
   });
 
+  it("undoes a saved approval from the receipt and reopens the review", async () => {
+    const user = userEvent.setup();
+    const current = reviewItem({ targetTitle: "Undo target" });
+    let approved = false;
+    const undoCalls: string[] = [];
+    mockReviewQueue([current], null, (url) => {
+      if (url.endsWith("/reviews/review-1/decision")) {
+        approved = true;
+        return jsonResponse({ data: { ...current, status: "approved", undo: {
+          decision_id: "decision-1", decision_type: "approve", available: true,
+          reason_code: null, restore_version_id: null, restore_version_no: null, page_id: "context-1",
+        } } });
+      }
+      if (url.includes("/reviews/review-1/decisions/")) {
+        undoCalls.push(url); approved = false;
+        return jsonResponse({ data: current });
+      }
+      if (url.includes("/reviews?")) return jsonResponse({ data: { items: approved ? [] : [current], next_cursor: null } });
+      return undefined;
+    });
+    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Undo target", level: 2 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(await screen.findByRole("button", { name: "Undo approval" }));
+    expect(await screen.findByText("Approval undone. The review is waiting again.")).toBeVisible();
+    expect(undoCalls).toEqual([`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/decisions/decision-1/undo`]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+  });
+
   it("recovers uncertain decisions after remount with read-first retries and one decision identity", async () => {
     const user = userEvent.setup();
     const current = reviewItem();
@@ -3295,7 +3325,7 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Next review" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Next review" }));
     expect(await screen.findByRole("heading", { name: "Loaded next", level: 2 })).toBeVisible();
-    expect(await screen.findByText("Approving publishes review version v2.")).toBeVisible();
+    expect(await screen.findByText("Approving publishes v2 in place of v1.")).toBeVisible();
     expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("cursor=not-needed"))).toBe(false);
   });
 

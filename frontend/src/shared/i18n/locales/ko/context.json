@@ -287,7 +287,7 @@
     "loadOlder": "이전 버전 불러오기",
     "latestDraft": "최신 초안",
     "noEarlierEndpoint": "빈 기준선",
-    "restore": "이 버전 복원",
+    "restore": "이 버전으로 새 초안 만들기",
     "restoreConfirm": "v{{version, josaEulReul}} 새 초안으로 복원할까요? 게시된 버전은 변경되지 않습니다.",
     "restored": "Context v{{version, josaIGa}} 초안 v{{draft, josaEuRo}} 복원되었습니다.",
     "restoring": "복원 중",

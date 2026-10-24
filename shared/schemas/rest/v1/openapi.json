@@ -15412,6 +15412,18 @@
       "ReviewBulkItemOutcome": {
         "additionalProperties": false,
         "properties": {
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -16093,6 +16105,79 @@
         "title": "ReviewDecisionRequest",
         "type": "object"
       },
+      "ReviewDecisionUndo": {
+        "additionalProperties": false,
+        "description": "Undo of the review's latest decision, for an actor who may undo it.\n\nAbsent for decisions recorded before undo existed, and for actors other\nthan the decider (any editor may undo an automatic approval).",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "decision_type": {
+            "title": "Decision Type",
+            "type": "string"
+          },
+          "page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Id"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "const": "later_changes",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "restore_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restore Version Id"
+          },
+          "restore_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restore Version No"
+          }
+        },
+        "required": [
+          "decision_id",
+          "decision_type",
+          "available"
+        ],
+        "title": "ReviewDecisionUndo",
+        "type": "object"
+      },
       "ReviewDocumentTarget": {
         "additionalProperties": false,
         "description": "Actor-visible document identity, independent of an operation's raw ID.",
@@ -16642,6 +16727,16 @@
             "default": 0,
             "title": "Superseded Review Count",
             "type": "integer"
+          },
+          "undo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDecisionUndo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -37218,6 +37313,114 @@
           }
         ],
         "summary": "Decide Review",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo": {
+      "post": {
+        "operationId": "undo_review_decision_api_v1_workspaces__workspace_id__reviews__review_item_id__decisions__decision_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "review_item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewItemResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Undo Review Decision",
         "tags": [
           "read"
         ]

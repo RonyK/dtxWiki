@@ -197,7 +197,7 @@
     "versionUnavailable": "선택한 Agent 버전을 사용할 수 없습니다.",
     "failedDiff": "diff 불러오기 실패",
     "failedRestore": "Agent 버전 복원 실패",
-    "restore": "이 버전 복원",
+    "restore": "이 버전으로 새 초안 만들기",
     "restoring": "복원 중",
     "restoreConfirm": "Agent v{{version, josaEulReul}} 새 초안으로 복원할까요? 활성 버전은 변경되지 않습니다.",
     "restored": "Agent v{{version, josaIGa}} 초안 v{{draft, josaEuRo}} 복원되었습니다.",

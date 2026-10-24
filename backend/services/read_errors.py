@@ -161,6 +161,21 @@ class ReviewRejectBlockedError(ReadServiceError):
         )
 
 
+class ReviewDecisionUndoUnavailableError(ReadServiceError):
+    """The named decision cannot be undone (any longer)."""
+
+    error_code = "review_decision_undo_unavailable"
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(
+            "something changed after this decision, so undoing it would discard "
+            "that work"
+            if reason_code == "later_changes"
+            else "this decision can no longer be undone"
+        )
+
+
 class ReviewDecisionIdConflictError(ReadServiceError):
     """A decision receipt ID was reused for a different authenticated request."""
 

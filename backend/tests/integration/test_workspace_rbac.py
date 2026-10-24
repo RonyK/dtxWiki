@@ -717,6 +717,25 @@ def test_request_changes_routes_to_me_scope(page_service):
     assert to_me.status_code == 200
     assert review_item_id in [item["id"] for item in to_me.json()["data"]["items"]]
 
+    # Withdrawing the request takes the item out of every recipient's queue; a
+    # retry reads the result, and a decision that is not the latest is refused.
+    decision_id = decided.json()["data"]["undo"]["decision_id"]
+    undo_path = (
+        f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}"
+        f"/decisions/{decision_id}/undo"
+    )
+    withdrawn = owner.post(undo_path)
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["data"]["status"] == "pending"
+    assert owner.post(undo_path).status_code == 200
+    to_me = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?scope=to_me")
+    assert review_item_id not in [item["id"] for item in to_me.json()["data"]["items"]]
+    stale = owner.post(undo_path.replace(decision_id, str(uuid4())))
+    assert (stale.status_code, stale.json()["error_code"]) == (
+        409,
+        "review_decision_undo_unavailable",
+    )
+
 
 def test_claim_and_second_claimer_conflicts(page_service):
     """T15/B6: claim succeeds for an editor; a second editor claiming the live

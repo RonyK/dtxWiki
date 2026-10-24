@@ -85,6 +85,20 @@
   the draft below them. Earlier drafts and branched alternatives are untouched.
   A reject confirmation whose impact changed meanwhile is refused with 409
   `review_decision_impact_changed`.
+- A Context review decision can be undone while nothing has changed since it:
+  an approval (including an automatic one), a rejection, or a first-round
+  change request. Undoing restores the published and draft heads, page
+  metadata and the reviews the decision settled or opened; the decision stays
+  in the history followed by an `undo` record. The decider (or an owner) may
+  undo a decision, any editor an automatic approval, which then waits for a
+  person. Browser sessions only:
+  `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
+  refused with 409 `review_decision_undo_unavailable` once anything changed.
+  Decisions made before this release, and approvals that revived an archived
+  page, cannot be undone. Reading a page as of a later time follows the undone
+  publication, the page's own stale warning returns with its older content,
+  and a withdrawn change request leaves `list_requested_changes` and refuses
+  revisions.
 - Preserve restored drafts' mandatory human-review conditions and first-publish
   metadata across page-first submissions and authenticated autosaves. Restart
   rejected content only while its surviving head is unchanged, refresh rejection

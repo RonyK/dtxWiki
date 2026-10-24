@@ -2312,6 +2312,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Review Decision */
+        post: operations["undo_review_decision_api_v1_workspaces__workspace_id__reviews__review_item_id__decisions__decision_id__undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/release": {
         parameters: {
             query?: never;
@@ -8391,6 +8408,8 @@ export interface components {
         };
         /** ReviewBulkItemOutcome */
         ReviewBulkItemOutcome: {
+            /** Decision Id */
+            decision_id?: string | null;
             /**
              * Id
              * Format: uuid
@@ -8619,6 +8638,32 @@ export interface components {
             expected_impact_fingerprint?: string | null;
         };
         /**
+         * ReviewDecisionUndo
+         * @description Undo of the review's latest decision, for an actor who may undo it.
+         *
+         *     Absent for decisions recorded before undo existed, and for actors other
+         *     than the decider (any editor may undo an automatic approval).
+         */
+        ReviewDecisionUndo: {
+            /** Available */
+            available: boolean;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /** Decision Type */
+            decision_type: string;
+            /** Page Id */
+            page_id?: string | null;
+            /** Reason Code */
+            reason_code?: "later_changes" | null;
+            /** Restore Version Id */
+            restore_version_id?: string | null;
+            /** Restore Version No */
+            restore_version_no?: number | null;
+        };
+        /**
          * ReviewDocumentTarget
          * @description Actor-visible document identity, independent of an operation's raw ID.
          */
@@ -8779,6 +8824,7 @@ export interface components {
              * @default 0
              */
             superseded_review_count: number;
+            undo?: components["schemas"]["ReviewDecisionUndo"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -20834,6 +20880,75 @@ export interface operations {
                 "application/json": components["schemas"]["ReviewDecisionRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewItemResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    undo_review_decision_api_v1_workspaces__workspace_id__reviews__review_item_id__decisions__decision_id__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                review_item_id: string;
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

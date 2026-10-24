@@ -785,6 +785,28 @@ class ReviewSettlement(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReviewDecisionUndo(BaseModel):
+    """Undo of the review's latest decision, for an actor who may undo it.
+
+    Absent for decisions recorded before undo existed, and for actors other
+    than the decider (any editor may undo an automatic approval).
+    """
+
+    decision_id: UUID
+    decision_type: str
+    available: bool
+    # later_changes: something changed after the decision, so undoing it would
+    # discard that work.
+    reason_code: Literal["later_changes"] | None = None
+    # While unavailable: the version whose content a new draft can start from
+    # instead (the version an approval replaced, or the rejected draft).
+    restore_version_id: UUID | None = None
+    restore_version_no: int | None = None
+    page_id: UUID | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ReviewEvidenceOperation(BaseModel):
     operation_id: UUID
     target_type: str
@@ -847,6 +869,7 @@ class ReviewItemDetail(BaseModel):
     published_version_id: UUID | None = None
     superseded_review_count: int = 0
     settlement: ReviewSettlement | None = None
+    undo: ReviewDecisionUndo | None = None
     reconciliation_available: bool = False
     reconciliation_page_id: UUID | None = None
     reconciliation_version_id: UUID | None = None
@@ -1001,6 +1024,8 @@ class ReviewBulkItemOutcome(BaseModel):
     reason: str | None = None
     target_title: str | None = None
     target_version_no: int | None = None
+    # approved: the decision a per-document undo names.
+    decision_id: UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 

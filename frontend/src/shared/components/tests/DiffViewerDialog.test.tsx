@@ -78,7 +78,7 @@ describe("DiffViewerDialog", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "Restore this version" });
+    const button = screen.getByRole("button", { name: "Start a new draft from this version" });
     expect(button).toHaveAttribute("aria-busy", "false");
   });
 });

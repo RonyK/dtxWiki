@@ -520,6 +520,13 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "POST",
         "/api/v1/workspaces/{workspace_id}/agent/pages/{agent_page_id}/activate",
     ),
+    # Undoing a review decision reverses a person's judgement (and may
+    # withdraw a publication); no AI-held token may do it.
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/"
+        "{decision_id}/undo",
+    ),
 }
 
 # These browser-session routes intentionally operate before membership exists.

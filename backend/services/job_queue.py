@@ -142,6 +142,16 @@ def context_page_embed_idempotency_key(
     return f"context_page:{page_id}:{marker}:{version_id}:{content_hash}"
 
 
+def context_page_undo_embed_idempotency_key(page_id: UUID, undo_id: UUID) -> str:
+    """Return the key of the reindex an undone review decision queues.
+
+    The heads an undo restores were each indexed before, under keys a repeat
+    enqueue would match, so the undo addresses its own transition.
+    """
+
+    return f"context_page:{page_id}:undo:{undo_id}"
+
+
 class JobRetryUnsupportedTypeError(RuntimeError):
     """manual_retry() refused a job_type in JOB_TYPES_WITH_DOMAIN_FAILURE_STATE."""
 

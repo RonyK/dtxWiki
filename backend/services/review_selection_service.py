@@ -609,7 +609,7 @@ class ReviewSelectionService:
                             )
                         )
                     else:
-                        if not dry_run:
+                        decided = (
                             self.review.apply_decision(
                                 session=session,
                                 workspace_id=workspace_id,
@@ -622,10 +622,20 @@ class ReviewSelectionService:
                                 actor_provenance=actor.provenance,
                                 actor=actor,
                             )
+                            if not dry_run
+                            else None
+                        )
                         approved.append(review_id)
                         outcomes.append(
                             ReviewBulkItemOutcome(
-                                id=review_id, outcome="approved", **metadata
+                                id=review_id,
+                                outcome="approved",
+                                decision_id=(
+                                    decided.undo.decision_id
+                                    if decided is not None and decided.undo is not None
+                                    else None
+                                ),
+                                **metadata,
                             )
                         )
                         internal_settled.update(preflight.superseded_review_ids)

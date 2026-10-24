@@ -3647,6 +3647,46 @@ def decide_review(
 
 
 @router.post(
+    "/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo",
+    response_model=ReviewItemResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def undo_review_decision(
+    svc: ServicesDep,
+    workspace_id: UUID,
+    review_item_id: UUID,
+    decision_id: UUID,
+    actor: RestActorDep,
+    access: WorkspaceEditorAccessDep,
+    session_factory: WorkspaceSessionFactoryDep,
+):
+    try:
+        with session_factory.begin() as session:
+            scoped_actor = replace(
+                actor,
+                workspace_id=workspace_id,
+                workspace_role=access.role,
+                role=access.role,
+            )
+            return {
+                "data": svc.review.undo_decision(
+                    session=session,
+                    workspace_id=workspace_id,
+                    review_item_id=review_item_id,
+                    decision_id=decision_id,
+                    actor_kind=actor.actor_kind,
+                    actor_id=actor.actor_id,
+                    actor_user_id=actor.user_id,
+                    actor_role=access.role,
+                    actor_provenance=actor.provenance,
+                    actor=scoped_actor,
+                )
+            }
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
+
+
+@router.post(
     "/{workspace_id}/reviews/{review_item_id}/claim",
     response_model=ReviewItemResponse,
     responses=REST_ERROR_RESPONSES,

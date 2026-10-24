@@ -22,7 +22,7 @@ test("reads review evidence, approves a document group and a single review, and 
   const detail = page.locator(".review-detail-card");
   await expect(detail.locator("#review-detail-title")).toHaveText(first.title);
   await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
-  await expect(detail.locator(".review-publication-notice")).toHaveText("Approving publishes review version v1.");
+  await expect(detail.locator(".review-publication-notice")).toHaveText("First publication · nothing published yet → v1");
   await expect(detail.locator(".diff-viewer")).toContainText("Exact reviewed body");
   await detail.getByRole("tab", { name: "Review version content", exact: true }).click();
   await expect(detail.locator(".markdown-body")).toContainText("Exact reviewed body");

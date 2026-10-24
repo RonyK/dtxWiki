@@ -4,9 +4,11 @@ The publish timeline reconstructs "what was published at time T" from
 ChangeOperation rows: every path that makes a version live leaves an
 operation referencing ``context_page_version:<id>`` — REST direct writes
 (``create``/``update``, published at creation), MCP publishes (``publish``),
-and B-8 archives (``archive``). The operation's ChangeSet.created_at is the
-publish instant — NOT ``version.created_at``, which is draft-creation time
-and mis-resolves drafts published late.
+and B-8 archives (``archive``). An undone approval leaves
+``publish_revert`` naming the version live again (no version: nothing is).
+The operation's ChangeSet.created_at is the publish instant — NOT
+``version.created_at``, which is draft-creation time and mis-resolves drafts
+published late.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.utils.uuid import parse_uuid_or_none
 
 _PUBLISH_OPERATIONS = ("create", "update", "publish")
-_TIMELINE_OPERATIONS = (*_PUBLISH_OPERATIONS, "archive")
+_TIMELINE_OPERATIONS = (*_PUBLISH_OPERATIONS, "archive", "publish_revert")
 _VERSION_REF_PREFIX = "context_page_version:"
 
 _PUBLISHED_STATUSES = {"published_snapshot", "superseded_snapshot"}
@@ -41,7 +43,7 @@ def _naive_utc(value: datetime) -> datetime:
 class TimelineEvent:
     page_id: UUID
     version_id: UUID | None
-    operation: str  # create | update | publish | archive
+    operation: str  # create | update | publish | archive | publish_revert
     occurred_at: datetime
     change_set_id: UUID
     reason: str | None
@@ -197,7 +199,9 @@ def publish_timeline(
 
     A version's publish instant is its FIRST genuine publish-family op; a
     later create/update naming the same (already-published) version is a
-    metadata re-touch, not a second publish, and is dropped.
+    metadata re-touch, not a second publish, and is dropped. A ``publish`` op
+    is always an instant: the same version publishes again only after an
+    undone approval reverted it.
     """
     rows = session.execute(
         select(ChangeOperation, ChangeSet)
@@ -216,11 +220,11 @@ def publish_timeline(
     published_versions: set[UUID] = set()
     for operation, change_set in rows:
         version_id = _version_id_from_ref(operation.diff_ref)
-        if operation.operation == "archive":
+        if operation.operation in ("archive", "publish_revert"):
             pass
         elif not _is_publish_instant(operation, version_id, draft_writes):
             continue
-        elif version_id in published_versions:
+        elif version_id in published_versions and operation.operation != "publish":
             continue
         else:
             published_versions.add(version_id)
@@ -244,9 +248,10 @@ def resolve_version_as_of(
 ) -> ContextPageVersion | None:
     """The version published at instant ``as_of`` (None = nothing was).
 
-    Only published/superseded snapshots resolve (viewer-safe by
-    construction); an ``archive`` event before ``as_of`` with no later
-    publish yields None. Falls back to the published head when a page has a
+    Only versions that were live at ``as_of`` resolve (viewer-safe by
+    construction): published/superseded snapshots, or a version a ``publish``
+    op made live before an approval undo returned it to draft. An ``archive``
+    event before ``as_of`` with no later publish yields None. Falls back to the published head when a page has a
     head but no timeline rows (legacy/seeded data).
     """
     naive_as_of = _naive_utc(as_of)
@@ -268,10 +273,17 @@ def resolve_version_as_of(
         if head is None:
             return None
         return head if _naive_utc(head.created_at) <= naive_as_of else None
-    if chosen.operation == "archive":
+    if chosen.operation == "archive" or chosen.version_id is None:
         return None
     version = session.get(ContextPageVersion, chosen.version_id)
-    if version is None or version.version_status not in _PUBLISHED_STATUSES:
+    if version is None:
+        return None
+    # A ``publish`` op proves the version was live at that instant even after
+    # an undone approval returned it to draft; other ops need its status.
+    if (
+        version.version_status not in _PUBLISHED_STATUSES
+        and chosen.operation != "publish"
+    ):
         return None
     return version
 
@@ -371,10 +383,17 @@ def what_changed(
         version_id = _version_id_from_ref(operation.diff_ref)
         if operation.operation == "archive":
             change_kind = "archived"
+        elif operation.operation == "publish_revert":
+            # An undone approval makes the version it replaced live again. An
+            # undone first publication leaves no published version to name.
+            if version_id is None:
+                continue
+            seen_versions.add(version_id)
+            change_kind = "updated"
         else:
             if not _is_publish_instant(operation, version_id, draft_writes):
                 continue
-            if version_id in seen_versions:
+            if version_id in seen_versions and operation.operation != "publish":
                 continue
             seen_versions.add(version_id)
             change_kind = "updated" if page.id in published_pages else "created"
@@ -388,7 +407,9 @@ def what_changed(
                 version_id=version_id,
                 previous_version_id=(
                     parent_by_version.get(version_id)
-                    if change_kind == "updated" and version_id is not None
+                    if change_kind == "updated"
+                    and version_id is not None
+                    and operation.operation != "publish_revert"
                     else None
                 ),
                 changed_at=change_set.created_at,

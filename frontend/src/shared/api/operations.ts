@@ -56,6 +56,8 @@ export type ReviewEvidence = components["schemas"]["ReviewEvidencePayload"];
 // Derived from the generated schema: the backend types both the audience and
 // reconciliation affordances, so this type no longer needs a manual overlay.
 export type ReviewItem = components["schemas"]["ReviewItemDetail"];
+export type ReviewDecisionUndo = components["schemas"]["ReviewDecisionUndo"];
+export type ReviewContentTarget = components["schemas"]["ReviewContentTarget"];
 export type ReviewItemListData =
   components["schemas"]["ReviewItemListPayload"];
 
@@ -344,6 +346,18 @@ export async function decideReview(
           : {}),
       }),
     },
+  );
+  return response.data;
+}
+
+export async function undoReviewDecision(
+  workspaceId: string,
+  reviewItemId: string,
+  decisionId: string,
+) {
+  const response = await apiRequest<{ data: ReviewItem }>(
+    `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decisions/${decisionId}/undo`,
+    { method: "POST" },
   );
   return response.data;
 }

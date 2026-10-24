@@ -1,6 +1,6 @@
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import delete, func, select
@@ -1662,6 +1662,31 @@ def test_deadline_system_auto_approval_does_not_publish(session_factory):
             session.get(ContextPage, created.page_id).current_published_version_id
             is None
         )
+
+        # Any editor may undo an automatic approval, and the next sweep must
+        # leave the reopened review to a person.
+        editor = uuid4()
+        undo = reviews.get_review(
+            session,
+            workspace.id,
+            review.id,
+            actor_user_id=editor,
+            actor_role="editor",
+            actor=_actor(workspace.id, "editor"),
+        ).undo
+        reviews.undo_decision(
+            session,
+            workspace.id,
+            review.id,
+            undo.decision_id,
+            actor_kind="human",
+            actor_id=str(editor),
+            actor_user_id=editor,
+            actor_role="editor",
+            actor_provenance="browser_session",
+        )
+        assert review.status == "pending"
+        assert reviews.sweep_auto_approve_reviews(session, workspace.id) == []
 
 
 @pytest.mark.parametrize("decision_type", ["approve", "reject", "request_changes"])

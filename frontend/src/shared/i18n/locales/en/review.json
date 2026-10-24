@@ -90,7 +90,8 @@
       "approve": "Approved",
       "request_changes": "Requested changes",
       "reject": "Rejected",
-      "comment": "Commented"
+      "comment": "Commented",
+      "undo": "Undo"
     }
   },
   "decisionSummary": {
@@ -268,7 +269,8 @@
       "request_changes": "Requested changes",
       "reject": "Rejected",
       "comment": "Commented",
-      "revision_submitted": "Revision submitted"
+      "revision_submitted": "Revision submitted",
+      "undo": "Decision undone"
     },
     "actorType": {
       "human": "Human",
@@ -290,7 +292,8 @@
       "tree_reorder": "Tree reorder",
       "tree_delete": "Tree delete",
       "tree_place": "Tree place",
-      "restore_after_rejection": "Restored after rejection"
+      "restore_after_rejection": "Restored after rejection",
+      "publish_revert": "Publication reverted"
     },
     "triggerType": {
       "mcp_write_draft": "MCP write draft",
@@ -306,7 +309,8 @@
       "library_registration": "Library registration",
       "source_deleted": "Source deleted",
       "schedule": "Schedule",
-      "context_draft_restore": "Draft restored"
+      "context_draft_restore": "Draft restored",
+      "context_page_publish_revert": "Publication reverted"
     },
     "changeSetStatus": {
       "draft_created": "Draft created",
@@ -371,7 +375,7 @@
       "restore_published": "The review draft is removed from the current document; published v{{version}} remains.",
       "hide_unpublished": "There is no published version; the document will not appear in the normal reader after rejection.",
       "no_head_change": "This rejection does not change the current document head.",
-      "restore_previous_draft": "Returns to v{{version}}."
+      "restore_previous_draft": "The edit base returns to v{{version}}."
     },
     "outcomes": {
       "approved": "Approved",
@@ -431,7 +435,18 @@
       "superseded_by_newer_draft": "Settled because a newer draft replaced this one.",
       "generic": "This review was settled.",
       "openReview": "Open the v{{version}} review",
-      "openDecidingReview": "Open the deciding review"
+      "openDecidingReview": "Open the deciding review",
+      "superseded_by_decision_undo": "Closed because the decision that opened this review was undone."
+    },
+    "firstPublicationNotice": "First publication · nothing published yet → v{{version}}",
+    "replacePublicationNotice": "Approving publishes v{{version}} in place of v{{from}}.",
+    "reopenedByUndo": "Reopened by undo",
+    "settlementShort": {
+      "superseded_by_approved_publish": "Settled by approving v{{version}}",
+      "superseded_by_rejected_ancestor": "Settled by rejecting v{{version}}",
+      "superseded_by_rejected_candidate": "Settled when the same version was rejected",
+      "superseded_by_newer_draft": "Replaced by a newer draft",
+      "superseded_by_decision_undo": "Closed by an undone decision"
     }
   },
   "document": {
@@ -486,5 +501,32 @@
     "publishingChange": "What publishing changes (published v{{baseline}} → v{{candidate}})",
     "publishingEmptyChange": "What publishing changes (empty document → v{{candidate}})",
     "draftParentBaseline": "Previous draft v{{version}}"
+  },
+  "undo": {
+    "action": {
+      "approve": "Undo approval",
+      "reject": "Undo rejection",
+      "request_changes": "Withdraw change request"
+    },
+    "available": {
+      "approve": "Undoing this approval restores the page as it was before it was published, and this review and the reviews settled with it wait again.",
+      "reject": "Undoing this rejection restores the rejected draft and the drafts written on it, and this review waits again.",
+      "request_changes": "Withdrawing this change request takes it back from its recipients, and this review waits again."
+    },
+    "laterChanges": {
+      "approve": "The page changed after this approval, so it can no longer be undone.",
+      "reject": "The page changed after this rejection, so it can no longer be undone.",
+      "request_changes": "The page changed after this change request, so it can no longer be withdrawn."
+    },
+    "viewLaterChanges": "Review later changes",
+    "startDraft": "Start a new draft from v{{version}}",
+    "done": {
+      "approve": "Approval undone. The review is waiting again.",
+      "reject": "Rejection undone. The review is waiting again.",
+      "request_changes": "Change request withdrawn. The review is waiting again."
+    },
+    "failed": "Failed to undo the decision",
+    "startDraftFailed": "Failed to start a new draft",
+    "undone": "Undone"
   }
 }
