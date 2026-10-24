@@ -535,7 +535,7 @@ class WhatChangedInput(MCPConversationInput):
 class WhatChangedEntryModel(BaseModel):
     concept_path: str
     title: str
-    change_kind: Literal["created", "updated", "archived"]
+    change_kind: Literal["created", "updated", "archived", "unpublished"]
     page_id: UUID
     version_id: UUID | None = None
     previous_version_id: UUID | None = None

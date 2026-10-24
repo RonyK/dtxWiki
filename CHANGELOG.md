@@ -80,12 +80,17 @@
   to `list_requested_changes` evidence, including the earlier draft a candidate
   was written on. Existing clients can ignore these additive fields and
   continue using the existing target and `diff_ref` fields.
+- MCP tool contract revision 15 adds `unpublished` to `what_changed` when an
+  undone first publication leaves no published version. Refresh the output
+  contract and invalidate the cached publication by `page_id`; `version_id`
+  is null. Draft visibility still applies, so readers without draft access
+  receive no unpublished-page metadata.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.
   A reject confirmation whose impact changed meanwhile is refused with 409
   `review_decision_impact_changed`.
-- A Context review decision can be undone while nothing has changed since it:
+- A Context review decision can be undone while its recorded result is current:
   an approval (including an automatic one), a rejection, or a first-round
   change request. Undoing restores the published and draft heads, page
   metadata and the reviews the decision settled or opened; the decision stays
@@ -93,7 +98,10 @@
   undo a decision, any editor an automatic approval, which then waits for a
   person. Browser sessions only:
   `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
-  refused with 409 `review_decision_undo_unavailable` once anything changed.
+  refused with 409 `review_decision_undo_unavailable` after a newer version or
+  a change to the recorded result. Later metadata changes the decision did
+  not touch, such as a tree rename, are preserved. Claims on restored change
+  requests return with their original timestamps and expiry.
   Decisions made before this release, and approvals that revived an archived
   page, cannot be undone. Reading a page as of a later time follows the undone
   publication, the page's own stale warning returns with its older content,

@@ -143,7 +143,11 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        including the earlier draft a candidate was written on. Clients may
 #        ignore these additive fields and keep using the existing target and
 #        diff_ref fields; no tool or input schema changed.
-MCP_TOOL_CONTRACT_REVISION = 14
+#  15 -- what_changed adds unpublished when an undone first publication leaves
+#        no published version. Refresh the output contract and invalidate the
+#        page's cached publication by page_id; version_id is null. Existing
+#        visibility rules still apply, including draft visibility.
+MCP_TOOL_CONTRACT_REVISION = 15
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

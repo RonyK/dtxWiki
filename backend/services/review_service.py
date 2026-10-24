@@ -2693,7 +2693,7 @@ class ReviewService:
         actor_role: str | None = None,
         actor: ActorContext | None = None,
     ) -> ReviewItemDetail:
-        """Undo a review's latest decision while nothing changed after it.
+        """Undo a review's latest decision while its result is still current.
 
         The decision's recorded effect is written back: statuses, the page's
         heads and metadata, and the reviews it settled or opened. The decision
@@ -2762,8 +2762,11 @@ class ReviewService:
                 **(review.risk_signals or {}),
                 "human_review_required": True,
             }
-        review.claimed_by = None
-        review.claimed_at = None
+        if review.status != CHANGES_REQUESTED_STATUS:
+            # Withdrawing a request releases any claim taken after it. When
+            # undo restores an earlier request, keep its recorded claim.
+            review.claimed_by = None
+            review.claimed_at = None
         change_set = get_in_workspace(
             session,
             ChangeSet,

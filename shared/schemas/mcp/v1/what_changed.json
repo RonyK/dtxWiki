@@ -520,7 +520,8 @@
             "enum": [
               "created",
               "updated",
-              "archived"
+              "archived",
+              "unpublished"
             ],
             "title": "Change Kind",
             "type": "string"

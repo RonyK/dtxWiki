@@ -8,7 +8,10 @@ from backend.models.base import utc_now
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.lint import LintFinding, LintRun
 from backend.models.review import ReviewDecision, ReviewItem
+from backend.models.tree import WorkspaceTreeNode
 from backend.schemas.context_write import ReviewDecisionRequest, UpdateDraftRequest
+from backend.schemas.mcp.read_tools import WhatChangedEntryModel
+from backend.schemas.tree import TreeNodeUpdate
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import (
     ReadNotFoundError,
@@ -16,6 +19,7 @@ from backend.services.read_errors import (
 )
 from backend.services.review_service import ReviewService
 from backend.services.temporal_read import resolve_version_as_of, what_changed
+from backend.services.tree_service import TreeService
 from backend.tests.integration.test_context_review_publish import (
     ACTOR,
     ACTOR_UUID,
@@ -93,10 +97,22 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert stale.status == "fixed"
         while_live = utc_now()
 
+        # This decision did not change the title. A later tree rename survives
+        # undo alongside the restored heads, instead of blocking it.
+        node = session.scalar(select(WorkspaceTreeNode).where(
+            WorkspaceTreeNode.target_kind == "context_page",
+            WorkspaceTreeNode.target_id == page_id,
+        ))
+        renamed = "Renamed after approval"
+        TreeService().update_node(
+            session, workspace.id, node.id, TreeNodeUpdate(display_name=renamed),
+            actor_kind="human", actor_id=ACTOR, actor=_actor(workspace.id, "owner"),
+        )
+        assert _detail(session, workspace.id, draft.review_item_id).undo.available
         restored = _undo(
             session, workspace.id, draft.review_item_id, decided.undo.decision_id
         )
-        assert _states(session, page_id) == before
+        assert _states(session, page_id) == (*before[:3], renamed, before[4])
         assert (stale.status, stale.resolved_at) == ("open", None)
         assert session.get(ContextPage, page_id).stale_candidate is True
         assert restored.status == "pending" and restored.undo is None
@@ -133,10 +149,22 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         first = _write(session, workspace.id, "Undo first", "# First\n\nBody.")
         first_before = _states(session, first.page_id)
         approved = _approve(session, workspace.id, first.review_item_id)
+        since = utc_now()
         _undo(session, workspace.id, first.review_item_id, approved.undo.decision_id)
         assert _states(session, first.page_id) == first_before
         first_page = session.get(ContextPage, first.page_id)
         assert resolve_version_as_of(session, first_page, utc_now()) is None
+        entries, has_more = what_changed(
+            session, workspace.id, since=since, actor=_actor(workspace.id, "editor"),
+        )
+        assert not has_more and len(entries) == 1
+        entry = WhatChangedEntryModel(**vars(entries[0]))
+        assert (entry.change_kind, entry.page_id) == ("unpublished", first.page_id)
+        assert entry.version_id is entry.previous_version_id is None
+        # The new delta must not disclose a draft-only page to ordinary readers.
+        assert what_changed(
+            session, workspace.id, since=since, actor=_actor(workspace.id, "viewer"),
+        ) == ([], False)
 
 
 def _stale_finding(session, workspace_id, page_id):
@@ -184,16 +212,29 @@ def test_undoing_a_rejection_restores_the_retired_drafts_and_their_reviews(
         workspace, published, draft = _published_page_with_draft(session, "Undo R")
         page_id = published.page_id
         later = _write(session, workspace.id, "Undo R", "# Later\n\nOn the candidate.")
+        reviews = ReviewService()
+        identity = {"actor_kind": "human", "actor_id": ACTOR, "actor_role": "owner"}
+        reviews.apply_decision(
+            session, workspace.id, later.review_item_id,
+            ReviewDecisionRequest(
+                decision_type="request_changes", decision_reason="Please revise",
+                audience_kind="workspace_editors",
+            ),
+            actor_user_id=ACTOR_UUID, actor_provenance="browser_session", **identity,
+        )
+        reviews.claim_review(session, workspace.id, later.review_item_id, **identity)
+        later_review = session.get(ReviewItem, later.review_item_id)
+        claim = (later_review.claimed_by, later_review.claimed_at)
         before = _states(session, page_id)
         decided = _reject(session, workspace.id, draft.review_item_id)
         assert session.get(ReviewItem, later.review_item_id).status == "superseded"
 
         _undo(session, workspace.id, draft.review_item_id, decided.undo.decision_id)
         assert _states(session, page_id) == before
-        assert {
-            session.get(ReviewItem, review_id).status
-            for review_id in (draft.review_item_id, later.review_item_id)
-        } == {"pending"}
+        session.refresh(later_review)
+        assert session.get(ReviewItem, draft.review_item_id).status == "pending"
+        assert later_review.status == "changes_requested"
+        assert (later_review.claimed_by, later_review.claimed_at) == claim
         assert _no_history_violations(session, page_id)
 
         # A rejection that reopened the draft below under a new review: undoing
@@ -305,9 +346,14 @@ def test_undoing_a_change_request_withdraws_it(session_factory):
             actor_role="owner",
             actor_provenance="browser_session",
         )
+        reviews.claim_review(
+            session, workspace.id, draft.review_item_id,
+            actor_kind="human", actor_id=ACTOR, actor_role="owner",
+        )
         _undo(session, workspace.id, draft.review_item_id, requested.undo.decision_id)
         review = session.get(ReviewItem, draft.review_item_id)
         assert review.status == "pending"
+        assert review.claimed_by is review.claimed_at is None
         assert (
             reviews.list_requested_changes_for_principal(
                 session, workspace.id, principal=ACTOR_UUID, principal_role="owner"

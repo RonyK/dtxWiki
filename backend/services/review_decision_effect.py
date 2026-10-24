@@ -5,7 +5,9 @@ and version statuses through several writers (rejection, publication,
 supersession). Rather than mirror each writer, a session listener records the
 value each tracked column held before the decision first changed it and the
 value the decision left. The record rides in the decision's audit payload.
-Undo proves nothing moved since and writes the recorded values back.
+Undo proves those results did not move since and writes the recorded values back.
+Later metadata changes outside the recorded effect, such as a tree rename when
+the decision did not change the title, are preserved.
 
 Guarded columns are the decision's result: if any moved since, undo would
 discard later work and is refused. Advisory columns are maintenance state the
@@ -62,7 +64,7 @@ _TRACKED: dict[type, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
         ("version_status", "graph_status"),
         (),
     ),
-    ReviewItem: ("review_item", ("status",), ()),
+    ReviewItem: ("review_item", ("status", "claimed_by", "claimed_at"), ()),
     ChangeSet: ("change_set", ("status",), ()),
     LintFinding: ("lint_finding", (), ("status", "resolved_at")),
     ClientDelegatedTask: ("client_delegated_task", (), ("status", "lease_expires_at")),
@@ -82,8 +84,11 @@ _UUID_COLUMNS = {
     "latest_draft_version_id",
     "placement_parent_node_id",
     "public_exposed_version_id",
+    "claimed_by",
 }
-_DATETIME_COLUMNS = {"content_changed_at", "resolved_at", "lease_expires_at"}
+_DATETIME_COLUMNS = {
+    "content_changed_at", "resolved_at", "lease_expires_at", "claimed_at",
+}
 
 
 def _encode(value: object) -> object:

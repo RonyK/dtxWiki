@@ -251,8 +251,8 @@ def resolve_version_as_of(
     Only versions that were live at ``as_of`` resolve (viewer-safe by
     construction): published/superseded snapshots, or a version a ``publish``
     op made live before an approval undo returned it to draft. An ``archive``
-    event before ``as_of`` with no later publish yields None. Falls back to the published head when a page has a
-    head but no timeline rows (legacy/seeded data).
+    event before ``as_of`` with no later publish yields None. Falls back to the
+    published head when a page has a head but no timeline rows (legacy/seeded data).
     """
     naive_as_of = _naive_utc(as_of)
     events = publish_timeline(session, page.id)
@@ -292,7 +292,7 @@ def resolve_version_as_of(
 class WhatChangedEntry:
     concept_path: str
     title: str
-    change_kind: str  # created | updated | archived
+    change_kind: str  # created | updated | archived | unpublished
     page_id: UUID
     version_id: UUID | None
     previous_version_id: UUID | None
@@ -314,7 +314,8 @@ def what_changed(
 
     created = the page's first publish event; archived rows surface the B-8
     cascade (the client's cache-invalidation signal — currently-archived
-    pages appear ONLY as archived entries). Returns (entries, has_more).
+    pages appear ONLY as archived entries). An undone first publication emits
+    unpublished for actors who can still see the draft. Returns (entries, has_more).
     """
     from backend.services.context_visibility import visible_context_version_id
     from backend.services.entity_ref import context_concept_path
@@ -387,9 +388,10 @@ def what_changed(
             # An undone approval makes the version it replaced live again. An
             # undone first publication leaves no published version to name.
             if version_id is None:
-                continue
-            seen_versions.add(version_id)
-            change_kind = "updated"
+                change_kind = "unpublished"
+            else:
+                seen_versions.add(version_id)
+                change_kind = "updated"
         else:
             if not _is_publish_instant(operation, version_id, draft_writes):
                 continue
