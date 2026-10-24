@@ -1,5 +1,21 @@
 """Stable service-provider contracts for dtxWiki backend overlays."""
 
+from backend.spi.auth import (
+    AUTH_METHOD_SPI_VERSION,
+    AuthMethodDescriptor,
+    AuthMethodError,
+    AuthMethodPlugin,
+    BeginRequest,
+    Branding,
+    CallbackInput,
+    CredentialMethodPlugin,
+    ExternalAssertion,
+    IdentityLifecycleHook,
+    MethodCapabilities,
+    ProviderContext,
+    ProvisioningHook,
+    RedirectInstruction,
+)
 from backend.spi.context import DatabaseProvider, ToolCallContext
 from backend.spi.conversion import (
     CONVERSION_OUTPUT_SCHEMA_VERSION,
@@ -18,6 +34,7 @@ from backend.spi.conversion import (
     SourceLocation,
     UnsupportedConversionError,
 )
+from backend.spi.plugins import DtxwikiPlugin, JobHandler, PluginMigrations, PluginMount
 from backend.spi.preview import (
     PREVIEW_OUTPUT_SCHEMA_VERSION,
     PREVIEW_PROVIDER_SPI_VERSION,
@@ -45,10 +62,28 @@ from backend.spi.types import (
     SearchResultType,
 )
 
-SPI_VERSION = "1.0"
+SPI_VERSION = "1.1"
 
 __all__ = [
+    "AUTH_METHOD_SPI_VERSION",
+    "AuthMethodDescriptor",
+    "AuthMethodError",
+    "AuthMethodPlugin",
+    "BeginRequest",
+    "Branding",
+    "CallbackInput",
+    "CredentialMethodPlugin",
+    "ExternalAssertion",
+    "IdentityLifecycleHook",
+    "MethodCapabilities",
+    "ProviderContext",
+    "ProvisioningHook",
+    "RedirectInstruction",
     "SPI_VERSION",
+    "DtxwikiPlugin",
+    "JobHandler",
+    "PluginMigrations",
+    "PluginMount",
     "CONVERSION_OUTPUT_SCHEMA_VERSION",
     "CONVERTER_SPI_VERSION",
     "PREVIEW_OUTPUT_SCHEMA_VERSION",

@@ -10,6 +10,8 @@ import pytest
 from backend.scripts import export_mcp_schemas
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 from backend.scripts.export_openapi import (
+    ACCOUNT_REAUTHENTICATION_SECURITY,
+    LOGIN_TRANSACTION_SECURITY,
     OAUTH_REVOKE_SECURITY,
     OPTIONAL_SESSION_COOKIE_SECURITY,
     RECENT_REAUTHENTICATION_SECURITY,
@@ -168,6 +170,18 @@ def test_openapi_security_matches_exhaustive_reviewed_route_matrix(openapi_schem
         OAUTH_REVOKE_SECURITY
     )
     assert "client_id" in schema["paths"]["/oauth/revoke"]["post"]["description"]
+    assert (
+        schema["paths"]["/api/v1/auth/identities/{identity_id}"]["delete"]["security"]
+        == ACCOUNT_REAUTHENTICATION_SECURITY
+    )
+    assert (
+        schema["paths"]["/api/v1/auth/sso/{slug}/link"]["post"]["security"]
+        == ACCOUNT_REAUTHENTICATION_SECURITY
+    )
+    assert (
+        schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["get"]["security"]
+        == LOGIN_TRANSACTION_SECURITY
+    )
 
 
 def test_mcp_client_tombstone_delete_is_browser_session_only(openapi_schema):

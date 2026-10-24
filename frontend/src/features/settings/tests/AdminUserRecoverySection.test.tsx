@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AUTH_EXPIRED_EVENT } from "../../../shared/api/client";
+import { AuthProvider } from "../../../shared/auth/AuthContext";
 import { setLocale } from "../../../shared/i18n";
 import { readAppStyles } from "../../../test-support/appStyles";
 import { AdminUserRecoverySection } from "../AdminUserRecoverySection";
@@ -56,12 +57,27 @@ describe("AdminUserRecoverySection", () => {
 
   it("keeps the directory private until reauthentication and relocks when proof expires", async () => {
     const user = userEvent.setup();
+    let externalSession = false;
+    let externalProof = true;
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input, init) => {
         const url = input.toString();
         if (url === `${BASE}/api/v1/auth/capabilities`) {
           return jsonResponse(authCapabilities());
+        }
+        if (url === `${BASE}/api/v1/auth/me`) {
+          return jsonResponse({ data: {
+            user_id: USER_ID, email: "admin@example.com", display_name: "Admin",
+            status: "active", has_password: false,
+          } });
+        }
+        if (url === `${BASE}/api/v1/auth/identities`) {
+          return jsonResponse({ data: {
+            has_password: false,
+            identities: [{ provider_slug: "company" }],
+            available_providers: [{ slug: "company", display_name: "Company SSO", supports_reauthentication: true }],
+          } });
         }
         if (url === `${BASE}/api/v1/auth/reauthenticate`) {
           const body = JSON.parse(String(init?.body));
@@ -79,6 +95,10 @@ describe("AdminUserRecoverySection", () => {
           return jsonResponse(reauthResponse());
         }
         if (url.startsWith(`${BASE}/api/v1/admin/users?`)) {
+          if (externalSession && externalProof) {
+            externalProof = false;
+            return jsonResponse({ data: { items: [], total: 0, offset: 0 } });
+          }
           return jsonResponse(
             {
               error_code: "recent_reauthentication_required",
@@ -92,10 +112,10 @@ describe("AdminUserRecoverySection", () => {
         throw new Error(`Unexpected request: ${url}`);
       });
 
-    render(<AdminUserRecoverySection />);
+    const { unmount } = render(<AdminUserRecoverySection />);
 
     expect(
-      screen.queryByRole("searchbox", { name: "Search users" }),
+      screen.queryByRole("searchbox", { name: /Search users/ }),
     ).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(([input]) =>
@@ -115,7 +135,7 @@ describe("AdminUserRecoverySection", () => {
       await screen.findByText("Your password was not accepted. Try again."),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("searchbox", { name: "Search users" }),
+      screen.queryByRole("searchbox", { name: /Search users/ }),
     ).not.toBeInTheDocument();
 
     await user.type(
@@ -131,13 +151,32 @@ describe("AdminUserRecoverySection", () => {
 
     expect(
       await screen.findByText(
-        "Your recent verification expired. Re-enter your password to search users again.",
+        "Your recent verification expired. Verify your identity again to search users.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("searchbox", { name: "Search users" }),
+      screen.queryByRole("searchbox", { name: /Search users/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Alex Kim")).not.toBeInTheDocument();
+
+    // The same proof-expiry path must remain usable without a local password.
+    unmount();
+    externalSession = true;
+    const originalUrl = window.location.href;
+    window.history.replaceState(null, "", "/settings?section=users&sso_verified=1");
+    try {
+      render(<AuthProvider><AdminUserRecoverySection /></AuthProvider>);
+      await user.type(await screen.findByRole("searchbox", { name: /Search users/ }), "alex@example.com");
+      await user.click(screen.getByRole("button", { name: "Search" }));
+      expect(await screen.findByText(
+        "Your recent verification expired. Verify your identity again to search users.",
+      )).toBeInTheDocument();
+      expect(screen.queryByLabelText("Your current password")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Verify with Company SSO" })).toBeInTheDocument();
+      expect(screen.queryByRole("searchbox", { name: /Search users/ })).not.toBeInTheDocument();
+    } finally {
+      window.history.replaceState(null, "", originalUrl);
+    }
   });
 
   it("issues and reveals a link once, sends revocation intent, and cannot reopen it", async () => {

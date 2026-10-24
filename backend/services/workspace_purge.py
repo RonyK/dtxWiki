@@ -68,6 +68,7 @@ GLOBAL_TABLES = frozenset(
     {
         "api_tokens",
         "app_metadata",
+        "auth_login_transactions",
         "email_outbox",
         "oauth_access_token_jti",
         "oauth_clients",
@@ -77,6 +78,7 @@ GLOBAL_TABLES = frozenset(
         "password_reset_tokens",
         "server_admins",
         "users",
+        "user_identities",
         "workspace",
     }
 )

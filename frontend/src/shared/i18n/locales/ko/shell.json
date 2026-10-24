@@ -286,7 +286,7 @@
     "workspace_join_request_requester_inactive": "가입을 요청한 계정이 활성 상태가 아닙니다.",
     "workspace_public_sharing_disabled": "페이지를 익명 공개하려면 먼저 워크스페이스를 외부 공개로 설정하세요.",
     "workspace_access_confirmation_required": "접근 설정 변경의 영향을 검토하고 확인하세요.",
-    "recent_reauthentication_required": "계속하려면 현재 비밀번호를 입력하세요.",
+    "recent_reauthentication_required": "계속하려면 본인 인증을 다시 진행하세요.",
     "context_history_state_inconsistent": "게시하기 전에 서버 운영자가 이 페이지 기록을 복구해야 합니다.",
     "workspace_user_required": "워크스페이스를 관리하려면 사용자 계정으로 로그인하세요.",
     "database_schema_mismatch": "데이터베이스 업데이트가 필요합니다. 서버 관리자에게 데이터베이스 업그레이드를 요청한 뒤 다시 시도하세요.",

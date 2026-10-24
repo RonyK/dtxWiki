@@ -21,6 +21,10 @@ RECENT_REAUTHENTICATION_SECURITY = [
         "RecentReauthenticationCookie": [],
     }
 ]
+ACCOUNT_REAUTHENTICATION_SECURITY = [
+    {"SessionCookie": [], "AccountReauthenticationCookie": []}
+]
+LOGIN_TRANSACTION_SECURITY = [{"LoginTransactionCookie": []}]
 OPTIONAL_SESSION_COOKIE_SECURITY = [{}, {"SessionCookie": []}]
 OAUTH_REVOKE_SECURITY = [
     {"SessionCookie": []},
@@ -53,6 +57,8 @@ FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS = {
 # These handlers authenticate by reading the session cookie directly instead of
 # using RestActorDep, so FastAPI cannot infer their actual security contract.
 OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/auth/identities"),
+    ("POST", "/api/v1/auth/sso/{slug}/reauthenticate"),
     ("POST", "/api/v1/auth/reauthenticate"),
     ("GET", "/api/v1/auth/me"),
     ("POST", "/api/v1/auth/password"),
@@ -88,6 +94,17 @@ OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
 }
 
+OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
+    ("POST", "/api/v1/auth/sso/{slug}/link"),
+    ("DELETE", "/api/v1/auth/identities/{identity_id}"),
+    ("POST", "/api/v1/auth/password/set"),
+}
+
+OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/auth/sso/{slug}/callback"),
+    ("POST", "/api/v1/auth/sso/{slug}/callback"),
+}
+
 OPENAPI_OPTIONAL_SESSION_ROUTES: set[RouteKey] = {
     ("GET", "/oauth/authorize"),
     ("POST", "/oauth/authorize"),
@@ -100,6 +117,9 @@ OPENAPI_OAUTH_REVOKE_ROUTES: set[RouteKey] = {
 # Explicitly reviewed unauthenticated operations. Logout is deliberately
 # idempotent and public: a missing or invalid cookie still clears browser state.
 OPENAPI_PUBLIC_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/capabilities"),
+    ("GET", "/api/v1/auth/sso/{slug}/start"),
+    ("GET", "/api/v1/auth/methods/{method_id}/icon.png"),
     ("GET", "/health/live"),
     ("GET", "/health/ready"),
     ("GET", "/api/v1/auth/capabilities"),
@@ -156,6 +176,18 @@ def reviewed_openapi_security() -> dict[RouteKey, list[dict[str, list]]]:
         {route: OAUTH_REVOKE_SECURITY for route in OPENAPI_OAUTH_REVOKE_ROUTES}
     )
     route_security.update({route: [] for route in OPENAPI_PUBLIC_ROUTES})
+    route_security.update(
+        {
+            route: ACCOUNT_REAUTHENTICATION_SECURITY
+            for route in OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES
+        }
+    )
+    route_security.update(
+        {
+            route: LOGIN_TRANSACTION_SECURITY
+            for route in OPENAPI_LOGIN_TRANSACTION_ROUTES
+        }
+    )
     return route_security
 
 
@@ -174,6 +206,16 @@ def build_openapi_schema() -> dict:
         "type": "apiKey",
         "in": "cookie",
         "name": f"{app.state.settings.session_cookie_name}_reauth",
+    }
+    security_schemes["AccountReauthenticationCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": f"{app.state.settings.session_cookie_name}_reauth_account",
+    }
+    security_schemes["LoginTransactionCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "dtxwiki_login_txn",
     }
     for (method, path), security in reviewed_openapi_security().items():
         operation = schema.get("paths", {}).get(path, {}).get(method.lower())

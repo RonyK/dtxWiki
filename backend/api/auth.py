@@ -217,7 +217,14 @@ def auth_capabilities(request: Request, response: Response):
     set_no_store_headers(response)
     return {
         "data": {
-            "signup_enabled": request.app.state.settings.effective_signup_enabled,
+            "signup_enabled": (
+                request.app.state.settings.effective_signup_enabled
+                and request.app.state.settings.auth_password_login_enabled
+            ),
+            "password_login": {
+                "enabled": request.app.state.settings.auth_password_login_enabled,
+            },
+            "login_methods": request.app.state.auth_providers.login_methods(),
             "password_recovery": {
                 "mode": request.app.state.settings.effective_password_recovery_mode,
                 "admin_assisted": (
@@ -240,6 +247,14 @@ def signup(
     request: Request,
     session_service: SessionServiceDep,
 ):
+    if not request.app.state.settings.auth_password_login_enabled:
+        return no_store_response(
+            auth_error_response(
+                SignupDisabledError(
+                    "password signup is disabled",
+                )
+            )
+        )
     try:
         # Disabled signup is a capability decision, not an authentication
         # attempt. Reject it before consuming shared brute-force quota.
@@ -271,6 +286,14 @@ def login(
     request: Request,
     session_service: SessionServiceDep,
 ):
+    if not request.app.state.settings.auth_password_login_enabled:
+        return no_store_response(
+            build_rest_error_response(
+                "password_login_disabled",
+                "Password login is disabled.",
+                status_code=403,
+            )
+        )
     try:
         consume_auth_slot(
             client_ip=auth_client_ip(request),
@@ -323,6 +346,9 @@ def reauthenticate(
         request=request,
         result=result,
     )
+    from backend.api.auth_sso import set_account_proof
+
+    set_account_proof(response, request.app.state.settings, request, result)
     return {
         "data": {
             "reauthenticated_until": result.reauthenticated_until,
@@ -371,6 +397,7 @@ def me(
     set_no_store_headers(response)
     try:
         token = current_session_token(request)
+        verified = session_service.token_codec.verify_session(token)
         user, refreshed_session = session_service.authenticate_session_with_refresh(
             token
         )
@@ -389,6 +416,8 @@ def me(
     return {
         "data": {
             **user_payload(user),
+            "session_method": "ext" if "ext" in (verified.amr or ()) else "pwd",
+            "session_provider_slug": verified.idp,
             "is_server_admin": is_admin,
             "oauth_available": deployment_service.oauth_available(settings),
             "oauth_unavailable_reason": deployment_service.oauth_unavailable_reason(
@@ -1050,6 +1079,7 @@ def user_payload(user: AuthenticatedUser) -> dict:
         "display_name": user.display_name,
         "status": user.status,
         "email_verified_at": user.email_verified_at,
+        "has_password": user.has_password,
     }
 
 

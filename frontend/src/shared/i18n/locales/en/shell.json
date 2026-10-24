@@ -286,7 +286,7 @@
     "workspace_join_request_requester_inactive": "The requesting account is not active.",
     "workspace_public_sharing_disabled": "Make the workspace externally public before publishing a page anonymously.",
     "workspace_access_confirmation_required": "Review and confirm the effects of this access change.",
-    "recent_reauthentication_required": "Enter your current password to continue.",
+    "recent_reauthentication_required": "Verify your identity again to continue.",
     "context_history_state_inconsistent": "This page history needs operator repair before it can be published.",
     "workspace_user_required": "Sign in with a user account to manage workspaces.",
     "database_schema_mismatch": "The database needs an update. Ask a server administrator to run the database upgrade, then retry.",

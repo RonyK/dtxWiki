@@ -31,11 +31,13 @@ from backend.services.ops.migration_preflight import (
     make_non_mutating_engine,
 )
 
-SUPPORTED = frozenset(
+# These explicit revisions retain the complete input CHECK contract; the
+# index and login additions do not change input-policy constraints.
+CONSTRAINED_REVISIONS = frozenset({REVISION, "ef53a0a7061c", "7e2b9c4d6a18"})
+SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
     {
         "bd62193d5cf6",
         "efcbcf724889",
-        REVISION,
     }
 )
 FIELDS = {
@@ -71,8 +73,8 @@ def _preflight(connection):
         for check in inspector.get_check_constraints(table)
         if check.get("name") in expected
     }
-    if (preflight.revision == REVISION and actual != expected) or (
-        preflight.revision != REVISION and actual
+    if (preflight.revision in CONSTRAINED_REVISIONS and actual != expected) or (
+        preflight.revision not in CONSTRAINED_REVISIONS and actual
     ):
         raise InputMaintenanceError(
             "input maintenance refused: stamp/schema constraint conflict"

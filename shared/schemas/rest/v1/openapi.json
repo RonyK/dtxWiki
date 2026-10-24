@@ -2919,6 +2919,16 @@
       "AuthCapabilitiesData": {
         "additionalProperties": false,
         "properties": {
+          "login_methods": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Login Methods",
+            "type": "array"
+          },
+          "password_login": {
+            "$ref": "#/components/schemas/PasswordLoginCapability"
+          },
           "password_recovery": {
             "$ref": "#/components/schemas/PasswordRecoveryCapabilities"
           },
@@ -2929,7 +2939,9 @@
         },
         "required": [
           "signup_enabled",
-          "password_recovery"
+          "password_recovery",
+          "password_login",
+          "login_methods"
         ],
         "title": "AuthCapabilitiesData",
         "type": "object"
@@ -3049,6 +3061,11 @@
             ],
             "title": "Email Verified At"
           },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
+          },
           "is_server_admin": {
             "default": false,
             "title": "Is Server Admin",
@@ -3097,6 +3114,28 @@
               }
             ],
             "title": "Oauth Unavailable Reason"
+          },
+          "session_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Method"
+          },
+          "session_provider_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Provider Slug"
           },
           "status": {
             "title": "Status",
@@ -3433,6 +3472,42 @@
           "priority"
         ],
         "title": "BundleItemEntry",
+        "type": "object"
+      },
+      "CapabilitiesData": {
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/AuthCapabilitiesData"
+          },
+          "plugins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Plugins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "auth",
+          "plugins"
+        ],
+        "title": "CapabilitiesData",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CapabilitiesData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "CapabilitiesResponse",
         "type": "object"
       },
       "ChangeSetEntry": {
@@ -7449,6 +7524,95 @@
         "title": "HealthReadyResponse",
         "type": "object"
       },
+      "IdentityData": {
+        "properties": {
+          "can_unlink": {
+            "title": "Can Unlink",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Email"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_slug",
+          "last_email",
+          "last_login_at",
+          "can_unlink"
+        ],
+        "title": "IdentityData",
+        "type": "object"
+      },
+      "IdentityListData": {
+        "properties": {
+          "available_providers": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Available Providers",
+            "type": "array"
+          },
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityData"
+            },
+            "title": "Identities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "has_password",
+          "identities",
+          "available_providers"
+        ],
+        "title": "IdentityListData",
+        "type": "object"
+      },
+      "IdentityListResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IdentityListData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "IdentityListResponse",
+        "type": "object"
+      },
       "InstructionArtifact": {
         "additionalProperties": false,
         "properties": {
@@ -10184,6 +10348,85 @@
           "ko"
         ],
         "title": "LocalizedText",
+        "type": "object"
+      },
+      "LoginMethodCapability": {
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "foreground": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Foreground"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Label",
+            "type": "object"
+          },
+          "method_id": {
+            "title": "Method Id",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "start_url": {
+            "title": "Start Url",
+            "type": "string"
+          },
+          "supports_reauthentication": {
+            "title": "Supports Reauthentication",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "method_id",
+          "protocol",
+          "display_name",
+          "label",
+          "start_url",
+          "supports_reauthentication"
+        ],
+        "title": "LoginMethodCapability",
         "type": "object"
       },
       "LoginRequest": {
@@ -14393,6 +14636,19 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
+      "PasswordLoginCapability": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "PasswordLoginCapability",
+        "type": "object"
+      },
       "PasswordRecoveryCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -15696,6 +15952,31 @@
           "compose_command"
         ],
         "title": "RecoveryConfigurationStatus",
+        "type": "object"
+      },
+      "RedirectData": {
+        "properties": {
+          "redirect_url": {
+            "title": "Redirect Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_url"
+        ],
+        "title": "RedirectData",
+        "type": "object"
+      },
+      "RedirectResponseBody": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RedirectData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "RedirectResponseBody",
         "type": "object"
       },
       "ReviewAutoApprovalSweepPayload": {
@@ -17217,6 +17498,22 @@
         "title": "ServerNameAtom",
         "type": "object"
       },
+      "SetPasswordRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "SetPasswordRequest",
+        "type": "object"
+      },
       "SettingsMcpClientData": {
         "additionalProperties": false,
         "properties": {
@@ -17703,6 +18000,19 @@
           "password"
         ],
         "title": "SignupRequest",
+        "type": "object"
+      },
+      "StartAccountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_to": {
+            "default": "/account",
+            "maxLength": 2048,
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "title": "StartAccountRequest",
         "type": "object"
       },
       "SubmitContextEditRequest": {
@@ -20165,9 +20475,19 @@
       }
     },
     "securitySchemes": {
+      "AccountReauthenticationCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_session_reauth_account",
+        "type": "apiKey"
+      },
       "HTTPBearer": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "LoginTransactionCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_login_txn",
+        "type": "apiKey"
       },
       "RecentReauthenticationCookie": {
         "in": "cookie",
@@ -20187,7 +20507,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.1.4"
+    "version": "0.1.3"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -21607,6 +21927,81 @@
         ]
       }
     },
+    "/api/v1/auth/identities": {
+      "get": {
+        "operationId": "identities_api_v1_auth_identities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Identities",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/identities/{identity_id}": {
+      "delete": {
+        "operationId": "unlink_api_v1_auth_identities__identity_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Identity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "AccountReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Unlink",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login_api_v1_auth_login_post",
@@ -21892,6 +22287,47 @@
           }
         ],
         "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/methods/{method_id}/icon.png": {
+      "get": {
+        "operationId": "icon_api_v1_auth_methods__method_id__icon_png_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "method_id",
+            "required": true,
+            "schema": {
+              "title": "Method Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Icon",
         "tags": [
           "auth"
         ]
@@ -22310,6 +22746,53 @@
         ]
       }
     },
+    "/api/v1/auth/password/set": {
+      "post": {
+        "operationId": "set_password_api_v1_auth_password_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "AccountReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/reauthenticate": {
       "post": {
         "operationId": "reauthenticate_api_v1_auth_reauthenticate_post",
@@ -22513,6 +22996,276 @@
         },
         "security": [],
         "summary": "Signup",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/callback": {
+      "get": {
+        "operationId": "callback_api_v1_auth_sso__slug__callback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "LoginTransactionCookie": []
+          }
+        ],
+        "summary": "Callback",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "form_callback_api_v1_auth_sso__slug__callback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "LoginTransactionCookie": []
+          }
+        ],
+        "summary": "Form Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/link": {
+      "post": {
+        "operationId": "link_api_v1_auth_sso__slug__link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectResponseBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "AccountReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/reauthenticate": {
+      "post": {
+        "operationId": "reauthenticate_api_v1_auth_sso__slug__reauthenticate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectResponseBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Reauthenticate",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/start": {
+      "get": {
+        "operationId": "start_api_v1_auth_sso__slug__start_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          },
+          {
+            "in": "query",
+            "name": "remember_me",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Remember Me",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [],
+        "summary": "Start",
         "tags": [
           "auth"
         ]
@@ -23111,6 +23864,28 @@
         "summary": "Delete Revoked Api Token",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities_api_v1_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Capabilities",
+        "tags": [
+          "capabilities"
         ]
       }
     },

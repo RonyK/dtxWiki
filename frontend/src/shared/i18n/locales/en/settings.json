@@ -1073,7 +1073,7 @@
       "unlocked": "Protected user search is unlocked until {{date}}.",
       "shortTime": "the short verification window ends",
       "error": "Your password was not accepted. Try again.",
-      "expired": "Your recent verification expired. Re-enter your password to search users again."
+      "expired": "Your recent verification expired. Verify your identity again to search users."
     },
     "searchLabel": "Search users",
     "searchHint": "Email, display name, or workspace name",

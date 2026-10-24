@@ -21,6 +21,7 @@ from backend.models.ask import (
     ProposalSourceItem,
 )
 from backend.models.audit import AuditEvent
+from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
 from backend.models.base import Base
 from backend.models.bundle import AgentInputBundle, AgentInputBundleItem
 from backend.models.change import ChangeOperation, ChangeSet
@@ -138,6 +139,7 @@ __all__ = [
     "ApiToken",
     "ApiTokenWorkspace",
     "AuditEvent",
+    "AuthLoginTransaction",
     "AgentPage",
     "AgentPageVersion",
     "AppMetadata",
@@ -234,6 +236,7 @@ __all__ = [
     "UploadAsset",
     "UploadAssetBinding",
     "User",
+    "UserIdentity",
     "UserFavorite",
     "WorkspaceTreeNode",
     "Workspace",

@@ -71,7 +71,7 @@ def test_package_exposes_no_stdio_mcp_entry_point():
     assert "dtxwiki-mcp" not in project["project"]["scripts"]
 
 
-def test_version_does_not_start_server(monkeypatch):
+def test_version_does_not_start_server(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_main,
         "run_server",
@@ -82,6 +82,15 @@ def test_version_does_not_start_server(monkeypatch):
 
     assert result.exit_code == 0
     assert result.stdout.startswith("dtxwiki ")
+
+    # The installed entry point must preserve eager version reporting even
+    # when extension discovery cannot configure the serving process.
+    monkeypatch.setenv("DTXWIKI_PLUGINS", "missing_version_test_plugin")
+    monkeypatch.setattr(sys, "argv", ["dtxwiki", "--version"])
+    with pytest.raises(SystemExit) as stopped:
+        cli_main.main()
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out.startswith("dtxwiki ")
 
 
 def test_root_invocation_accepts_serve_options(monkeypatch):

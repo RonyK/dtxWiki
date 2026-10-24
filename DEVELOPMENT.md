@@ -118,6 +118,85 @@ export DTXWIKI_DATABASE_URL="sqlite+pysqlite:///${DTXWIKI_DEMO_DIR}/dtxwiki-demo
 .venv/bin/dtxwiki --no-open
 ```
 
+## 로그인 및 서버 플러그인 SPI
+
+외부 배포 패키지는 `dtxwiki.plugins` entry point로 `DtxwikiPlugin` 인스턴스 또는
+이를 반환하는 인자 없는 factory를 내보냅니다. 이름은 소문자로 시작하는
+`[a-z][a-z0-9_]*` 형식의 최대 47자이며, 배포자가 `DTXWIKI_PLUGINS`에서 명시적으로 선택해야
+로드됩니다. core SPI는 `backend.spi.SPI_VERSION = "1.1"`, 로그인 method SPI는
+`backend.spi.auth.AUTH_METHOD_SPI_VERSION = "1.0"`입니다. `requires_core`와
+`requires_spi`는 각각 PEP 440 version specifier입니다.
+
+예를 들어 private 패키지의 `pyproject.toml`에 다음 entry point를 등록합니다.
+
+```toml
+[project.entry-points."dtxwiki.plugins"]
+company_login = "company_login.plugin:plugin"
+```
+
+해당 모듈은 공개 OIDC helper를 재사용할 수 있습니다. 이 예시는 별도 패키지의 최소
+adapter이며, 공개 core가 `company_oidc` provider를 기본 등록하지는 않습니다.
+
+```python
+from backend.spi import Branding, DtxwikiPlugin
+from backend.spi.auth_oidc import OidcMethodBase
+
+
+class CompanyOidc(OidcMethodBase):
+    descriptor = OidcMethodBase.describe(
+        method_id="company_oidc",
+        branding=Branding(label={"ko": "회사 계정으로 로그인", "en": "Company SSO"}),
+    )
+
+
+method = CompanyOidc()
+plugin = DtxwikiPlugin(
+    name="company_login",
+    version="1.0.0",
+    requires_core=">=0.1.3,<0.2",
+    requires_spi=">=1.1,<2",
+    auth_methods=lambda: (method,),
+)
+```
+
+provider의 issuer·client ID·secret 참조와 계정 생성·연결 정책은
+[운영 설정](DEPLOYMENT.md#별도-로그인-플러그인과-oidc-provider)에 둡니다. adapter는
+`AuthMethodPlugin`의 `descriptor`, `validate_config`, `begin`, `complete`를 구현하고
+검증된 `ExternalAssertion`을 반환합니다. core가 로그인 거래, 계정 연결과 native
+session을 관리합니다. IdP access/refresh token을 core DB나 로그에 남기지 않습니다.
+`backend.testing.spi_conformance.auth.assert_auth_method_contract`로 adapter의
+기본 계약을 확인하고, 실제 IdP의 issuer·서명·nonce·PKCE 실패 경로는 패키지 자체
+테스트로 검증합니다.
+
+선택 hook은 다음과 같습니다.
+
+- `settings_model`: Pydantic 모델. 필드별 환경변수는
+  `DTXWIKI_PLUGIN_<NAME>_<FIELD>`이며 알 수 없는 키는 거부합니다.
+  `configure(model)`은 모든 플러그인의 설정 검증이 끝난 뒤 `Settings` 인스턴스당
+  한 번 실행됩니다.
+- `mount() -> PluginMount`: `api_router`는 `/api/v1/ext/<name>` 아래,
+  `ui_app`은 `/ext/<name>/` 아래에 core가 mount합니다. 임의 root route를
+  등록하는 hook이 아니며, 기존 overlay의 `extra_mount`는 계속 지원합니다.
+- `lifespan(app)`: async context manager. 기존 overlay lifespan 안에서 플러그인
+  lifespan이 시작되고 core MCP lifespan이 이어집니다. 종료 순서는 반대입니다.
+- `worker_handlers()`: 공개 `backend.spi.JobHandler`의 이름별 mapping.
+  core 또는 다른 플러그인과 이름이 충돌하면 시작을 거부합니다. handler는 core의
+  queue claim·완료·실패 transaction 규칙에 맞춥니다.
+- `cli`: `typer.Typer` 인스턴스. `dtxwiki <name> ...` 아래에 등록합니다.
+- `migrations`: `PluginMigrations(script_location, base, plane)`.
+  `script_location/versions/`의 Alembic revision을 사용하며 `plane`은
+  `control`만 지원합니다. 자체 `DeclarativeBase`만 사용하고 core 또는
+  다른 플러그인 metadata로 향하는 FK를 만들지 않습니다. workspace plane이나
+  `workspace_id`가 있는 테이블은 시작 시 거부합니다. 비활성화된 플러그인의
+  데이터까지 blocker 집계와 workspace 삭제에 연결하는 수명주기가 필요하기
+  때문입니다.
+
+플러그인 migration은 core head 적용 뒤 단일 DB에 실행되며 core가 제공하는
+Alembic 환경과 별도 `alembic_version_<name>`을 사용합니다. 플러그인의 `env.py`는
+실행하지 않습니다. 자동 migration이 꺼져 있으면 chain의 head 일치만 검증합니다.
+현재 workspace별 물리 DB와 shard fleet migration은 지원하지 않습니다. 플러그인은
+서버 프로세스에서 실행되는 신뢰된 코드이며 route namespace가 sandbox는 아닙니다.
+
 ## 테스트와 검증
 
 ```bash

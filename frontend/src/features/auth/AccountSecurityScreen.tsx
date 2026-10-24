@@ -39,6 +39,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { LoginMethodsSection } from "./LoginMethodsSection";
 
 type AccountOverview = {
   workspaces: WorkspaceListData | null;
@@ -253,7 +254,7 @@ export function AccountSecurityScreen() {
           <StatusBanner tone="warning">{overviewError}</StatusBanner>
         ) : null}
         {user ? (
-          <div className="account-grid">
+          <><div className="account-grid">
             <section
               className="auth-panel account-profile-panel"
               aria-label={t("account.profileAria", { defaultValue: "Profile" })}
@@ -322,14 +323,14 @@ export function AccountSecurityScreen() {
                   defaultValue: "Account actions",
                 })}
               >
-                <Link className="icon-button" to="/account/password">
+                {user.has_password !== false ? <Link className="icon-button" to="/account/password">
                   <KeyRound size={16} aria-hidden="true" />
                   <span>
                     {t("account.updatePassword", {
                       defaultValue: "Update password",
                     })}
                   </span>
-                </Link>
+                </Link> : null}
                 <button
                   className="icon-button"
                   disabled={signingOut}
@@ -454,6 +455,7 @@ export function AccountSecurityScreen() {
               </div>
             </section>
           </div>
+          {user.has_password !== undefined ? <LoginMethodsSection /> : null}</>
         ) : (
           <section
             className="auth-panel"
@@ -543,6 +545,10 @@ export function AccountPasswordScreen() {
         })}
       />
     );
+  }
+
+  if (user?.has_password === false) {
+    return <div className="workspace-screen single-column"><LoginMethodsSection /></div>;
   }
 
   return (

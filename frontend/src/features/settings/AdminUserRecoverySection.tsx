@@ -26,7 +26,10 @@ import {
   type AdminPasswordResetDelivery,
   type AdminUser,
 } from "../../shared/api/adminUsers";
-import { getAuthCapabilities, reauthenticate } from "../../shared/api/auth";
+import { getAuthCapabilities, getLoginIdentities, reauthenticate, type LoginMethod } from "../../shared/api/auth";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
+import { ExternalReauthenticationButtons } from "../auth/ExternalReauthenticationButtons";
+import { linkedLoginMethods } from "../auth/loginMethods";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
@@ -55,6 +58,15 @@ type RecoveryCapabilityState = {
 
 export function AdminUserRecoverySection() {
   const { t } = useTranslation("settings");
+  const auth = useOptionalAuth();
+  const hasPassword = auth?.user?.has_password !== false;
+  const [externalVerified, setExternalVerified] = useState(false);
+  const [returnedFromProvider] = useState(() => new URLSearchParams(window.location.search).has("sso_verified"));
+  const requiresPassword = hasPassword && !externalVerified;
+  const [reauthenticationMethods, setReauthenticationMethods] = useState<LoginMethod[]>([]);
+  const verificationParams = new URLSearchParams(window.location.search);
+  verificationParams.set("sso_verified", "1");
+  const reauthenticationReturnTo = `${window.location.pathname}?${verificationParams}${window.location.hash}`;
   const [directoryUnlocked, setDirectoryUnlocked] = useState(false);
   const [reauthenticatedUntil, setReauthenticatedUntil] = useState<
     string | null
@@ -86,6 +98,33 @@ export function AdminUserRecoverySection() {
       linkReady: false,
       status: "loading",
     });
+
+  useEffect(() => {
+    if (auth?.user?.has_password === undefined) return;
+    let active = true;
+    void getLoginIdentities().then((data) => {
+      if (active) setReauthenticationMethods(linkedLoginMethods(data));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [auth?.user?.has_password, auth?.user?.user_id]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!returnedFromProvider || !auth?.user?.email) return;
+    params.delete("sso_verified");
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
+    let active = true;
+    // The protected server response proves the callback's short-lived proof;
+    // a query parameter alone never unlocks the directory.
+    void searchAdminUsers(auth.user.email, { limit: 1 }).then(() => {
+      if (active) {
+        setDirectoryUnlocked(true);
+        setExternalVerified(true);
+        setReauthenticatedUntil(null);
+      }
+    }).catch((caught) => { if (active) setUnlockError(apiErrorMessage(caught)); });
+    return () => { active = false; };
+  }, [auth?.user?.email, returnedFromProvider]);
 
   useEffect(() => {
     let active = true;
@@ -147,6 +186,7 @@ export function AdminUserRecoverySection() {
 
   function lockDirectory(message: string) {
     setDirectoryUnlocked(false);
+    setExternalVerified(false);
     setReauthenticatedUntil(null);
     setUnlockError(message);
     setQuery("");
@@ -198,7 +238,7 @@ export function AdminUserRecoverySection() {
         lockDirectory(
           t("userRecovery.unlock.expired", {
             defaultValue:
-              "Your recent verification expired. Re-enter your password to search users again.",
+              "Your recent verification expired. Verify your identity again to search users.",
           }),
         );
         return;
@@ -256,15 +296,15 @@ export function AdminUserRecoverySection() {
 
   async function onIssue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!target || !currentPassword) {
+    if (!target || (requiresPassword && !currentPassword)) {
       return;
     }
-    try { validateAccountPassword(currentPassword); }
+    try { if (requiresPassword) validateAccountPassword(currentPassword); }
     catch (caught) { setIssueError(t((caught as Error).message, {ns: "auth"})); return; }
     setIssuing(true);
     setIssueError(null);
     try {
-      await reauthenticate({ current_password: currentPassword });
+      if (requiresPassword) await reauthenticate({ current_password: currentPassword });
       const result = await issueAdminPasswordReset(target.user_id, {
         delivery,
         revoke_api_tokens: revokeApiTokens,
@@ -299,7 +339,12 @@ export function AdminUserRecoverySection() {
       setRevokeApiTokens(false);
     } catch (caught) {
       setCurrentPassword("");
-      setIssueError(adminRecoveryErrorMessage(caught, t));
+      if (!requiresPassword && caught instanceof ApiError &&
+          caught.body.error_code === "recent_reauthentication_required") {
+        lockDirectory(t("loginMethods.adminVerifyHint", { ns: "auth" }));
+      } else {
+        setIssueError(adminRecoveryErrorMessage(caught, t));
+      }
     } finally {
       setIssuing(false);
     }
@@ -389,16 +434,16 @@ export function AdminUserRecoverySection() {
               })}
             </strong>
             <p className="meta-line">
-              {t("userRecovery.unlock.description", {
+              {hasPassword ? t("userRecovery.unlock.description", {
                 defaultValue:
                   "Re-enter your server-admin password before viewing the instance user directory.",
-              })}
+              }) : t("loginMethods.adminVerifyHint", { ns: "auth" })}
             </p>
           </div>
           {unlockError ? (
             <StatusBanner tone="warning">{unlockError}</StatusBanner>
           ) : null}
-          <label
+          {hasPassword ? <><label
             className="field-stack"
             htmlFor="admin-user-directory-password"
           >
@@ -433,7 +478,10 @@ export function AdminUserRecoverySection() {
               : t("userRecovery.unlock.action", {
                   defaultValue: "Unlock user search",
                 })}
-          </button>
+          </button></> : null}
+          <ExternalReauthenticationButtons methods={reauthenticationMethods}
+            returnTo={reauthenticationReturnTo}
+            onError={setUnlockError} />
         </form>
       ) : (
         <>
@@ -447,6 +495,9 @@ export function AdminUserRecoverySection() {
                   }),
             })}
           </StatusBanner>
+          <ExternalReauthenticationButtons methods={reauthenticationMethods}
+            returnTo={reauthenticationReturnTo}
+            onError={setUnlockError} />
           {searchError ? (
             <StatusBanner tone="warning">{searchError}</StatusBanner>
           ) : null}
@@ -681,6 +732,7 @@ export function AdminUserRecoverySection() {
         <RecoveryConfirmationDialog
           busy={issuing}
           currentPassword={currentPassword}
+          requirePassword={requiresPassword}
           delivery={delivery}
           error={issueError}
           onCancel={closeRecovery}
@@ -703,6 +755,7 @@ export function AdminUserRecoverySection() {
 function RecoveryConfirmationDialog({
   busy,
   currentPassword,
+  requirePassword,
   delivery,
   error,
   onCancel,
@@ -716,6 +769,7 @@ function RecoveryConfirmationDialog({
 }: {
   busy: boolean;
   currentPassword: string;
+  requirePassword: boolean;
   delivery: AdminPasswordResetDelivery;
   error: string | null;
   onCancel: () => void;
@@ -852,7 +906,7 @@ function RecoveryConfirmationDialog({
             </span>
           </label>
         </fieldset>
-        <label
+        {requirePassword ? <label
           className="field-stack"
           htmlFor="admin-recovery-current-password"
         >
@@ -878,7 +932,7 @@ function RecoveryConfirmationDialog({
             type="password"
             value={currentPassword}
           />
-        </label>
+        </label> : null}
         <label
           className="admin-recovery-token-option"
           htmlFor="admin-recovery-revoke-tokens"
@@ -918,7 +972,7 @@ function RecoveryConfirmationDialog({
           </button>
           <button
             className="icon-button primary"
-            disabled={busy || !currentPassword}
+            disabled={busy || (requirePassword && !currentPassword)}
             type="submit"
           >
             {busy

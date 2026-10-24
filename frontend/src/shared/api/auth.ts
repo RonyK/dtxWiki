@@ -13,6 +13,9 @@ export type AuthUser = {
   display_name: string;
   status: string;
   email_verified_at?: string | null;
+  has_password?: boolean;
+  session_method?: string | null;
+  session_provider_slug?: string | null;
   // Instance (server) admin flag — populated authoritatively by GET /auth/me.
   // Gates system/deployment settings; absent on older/non-/me responses.
   is_server_admin?: boolean;
@@ -71,9 +74,38 @@ type ReauthenticateResponse = {
   };
 };
 
+export type LoginMethod = {
+  slug: string;
+  method_id: string;
+  protocol: string;
+  display_name: string;
+  label: { ko: string; en: string };
+  icon_url: string | null;
+  background?: string | null;
+  foreground?: string | null;
+  start_url: string;
+  supports_reauthentication: boolean;
+};
+
+export type LoginIdentity = {
+  id: string;
+  provider_slug: string;
+  last_email: string | null;
+  last_login_at: string | null;
+  can_unlink: boolean;
+};
+
+export type LoginIdentities = {
+  has_password: boolean;
+  identities: LoginIdentity[];
+  available_providers: LoginMethod[];
+};
+
 type AuthCapabilitiesResponse = {
   data: {
     signup_enabled: boolean;
+    password_login?: { enabled: boolean };
+    login_methods?: LoginMethod[];
     password_recovery: {
       mode: "email" | "admin_assisted" | "disabled";
       admin_assisted: boolean;
@@ -177,6 +209,31 @@ export function getAuthCapabilities() {
   return apiRequest<AuthCapabilitiesResponse>("/api/v1/auth/capabilities").then(
     (response) => response.data,
   );
+}
+
+export function getLoginIdentities() {
+  return apiRequest<{ data: LoginIdentities }>("/api/v1/auth/identities").then(
+    (response) => response.data,
+  );
+}
+
+export function startIdentityFlow(slug: string, action: "link" | "reauthenticate", returnTo: string) {
+  return apiRequest<{ data: { redirect_url: string } }>(
+    `/api/v1/auth/sso/${encodeURIComponent(slug)}/${action}`,
+    { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
+  ).then((response) => response.data);
+}
+
+export function unlinkLoginIdentity(id: string) {
+  return apiRequest<AuthSessionResponse>(`/api/v1/auth/identities/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }).then((response) => response.data);
+}
+
+export function setAccountPassword(newPassword: string) {
+  return apiRequest<AuthSessionResponse>("/api/v1/auth/password/set", {
+    method: "POST", body: JSON.stringify({ new_password: newPassword }),
+  }).then((response) => response.data);
 }
 
 export function confirmPasswordReset(input: {

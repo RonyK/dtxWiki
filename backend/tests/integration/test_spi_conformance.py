@@ -1,4 +1,4 @@
-"""SPI 1.0 signature freeze and search backend killer contracts."""
+"""SPI 1.1 preserves the original signatures and search backend contracts."""
 
 from __future__ import annotations
 
@@ -64,8 +64,10 @@ def _actor(role: str) -> ActorContext:
     )
 
 
-def test_spi_1_0_public_surface_and_signatures_are_frozen():
-    assert SPI_VERSION == "1.0"
+def test_spi_1_1_preserves_original_public_surface_and_signatures():
+    assert SPI_VERSION == "1.1"
+    # Auth/plugin contracts are additive; the original 1.0 exports below
+    # retain their exact class identities, members, fields and signatures.
     assert CompatToolCallContext is ToolCallContext
     assert CompatRetriever is Retriever
     assert _public_callables(Retriever) == {"supported_modes", "retrieve"}

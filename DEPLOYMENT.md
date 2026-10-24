@@ -340,6 +340,68 @@ remembered 갱신은 `auth.session.renewed` audit event 로 Activity 에 남습�
 
 ## Identity & Recovery 설정
 
+### 별도 로그인 플러그인과 OIDC provider
+
+공개 core는 비밀번호 로그인과 외부 로그인 SPI를 제공합니다. Google이나 사내 SSO
+provider는 별도 배포 패키지에서 구현하고, API·worker·CLI가 사용하는 **같은 Python
+환경**에 설치합니다. 패키지 설치만으로 플러그인이 활성화되지는 않습니다.
+`DTXWIKI_PLUGINS`에는 패키지 이름이 아닌 `dtxwiki.plugins` entry point 이름을
+쉼표로 나열합니다. 다음 예시는 `company_login` 플러그인이 `company_oidc` 로그인
+method를 제공하는 경우입니다.
+
+```dotenv
+DTXWIKI_PLUGINS=company_login
+DTXWIKI_AUTH_PROVIDERS_FILE=/etc/dtxwiki/auth-providers.toml
+DTXWIKI_PUBLIC_BASE_URL=https://wiki.example.com
+DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=true
+```
+
+`auth-providers.toml`은 `[[providers]]` 목록입니다. 아래 issuer·client ID·도메인은
+실제 IdP 등록 값으로 바꾸고, client secret은 서비스 계정이 읽을 수 있는 별도 파일에
+보관합니다. `env:COMPANY_OIDC_CLIENT_SECRET` 형태의 환경변수 참조도 지원합니다.
+
+```toml
+[[providers]]
+slug = "company"
+method = "company_oidc"
+display_name = "Company SSO"
+issuer = "https://idp.example.com/tenant"
+client_id = "dtxwiki"
+client_secret_ref = "file:/etc/dtxwiki/oidc-client-secret"
+jit_provisioning = true
+allowed_email_domains = ["example.com"]
+link_policy = "confirm"
+trust_email_verified = false
+```
+
+IdP의 redirect URI는 대표 URL에서 고정적으로 만들어집니다. 위 예시에서는
+`https://wiki.example.com/api/v1/auth/sso/company/callback`을 등록합니다. 로그인
+provider 설정에는 HTTPS 대표 URL이 필요하며, `solo_local`의 loopback HTTP 개발
+설정만 예외입니다. 서버는 state·nonce·PKCE 거래와 사용자 연결, native 세션 발급을
+관리합니다. 새 계정 자동 생성은 `jit_provisioning = true`인 provider에서만
+허용됩니다. 이메일이 같은 기존 계정은 기본 `confirm` 정책에서 자동 연결되지 않습니다.
+공개 OIDC helper로 사설망 IdP에 연결하려면 provider 설정의
+`allow_private_network = true`를 명시합니다. IdP URL은 여전히 HTTPS여야 합니다.
+
+플러그인 전용 환경변수는 해당 플러그인의 `settings_model`에 선언된 필드에 한해
+`DTXWIKI_PLUGIN_<ENTRY_POINT_NAME>_<FIELD>`로 설정합니다. 활성화되지 않은 플러그인의
+키, 선언되지 않은 필드, 누락·중복 entry point, core/SPI 버전 불일치는 시작을
+거부합니다. API·worker·CLI에는 같은 allowlist와 provider·secret 설정을 전달하세요.
+설정을 바꾼 뒤에는 프로세스를 다시 시작합니다.
+
+플러그인에 DB 변경이 있으면 기존 [백업 절차](#백업과-복구-점검)를 따른 뒤 API와
+worker를 종료하고 같은 환경에서 `dtxwiki bootstrap`을 실행합니다. core migration이
+먼저 실행되고, 플러그인별 독립 chain과 `alembic_version_<name>`이 이어서 적용됩니다.
+`DTXWIKI_AUTO_BOOTSTRAP=false`인 서버와 worker는 필요한 플러그인 migration이
+적용되지 않았으면 시작을 거부합니다. 현재 지원 토폴로지는 단일 DB이며 shard fleet
+migration은 제공하지 않습니다.
+
+로그인 UI는 `/api/v1/auth/capabilities`에서 활성 provider를 조회합니다. 계정의
+외부 identity 조회·연결·해제와 최초 비밀번호 설정 API도 core가 제공합니다. 마지막
+사용 가능한 로그인 방법의 해제는 거부하며, 비밀번호 로그인의 사용 여부는
+`DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED`로 제어합니다. 실제 IdP 연결 검증은 설치한
+플러그인 및 운영 IdP에서 별도로 수행해야 합니다.
+
 **SMTP 설정은 선택 사항입니다.** SMTP 없이도 회원가입·로그인·위키 기본 기능을 사용할
 수 있습니다. 기본 `DTXWIKI_MAIL_PROVIDER=none`에서는 이메일 인증, 이메일을 통한
 비밀번호 복구를 사용할 수 없습니다. SMTP 없이도 **HTTPS 대표 URL이 설정되어 있으면**

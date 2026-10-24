@@ -1,16 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
-
-
-@dataclass(frozen=True)
-class JobHandler:
-    business: Callable[..., dict[str, Any]]
-    completes_in_service: bool
-    on_failure: Callable[..., None] | None = None
-
+from backend.spi.plugins import JobHandler
 
 _HANDLERS: dict[str, JobHandler] = {}
 

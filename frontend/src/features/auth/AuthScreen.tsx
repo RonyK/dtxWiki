@@ -11,6 +11,7 @@ import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { loginMethodStyle } from "./loginMethodBranding";
 
 type AuthMode = "login" | "signup";
 
@@ -20,7 +21,7 @@ type AuthMode = "login" | "signup";
 const NON_SPA_PATH_PREFIXES = ["/oauth/"];
 
 export function AuthScreen() {
-  const { t } = useTranslation("auth");
+  const { t, i18n } = useTranslation("auth");
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -39,6 +40,8 @@ export function AuthScreen() {
     sessionChecked,
     capabilitiesChecked,
     signupEnabled,
+    passwordLoginEnabled,
+    loginMethods,
     passwordRecoveryMode,
     capabilitiesError,
     refreshCapabilities,
@@ -51,15 +54,25 @@ export function AuthScreen() {
   // "you already have a session" redirect would fire on that result and carry
   // the visitor into the app as A, one round trip after the "wrong password"
   // banner appeared.
-  const credentialFailureRef = useRef(false);
+  const credentialFailureRef = useRef(searchParams.has("auth_error"));
   const [status, setStatus] = useState<string | null>(() =>
     searchParams.get("reset") === "complete" ? t("status.passwordReset") : null,
   );
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => {
+    const code = searchParams.get("auth_error");
+    return code ? t(`sso.errors.${SSO_ERROR_CODES.has(code) ? code : "unknown"}`) : null;
+  });
   const [submitting, setSubmitting] = useState(false);
 
   const canSignup =
-    capabilitiesChecked && capabilitiesError === null && signupEnabled;
+    capabilitiesChecked && capabilitiesError === null && signupEnabled && passwordLoginEnabled;
+
+  useEffect(() => {
+    if (!searchParams.has("auth_error")) return;
+    const clean = new URLSearchParams(searchParams);
+    clean.delete("auth_error");
+    navigate({ pathname: location.pathname, search: clean.toString() }, { replace: true });
+  }, [location.pathname, navigate, searchParams]);
 
   useEffect(() => {
     if (requestedMode === "login") {
@@ -205,10 +218,31 @@ export function AuthScreen() {
         {capabilitiesChecked && capabilitiesError ? (
           <StatusBanner tone="warning">{t("capabilitiesUnavailable")}</StatusBanner>
         ) : null}
-        {capabilitiesChecked && !capabilitiesError && !signupEnabled ? (
+        {capabilitiesChecked && !capabilitiesError && !signupEnabled && passwordLoginEnabled ? (
           <StatusBanner tone="info">{t("signupDisabled")}</StatusBanner>
         ) : null}
         <section className="auth-panel" aria-label={t("panelLabel")}>
+          {loginMethods.length > 0 ? (
+            <div className="auth-form" aria-label={t("sso.methods")}>
+              {loginMethods.map((method) => {
+                const query = new URLSearchParams({
+                  next: safeNextPath(searchParams.get("next")),
+                  remember_me: String(rememberMe),
+                });
+                return <a className="icon-button" key={method.slug} style={loginMethodStyle(method)}
+                  href={`${method.start_url}?${query.toString()}`}>
+                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : null}
+                  {method.label[i18n.language.startsWith("ko") ? "ko" : "en"] || method.display_name}
+                </a>;
+              })}
+            </div>
+          ) : null}
+          {(!passwordLoginEnabled && loginMethods.length > 0) ? (
+            <label className="checkbox-field auth-remember">
+              <input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />
+              <span>{t("fields.remember")}</span>
+            </label>
+          ) : null}
           {canSignup ? (
             <SegmentedControl
               compact
@@ -237,7 +271,7 @@ export function AuthScreen() {
               onChange={switchMode}
             />
           ) : null}
-          <form className="auth-form" onSubmit={onSubmit}>
+          {passwordLoginEnabled ? <form className="auth-form" onSubmit={onSubmit}>
             <label className="field-stack">
               {t("fields.email")}
               <input
@@ -295,12 +329,8 @@ export function AuthScreen() {
               </p>
             ) : null}
             <label className="checkbox-field auth-remember">
-              <input
-                  onKeyDown={preventCompositionSubmit}
-                checked={rememberMe}
-                onChange={(event) => setRememberMe(event.target.checked)}
-                type="checkbox"
-              />
+              <input checked={rememberMe} onKeyDown={preventCompositionSubmit}
+                onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />
               <span>{t("fields.remember")}</span>
             </label>
             <div className="auth-actions">
@@ -327,19 +357,34 @@ export function AuthScreen() {
                 )}
               </p>
             )}
-          </form>
+          </form> : null}
         </section>
       </section>
     </div>
   );
 }
 
-function safeNextPath(next: string | null) {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) {
-    return "/dashboard";
+export function safeNextPath(next: string | null) {
+  if (!next || new TextEncoder().encode(next).length > 2048 || /[\\\u0000-\u0020\u007f]/u.test(next)) return "/dashboard";
+  let decoded = next.split(/[?#]/u, 1)[0];
+  for (let count = 0; count < 8; count += 1) {
+    if (!decoded.startsWith("/") || decoded.startsWith("//") || /[\\\u0000-\u0020\u007f]/u.test(decoded)) return "/dashboard";
+    const normalized = new URL(decoded, "https://dtxwiki.invalid").pathname.toLowerCase();
+    if (normalized === "/api" || normalized.startsWith("/api/")) return "/dashboard";
+    try {
+      const value = decodeURIComponent(decoded);
+      if (value === decoded) return next;
+      decoded = value;
+    } catch { return "/dashboard"; }
   }
-  return next;
+  return "/dashboard";
 }
+
+const SSO_ERROR_CODES = new Set([
+  "sso_transaction_invalid", "sso_assertion_invalid", "sso_provider_unavailable",
+  "sso_idp_error", "account_link_required", "email_unverified", "identity_already_linked",
+  "account_disabled", "signup_not_allowed", "reauthentication_mismatch",
+]);
 
 function isNonSpaPath(path: string) {
   return NON_SPA_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));

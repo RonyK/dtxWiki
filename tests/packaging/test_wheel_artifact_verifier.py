@@ -13,7 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
-CURRENT_HEAD = "ef53a0a7061c"
+CURRENT_HEAD = "7e2b9c4d6a18"
 REVISION_DIRECTORY = (
     REPO_ROOT
     / "backend"
@@ -576,6 +576,7 @@ def test_verifier_rejects_missing_or_rewritten_historical_release_mappings(tmp_p
         ("0.1.4", "19db79d3e622"),
         ("0.1.4", None),
     ):
+
         def rewrite(stage, release=release, head=head):
             path = stage / "backend/migrations/release_manifest.json"
             payload = json.loads(path.read_text())

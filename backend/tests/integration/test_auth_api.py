@@ -125,14 +125,20 @@ def test_auth_capabilities_exposes_effective_signup_and_recovery_policy(page_ser
     assert solo_local.json()["data"] == {
         "signup_enabled": True,
         "password_recovery": {"mode": "disabled", "admin_assisted": False},
+        "password_login": {"enabled": True},
+        "login_methods": [],
     }
     assert team_default.json()["data"] == {
         "signup_enabled": False,
         "password_recovery": {"mode": "disabled", "admin_assisted": False},
+        "password_login": {"enabled": True},
+        "login_methods": [],
     }
     assert team_explicit.json()["data"] == {
         "signup_enabled": True,
         "password_recovery": {"mode": "disabled", "admin_assisted": False},
+        "password_login": {"enabled": True},
+        "login_methods": [],
     }
     assert solo_local.headers["cache-control"] == "no-store"
     assert solo_local.headers["pragma"] == "no-cache"

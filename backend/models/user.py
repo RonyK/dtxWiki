@@ -36,7 +36,7 @@ class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
 
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     member_search_key: Mapped[str] = mapped_column(
         Text,

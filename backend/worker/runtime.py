@@ -203,6 +203,16 @@ class OneShotWorker:
         # The entrypoint's resolved settings (including --db overrides). A
         # fresh Settings() here would read the process env instead (R1′).
         self._settings = resolved_settings
+        self._plugin_handlers = {}
+        if resolved_settings is not None:
+            from backend.app.plugins import PluginConfigurationError, load_plugins
+
+            self._plugin_handlers = load_plugins(resolved_settings).worker_handlers()
+            for name in self._plugin_handlers:
+                if get_handler(name) is not None:
+                    raise PluginConfigurationError(
+                        f"plugin worker handler collides with core job type: {name}"
+                    )
         if resolved_settings is not None:
             self._services.settings = resolved_settings
         if database_provider is not None:
@@ -354,7 +364,7 @@ class OneShotWorker:
         wrote, so re-apply them once the job is terminally failed. Runs in its
         own savepoint so a marker failure cannot poison the caller's
         transaction or mask the dispatch outcome."""
-        handler = get_handler(job.job_type)
+        handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None or handler.on_failure is None:
             return
         try:
@@ -1427,7 +1437,7 @@ class OneShotWorker:
         return self._handler_for(job).business(self, session, job, None)
 
     def _handler_for(self, job: Job | _ClaimedJob) -> JobHandler:
-        handler = get_handler(job.job_type)
+        handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None:
             raise ValueError(f"unsupported worker job type: {job.job_type}")
         return handler
@@ -2156,7 +2166,7 @@ class OneShotWorker:
         the domain rows stay in their pre-job pending state forever. Errors are
         logged rather than raised so a marker write cannot mask the dispatch
         outcome."""
-        handler = get_handler(job.job_type)
+        handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None or handler.on_failure is None:
             return
         try:

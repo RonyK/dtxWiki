@@ -193,9 +193,10 @@ def test_signup_disabled_rejects_new_signup(session_factory, session_service):
         )
 
     with session_factory() as session:
-        assert session.scalar(
-            select(User).where(User.email == "blocked@example.com")
-        ) is None
+        assert (
+            session.scalar(select(User).where(User.email == "blocked@example.com"))
+            is None
+        )
 
 
 def test_signup_enabled_defaults_to_false(session_factory):
@@ -234,9 +235,10 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
         )
 
     with session_factory() as session:
-        assert session.scalar(
-            select(User).where(User.email == "rolled-back@example.com")
-        ) is None
+        assert (
+            session.scalar(select(User).where(User.email == "rolled-back@example.com"))
+            is None
+        )
 
 
 def test_login_rejects_unknown_or_wrong_password(session_service):
@@ -345,11 +347,11 @@ def test_remembered_session_refresh_window_overlap_and_absolute_cap(
             now=clock.now,
         ),
     )
-    initial = service.signup(
-        email="remembered-refresh@example.com",
-        password="correct-password",
-        remember_me=True,
-    )
+    with service.session_factory.begin() as session:
+        user = service.provision_user(session, email="remembered-refresh@example.com")
+        initial = service.issue_session(
+            user, remember_me=True, amr=("ext", "mfa"), idp="example-sso-"
+        )
     original_authentication_time = initial.issued_at
 
     clock.advance(timedelta(seconds=79))
@@ -362,6 +364,8 @@ def test_remembered_session_refresh_window_overlap_and_absolute_cap(
     assert first_refresh.expires_at == clock.value + timedelta(seconds=100)
     first_verified = service.token_codec.verify_session(first_refresh.session_token)
     assert first_verified.authenticated_at == original_authentication_time
+    assert first_verified.amr == ("ext", "mfa")
+    assert first_verified.idp == "example-sso-"
 
     # Stateless cookies cannot revoke the prior token during rotation. Renewal
     # starts only inside the final threshold window, so this overlap is <=20s.
@@ -376,6 +380,9 @@ def test_remembered_session_refresh_window_overlap_and_absolute_cap(
     assert capped_refresh.expires_at == original_authentication_time + timedelta(
         seconds=250
     )
+    capped_verified = service.token_codec.verify_session(capped_refresh.session_token)
+    assert capped_verified.amr == first_verified.amr
+    assert capped_verified.idp == first_verified.idp
 
     clock.advance(timedelta(seconds=70))
     _, no_rotation_at_cap = service.authenticate_session_with_refresh(
@@ -451,6 +458,7 @@ def test_legacy_v1_session_without_renewal_claims_stays_valid_without_refresh(
         user, refreshed = session_service.authenticate_session_with_refresh(token)
         assert verified.remember_me is False
         assert verified.authenticated_at is None
+        assert verified.amr is None and verified.idp is None
         assert user == signed_up.user
         assert refreshed is None
 

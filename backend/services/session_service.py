@@ -23,6 +23,7 @@ from backend.app.settings import (
     Settings,
 )
 from backend.domain import identity_policy
+from backend.domain.auth_policy import provider_slug_valid
 from backend.domain.credential_input import (
     SESSION_TOKEN_MAX_BYTES,
     ascii_token_is_valid,
@@ -30,6 +31,20 @@ from backend.domain.credential_input import (
 )
 from backend.models.user import User
 from backend.services.audit_service import AuditService
+from backend.services.auth.password_method import (
+    DUMMY_PASSWORD_HASH as DUMMY_PASSWORD_HASH,
+)
+from backend.services.auth.password_method import verify_password
+from backend.services.auth.session_issuer import (
+    AuthenticatedUser as AuthenticatedUser,
+)
+from backend.services.auth.session_issuer import (
+    SessionResult as SessionResult,
+)
+from backend.services.auth.session_issuer import (
+    authenticated_user as authenticated_user,
+)
+from backend.services.auth.session_issuer import issue_native_session
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.personal_workspace_service import ensure_personal_workspace
 from backend.utils.database_errors import is_single_column_unique_violation
@@ -54,10 +69,6 @@ RECENT_REAUTHENTICATION_TOKEN_KIND = "recent_reauthentication"
 RECENT_REAUTHENTICATION_TOKEN_VERSION = 1
 RECENT_REAUTHENTICATION_TTL_SECONDS = 5 * 60
 MIN_PASSWORD_LENGTH = identity_policy.NEW_PASSWORD_MIN_LENGTH
-DUMMY_PASSWORD_HASH = (
-    "$argon2id$v=19$m=65536,t=3,p=4$u2au8gUQ3qKl1XimMaOpFQ"
-    "$Kvoeh33YAsJ5V/VMP8lB4wS0V3JS85RQUdHFy8Ew0CA"
-)
 _AUTH_IP_BUCKET: dict[str, list[float]] = {}
 _AUTH_EMAIL_BUCKET: dict[str, list[float]] = {}
 _AUTH_BUCKET_LOCK = threading.Lock()
@@ -113,30 +124,14 @@ class SignupDisabledError(SessionServiceError):
 
 
 @dataclass(frozen=True)
-class AuthenticatedUser:
-    user_id: UUID
-    email: str
-    display_name: str
-    status: str
-    email_verified_at: datetime | None = None
-
-
-@dataclass(frozen=True)
 class VerifiedSession:
     user_id: UUID
     session_generation: int
     expires_at: datetime
     remember_me: bool
     authenticated_at: datetime | None
-
-
-@dataclass(frozen=True)
-class SessionResult:
-    user: AuthenticatedUser
-    session_token: str
-    issued_at: datetime
-    expires_at: datetime
-    remember_me: bool
+    amr: tuple[str, ...] | None = None
+    idp: str | None = None
 
 
 @dataclass(frozen=True)
@@ -290,6 +285,8 @@ class SessionTokenCodec:
         remember_me: bool = False,
         authenticated_at: datetime | None = None,
         issued_at: datetime | None = None,
+        amr: tuple[str, ...] | None = None,
+        idp: str | None = None,
     ) -> tuple[str, datetime]:
         issued_at = (issued_at or self.now()).astimezone(UTC).replace(microsecond=0)
         authenticated_at = (
@@ -317,6 +314,14 @@ class SessionTokenCodec:
             "remembered": remember_me,
             "auth_time": int(authenticated_at.timestamp()),
         }
+        if amr is not None:
+            if not _valid_amr(amr):
+                raise ValueError("session authentication methods are invalid")
+            payload["amr"] = list(amr)
+        if idp is not None:
+            if not _valid_idp(idp):
+                raise ValueError("session identity provider is invalid")
+            payload["idp"] = idp
         encoded_payload = _base64url_encode(
             json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
         )
@@ -390,12 +395,22 @@ class SessionTokenCodec:
             else:
                 remember_me = True
         try:
+            amr_claim = payload.get("amr")
+            idp_claim = payload.get("idp")
+            if amr_claim is not None and (
+                not isinstance(amr_claim, list) or not _valid_amr(amr_claim)
+            ):
+                raise InvalidSessionError("session authentication methods are invalid")
+            if idp_claim is not None and not _valid_idp(idp_claim):
+                raise InvalidSessionError("session identity provider is invalid")
             return VerifiedSession(
                 user_id=UUID(str(payload["sub"])),
                 session_generation=session_generation,
                 expires_at=expires_at,
                 remember_me=remember_me,
                 authenticated_at=authenticated_at,
+                amr=tuple(amr_claim) if amr_claim is not None else None,
+                idp=idp_claim,
             )
         except (KeyError, ValueError) as exc:
             raise InvalidSessionError("session token subject is invalid") from exc
@@ -480,42 +495,74 @@ class SessionService:
         # Recheck at the domain write boundary even though the HTTP endpoint
         # rejects disabled requests before consuming a rate-limit slot.
         self.assert_signup_enabled()
+        # Reject invalid public input before opening a database transaction or
+        # spending password-hashing work. Provisioning rechecks its own inputs
+        # because trusted external-login callers use that seam directly too.
         normalized_email = normalize_email(email)
         validate_password(password)
-        name = normalize_display_name(display_name, normalized_email)
+        normalized_name = normalize_display_name(display_name, normalized_email)
         with self.session_factory.begin() as session:
-            user = User(
-                email=normalized_email,
-                password_hash=self.credential_hasher.hash_password(password),
-                display_name=name,
-                status="active",
-            )
-            session.add(user)
             try:
-                session.flush()
+                user = self.provision_user(
+                    session,
+                    email=normalized_email,
+                    password=password,
+                    display_name=normalized_name,
+                )
             except IntegrityError as exc:
                 if not is_single_column_unique_violation(
                     exc, table="users", column="email"
                 ):
                     raise
                 raise DuplicateEmailError("email already exists") from exc
-            # Onboarding is decoupled from the installation's legacy/default
-            # content workspace.  Every signup mode starts in an ordinary,
-            # private Personal workspace and receives no implicit global
-            # membership.
-            ensure_personal_workspace(session, user=user)
-            self._emit_session_audit(
-                session,
-                user_id=user.id,
-                action="auth.user.signed_up",
-                target_kind="user",
-                target_id=user.id,
-                # AUTH-10: no email — target_id already carries a queryable
-                # user id, and the email's presence is what makes this row a
-                # PII-bearing row that outlives the account.
-                payload={"display_name": user.display_name},
-            )
-            return self._issue_session(user, remember_me=remember_me)
+            return self.issue_session(user, remember_me=remember_me, amr=("pwd",))
+
+    def provision_user(
+        self,
+        session: Session,
+        *,
+        email: str,
+        display_name: str | None = None,
+        password: str | None = None,
+        email_verified_at: datetime | None = None,
+    ) -> User:
+        """Provision a native account inside the caller's transaction.
+
+        The caller decides whether registration is authorized. An external
+        provider's JIT policy is independent of public password signup policy.
+        Unique conflicts propagate so the broker can roll back and retry its
+        complete identity binding transaction.
+        """
+
+        normalized_email = normalize_email(email)
+        if password is not None:
+            validate_password(password)
+        name = normalize_display_name(display_name, normalized_email)
+        user = User(
+            email=normalized_email,
+            password_hash=(
+                self.credential_hasher.hash_password(password)
+                if password is not None
+                else None
+            ),
+            display_name=name,
+            email_verified_at=email_verified_at,
+            status="active",
+        )
+        session.add(user)
+        session.flush()
+        # Every login method starts in an ordinary private Personal workspace
+        # and receives no implicit global or installation workspace membership.
+        ensure_personal_workspace(session, user=user)
+        self._emit_session_audit(
+            session,
+            user_id=user.id,
+            action="auth.user.signed_up",
+            target_kind="user",
+            target_id=user.id,
+            payload={"display_name": user.display_name},
+        )
+        return user
 
     def login(
         self,
@@ -528,11 +575,13 @@ class SessionService:
         normalized_email = normalize_email(email)
         with self.session_factory.begin() as session:
             user = session.scalar(select(User).where(User.email == normalized_email))
-            if user is None:
-                self.credential_hasher.verify_password(password, DUMMY_PASSWORD_HASH)
+            if not verify_password(
+                self.credential_hasher,
+                password,
+                user.password_hash if user is not None else None,
+            ):
                 raise InvalidCredentialsError("email or password is invalid")
-            if not self.credential_hasher.verify_password(password, user.password_hash):
-                raise InvalidCredentialsError("email or password is invalid")
+            assert user is not None and user.password_hash is not None
             self._assert_active(user)
             if self.credential_hasher.password_needs_rehash(user.password_hash):
                 user.password_hash = self.credential_hasher.hash_password(password)
@@ -545,7 +594,7 @@ class SessionService:
                 target_id=user.id,
                 payload={},
             )
-            return self._issue_session(user, remember_me=remember_me)
+            return self.issue_session(user, remember_me=remember_me, amr=("pwd",))
 
     def authenticate_session(self, token: str) -> AuthenticatedUser:
         user, _, _ = self._authenticate_session(token, refresh_remembered=False)
@@ -609,6 +658,8 @@ class SessionService:
                     user,
                     remember_me=True,
                     authenticated_at=verified.authenticated_at,
+                    amr=verified.amr,
+                    idp=verified.idp,
                 )
         if refreshed is not None and not self._audit_session_renewal(
             verified=verified,
@@ -711,7 +762,8 @@ class SessionService:
             if user is None:
                 raise InvalidSessionError("session user no longer exists")
             self._assert_active(user)
-            if not self.credential_hasher.verify_password(
+            if not verify_password(
+                self.credential_hasher,
                 current_password,
                 user.password_hash,
             ):
@@ -743,7 +795,7 @@ class SessionService:
                 # Successful current-password verification is a fresh primary
                 # authentication event. Preserve whether the browser was
                 # remembered, but restart its absolute authentication window.
-                result = self._issue_session(user, remember_me=remember_me)
+                result = self.issue_session(user, remember_me=remember_me, amr=("pwd",))
         if invalid_password:
             raise InvalidCredentialsError("current password is invalid")
         assert result is not None
@@ -777,7 +829,8 @@ class SessionService:
             if user is None:
                 raise InvalidSessionError("session user no longer exists")
             self._assert_active(user)
-            if not self.credential_hasher.verify_password(
+            if not verify_password(
+                self.credential_hasher,
                 current_password,
                 user.password_hash,
             ):
@@ -825,6 +878,43 @@ class SessionService:
                 target_id=user.id,
                 payload={"reason": reason},
             )
+
+    def issue_external_reauthentication(
+        self,
+        session: Session,
+        *,
+        user_id: UUID,
+        session_generation: int,
+    ) -> RecentReauthenticationResult:
+        """Issue native step-up proof after a broker-verified external login.
+
+        This is a trusted service seam, never an HTTP claim. The broker owns
+        identity verification and binds its one-time transaction to the native
+        browser session. Recheck its generation under the caller's transaction
+        so revocation or suspension also invalidates an in-flight callback.
+        """
+
+        user = session.scalar(select(User).where(User.id == user_id).with_for_update())
+        if (
+            user is None
+            or user.status != "active"
+            or user.session_generation != session_generation
+        ):
+            raise RecentReauthenticationRequiredError(
+                "external reauthentication session has been revoked"
+            )
+        result = self._reauthentication_codec().issue(
+            user_id=user.id, session_generation=user.session_generation
+        )
+        self._emit_session_audit(
+            session,
+            user_id=user.id,
+            action="auth.reauthentication.succeeded",
+            target_kind="user",
+            target_id=user.id,
+            payload={"reauthenticated_until": result.reauthenticated_until.isoformat()},
+        )
+        return result
 
     def verify_recent_reauthentication(
         self,
@@ -892,20 +982,41 @@ class SessionService:
         *,
         remember_me: bool = False,
         authenticated_at: datetime | None = None,
+        amr: tuple[str, ...] | None = None,
+        idp: str | None = None,
     ) -> SessionResult:
-        issued_at = self.token_codec.now().astimezone(UTC).replace(microsecond=0)
-        token, expires_at = self.token_codec.issue(
+        return self.issue_session(
             user,
             remember_me=remember_me,
             authenticated_at=authenticated_at,
-            issued_at=issued_at,
+            amr=amr,
+            idp=idp,
         )
-        return SessionResult(
-            user=authenticated_user(user),
-            session_token=token,
-            issued_at=issued_at,
-            expires_at=expires_at,
+
+    def issue_session(
+        self,
+        user: User,
+        *,
+        remember_me: bool = False,
+        authenticated_at: datetime | None = None,
+        amr: tuple[str, ...] | None = None,
+        idp: str | None = None,
+    ) -> SessionResult:
+        """Issue a native session inside the caller's account transaction.
+
+        The caller owns primary authentication and the session-created audit.
+        This method shares cookie credentials, TTL and revocation semantics
+        between password login and external providers.
+        """
+
+        self._assert_active(user)
+        return issue_native_session(
+            self.token_codec,
+            user,
             remember_me=remember_me,
+            authenticated_at=authenticated_at,
+            amr=amr,
+            idp=idp,
         )
 
     def _reauthentication_codec(self) -> RecentReauthenticationCodec:
@@ -991,14 +1102,21 @@ def _sweep_auth_buckets(now: float) -> None:
             del bucket[key]
 
 
-def authenticated_user(user: User) -> AuthenticatedUser:
-    return AuthenticatedUser(
-        user_id=user.id,
-        email=user.email,
-        display_name=user.display_name,
-        status=user.status,
-        email_verified_at=user.email_verified_at,
+def _valid_amr(value: tuple[str, ...] | list[str]) -> bool:
+    return bool(
+        isinstance(value, (tuple, list))
+        and 1 <= len(value) <= 8
+        and all(
+            isinstance(method, str)
+            and 1 <= len(method) <= 64
+            and all("!" <= character <= "~" for character in method)
+            for method in value
+        )
     )
+
+
+def _valid_idp(value: str) -> bool:
+    return provider_slug_valid(value)
 
 
 def normalize_email(email: str) -> str:

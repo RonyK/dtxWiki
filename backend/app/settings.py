@@ -11,7 +11,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from backend.app.data_dir import data_dir, default_sqlite_url
@@ -128,6 +128,7 @@ OPERATIONAL_ENV_KEYS = frozenset(
 
 
 class Settings(BaseSettings):
+    _plugin_registry: object | None = PrivateAttr(default=None)
     app_name: str = "dtxWiki"
     app_version: str = Field(default_factory=package_version)
     app_env: str = "development"
@@ -137,6 +138,9 @@ class Settings(BaseSettings):
     frontend_dev_port: int = DEFAULT_FRONTEND_DEV_PORT
     cors_origins: str | None = None
     auto_bootstrap: bool = True
+    plugins: str = ""
+    auth_providers_file: str | None = None
+    auth_password_login_enabled: bool = True
     # Ordinary launches own their worker. Service-managed deployments select
     # external when their service manager starts the worker separately.
     worker_mode: Literal["managed", "external"] = "managed"
@@ -590,6 +594,9 @@ class Settings(BaseSettings):
         return _parse_cors_origins(self.cors_origins)
 
     def validate_for_startup(self) -> None:
+        from backend.app.plugins import load_plugins
+
+        plugin_registry = load_plugins(self)
         for env_key in sorted(REMOVED_ENV_KEYS.intersection(os.environ)):
             _warn_removed_env(env_key)
 
@@ -709,7 +716,11 @@ class Settings(BaseSettings):
             if k.startswith("DTXWIKI_") and not k.startswith("DTXWIKI_SERVICE_")
         }
         _unknown = (
-            _env_dtxwiki - _known_fields - OPERATIONAL_ENV_KEYS - REMOVED_ENV_KEYS
+            _env_dtxwiki
+            - _known_fields
+            - OPERATIONAL_ENV_KEYS
+            - REMOVED_ENV_KEYS
+            - plugin_registry.environment_keys
         )
         if _unknown:
             raise RuntimeError(

@@ -11,6 +11,7 @@ from typing import Annotated
 
 import typer
 import uvicorn
+from typer.main import get_command
 
 from backend.app.bootstrap import (
     bootstrap as bootstrap_app,
@@ -19,6 +20,7 @@ from backend.app.bootstrap import (
     migration_status,
 )
 from backend.app.data_dir import data_dir, default_sqlite_url
+from backend.app.plugins import load_plugins
 from backend.app.runtime import RuntimeStartupError, serve_runtime
 from backend.app.settings import Settings
 from backend.app.version import package_version
@@ -78,6 +80,7 @@ def root(
         None, help="Background worker mode: managed (default) or external."
     ),
 ) -> None:
+    load_plugins(Settings())
     if ctx.invoked_subcommand is None:
         serve(
             host=host,
@@ -478,6 +481,16 @@ app.command("eval")(eval_commands.eval_command)
 
 
 def main() -> None:
+    if "--version" in sys.argv[1:]:
+        # Let Click handle the eager core option before extension settings.
+        # make_context only parses root options, so a plugin's own --version
+        # still reaches normal command discovery below.
+        try:
+            with get_command(app).make_context("dtxwiki", sys.argv[1:]):
+                pass
+        except typer.Exit as exc:
+            raise SystemExit(exc.exit_code) from None
+    load_plugins(Settings()).install_cli(app)
     app()
 
 

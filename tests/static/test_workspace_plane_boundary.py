@@ -407,6 +407,11 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # separate allowlist rather than folded into CONTROL_SESSION_FACTORY_
 # ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
+    "backend/api/auth_sso.py": (
+        "Builds the external-login broker over control-plane users, identities "
+        "and browser login transactions. Provisioning uses the existing Personal "
+        "workspace account-creation boundary; no workspace content is queried."
+    ),
     "backend/api/deps.py": (
         "Defines SessionFactoryDep itself. Its own use, in "
         "check_workspace_access, is the identity-plane require_workspace_"
