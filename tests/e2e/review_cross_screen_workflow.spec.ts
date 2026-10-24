@@ -5,11 +5,10 @@ import { expect, test, type APIRequestContext, type APIResponse, type Locator, t
 import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
 
 type PendingPage = { id: string; title: string; version_id: string; review_item_id: string };
-type ReviewDetail = { status: string };
 
-// The direct Context workflow covers exact content and same-candidate impact
-// separately from the original Ask promotion journey below.
-test("reads exact evidence, approves a document group, and records the decision in Activity", async ({ page }, testInfo) => {
+// Ask promotion and acceptance are covered by backend integration tests. This
+// journey covers the browser's evidence, group and single decision controls.
+test("reads review evidence, approves a document group and a single review, and records Activity", async ({ page }, testInfo) => {
   await authenticatePage(page, testInfo, "review-group");
   const workspace = await currentWorkspace(page.request);
   const first = await pendingPage(page.request, workspace.id, "Grouped review candidate");
@@ -29,6 +28,8 @@ test("reads exact evidence, approves a document group, and records the decision 
   await expect(detail.locator(".markdown-body")).toContainText("Exact reviewed body");
   await expect(detail.getByRole("link", { name: /Open current document:/ }))
     .toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${first.id}`);
+  await detail.getByText("Review information", { exact: true }).click();
+  await expect(detail.getByText("Change evidence", { exact: true })).toBeVisible();
 
   const rail = page.locator(".review-rail");
   const firstGroup = rail.getByRole("region", { name: first.title, exact: true });
@@ -44,8 +45,14 @@ test("reads exact evidence, approves a document group, and records the decision 
   await expect(page.locator(".review-bulk-outcomes")).toContainText("3 / 3");
   // The open review was decided by this run; it is not an outside-filters item.
   await expect(page.getByText(/outside the current queue filters/)).toHaveCount(0);
-  expect(["approved", "superseded"]).toContain((await reviewDetail(page.request, workspace.id, first.review_item_id)).status);
-  expect((await reviewDetail(page.request, workspace.id, second.review_item_id)).status).toBe("pending");
+  const secondGroup = rail.getByRole("region", { name: second.title, exact: true });
+  await expect(secondGroup).toBeVisible();
+  await page.goto(`/review?review=${second.review_item_id}`);
+  await expect(detail.locator("#review-detail-title")).toHaveText(second.title);
+  await detail.getByText("Add a decision reason (optional)", { exact: true }).click();
+  await detail.getByLabel("Decision reason").fill("Cross-screen workflow reviewed");
+  await detail.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(secondGroup).toHaveCount(0);
   await page.goto("/activity");
   await expect(page.locator("article.activity-row").getByText("Review decision", { exact: true }).first()).toBeVisible();
 });
@@ -119,10 +126,6 @@ async function selectDocumentGroup(page: Page, group: Locator) {
   await expect(group).toHaveAttribute("aria-busy", "false");
 }
 
-async function reviewDetail(request: APIRequestContext, workspaceId: string, reviewId: string): Promise<ReviewDetail> {
-  return responseData(await request.get(`${backendBaseUrl}/api/v1/workspaces/${workspaceId}/reviews/${reviewId}`));
-}
-
 async function responseData<T>(response: APIResponse): Promise<T> {
   expect(response.ok(), await response.text()).toBeTruthy();
   return (await response.json()).data as T;
@@ -143,127 +146,3 @@ async function reviewTabGeometry(tab: Locator) {
     return { tabTop: element.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom };
   });
 }
-
-test("reviews a retained Ask API proposal and records activity", async ({ page }, testInfo) => {
-  await authenticatePage(page, testInfo, "cross-screen");
-  const workspace = await currentWorkspace(page.request);
-  const evidenceResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages`,
-    {
-      data: {
-        title: "Review workflow evidence",
-        body_md: "# Review workflow evidence\n\nCapture the review workflow evidence.",
-      },
-    },
-  );
-  expect(evidenceResponse.ok()).toBeTruthy();
-  const evidence = (await evidenceResponse.json()).data as {
-    content_hash: string;
-    id: string;
-    version_id: string;
-  };
-  const publishEvidenceResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/` +
-      `${evidence.id}/versions/${evidence.version_id}/publish`,
-    {
-      data: {
-        expected_content_hash: evidence.content_hash,
-        reason: "Seed evidence for the retained Ask API workflow.",
-      },
-    },
-  );
-  expect(publishEvidenceResponse.ok(), await publishEvidenceResponse.text())
-    .toBeTruthy();
-
-  // Ask's browser route is unavailable. Seed through its retained API so this
-  // still exercises the real proposal, Review decision, and Activity workflow.
-  const sessionResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/ask/sessions`,
-    { data: {} },
-  );
-  expect(sessionResponse.ok(), await sessionResponse.text()).toBeTruthy();
-  const sessionId = (await sessionResponse.json()).data.id as string;
-  const turnResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/ask/sessions/${sessionId}/turns`,
-    { data: { user_message: "Capture the review workflow evidence" } },
-  );
-  expect(turnResponse.ok(), await turnResponse.text()).toBeTruthy();
-  const turn = (await turnResponse.json()).data as {
-    id: string;
-    cited_context_page_ids: string[];
-  };
-  expect(turn.cited_context_page_ids).toContain(evidence.id);
-  const proposalResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/ask/turns/${turn.id}/promote`,
-    {
-      data: {
-        save_mode: "create_page",
-        page_type: "guide",
-        title: "Cross-screen workflow answer",
-      },
-    },
-  );
-  expect(proposalResponse.ok(), await proposalResponse.text()).toBeTruthy();
-  const proposal = (await proposalResponse.json()).data as {
-    id: string;
-    proposed_parent_tree_node_id: string;
-    proposed_title: string;
-  };
-  // A retried Personal workspace can hold a pending request left by the prior
-  // attempt, so scope the review assertions to the proposal this run accepts
-  // instead of asserting a globally empty rail.
-  const acceptResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/ingress-proposals/${proposal.id}/accept`,
-    {
-      data: {
-        final_save_mode: "create_page",
-        final_parent_node_id: proposal.proposed_parent_tree_node_id,
-        final_title: proposal.proposed_title,
-        final_page_type: "guide",
-        review_required: true,
-      },
-    },
-  );
-  expect(acceptResponse.ok(), await acceptResponse.text()).toBeTruthy();
-  const accepted = (await acceptResponse.json()).data as {
-    proposal_id: string;
-    review_item_id: string | null;
-  };
-  expect(accepted.proposal_id).toBe(proposal.id);
-  expect(accepted.review_item_id).toBeTruthy();
-
-  await page.goto(`/review?review=${encodeURIComponent(accepted.review_item_id!)}`);
-
-  await expect(
-    page.getByRole("complementary", { name: "Review queue" }),
-  ).toBeVisible();
-  const reviewRequests = page.locator(".review-row");
-  // Select this run's exact review through its permalink; older pending
-  // requests must not change which proposal the browser approves.
-  await page.getByText("Review information", { exact: true }).click();
-  await expect(page.getByText("Change evidence", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(`accept context ingress proposal ${proposal.id}`),
-  ).toBeVisible();
-  const pendingBefore = await reviewRequests.count();
-  expect(pendingBefore).toBeGreaterThan(0);
-  await page.getByText("Add a decision reason (optional)", { exact: true }).click();
-  await page
-    .getByLabel("Decision reason")
-    .fill("Cross-screen workflow reviewed");
-  await page.getByRole("button", { name: "Approve" }).click();
-
-  await expect(reviewRequests).toHaveCount(pendingBefore - 1);
-
-  await page.goto("/activity");
-
-  await expect(
-    page.getByRole("heading", { name: "Activity", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .locator("article.activity-row")
-      .getByText("Review decision", { exact: true })
-      .first(),
-  ).toBeVisible();
-});

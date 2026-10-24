@@ -696,7 +696,7 @@ def test_selection_is_signed_actor_bound_and_expires_without_mutation(
         assert session.scalar(select(func.count(ReviewDecision.id))) == 0
 
 
-def test_selection_limit_reports_total_instead_of_truncating(page_service):
+def test_selection_limit_reports_total_instead_of_truncating(page_service, monkeypatch):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
     response = client.post(
@@ -708,6 +708,10 @@ def test_selection_limit_reports_total_instead_of_truncating(page_service):
     assert data["error_code"] == "review_selection_limit_exceeded"
     assert data["details"] == {"total": 5001, "limit": 5000}
 
+    # Use more than LIMIT + 1 matches so counting only the fetched rows fails.
+    # A small execution limit avoids creating 5,001 database rows; the explicit
+    # ID request above still pins the production limit.
+    monkeypatch.setattr(review_selection_service, "SELECTION_LIMIT", 3)
     review_id = _seed_pending_review(page_service, workspace_id)
     with page_service.session_factory.begin() as session:
         source = session.get(ReviewItem, UUID(review_id))
@@ -721,26 +725,28 @@ def test_selection_limit_reports_total_instead_of_truncating(page_service):
             review_type="context_update",
             status="pending",
             risk_level="low",
-        ) for _ in range(5000)])
+        ) for _ in range(4)])
     group = client.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/selection",
         json={"filters": {"target_page_id": page_id, "status": "pending"}},
     )
     assert group.status_code == 422, group.text
-    assert group.json()["details"] == {"total": 5001, "limit": 5000}
+    assert group.json()["details"] == {"total": 5, "limit": 3}
 
 
-@pytest.mark.parametrize("decision_type", ["approve", "reject", "request_changes"])
 def test_single_decision_receipt_retries_once_and_conflicts_on_changed_payload(
-    page_service, decision_type,
+    page_service,
 ):
+    # Receipt replay precedes decision-type dispatch. Cover the HTTP contract
+    # once with a terminal approval; collaboration tests cover later routing
+    # rounds, and PostgreSQL tests cover concurrent receipt collisions.
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
     review_id = _seed_pending_review(page_service, workspace_id)
     url = f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}/decision"
     request = {
         "decision_id": str(uuid4()),
-        "decision_type": decision_type,
+        "decision_type": "approve",
         "decision_reason": "Reason for the original decision.",
     }
     first = client.post(url, json=request)
