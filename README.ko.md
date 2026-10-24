@@ -426,6 +426,12 @@ pip 설치는 기존 가상환경을 활성화한 뒤
 `python -m pip install --upgrade "dtxwiki==0.1.3"`을 실행하세요.
 npm은 [npm 업데이트 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md#updating)를 따르세요.
 
+기존 uv 설치를 바꿀 때는
+`uv tool install --force "dtxwiki==0.1.3"`을 사용하세요. dtxWiki는 Python 3.12 이상이
+필요하며 이 명령은 Python 버전을 고정하지 않습니다. 특정 인터프리터가 필요할 때만
+지원 버전의 `--python <버전-또는-경로>` 옵션을 추가하세요. 기존 패키지 인덱스·인증 설정도
+유지하세요.
+
 서버와 같은 OS 계정·환경 설정·DB로, 시작 전에 **새 버전의** 검사를 실행하세요.
 
 ```bash

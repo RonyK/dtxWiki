@@ -83,7 +83,33 @@ class RecoveryConfigurationStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DeploymentStatus(BaseModel):
+class DeploymentUpdateCheckRequest(BaseModel):
+    force: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeploymentUpdateStatus(BaseModel):
+    current_version: str | None = None
+    latest_version: str | None = None
+    update_available: bool = False
+    check_status: Literal["not_checked", "succeeded", "failed", "disabled"] = (
+        "not_checked"
+    )
+    checked_at: datetime | None = None
+    stale: bool = False
+    source: Literal["pypi", "configured_index"] = "pypi"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeploymentUpdateStatusResponse(RESTResponseBase):
+    data: DeploymentUpdateStatus
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeploymentStatus(DeploymentUpdateStatus):
     """Current, read-only deployment state derived from process settings."""
 
     public_base_url: str | None
@@ -108,11 +134,6 @@ class DeploymentStatus(BaseModel):
     signup: SignupConfigurationStatus
     recovery: RecoveryConfigurationStatus
     suggested_commands: list[SuggestedCommand]
-    # Update-available banner (cache-only, fail-open; see update_check_service).
-    current_version: str | None = None
-    latest_version: str | None = None
-    update_available: bool = False
-
     model_config = ConfigDict(extra="forbid")
 
 

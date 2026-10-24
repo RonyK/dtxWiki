@@ -6630,6 +6630,29 @@
             "title": "Behind Proxy",
             "type": "boolean"
           },
+          "check_status": {
+            "default": "not_checked",
+            "enum": [
+              "not_checked",
+              "succeeded",
+              "failed",
+              "disabled"
+            ],
+            "title": "Check Status",
+            "type": "string"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
           "current_version": {
             "anyOf": [
               {
@@ -6721,6 +6744,20 @@
           "signup": {
             "$ref": "#/components/schemas/SignupConfigurationStatus"
           },
+          "source": {
+            "default": "pypi",
+            "enum": [
+              "pypi",
+              "configured_index"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
           "suggested_commands": {
             "items": {
               "$ref": "#/components/schemas/SuggestedCommand"
@@ -6775,6 +6812,105 @@
           "data"
         ],
         "title": "DeploymentStatusResponse",
+        "type": "object"
+      },
+      "DeploymentUpdateCheckRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "DeploymentUpdateCheckRequest",
+        "type": "object"
+      },
+      "DeploymentUpdateStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "check_status": {
+            "default": "not_checked",
+            "enum": [
+              "not_checked",
+              "succeeded",
+              "failed",
+              "disabled"
+            ],
+            "title": "Check Status",
+            "type": "string"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "latest_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Version"
+          },
+          "source": {
+            "default": "pypi",
+            "enum": [
+              "pypi",
+              "configured_index"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "update_available": {
+            "default": false,
+            "title": "Update Available",
+            "type": "boolean"
+          }
+        },
+        "title": "DeploymentUpdateStatus",
+        "type": "object"
+      },
+      "DeploymentUpdateStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeploymentUpdateStatus"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DeploymentUpdateStatusResponse",
         "type": "object"
       },
       "DiscardContextEditRequest": {
@@ -20521,6 +20657,83 @@
           }
         ],
         "summary": "Admin Deployment Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/deployment/update-check": {
+      "post": {
+        "description": "Check the package index for a release without applying any update.",
+        "operationId": "admin_deployment_update_check_api_v1_admin_deployment_update_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentUpdateCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentUpdateStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Deployment Update Check",
         "tags": [
           "admin"
         ]

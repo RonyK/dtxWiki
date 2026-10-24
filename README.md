@@ -435,6 +435,12 @@ without starting the new server. For pip, activate the existing virtual
 environment and run `python -m pip install --upgrade "dtxwiki==0.1.3"`.
 For npm, follow the [npm update instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.1.3/npm/dtxwiki/README.md#updating).
 
+For an existing uv installation, use
+`uv tool install --force "dtxwiki==0.1.3"`. dtxWiki requires Python 3.12 or newer;
+this command does not pin the interpreter. If you need a specific interpreter,
+add `--python <version-or-path>` with a supported version. Preserve your existing
+package index and authentication settings.
+
 Using the server's OS account, environment settings, and database, run the
 **new version's** audit before starting it:
 
