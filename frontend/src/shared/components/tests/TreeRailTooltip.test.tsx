@@ -65,7 +65,7 @@ describe("TreeRail tooltip ownership", () => {
     const chevron = within(parentRow).getByRole("button", { name: `Expand ${parent.title}` });
     fireEvent.pointerDown(chevron, { clientX: 40, clientY: 165, pointerType: "mouse" });
     act(() => { chevron.focus(); });
-    expect(screen.getByRole("tooltip")).toHaveTextContent(parent.title);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     fireEvent.click(chevron, { clientX: 40, clientY: 165, detail: 1 });
     expect(onExpandedNodeIdsChange).toHaveBeenCalledWith([parent.id]);
     rerender(<TreeRail title="Context" nodes={nodes} expandedNodeIds={[parent.id]} onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
@@ -82,7 +82,7 @@ describe("TreeRail tooltip ownership", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent(child.title);
   });
 
-  it("uses the actual click position after pointer movement while the popup was dismissed", () => {
+  it("keeps a clicked row dismissed through small movements and closes a fresh hover despite retained focus", () => {
     const parent = { ...node("parent"), node_kind: "folder" as const, target_kind: null, target_id: null, can_have_children: true, children_count: 1 };
     render(<TreeRail title="Context" nodes={[parent]} expandedNodeIds={[]} onExpandedNodeIdsChange={vi.fn()} />);
     const row = screen.getByRole("treeitem");
@@ -94,6 +94,15 @@ describe("TreeRail tooltip ownership", () => {
     fireEvent.pointerMove(chevron, { clientX: 40, clientY: 165 });
     fireEvent.click(chevron, { clientX: 40, clientY: 165, detail: 1 });
     fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.pointerMove(chevron, { clientX: 42, clientY: 165 });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.pointerMove(document.body, { clientX: 700, clientY: 500 });
+    fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
+    expect(screen.getByRole("tooltip")).toHaveTextContent(parent.title);
+    fireEvent.mouseLeave(row, { relatedTarget: document.body });
+    expect(chevron).toHaveFocus();
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
@@ -186,19 +195,33 @@ describe("TreeRail tooltip ownership", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
-  it("hands Escape to an opened menu and dismisses on drag or a newly opened modal", async () => {
-    render(<TreeRail title="Context" nodes={[node()]} onRenameNode={vi.fn()} />);
+  it("restores menu focus without reopening the tooltip and dismisses on drag or a newly opened modal", async () => {
+    const onCopyNodeLink = vi.fn();
+    render(<TreeRail title="Context" nodes={[node()]} onRenameNode={vi.fn()} onCopyNodeLink={onCopyNodeLink} />);
     const row = screen.getByRole("treeitem");
-    fireEvent.mouseEnter(row);
-    fireEvent.click(within(row).getByRole("button", { name: "Open actions for first full title" }));
+    const trigger = within(row).getByRole("button", { name: "Open actions for first full title" });
+    act(() => { trigger.focus(); });
+    fireEvent.click(trigger, { clientX: 250, clientY: 165, detail: 1 });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(screen.getByRole("menu")).toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    fireEvent.mouseEnter(row);
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.click(trigger, { clientX: 250, clientY: 165, detail: 1 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    expect(onCopyNodeLink).toHaveBeenCalledOnce();
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.pointerMove(document.body, { clientX: 700, clientY: 500 });
+    fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
     fireEvent.dragStart(row);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    fireEvent.mouseEnter(row);
+    fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
     const modal = document.createElement("div");
     modal.setAttribute("aria-modal", "true");
     await act(async () => { document.body.append(modal); });

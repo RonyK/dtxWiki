@@ -15,18 +15,20 @@ const TITLE_MAX_LINES = 4;
 // A focused row in another rail must not leave a second popup behind when a
 // pointer or keyboard user starts reading a different row.
 let activeTooltip: { dismiss: () => void } | null = null;
-let suppressedPointer: { x: number; y: number; release: () => void } | null = null;
+let suppressedPointer: { x: number; y: number; row?: HTMLElement; release: () => void } | null = null;
 
-function suppressPointerReentry(x: number, y: number) {
+function suppressPointerReentry(x: number, y: number, row?: HTMLElement) {
   suppressedPointer?.release();
   const release = () => {
     document.removeEventListener("pointermove", handleMove, true);
     if (suppressedPointer?.release === release) suppressedPointer = null;
   };
   const handleMove = (event: globalThis.PointerEvent) => {
-    if (event.clientX !== x || event.clientY !== y) release();
+    if (event.clientX === x && event.clientY === y) return;
+    if (event.target instanceof Node && row?.contains(event.target)) return;
+    release();
   };
-  suppressedPointer = { x, y, release };
+  suppressedPointer = { x, y, row, release };
   document.addEventListener("pointermove", handleMove, true);
   return release;
 }
@@ -54,19 +56,25 @@ export function useTreeRowTooltip({
   const popupRef = useRef<HTMLDivElement | null>(null);
   const arrowRef = useRef<HTMLSpanElement | null>(null);
   const pointerWithinRef = useRef(false);
+  const pointerFocusRef = useRef(false);
+  const keyboardFocusedRowRef = useRef<HTMLElement | null>(null);
   const pointerPositionRef = useRef({ x: 0, y: 0 });
   const suppressionReleaseRef = useRef<(() => void) | null>(null);
   const dismiss = useCallback(() => {
     ownerRef.current = null;
     pointerWithinRef.current = false;
+    keyboardFocusedRowRef.current = null;
     setOwner(null);
     if (activeTooltip?.dismiss === dismiss) activeTooltip = null;
   }, []);
-  const dismissForActivation = useCallback((event?: { clientX: number; clientY: number; detail: number }) => {
+  const dismissForActivation = useCallback((event?: { clientX: number; clientY: number; detail: number; currentTarget?: EventTarget | null }) => {
     if (event && event.detail > 0) {
       pointerPositionRef.current = { x: event.clientX, y: event.clientY };
     }
-    suppressionReleaseRef.current = suppressPointerReentry(pointerPositionRef.current.x, pointerPositionRef.current.y);
+    // Keep a clicked row quiet until the pointer actually leaves it. Repeated
+    // expansion callbacks must preserve the suppression set by click capture.
+    const row = event?.currentTarget instanceof HTMLElement ? event.currentTarget : suppressedPointer?.row;
+    suppressionReleaseRef.current = suppressPointerReentry(pointerPositionRef.current.x, pointerPositionRef.current.y, row);
     dismiss();
   }, [dismiss]);
 
@@ -91,10 +99,29 @@ export function useTreeRowTooltip({
     return target instanceof Node && Boolean(ownerRef.current?.element.contains(target));
   }
 
+  function hasKeyboardFocus() {
+    const row = keyboardFocusedRowRef.current;
+    return row === ownerRef.current?.element && row.contains(document.activeElement);
+  }
+
   function leave(event: MouseEvent<HTMLElement>) {
     pointerWithinRef.current = pointerWithin(event.relatedTarget);
-    if (!pointerWithinRef.current && !ownerRef.current?.element.contains(document.activeElement)) dismiss();
+    if (!pointerWithinRef.current && !hasKeyboardFocus()) dismiss();
   }
+
+  useLayoutEffect(() => {
+    const handlePointerDown = () => {
+      pointerFocusRef.current = true;
+      dismiss();
+    };
+    const handleKeyDown = () => { pointerFocusRef.current = false; };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [dismiss]);
 
   useLayoutEffect(() => {
     if (disabled) dismiss();
@@ -186,7 +213,7 @@ export function useTreeRowTooltip({
       // WebKit can omit mouseleave when expanding a row replaces its hovered
       // chevron SVG. The next real target reconciles row ownership.
       pointerWithinRef.current = pointerWithin(event.target);
-      if (!pointerWithinRef.current && !owner.element.contains(document.activeElement)) dismiss();
+      if (!pointerWithinRef.current && !hasKeyboardFocus()) dismiss();
     };
     const dismissForOverlay = () => {
       if (hasCoveringOverlay(owner.element)) dismiss();
@@ -211,9 +238,19 @@ export function useTreeRowTooltip({
   const rect = owner?.element.getBoundingClientRect();
   return {
     dismissForActivation,
-    focus: (nodeId: string, element: HTMLElement) => show(nodeId, element, false),
+    focus: (nodeId: string, element: HTMLElement) => {
+      if (pointerFocusRef.current) return;
+      show(nodeId, element, false);
+      keyboardFocusedRowRef.current = element;
+    },
+    restoreFocus: (element: HTMLElement | undefined) => {
+      element?.focus();
+      dismissForActivation();
+    },
     blur: (relatedTarget: EventTarget | null) => {
-      if (!ownerRef.current?.element.contains(relatedTarget as Node | null) && !pointerWithinRef.current) dismiss();
+      if (ownerRef.current?.element.contains(relatedTarget as Node | null)) return;
+      keyboardFocusedRowRef.current = null;
+      if (!pointerWithinRef.current) dismiss();
     },
     enter: (nodeId: string, element: HTMLElement, event: { clientX: number; clientY: number }) => {
       pointerPositionRef.current = { x: event.clientX, y: event.clientY };
