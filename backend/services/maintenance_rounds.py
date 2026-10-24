@@ -349,6 +349,7 @@ def submit_answers(
     codec: ClientRoundStateCodec,
     actor_kind: str,
     actor_id: str,
+    actor_provenance: str = "internal",
     now: datetime | None = None,
     context_write_service: ContextWriteService | None = None,
 ) -> AnswerOutcome:
@@ -380,11 +381,11 @@ def submit_answers(
     lint_run: LintRun | None = None
     finding_count = 0
     stagers = dict(TASK_STAGERS)
-    if context_write_service is not None:
-        stagers["folder_overview_draft"] = partial(
-            stagers["folder_overview_draft"],
-            context_write_service=context_write_service,
-        )
+    stagers["folder_overview_draft"] = partial(
+        stagers["folder_overview_draft"],
+        actor_provenance=actor_provenance,
+        context_write_service=context_write_service,
+    )
     for task_id, answer in parsed_answers:
         task = tasks.get(task_id)
         if task is None or task.status != "leased":
@@ -1296,6 +1297,7 @@ def _stage_folder_overview_draft(
     actor_id: str,
     now: datetime,
     *,
+    actor_provenance: str = "internal",
     context_write_service: ContextWriteService | None = None,
 ) -> DraftStageResult:
     from backend.services.context_write_service import ContextWriteService
@@ -1319,6 +1321,7 @@ def _stage_folder_overview_draft(
         ),
         actor_kind="agent",
         actor_id=f"client_llm:{actor_id}",
+        actor_provenance=actor_provenance,
         actor_role="owner",
         force_new_page=True,
     )

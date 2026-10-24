@@ -22,6 +22,7 @@ from backend.schemas.context_write import (
     UpdateDraftRequest,
     WriteDraftRequest,
 )
+from backend.services.body_preparer import BodyPreparer
 from backend.services.context_ingress_service import ContextIngressService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.okf import import_okf_bundle
@@ -75,7 +76,14 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
     page_service, session_factory, mcp_default_actor
 ):
     """R4 W1-W12 golden, with the intentional R5/R6 policy changes applied."""
-    service = ContextWriteService()
+    prepared_provenances = []
+
+    class RecordingPreparer(BodyPreparer):
+        def prepare(self, input, ctx):
+            prepared_provenances.append(ctx.actor_provenance)
+            return super().prepare(input, ctx)
+
+    service = ContextWriteService(body_preparer=RecordingPreparer())
     reader = mcp_default_actor(scopes=("read", "draft-write"))
     with session_factory() as session:
         workspace_id = session.scalar(
@@ -285,6 +293,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
         _assert_stored(
             session_factory, draft.draft_version_id, expected, f"W7 {suffix}"
         )
+        assert prepared_provenances[-1] == "internal"
 
         # W8: patch_draft's current-base path, then W9: the stale overlapping
         # block path must land a branch after preparing the caller's body.
@@ -301,7 +310,9 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 ),
                 actor_kind="human",
                 actor_id=ACTOR_ID,
+                actor_provenance="mcp_client",
             )
+        assert prepared_provenances[-1] == "mcp_client"
         _assert_stored(
             session_factory, patched.draft_version_id, expected, f"W8 {suffix}"
         )
@@ -334,7 +345,9 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 ),
                 actor_kind="human",
                 actor_id=ACTOR_ID,
+                actor_provenance="mcp_client",
             )
+        assert prepared_provenances[-1] == "mcp_client"
         assert diverged.push_outcome == "diverged"
         _assert_stored(
             session_factory,
@@ -359,7 +372,9 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 ),
                 actor_kind="human",
                 actor_id=ACTOR_ID,
+                actor_provenance="browser_session",
             )
+        assert prepared_provenances[-1] == "browser_session"
         _assert_stored(
             session_factory, updated.draft_version_id, expected, f"W10 {suffix}"
         )
@@ -460,7 +475,9 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 ),
                 actor_kind="human",
                 actor_id=ACTOR_ID,
+                actor_provenance="browser_session",
             )
+            assert prepared_provenances[-1] == "browser_session"
             assert preview.body_changed is True
             cited = service.update_draft(
                 session=session,

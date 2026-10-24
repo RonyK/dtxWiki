@@ -7,8 +7,17 @@
   `services` use it too; standalone CLI worker processes build their own builtin
   registry and do not inherit another process's injected modules. Supply modules
   before the registry is first used; late injection raises `ValueError`.
+  Module injection is typed as `tuple[LintModule, ...]`;
+  `LintPolicy.rule_enabled` requires an explicit `default_enabled` argument.
+- Context lint modules receive the actual caller provenance, including browser
+  reconciliation and MCP revision and maintenance writes.
 - Preserve Markdown hard breaks during formatting and block identities after
   formatted patches. Whole-body edit retries retain their original receipt.
+- With auto-fix disabled, page writes preserve authored trailing whitespace.
+  NFC/NFD differences, line endings and the final newline still do not create
+  a new version on their own.
+- Autosave checks the supplied base before preparing content. A stale base takes
+  precedence when both the base and save-time content checks would fail.
 - Keep legacy citation-only updates and patch previews compatible with stored
   frontmatter, and verify reconciliation independently of current fixer settings.
 

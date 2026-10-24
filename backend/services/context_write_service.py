@@ -662,6 +662,7 @@ class ContextWriteService:
         workspace: Workspace,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
         session: Session,
         page: ContextPage | None = None,
         version: ContextPageVersion | None = None,
@@ -673,7 +674,7 @@ class ContextWriteService:
                     workspace=workspace,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    actor_provenance="mcp_client",
+                    actor_provenance=actor_provenance,
                     page=page,
                     version=version,
                     session=session,
@@ -713,6 +714,7 @@ class ContextWriteService:
         session: Session,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
     ) -> bool:
         try:
             return (
@@ -724,6 +726,7 @@ class ContextWriteService:
                     version=base_version,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
+                    actor_provenance=actor_provenance,
                 ).body
                 == new_body
             )
@@ -804,6 +807,8 @@ class ContextWriteService:
         actor_role: str,
         origin_chat_session_id: UUID | None = None,
         force_new_page: bool = False,
+        *,
+        actor_provenance: str = "internal",
     ) -> WriteDraftResult:
         # B-P1-4 Sprint_6 Fix_4: wrap the entire write_draft body in a
         # SAVEPOINT so a mid-write exception rolls back every partial
@@ -830,6 +835,7 @@ class ContextWriteService:
                 session=session,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
             )
             request = request.model_copy(update={"body_markdown": prepared_body.body})
             missing_citation_warnings = self._citation_warnings(
@@ -1089,6 +1095,7 @@ class ContextWriteService:
         actor_id: str,
         origin_chat_session_id: UUID | None = None,
         *,
+        actor_provenance: str = "internal",
         auto_approve_format_only: bool = True,
         allow_changes_requested_revision: bool = False,
     ) -> UpdateDraftResult:
@@ -1185,6 +1192,7 @@ class ContextWriteService:
                 classification=classification,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 origin_chat_session_id=origin_chat_session_id,
                 auto_approve_format_only=auto_approve_format_only,
             )
@@ -1198,6 +1206,7 @@ class ContextWriteService:
         actor_id: str,
         origin_chat_session_id: UUID | None = None,
         *,
+        actor_provenance: str = "internal",
         auto_approve_format_only: bool = True,
         require_current_base: bool = False,
     ) -> UpdateDraftResult:
@@ -1260,6 +1269,7 @@ class ContextWriteService:
                 request=effective_request,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 origin_chat_session_id=origin_chat_session_id,
                 auto_approve_format_only=auto_approve_format_only,
                 identity_seed=identity_seed,
@@ -1374,6 +1384,7 @@ class ContextWriteService:
         request: PatchDraftRequest,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
         origin_chat_session_id: UUID | None,
         auto_approve_format_only: bool,
         identity_seed: str,
@@ -1629,6 +1640,7 @@ class ContextWriteService:
                     page=page,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
+                    actor_provenance=actor_provenance,
                     base_version=requested_base_version,
                     new_body=stale_body,
                     edits=stale_base_edits,
@@ -1963,6 +1975,7 @@ class ContextWriteService:
                     version=base_version,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
+                    actor_provenance=actor_provenance,
                 )
                 new_body = prepared_body.body
                 outside_target_changed = _body_changed_outside_edit_ranges(
@@ -2077,6 +2090,7 @@ class ContextWriteService:
                 classification=classification,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
                 origin_chat_session_id=origin_chat_session_id,
                 auto_approve_format_only=auto_approve_format_only,
                 edits=edits,
@@ -2375,6 +2389,7 @@ class ContextWriteService:
         page: ContextPage,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
         base_version: ContextPageVersion,
         new_body: str,
         edits: tuple[ResolvedEdit, ...],
@@ -2396,6 +2411,7 @@ class ContextWriteService:
             version=base_version,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor_provenance,
         )
         new_body = prepared_body.body
         outside_target_changed = _body_changed_outside_edit_ranges(
@@ -2784,6 +2800,7 @@ class ContextWriteService:
         classification: _ContextUpdateClassification,
         actor_kind: str,
         actor_id: str,
+        actor_provenance: str,
         origin_chat_session_id: UUID | None,
         auto_approve_format_only: bool,
         edits: tuple[ResolvedEdit, ...] | None = None,
@@ -2828,6 +2845,7 @@ class ContextWriteService:
             version=base_version,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor_provenance,
         )
         new_body = prepared_body.body
         if workspace.auto_fix_enabled and pre_normalize_body:
@@ -2969,6 +2987,7 @@ class ContextWriteService:
                 page=page,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                actor_provenance=actor_provenance,
             )
             and not gate.force_signals()
             and not risk_at_or_above("low", review_from)
@@ -3028,9 +3047,7 @@ class ContextWriteService:
                 prepared_block_map=prepared_block_map,
                 force_new_version=force_new_version,
             )
-        body_changed = not same_authored_markdown(
-            version.body_md, base_version.body_md
-        )
+        body_changed = not same_authored_markdown(version.body_md, base_version.body_md)
         metadata_changed = self._metadata_patch_changes(
             session=session,
             page=page,

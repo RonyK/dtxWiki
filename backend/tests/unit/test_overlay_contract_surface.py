@@ -28,7 +28,7 @@ def test_overlay_assembly_surface_signatures_are_pinned():
         "'object | None' = None, search_service: 'object | None' = None, "
         "ask_service: 'object | None' = None, directory: "
         "'WorkspaceDirectory | None' = None, services: "
-        "'ServiceRegistry | None' = None, lint_modules: 'tuple' = (), "
+        "'ServiceRegistry | None' = None, lint_modules: 'tuple[LintModule, ...]' = (), "
         "blob_store_provider: "
         "'BlobStoreProvider | None' = None) -> 'AppContainer'"
     )

@@ -1145,6 +1145,7 @@ class PageService:
                 request=patch_request,
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
+                actor_provenance=actor.provenance,
                 auto_approve_format_only=True,
                 require_current_base=True,
             )

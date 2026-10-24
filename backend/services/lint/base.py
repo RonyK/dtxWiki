@@ -103,7 +103,7 @@ class LintPolicy:
         policy._overrides = dict(overrides or {})
         return policy
 
-    def rule_enabled(self, rule_id: str, *, default_enabled: bool = True) -> bool:
+    def rule_enabled(self, rule_id: str, *, default_enabled: bool) -> bool:
         return self._overrides.get(rule_id, default_enabled)
 
     def fix_on_save(self, module: LintModule) -> bool:

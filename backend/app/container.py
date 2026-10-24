@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from threading import Lock
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
 from backend.spi.context import ToolCallContext
+
+if TYPE_CHECKING:
+    from backend.services.lint.base import LintModule
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +341,7 @@ class ServiceRegistry:
     """
 
     settings: Settings | None = None
-    lint_modules: tuple = ()
+    lint_modules: tuple[LintModule, ...] = ()
     # Context media is workspace-owned data, so this holds a routing callable
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
@@ -1115,7 +1118,7 @@ def assemble(
     ask_service: object | None = None,
     directory: WorkspaceDirectory | None = None,
     services: ServiceRegistry | None = None,
-    lint_modules: tuple = (),
+    lint_modules: tuple[LintModule, ...] = (),
     blob_store_provider: BlobStoreProvider | None = None,
 ) -> AppContainer:
     if db is not None and session_factory is not None:

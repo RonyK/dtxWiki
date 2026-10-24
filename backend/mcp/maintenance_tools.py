@@ -66,6 +66,7 @@ def wiki_maintenance(
                     codec=codec,
                     actor_kind=actor.actor_kind,
                     actor_id=actor.actor_id,
+                    actor_provenance=actor.provenance,
                     context_write_service=ctx.services.context_write,
                 )
                 rendered = {

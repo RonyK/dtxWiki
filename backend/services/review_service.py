@@ -1634,6 +1634,7 @@ class ReviewService:
         principal_role: str | None = None,
         *,
         context_write_service,
+        actor_provenance: str = "internal",
         update: UpdateDraftRequest | None = None,
         create: WriteDraftRequest | None = None,
         note: str | None = None,
@@ -1729,6 +1730,7 @@ class ReviewService:
             request=update,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor_provenance,
             origin_chat_session_id=origin_chat_session_id,
             # A revision answering a change request must never auto-approve — it
             # goes back to a human ("the AI never approves" — Risk 6). (re-review
