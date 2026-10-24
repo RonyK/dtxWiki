@@ -14,6 +14,7 @@ from backend.api.agent_bundles import router as agent_bundles_router
 from backend.api.auth import router as auth_router
 from backend.api.auth_sso import capabilities_router
 from backend.api.auth_sso import router as auth_sso_router
+from backend.api.auth_verification import router as auth_verification_router
 from backend.api.context_media import router as context_media_router
 from backend.api.context_pages import router as context_pages_router
 from backend.api.health import health_root_router
@@ -212,6 +213,18 @@ def create_app(
     )
     resolved_settings.validate_for_startup()
     plugin_registry = load_plugins(resolved_settings)
+    auth_providers = ProviderRegistry(
+        resolved_settings,
+        plugin_registry.auth_methods(),
+    )
+    if (
+        not resolved_settings.auth_password_login_enabled
+        and not auth_providers.login_methods()
+    ):
+        raise ValueError(
+            "password login is disabled but no active external login provider "
+            "is configured"
+        )
     # Resolve the session secret before serving: a solo_local install
     # generates its data-directory secret here, so a data directory that
     # cannot hold it fails startup instead of the first login.
@@ -248,10 +261,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.container = resolved_container
     app.state.plugin_registry = plugin_registry
-    app.state.auth_providers = ProviderRegistry(
-        resolved_settings,
-        plugin_registry.auth_methods(),
-    )
+    app.state.auth_providers = auth_providers
     if bootstrap_on_startup:
         bootstrap(resolved_settings, app)
     if page_service is not None:
@@ -343,6 +353,7 @@ def create_app(
     mount_storage_topology_health(app, resolved_container)
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(auth_sso_router, prefix="/api/v1")
+    app.include_router(auth_verification_router, prefix="/api/v1")
     app.include_router(capabilities_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")

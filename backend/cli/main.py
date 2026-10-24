@@ -11,7 +11,6 @@ from typing import Annotated
 
 import typer
 import uvicorn
-from typer.main import get_command
 
 from backend.app.bootstrap import (
     bootstrap as bootstrap_app,
@@ -20,7 +19,6 @@ from backend.app.bootstrap import (
     migration_status,
 )
 from backend.app.data_dir import data_dir, default_sqlite_url
-from backend.app.plugins import load_plugins
 from backend.app.runtime import RuntimeStartupError, serve_runtime
 from backend.app.settings import Settings
 from backend.app.version import package_version
@@ -35,6 +33,7 @@ from backend.cli.commands import prod as prod_commands
 from backend.cli.commands import rerank as rerank_commands
 from backend.cli.commands import update as update_commands
 from backend.cli.integrations import detect
+from backend.cli.invocation import PluginCommandGroup, invocation_settings
 from backend.scripts.migrate_data import (
     MigrationPrecheckError,
     ProgressEvent,
@@ -44,6 +43,7 @@ from backend.scripts.migrate_data import (
 )
 
 app = typer.Typer(
+    cls=PluginCommandGroup,
     invoke_without_command=True,
     no_args_is_help=False,
     help="Run dtxWiki and manage authenticated HTTP MCP connections.",
@@ -80,7 +80,7 @@ def root(
         None, help="Background worker mode: managed (default) or external."
     ),
 ) -> None:
-    load_plugins(Settings())
+    invocation_settings()
     if ctx.invoked_subcommand is None:
         serve(
             host=host,
@@ -134,7 +134,7 @@ def run_server(
                 "must be managed or external", param_hint="--worker-mode"
             )
         overrides["worker_mode"] = worker_mode
-    settings = Settings(**overrides)
+    settings = invocation_settings(**overrides)
     resolved_port = port if port is not None else settings.backend_port
     if settings.app_mode == "solo_local" and not is_loopback_bind_host(host):
         _warn_solo_local_network_bind(host, settings)
@@ -217,9 +217,9 @@ def bootstrap_command(
     db: str | None = typer.Option(None, help="Override database URL."),
 ) -> None:
     if db:
-        settings = Settings(database_url=db, auto_bootstrap=True)
+        settings = invocation_settings(database_url=db, auto_bootstrap=True)
     else:
-        settings = Settings(auto_bootstrap=True)
+        settings = invocation_settings(auto_bootstrap=True)
     bootstrap_app(settings)
     typer.echo(f"bootstrapped {_redact(settings.database_url)}")
 
@@ -245,7 +245,7 @@ def reindex(
         reindex_workspace,
     )
 
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     embedder = build_embedding_provider(settings)
     session_factory = make_session_factory_from_settings(settings)
     database_provider = DatabaseProvider(settings, session_factory=session_factory)
@@ -303,7 +303,7 @@ def reindex(
 
 @app.command()
 def info(json_output: bool = typer.Option(False, "--json")) -> None:
-    settings = Settings()
+    settings = invocation_settings()
     status = migration_status(settings)
     payload = {
         "data_dir": str(data_dir()),
@@ -481,16 +481,6 @@ app.command("eval")(eval_commands.eval_command)
 
 
 def main() -> None:
-    if "--version" in sys.argv[1:]:
-        # Let Click handle the eager core option before extension settings.
-        # make_context only parses root options, so a plugin's own --version
-        # still reaches normal command discovery below.
-        try:
-            with get_command(app).make_context("dtxwiki", sys.argv[1:]):
-                pass
-        except typer.Exit as exc:
-            raise SystemExit(exc.exit_code) from None
-    load_plugins(Settings()).install_cli(app)
     app()
 
 

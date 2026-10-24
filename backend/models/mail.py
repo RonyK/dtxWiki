@@ -49,8 +49,21 @@ class EmailOutbox(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         CheckConstraint(
             "message_kind IN "
             "('password_reset', 'email_verification', 'password_changed', "
-            "'job_failed', 'reconciliation_reminder')",
+            "'job_failed', 'reconciliation_reminder', 'pending_signup', "
+            "'email_reauthentication')",
             name="email_outbox_message_kind_check",
+        ),
+        CheckConstraint(
+            "(message_kind = 'pending_signup' AND recipient_user_id IS NULL "
+            "AND pending_signup_id IS NOT NULL "
+            "AND reauthentication_challenge_id IS NULL) OR "
+            "(message_kind = 'email_reauthentication' "
+            "AND recipient_user_id IS NOT NULL AND pending_signup_id IS NULL "
+            "AND reauthentication_challenge_id IS NOT NULL) OR "
+            "(message_kind NOT IN ('pending_signup', 'email_reauthentication') "
+            "AND recipient_user_id IS NOT NULL AND pending_signup_id IS NULL "
+            "AND reauthentication_challenge_id IS NULL)",
+            name="email_outbox_recipient_check",
         ),
         CheckConstraint(
             "status IN ('queued', 'sending', 'sent', 'failed')",
@@ -64,10 +77,17 @@ class EmailOutbox(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
     )
 
-    recipient_user_id: Mapped[UUID] = mapped_column(
+    recipient_user_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    pending_signup_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("auth_pending_signups.id", ondelete="CASCADE")
+    )
+    reauthentication_challenge_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("email_reauthentication_challenges.id", ondelete="CASCADE"),
     )
     token_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -146,8 +166,6 @@ class PasswordRecoveryRateLimitSlot(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 
     bucket_kind: Mapped[str] = mapped_column(Text, nullable=False)
     bucket_digest: Mapped[str] = mapped_column(Text, nullable=False)
-    window_started_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
+    window_started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

@@ -862,15 +862,32 @@ def test_password_reset_confirm_is_single_use_and_does_not_auto_login(page_servi
     assert confirmed.headers["pragma"] == "no-cache"
     assert "dtxwiki_session=" in confirmed.headers["set-cookie"]
     assert "Max-Age=0" in confirmed.headers["set-cookie"]
+    proof_cookies = confirmed.headers.get_list("set-cookie")
+    assert any(
+        "dtxwiki_session_reauth_account=" in value
+        and "Path=/api/v1/auth" in value
+        and "Max-Age=0" in value
+        for value in proof_cookies
+    )
+    assert any(
+        "dtxwiki_session_reauth=" in value and "Path=/api/v1/admin" in value
+        for value in proof_cookies
+    )
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"email": "reset-web@example.com", "password": "original-password"},
-    ).status_code == 401
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"email": "reset-web@example.com", "password": "replacement-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "reset-web@example.com", "password": "original-password"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "reset-web@example.com", "password": "replacement-password"},
+        ).status_code
+        == 200
+    )
 
     reused = client.post(
         "/api/v1/auth/password-reset/confirm",
@@ -901,6 +918,10 @@ def test_logout_revokes_presented_session_cookie(page_service):
 
     logout = client.post("/api/v1/auth/logout")
     assert logout.status_code == 200
+    assert any(
+        "dtxwiki_session_reauth_account=" in value and "Max-Age=0" in value
+        for value in logout.headers.get_list("set-cookie")
+    )
 
     stolen_me = stolen_client.get("/api/v1/auth/me")
     assert stolen_me.status_code == 401

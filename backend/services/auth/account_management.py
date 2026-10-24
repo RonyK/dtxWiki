@@ -112,11 +112,14 @@ class AuthAccountService:
         password: str,
     ) -> SessionResult:
         validate_password(password)
+        # Argon2 must not hold SQLite's database-wide writer lock. The locked
+        # transaction below rechecks every state used to authorize the write.
+        password_hash = self.sessions.credential_hasher.hash_password(password)
         with self.session_factory.begin() as session:
             live = _locked_user(session, user, verified)
             if live.password_hash is not None:
                 raise AuthFlowError("password_already_set")
-            live.password_hash = self.sessions.credential_hasher.hash_password(password)
+            live.password_hash = password_hash
             live.session_generation += 1
             issued = _issue_replacement(self.sessions, live, verified)
             self.events.user_event(session, live.id, "auth.password.set", {})

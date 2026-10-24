@@ -67,6 +67,7 @@ DEFAULT_REMEMBERED_SESSION_ABSOLUTE_TTL_SECONDS = (
 )
 RECENT_REAUTHENTICATION_TOKEN_KIND = "recent_reauthentication"
 RECENT_REAUTHENTICATION_TOKEN_VERSION = 1
+SCOPED_REAUTHENTICATION_TOKEN_VERSION = 2
 RECENT_REAUTHENTICATION_TTL_SECONDS = 5 * 60
 MIN_PASSWORD_LENGTH = identity_policy.NEW_PASSWORD_MIN_LENGTH
 _AUTH_IP_BUCKET: dict[str, list[float]] = {}
@@ -144,6 +145,9 @@ class RecentReauthenticationResult:
 class VerifiedRecentReauthentication:
     user_id: UUID
     session_generation: int
+    scope: str | None = None
+    session_digest: str | None = None
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +167,8 @@ class RecentReauthenticationCodec:
         *,
         user_id: UUID,
         session_generation: int,
+        scope: str | None = None,
+        session_digest: str | None = None,
     ) -> RecentReauthenticationResult:
         issued_at = self.now().replace(microsecond=0)
         expires_at = issued_at + timedelta(seconds=self.ttl_seconds)
@@ -175,10 +181,22 @@ class RecentReauthenticationCodec:
             "jti": secrets.token_urlsafe(16),
             "sg": session_generation,
         }
+        if scope is not None:
+            if scope not in {"account", "admin"} or (
+                not isinstance(session_digest, str)
+                or len(session_digest) != 64
+                or any(char not in "0123456789abcdef" for char in session_digest)
+            ):
+                raise ValueError("scoped reauthentication requires a session binding")
+            payload["v"] = SCOPED_REAUTHENTICATION_TOKEN_VERSION
+            payload["scope"] = scope
+            payload["sid"] = session_digest
         encoded_payload = _base64url_encode(
             json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
         )
-        signature = _base64url_encode(self._sign(encoded_payload.encode()))
+        signature = _base64url_encode(
+            self._sign(encoded_payload.encode(), version=payload["v"])
+        )
         return RecentReauthenticationResult(
             proof_token=require_ascii_token(
                 f"{encoded_payload}.{signature}",
@@ -199,21 +217,37 @@ class RecentReauthenticationCodec:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof is malformed"
             ) from exc
+        signed_version = RECENT_REAUTHENTICATION_TOKEN_VERSION
         expected_signature = _base64url_encode(self._sign(encoded_payload.encode()))
         if not hmac.compare_digest(encoded_signature, expected_signature):
-            raise RecentReauthenticationRequiredError(
-                "recent reauthentication proof signature is invalid"
+            signed_version = SCOPED_REAUTHENTICATION_TOKEN_VERSION
+            expected_signature = _base64url_encode(
+                self._sign(encoded_payload.encode(), version=signed_version)
             )
+            if not hmac.compare_digest(encoded_signature, expected_signature):
+                raise RecentReauthenticationRequiredError(
+                    "recent reauthentication proof signature is invalid"
+                )
         try:
             payload = json.loads(_base64url_decode(encoded_payload))
         except (ValueError, json.JSONDecodeError) as exc:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof payload is invalid"
             ) from exc
-        if payload.get("v") != RECENT_REAUTHENTICATION_TOKEN_VERSION:
+        if not isinstance(payload, dict) or payload.get("v") != signed_version:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof version is unsupported"
             )
+        scope, session_digest = payload.get("scope"), payload.get("sid")
+        if signed_version == SCOPED_REAUTHENTICATION_TOKEN_VERSION:
+            if scope not in {"account", "admin"} or (
+                not isinstance(session_digest, str)
+                or len(session_digest) != 64
+                or any(char not in "0123456789abcdef" for char in session_digest)
+            ):
+                raise RecentReauthenticationRequiredError("scoped proof is invalid")
+        elif scope is not None or session_digest is not None:
+            raise RecentReauthenticationRequiredError("legacy proof has scoped claims")
         if payload.get("kind") != RECENT_REAUTHENTICATION_TOKEN_KIND:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof kind is unsupported"
@@ -232,14 +266,19 @@ class RecentReauthenticationCodec:
             return VerifiedRecentReauthentication(
                 user_id=UUID(str(payload["sub"])),
                 session_generation=session_generation,
+                scope=payload.get("scope"),
+                session_digest=payload.get("sid"),
+                expires_at=datetime.fromtimestamp(exp, UTC),
             )
         except (KeyError, ValueError) as exc:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof subject is invalid"
             ) from exc
 
-    def _sign(self, encoded_payload: bytes) -> bytes:
-        signing_key = f"dtxwiki.recent_reauthentication.v1\0{self.secret}".encode()
+    def _sign(self, encoded_payload: bytes, *, version: int = 1) -> bytes:
+        signing_key = (
+            f"dtxwiki.recent_reauthentication.v{version}\0{self.secret}".encode()
+        )
         return hmac.new(
             signing_key,
             encoded_payload,
@@ -885,6 +924,8 @@ class SessionService:
         *,
         user_id: UUID,
         session_generation: int,
+        scope: str | None = None,
+        session_token: str | None = None,
     ) -> RecentReauthenticationResult:
         """Issue native step-up proof after a broker-verified external login.
 
@@ -904,7 +945,12 @@ class SessionService:
                 "external reauthentication session has been revoked"
             )
         result = self._reauthentication_codec().issue(
-            user_id=user.id, session_generation=user.session_generation
+            user_id=user.id,
+            session_generation=user.session_generation,
+            scope=scope,
+            session_digest=hashlib.sha256(session_token.encode()).hexdigest()
+            if session_token
+            else None,
         )
         self._emit_session_audit(
             session,
@@ -921,8 +967,21 @@ class SessionService:
         *,
         proof_token: str,
         user_id: UUID,
+        scope: str | None = None,
+        session_token: str | None = None,
     ) -> VerifiedRecentReauthentication:
         verified = self._reauthentication_codec().verify(proof_token)
+        if verified.scope is not None and (
+            verified.scope != scope
+            or session_token is None
+            or not hmac.compare_digest(
+                verified.session_digest or "",
+                hashlib.sha256(session_token.encode()).hexdigest(),
+            )
+        ):
+            raise RecentReauthenticationRequiredError(
+                "recent reauthentication proof has another purpose or session"
+            )
         if verified.user_id != user_id:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof belongs to another user"

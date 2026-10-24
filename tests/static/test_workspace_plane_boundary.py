@@ -85,7 +85,6 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "uploader labels, after shard sessions close. Metadata and cleanup route "
         "through session_for(workspace_id); split-database API tests cover both."
     ),
-
     # -- WorkspaceDirectory thin-lookup pattern:
     # resolve workspace_id + membership role on the control session, then do
     # the actual page read/write through session_for(workspace_id).
@@ -407,6 +406,11 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # separate allowlist rather than folded into CONTROL_SESSION_FACTORY_
 # ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
+    "backend/api/auth_verification.py": (
+        "Identity-plane only: browser-bound pending signup and purpose-bound "
+        "reauthentication challenges use global users/identity/outbox records, "
+        "never workspace document or membership data."
+    ),
     "backend/api/auth_sso.py": (
         "Builds the external-login broker over control-plane users, identities "
         "and browser login transactions. Provisioning uses the existing Personal "
@@ -1076,7 +1080,6 @@ ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
         "uploader labels, after shard sessions close. Metadata and cleanup route "
         "through session_for(workspace_id); split-database API tests cover both."
     ),
-
     "backend/api/admin.py": (
         "FIXED. admin_list_context_media_orphans lists the orphans on "
         "WorkspaceSessionFactoryDep, closes it, and resolves uploader names on "

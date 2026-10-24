@@ -31,7 +31,8 @@ INITIAL_REVISION = "bd62193d5cf6"
 CORE_REVISION = "efcbcf724889"
 PUBLISHED_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "ef53a0a7061c"
-CURRENT_HEAD = "7e2b9c4d6a18"
+LOGIN_REVISION = "7e2b9c4d6a18"
+CURRENT_HEAD = "c31a6d907e42"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -89,7 +90,8 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         CORE_REVISION: INITIAL_REVISION,
         PUBLISHED_REVISION: CORE_REVISION,
         RELEASE_014_REVISION: PUBLISHED_REVISION,
-        CURRENT_HEAD: RELEASE_014_REVISION,
+        LOGIN_REVISION: RELEASE_014_REVISION,
+        CURRENT_HEAD: LOGIN_REVISION,
     }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())

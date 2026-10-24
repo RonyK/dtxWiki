@@ -79,6 +79,12 @@ describe("AdminUserRecoverySection", () => {
             available_providers: [{ slug: "company", display_name: "Company SSO", supports_reauthentication: true }],
           } });
         }
+        if (url.startsWith(`${BASE}/api/v1/auth/verification?`)) {
+          return jsonResponse({ data: {
+            scope: "admin", mode: "sso", verified: false, reauthenticated_until: null,
+            providers: [{ slug: "company", display_name: "Company SSO", supports_reauthentication: true }],
+          } });
+        }
         if (url === `${BASE}/api/v1/auth/reauthenticate`) {
           const body = JSON.parse(String(init?.body));
           if (body.current_password === "wrong-password") {
@@ -172,7 +178,7 @@ describe("AdminUserRecoverySection", () => {
         "Your recent verification expired. Verify your identity again to search users.",
       )).toBeInTheDocument();
       expect(screen.queryByLabelText("Your current password")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Verify with Company SSO" })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "Verify with Company SSO" })).toBeInTheDocument();
       expect(screen.queryByRole("searchbox", { name: /Search users/ })).not.toBeInTheDocument();
     } finally {
       window.history.replaceState(null, "", originalUrl);

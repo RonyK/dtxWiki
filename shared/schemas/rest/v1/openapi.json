@@ -3584,6 +3584,22 @@
         ],
         "type": "string"
       },
+      "ConfirmationTokenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "ConfirmationTokenRequest",
+        "type": "object"
+      },
       "ContextImageMediaType": {
         "enum": [
           "image/png",
@@ -7035,6 +7051,118 @@
           "message"
         ],
         "title": "DraftReviewReason",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmData": {
+        "properties": {
+          "reauthenticated_until": {
+            "format": "date-time",
+            "title": "Reauthenticated Until",
+            "type": "string"
+          },
+          "return_to": {
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reauthenticated_until",
+          "return_to"
+        ],
+        "title": "EmailReauthenticationConfirmData",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 128,
+            "minLength": 32,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "scope"
+        ],
+        "title": "EmailReauthenticationConfirmRequest",
+        "type": "object"
+      },
+      "EmailReauthenticationConfirmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailReauthenticationConfirmData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailReauthenticationConfirmResponse",
+        "type": "object"
+      },
+      "EmailReauthenticationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "return_to": {
+            "default": "/account",
+            "maxLength": 2048,
+            "title": "Return To",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "EmailReauthenticationRequest",
+        "type": "object"
+      },
+      "EmailReauthenticationRequestData": {
+        "properties": {
+          "status": {
+            "const": "email_sent",
+            "default": "email_sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "EmailReauthenticationRequestData",
+        "type": "object"
+      },
+      "EmailReauthenticationRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailReauthenticationRequestData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "EmailReauthenticationRequestResponse",
         "type": "object"
       },
       "EmailVerificationConfirmRequest": {
@@ -14841,6 +14969,150 @@
         "title": "PendingReviewInfo",
         "type": "object"
       },
+      "PendingSignupConfirmData": {
+        "properties": {
+          "return_to": {
+            "title": "Return To",
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/AuthSessionData"
+          }
+        },
+        "required": [
+          "session",
+          "return_to"
+        ],
+        "title": "PendingSignupConfirmData",
+        "type": "object"
+      },
+      "PendingSignupConfirmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PendingSignupConfirmData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "PendingSignupConfirmResponse",
+        "type": "object"
+      },
+      "PendingSignupData": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_confirmation_required": {
+            "title": "Email Confirmation Required",
+            "type": "boolean"
+          },
+          "requested": {
+            "title": "Requested",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email",
+          "email_confirmation_required",
+          "requested"
+        ],
+        "title": "PendingSignupData",
+        "type": "object"
+      },
+      "PendingSignupEmailData": {
+        "properties": {
+          "return_to": {
+            "title": "Return To",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthSessionData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "email_sent",
+              "complete"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "return_to"
+        ],
+        "title": "PendingSignupEmailData",
+        "type": "object"
+      },
+      "PendingSignupEmailRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+            "title": "Email",
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "PendingSignupEmailRequest",
+        "type": "object"
+      },
+      "PendingSignupEmailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PendingSignupEmailData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "PendingSignupEmailResponse",
+        "type": "object"
+      },
+      "PendingSignupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PendingSignupData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "PendingSignupResponse",
+        "type": "object"
+      },
       "PolicyCard": {
         "additionalProperties": false,
         "properties": {
@@ -18772,6 +19044,75 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VerificationData": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "password",
+              "sso",
+              "email",
+              "session"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LoginMethodCapability"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "reauthenticated_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reauthenticated Until"
+          },
+          "scope": {
+            "enum": [
+              "account",
+              "admin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scope",
+          "mode",
+          "verified",
+          "providers"
+        ],
+        "title": "VerificationData",
+        "type": "object"
+      },
+      "VerificationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VerificationData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "VerificationResponse",
+        "type": "object"
+      },
       "VersionEntry": {
         "additionalProperties": false,
         "properties": {
@@ -20475,9 +20816,21 @@
       }
     },
     "securitySchemes": {
+      "AccountEmailBindingCookie": {
+        "description": "Browser binding for an email confirmation with scope=account.",
+        "in": "cookie",
+        "name": "dtxwiki_email_reauth_account",
+        "type": "apiKey"
+      },
       "AccountReauthenticationCookie": {
         "in": "cookie",
         "name": "dtxwiki_session_reauth_account",
+        "type": "apiKey"
+      },
+      "AdminEmailBindingCookie": {
+        "description": "Browser binding for an email confirmation with scope=admin.",
+        "in": "cookie",
+        "name": "dtxwiki_email_reauth_admin",
         "type": "apiKey"
       },
       "HTTPBearer": {
@@ -20487,6 +20840,11 @@
       "LoginTransactionCookie": {
         "in": "cookie",
         "name": "dtxwiki_login_txn",
+        "type": "apiKey"
+      },
+      "PendingSignupCookie": {
+        "in": "cookie",
+        "name": "dtxwiki_pending_signup",
         "type": "apiKey"
       },
       "RecentReauthenticationCookie": {
@@ -20507,7 +20865,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.1.3"
+    "version": "0.1.4"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -21729,6 +22087,103 @@
         ]
       }
     },
+    "/api/v1/auth/email-reauthentication/confirm": {
+      "post": {
+        "operationId": "confirm_email_api_v1_auth_email_reauthentication_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailReauthenticationConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailReauthenticationConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "AccountEmailBindingCookie": [],
+            "SessionCookie": []
+          },
+          {
+            "AdminEmailBindingCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Confirm Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/email-reauthentication/request": {
+      "post": {
+        "operationId": "request_email_api_v1_auth_email_reauthentication_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailReauthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailReauthenticationRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Request Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/email-verification/confirm": {
       "post": {
         "operationId": "confirm_email_verification_api_v1_auth_email_verification_confirm_post",
@@ -22793,6 +23248,124 @@
         ]
       }
     },
+    "/api/v1/auth/pending-signups": {
+      "get": {
+        "operationId": "pending_signup_api_v1_auth_pending_signups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingSignupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "PendingSignupCookie": []
+          }
+        ],
+        "summary": "Pending Signup",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/pending-signups/confirm": {
+      "post": {
+        "operationId": "pending_confirm_api_v1_auth_pending_signups_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingSignupConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "PendingSignupCookie": []
+          }
+        ],
+        "summary": "Pending Confirm",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/pending-signups/email": {
+      "post": {
+        "operationId": "pending_email_api_v1_auth_pending_signups_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingSignupEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingSignupEmailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "PendingSignupCookie": []
+          }
+        ],
+        "summary": "Pending Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/reauthenticate": {
       "post": {
         "operationId": "reauthenticate_api_v1_auth_reauthenticate_post",
@@ -23078,12 +23651,53 @@
             "description": "Unprocessable Entity"
           }
         },
+        "security": [],
+        "summary": "Form Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/callback/continue": {
+      "post": {
+        "operationId": "form_callback_continue_api_v1_auth_sso__slug__callback_continue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
         "security": [
           {
             "LoginTransactionCookie": []
           }
         ],
-        "summary": "Form Callback",
+        "summary": "Form Callback Continue",
         "tags": [
           "auth"
         ]
@@ -23862,6 +24476,69 @@
           }
         ],
         "summary": "Delete Revoked Api Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verification": {
+      "get": {
+        "operationId": "verification_api_v1_auth_verification_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "account",
+              "enum": [
+                "account",
+                "admin"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "return_to",
+            "required": false,
+            "schema": {
+              "default": "/account",
+              "maxLength": 2048,
+              "title": "Return To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Verification",
         "tags": [
           "auth"
         ]

@@ -1,6 +1,9 @@
 import json
 import sys
 
+from backend.api.auth_cookies import PENDING_SIGNUP_COOKIE
+from backend.api.auth_sso import BINDING_COOKIE
+from backend.api.auth_verification import email_binding_name
 from backend.app.main import create_app
 from backend.policy.rest_scopes import (
     REST_REQUIRED_SCOPES,
@@ -25,6 +28,11 @@ ACCOUNT_REAUTHENTICATION_SECURITY = [
     {"SessionCookie": [], "AccountReauthenticationCookie": []}
 ]
 LOGIN_TRANSACTION_SECURITY = [{"LoginTransactionCookie": []}]
+PENDING_SIGNUP_SECURITY = [{"PendingSignupCookie": []}]
+EMAIL_REAUTHENTICATION_SECURITY = [
+    {"SessionCookie": [], "AccountEmailBindingCookie": []},
+    {"SessionCookie": [], "AdminEmailBindingCookie": []},
+]
 OPTIONAL_SESSION_COOKIE_SECURITY = [{}, {"SessionCookie": []}]
 OAUTH_REVOKE_SECURITY = [
     {"SessionCookie": []},
@@ -57,6 +65,8 @@ FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS = {
 # These handlers authenticate by reading the session cookie directly instead of
 # using RestActorDep, so FastAPI cannot infer their actual security contract.
 OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/auth/verification"),
+    ("POST", "/api/v1/auth/email-reauthentication/request"),
     ("GET", "/api/v1/auth/identities"),
     ("POST", "/api/v1/auth/sso/{slug}/reauthenticate"),
     ("POST", "/api/v1/auth/reauthenticate"),
@@ -102,7 +112,17 @@ OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
 
 OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {
     ("GET", "/api/v1/auth/sso/{slug}/callback"),
-    ("POST", "/api/v1/auth/sso/{slug}/callback"),
+    ("POST", "/api/v1/auth/sso/{slug}/callback/continue"),
+}
+
+OPENAPI_PENDING_SIGNUP_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/auth/pending-signups"),
+    ("POST", "/api/v1/auth/pending-signups/email"),
+    ("POST", "/api/v1/auth/pending-signups/confirm"),
+}
+
+OPENAPI_EMAIL_REAUTHENTICATION_ROUTES: set[RouteKey] = {
+    ("POST", "/api/v1/auth/email-reauthentication/confirm"),
 }
 
 OPENAPI_OPTIONAL_SESSION_ROUTES: set[RouteKey] = {
@@ -117,6 +137,9 @@ OPENAPI_OAUTH_REVOKE_ROUTES: set[RouteKey] = {
 # Explicitly reviewed unauthenticated operations. Logout is deliberately
 # idempotent and public: a missing or invalid cookie still clears browser state.
 OPENAPI_PUBLIC_ROUTES: set[RouteKey] = {
+    # The external POST landing page only returns a same-origin continuation
+    # form; it neither consumes the transaction nor authenticates an account.
+    ("POST", "/api/v1/auth/sso/{slug}/callback"),
     ("GET", "/api/v1/capabilities"),
     ("GET", "/api/v1/auth/sso/{slug}/start"),
     ("GET", "/api/v1/auth/methods/{method_id}/icon.png"),
@@ -188,6 +211,15 @@ def reviewed_openapi_security() -> dict[RouteKey, list[dict[str, list]]]:
             for route in OPENAPI_LOGIN_TRANSACTION_ROUTES
         }
     )
+    route_security.update(
+        {route: PENDING_SIGNUP_SECURITY for route in OPENAPI_PENDING_SIGNUP_ROUTES}
+    )
+    route_security.update(
+        {
+            route: EMAIL_REAUTHENTICATION_SECURITY
+            for route in OPENAPI_EMAIL_REAUTHENTICATION_ROUTES
+        }
+    )
     return route_security
 
 
@@ -215,7 +247,24 @@ def build_openapi_schema() -> dict:
     security_schemes["LoginTransactionCookie"] = {
         "type": "apiKey",
         "in": "cookie",
-        "name": "dtxwiki_login_txn",
+        "name": BINDING_COOKIE,
+    }
+    security_schemes["PendingSignupCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": PENDING_SIGNUP_COOKIE,
+    }
+    security_schemes["AccountEmailBindingCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": email_binding_name("account"),
+        "description": "Browser binding for an email confirmation with scope=account.",
+    }
+    security_schemes["AdminEmailBindingCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": email_binding_name("admin"),
+        "description": "Browser binding for an email confirmation with scope=admin.",
     }
     for (method, path), security in reviewed_openapi_security().items():
         operation = schema.get("paths", {}).get(path, {}).get(method.lower())

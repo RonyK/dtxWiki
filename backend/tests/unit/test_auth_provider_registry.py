@@ -1,18 +1,33 @@
 import io
 from dataclasses import replace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from PIL import Image
 
 from backend.app.settings import Settings
 from backend.services.auth.provider_registry import ProviderRegistry
-from backend.spi.auth import Branding
-from backend.testing.fake_auth_method import FakeAuthMethod
+from backend.spi.auth import BeginRequest, Branding, CallbackInput
+from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod, FakeSamlMethod
+from backend.testing.spi_conformance.auth import assert_auth_method_contract
 
 
 def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_branding(
     tmp_path, monkeypatch
 ):
+    from backend.app.main import create_app
+
+    # Serving must refuse a lockout before creating storage. This guard does
+    # not belong to Settings/bootstrap: CLI recovery must remain available.
+    disabled = Settings(
+        auth_password_login_enabled=False,
+        database_url=f"sqlite:///{tmp_path / 'must-not-exist.sqlite'}",
+        session_secret="s" * 64,
+        _env_file=None,
+    )
+    with pytest.raises(ValueError, match="no active external login provider"):
+        create_app(settings=disabled)
+    assert not (tmp_path / "must-not-exist.sqlite").exists()
     settings = Settings(public_base_url="https://wiki.example.test")
     method = FakeAuthMethod()
     for method_id in ("password", "core.password", "core.oidc", "invalid/method"):
@@ -88,3 +103,58 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
                     "client_secret_ref": secret_ref,
                 }
             )
+    # SAML uses a signed assertion and InResponseTo, with neither OIDC nonce
+    # nor PKCE/client-secret requirements. Fresh AuthnInstant supports reauth.
+    saml = FakeSamlMethod()
+    registry = ProviderRegistry(settings, [saml])
+    registry.add({"slug": "saml", "method": "test_saml"})
+    provider = registry.get("saml")
+    assert registry.login_methods()[0]["supports_reauthentication"] is True
+    for field, value in (
+        ("nonce", "supported"),
+        ("pkce", "required"),
+        ("id_token", "signed"),
+    ):
+        invalid = FakeSamlMethod()
+        invalid.descriptor = replace(
+            invalid.descriptor,
+            capabilities=replace(invalid.descriptor.capabilities, **{field: value}),
+        )
+        with pytest.raises(ValueError, match="capabilities"):
+            ProviderRegistry(settings, [invalid])
+    invalid.descriptor = replace(saml.descriptor, interaction="credential")
+    with pytest.raises(ValueError, match="capabilities"):
+        ProviderRegistry(settings, [invalid])
+
+    def saml_callback(changes=None):
+        def callback(instruction):
+            state = parse_qs(urlsplit(instruction.url).query)["RelayState"][0]
+            return CallbackInput(
+                http_method="POST",
+                query={},
+                form={
+                    "RelayState": state,
+                    "InResponseTo": instruction.protocol_request_id,
+                    "SAMLResponse": "valid",
+                    **(changes or {}),
+                },
+                protocol_request_id=instruction.protocol_request_id,
+            )
+
+        return callback
+
+    assert_auth_method_contract(
+        saml,
+        provider.context,
+        begin=BeginRequest(
+            purpose="reauth", state="core-state", force_reauthentication=True
+        ),
+        successful_callback=saml_callback(),
+        rejected_callbacks={
+            "signature": saml_callback({"SAMLResponse": "bad-signature"}),
+            "audience": saml_callback({"SAMLResponse": "bad-audience"}),
+            "correlation": saml_callback({"InResponseTo": "other-request"}),
+        },
+        expected_issuer=FAKE_ISSUER,
+        expected_subject="fake-saml-subject",
+    )

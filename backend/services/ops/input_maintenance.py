@@ -32,8 +32,10 @@ from backend.services.ops.migration_preflight import (
 )
 
 # These explicit revisions retain the complete input CHECK contract; the
-# index and login additions do not change input-policy constraints.
-CONSTRAINED_REVISIONS = frozenset({REVISION, "ef53a0a7061c", "7e2b9c4d6a18"})
+# index and auth additions do not change input-policy constraints.
+CONSTRAINED_REVISIONS = frozenset(
+    {REVISION, "ef53a0a7061c", "7e2b9c4d6a18", "c31a6d907e42"}
+)
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
     {
         "bd62193d5cf6",

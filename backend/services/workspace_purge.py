@@ -69,6 +69,8 @@ GLOBAL_TABLES = frozenset(
         "api_tokens",
         "app_metadata",
         "auth_login_transactions",
+        "auth_pending_signups",
+        "email_reauthentication_challenges",
         "email_outbox",
         "oauth_access_token_jti",
         "oauth_clients",
@@ -448,8 +450,7 @@ def build_purge_plan(
             if not edge.nullable_columns:
                 continue
             if not any(
-                edge.table_name in component
-                and edge.parent_table_name in component
+                edge.table_name in component and edge.parent_table_name in component
                 for component in components
             ):
                 continue

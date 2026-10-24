@@ -1,8 +1,9 @@
 """Core-owned browser login and account management routes."""
 
 import html
+import secrets
 from typing import Annotated
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -22,7 +23,15 @@ from backend.api.auth import (
     set_recent_reauthentication_cookie,
     set_session_cookie,
 )
+from backend.api.auth_cookies import (
+    PENDING_SIGNUP_COOKIE,
+    PENDING_SIGNUP_PATH,
+    account_reauthentication_cookie_name,
+    set_account_reauthentication_cookie,
+)
 from backend.api.deps import SessionFactoryDep
+from backend.api.middleware.security_headers import CSP_SCRIPT_NONCE_STATE_KEY
+from backend.api.request_origin import require_same_origin
 from backend.app.errors import build_rest_error_response
 from backend.schemas.auth import (
     AuthSessionResponse,
@@ -35,10 +44,16 @@ from backend.services.auth.account_management import (
 )
 from backend.services.auth.broker import AuthBroker
 from backend.services.auth.events import AuthEvents
-from backend.services.auth.login_transactions import LOGIN_TTL_SECONDS, AuthFlowError
+from backend.services.auth.external_signup import ExternalSignupService
+from backend.services.auth.login_transactions import (
+    LOGIN_TTL_SECONDS,
+    AuthFlowError,
+    FlowContext,
+)
 from backend.services.auth.return_path import safe_return_path
+from backend.services.mail_delivery import build_email_delivery_service
 from backend.services.session_service import (
-    RECENT_REAUTHENTICATION_TTL_SECONDS,
+    AuthRateLimitError,
     SessionServiceError,
     consume_auth_slot,
 )
@@ -47,13 +62,34 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 capabilities_router = APIRouter(tags=["capabilities"])
 BINDING_COOKIE = "dtxwiki_login_txn"
 BINDING_PATH = "/api/v1/auth/sso"
+CALLBACK_MAX_BYTES = 64 * 1024
+CALLBACK_MAX_FIELDS = 20
 
 
-def get_auth_events(session_factory: SessionFactoryDep):
+def get_auth_events(session_factory: SessionFactoryDep) -> AuthEvents:
     return AuthEvents(session_factory)
 
 
 AuthEventsDep = Annotated[AuthEvents, Depends(get_auth_events)]
+
+
+def get_signups(
+    request: Request,
+    session_factory: SessionFactoryDep,
+    sessions: SessionServiceDep,
+    events: AuthEventsDep,
+) -> ExternalSignupService:
+    return ExternalSignupService(
+        session_factory,
+        request.app.state.auth_providers,
+        sessions,
+        build_email_delivery_service(request.app.state.settings),
+        events,
+        sessions.token_codec.now,
+    )
+
+
+SignupDep = Annotated[ExternalSignupService, Depends(get_signups)]
 
 
 def get_broker(
@@ -61,9 +97,15 @@ def get_broker(
     session_factory: SessionFactoryDep,
     sessions: SessionServiceDep,
     events: AuthEventsDep,
-):
+    signups: SignupDep,
+) -> AuthBroker:
     return AuthBroker(
-        session_factory, request.app.state.auth_providers, sessions, events=events
+        session_factory,
+        request.app.state.auth_providers,
+        sessions,
+        events=events,
+        signups=signups,
+        mail_configured=request.app.state.settings.mail_configured,
     )
 
 
@@ -75,7 +117,7 @@ def get_accounts(
     session_factory: SessionFactoryDep,
     sessions: SessionServiceDep,
     events: AuthEventsDep,
-):
+) -> AuthAccountService:
     return AuthAccountService(
         session_factory, request.app.state.auth_providers, sessions, events
     )
@@ -91,64 +133,57 @@ def flow_error(exc):
             "The external authentication operation could not be completed.",
             status_code=409
             if exc.code in {"last_login_method", "identity_already_linked"}
+            else 429
+            if exc.code == "rate_limited"
+            else 403
+            if exc.code == "server_admin_required"
             else 400,
         )
     )
 
 
 def same_origin(request):
-    base = urlsplit(request.app.state.settings.public_base_url or "")
-    expected = f"{base.scheme}://{base.netloc}"
-    if request.headers.get("origin") != expected or not base.netloc:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error_code": "origin_required",
-                "message": "A same-origin request is required.",
-            },
-        )
+    require_same_origin(request)
 
 
 def account_cookie_name(settings):
-    return f"{settings.session_cookie_name}_reauth_account"
+    return account_reauthentication_cookie_name(settings)
 
 
 def set_account_proof(response, settings, request, result):
-    from backend.api.cookie_budget import set_bounded_cookie
-
-    set_bounded_cookie(
+    set_account_reauthentication_cookie(
         response,
-        key=account_cookie_name(settings),
-        value=result.proof_token,
-        httponly=True,
+        settings,
         secure=session_cookie_secure_for_request(settings, request),
-        samesite="strict",
-        path="/api/v1/auth",
-        max_age=RECENT_REAUTHENTICATION_TTL_SECONDS,
-        expires=result.reauthenticated_until,
+        result=result,
     )
 
 
 def require_account_proof(request, sessions, user_id):
-    sessions.verify_recent_reauthentication(
+    from backend.services.auth.reauthentication_policy import ReauthenticationPolicy
+
+    ReauthenticationPolicy(
+        sessions.session_factory,
+        sessions,
+        request.app.state.auth_providers,
+        request.app.state.settings.mail_configured,
+    ).require(
+        session_token=current_session_token(request),
+        scope="account",
         proof_token=request.cookies.get(
             account_cookie_name(request.app.state.settings), ""
         ),
-        user_id=user_id,
     )
 
 
 def set_binding(response, request, binding, provider):
-    cross_post = provider.method.descriptor.protocol == "saml2"
     secure = session_cookie_secure_for_request(request.app.state.settings, request)
-    if cross_post and not secure:
-        raise AuthFlowError("sso_provider_unavailable")
     response.set_cookie(
         BINDING_COOKIE,
         binding,
         httponly=True,
         secure=secure,
-        samesite="none" if cross_post else "lax",
+        samesite="lax",
         path=BINDING_PATH,
         max_age=LOGIN_TTL_SECONDS,
     )
@@ -190,6 +225,7 @@ def start(
     next: str | None = None,
     remember_me: bool = False,
 ):
+    context = FlowContext("login", safe_return_path(next))
     try:
         # No account identifier exists yet. Consume only the IP axis rather
         # than making every visitor share one global per-email bucket.
@@ -197,24 +233,35 @@ def start(
         provider = broker.provider(slug)
         instruction, binding = broker.transactions.begin(
             provider,
-            return_to=safe_return_path(next),
+            return_to=context.return_to,
             remember_me=remember_me,
         )
         response = instruction_response(instruction)
         set_binding(response, request, binding, provider)
         return response
     except AuthFlowError as exc:
-        return callback_error(exc.code)
+        return callback_error(exc.code, context)
     except SessionServiceError as exc:
-        return no_store_response(auth_error_response(exc))
+        return callback_error(exc.error_code, context)
     except Exception:
-        return callback_error("sso_provider_unavailable")
+        return callback_error("sso_provider_unavailable", context)
 
 
-def callback_error(code):
+def callback_error(code, context: FlowContext | None = None):
+    if context is not None and context.purpose != "login":
+        destination = urlsplit(context.return_to)
+        query = parse_qsl(destination.query, keep_blank_values=True)
+        query = [(key, value) for key, value in query if key != "auth_error"]
+        query.append(("auth_error", code))
+        target = urlunsplit(destination._replace(query=urlencode(query)))
+    else:
+        query = [("auth_error", code)]
+        if context is not None:
+            query.append(("next", context.return_to))
+        target = "/login?" + urlencode(query)
     return no_store_response(
         RedirectResponse(
-            "/login?" + urlencode({"auth_error": code}),
+            target,
             status_code=302,
         )
     )
@@ -229,12 +276,85 @@ def callback(
     )
 
 
+async def callback_form(request: Request) -> dict[str, str]:
+    """Bound the wire payload before multipart or URL-encoded parsing."""
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > CALLBACK_MAX_BYTES:
+            raise AuthFlowError("sso_transaction_invalid")
+
+    async def buffered_body():
+        return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+    buffered = Request(request.scope, buffered_body)
+    try:
+        async with buffered.form(
+            max_fields=CALLBACK_MAX_FIELDS,
+            max_files=0,
+            max_part_size=CALLBACK_MAX_BYTES,
+        ) as form:
+            fields = form.multi_items()
+            if (
+                len(fields) > CALLBACK_MAX_FIELDS
+                or len({key for key, _ in fields}) != len(fields)
+                or any(not isinstance(value, str) for _, value in fields)
+            ):
+                raise AuthFlowError("sso_transaction_invalid")
+            return dict(fields)
+    except AuthFlowError:
+        raise
+    except Exception as exc:
+        raise AuthFlowError("sso_transaction_invalid") from exc
+
+
 @router.post("/sso/{slug}/callback")
-async def form_callback(
+async def form_callback(slug: str, request: Request):
+    # Cross-site POST omits the native Lax session cookie. Do not consume the
+    # transaction or call the IdP until a same-origin form restores cookies.
+    try:
+        form = await callback_form(request)
+    except AuthFlowError:
+        return callback_error("sso_transaction_invalid")
+    nonce = secrets.token_urlsafe(24)
+    setattr(request.state, CSP_SCRIPT_NONCE_STATE_KEY, nonce)
+    action = request.url_for("form_callback_continue", slug=slug).path
+    fields = "".join(
+        f'<input type="hidden" name="{html.escape(key, quote=True)}" '
+        f'value="{html.escape(value, quote=True)}">'
+        for key, value in form.items()
+    )
+    return no_store_response(
+        HTMLResponse(
+            '<!doctype html><meta name="referrer" content="same-origin">'
+            "<title>Continue sign-in</title>"
+            '<form id="sso-callback" method="post" '
+            f'action="{html.escape(action, quote=True)}">'
+            f'{fields}<button type="submit">Continue</button></form>'
+            f'<script nonce="{nonce}">'
+            "HTMLFormElement.prototype.submit.call("
+            'document.getElementById("sso-callback"));</script>',
+            headers={
+                "Content-Security-Policy": "default-src 'none'; "
+                f"script-src 'nonce-{nonce}'; form-action 'self'; "
+                "base-uri 'none'; frame-ancestors 'none'",
+                # no-referrer makes browser form navigations send Origin:null,
+                # defeating the continuation's same-origin check. Only the
+                # token-free callback location is shared within this origin.
+                "Referrer-Policy": "same-origin",
+            },
+        )
+    )
+
+
+@router.post("/sso/{slug}/callback/continue")
+async def form_callback_continue(
     slug: str, request: Request, broker: BrokerDep, sessions: SessionServiceDep
 ):
-    form = await request.form(max_fields=20, max_files=0)
-    if any(not isinstance(value, str) for value in form.values()):
+    same_origin(request)
+    try:
+        form = await callback_form(request)
+    except AuthFlowError:
         return callback_error("sso_transaction_invalid")
     return await run_in_threadpool(
         complete_callback,
@@ -243,12 +363,29 @@ async def form_callback(
         broker,
         sessions,
         {},
-        dict(form),
+        form,
     )
 
 
+def recover_callback_context(slug, request, broker, state, binding):
+    base = (request.app.state.settings.public_base_url or "").rstrip("/")
+    if not base:
+        return None
+    try:
+        return broker.transactions.context_for_callback(
+            slug,
+            f"{base}/api/v1/auth/sso/{slug}/callback",
+            state=state,
+            binding=binding,
+        )
+    except AuthFlowError:
+        return None
+
+
 def complete_callback(slug, request, broker, sessions, query, form=None):
-    response = None
+    params = form if form is not None else query
+    state = params.get("state") or params.get("RelayState")
+    binding = request.cookies.get(BINDING_COOKIE)
     try:
         consume_auth_slot(auth_client_ip(request), "")
         current = None
@@ -258,11 +395,10 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
                 _, current = sessions.authenticate_session_context(token)
             except SessionServiceError:
                 pass
-        params = form if form is not None else query
         result = broker.complete(
             slug,
-            state=params.get("state") or params.get("RelayState"),
-            binding=request.cookies.get(BINDING_COOKIE),
+            state=state,
+            binding=binding,
             query=query,
             form=form,
             current_session=current,
@@ -273,6 +409,20 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
         if result.session is not None:
             set_session_cookie(
                 response, request.app.state.settings, request, result.session
+            )
+        if result.pending_signup is not None:
+            from backend.services.auth.external_signup import PENDING_SIGNUP_TTL_SECONDS
+
+            response.set_cookie(
+                PENDING_SIGNUP_COOKIE,
+                result.pending_signup.binding,
+                httponly=True,
+                secure=session_cookie_secure_for_request(
+                    request.app.state.settings, request
+                ),
+                samesite="lax",
+                path=PENDING_SIGNUP_PATH,
+                max_age=PENDING_SIGNUP_TTL_SECONDS,
             )
         if result.reauthentication is not None:
             set_recent_reauthentication_cookie(
@@ -286,16 +436,22 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
             )
     except AuthFlowError as exc:
         broker.audit_failure(slug, exc.code)
-        response = callback_error(exc.code)
-    except SessionServiceError:
-        broker.audit_failure(slug, "sso_assertion_invalid")
-        response = callback_error("sso_assertion_invalid")
+        context = exc.context
+        if context is None and exc.code == "sso_provider_unavailable":
+            context = recover_callback_context(slug, request, broker, state, binding)
+        return callback_error(exc.code, context)
+    except AuthRateLimitError as exc:
+        context = recover_callback_context(slug, request, broker, state, binding)
+        broker.audit_failure(slug, exc.error_code)
+        return callback_error(exc.error_code, context)
+    except SessionServiceError as exc:
+        broker.audit_failure(slug, exc.error_code)
+        return callback_error(exc.error_code)
     except Exception:
         broker.audit_failure(slug, "sso_provider_unavailable")
-        response = callback_error("sso_provider_unavailable")
-    finally:
-        if response is not None:
-            response.delete_cookie(BINDING_COOKIE, path=BINDING_PATH)
+        return callback_error("sso_provider_unavailable")
+    # Callback responses never mutate the shared binding cookie: a delayed
+    # response must not erase the binding installed by a more recent start.
     return response
 
 

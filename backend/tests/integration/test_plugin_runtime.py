@@ -30,6 +30,7 @@ from backend.worker.runtime import OneShotWorker
 
 def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(monkeypatch):
     events = []
+    configured = []
     router = APIRouter()
 
     @router.get("/probe")
@@ -56,6 +57,7 @@ def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(monkeypatc
         version="1.0",
         requires_core=">=0.1,<1",
         requires_spi=">=1.1,<2",
+        configure=configured.append,
         mount=lambda: PluginMount(
             api_router=router,
             ui_app=Starlette(routes=[Route("/", lambda _: PlainTextResponse("UI"))]),
@@ -92,6 +94,30 @@ def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(monkeypatc
     collision = replace(plugin, worker_handlers=lambda: {"extraction": handler})
     with pytest.raises(plugins.PluginConfigurationError, match="worker handler"):
         plugins.PluginRegistry((collision,)).worker_handlers()
+
+    # Exercise the real CLI entry path as well as registry composition. Each
+    # invocation owns one instance, even when root and bootstrap both need it.
+    from backend.cli import main as cli_main
+
+    monkeypatch.setenv("DTXWIKI_PLUGINS", "example")
+    configured.clear()
+    command = CliRunner().invoke(cli_main.app, ["example", "probe-cli"])
+    assert command.exit_code == 0, command.output
+    assert command.output.strip() == "example command"
+    assert configured == [None]
+    bootstrapped = []
+
+    def bootstrap(settings):
+        bootstrapped.append(settings)
+        plugins.load_plugins(settings)
+
+    monkeypatch.setattr(cli_main, "bootstrap_app", bootstrap)
+    command = CliRunner().invoke(
+        cli_main.app, ["bootstrap", "--db", "sqlite:///override.db"]
+    )
+    assert command.exit_code == 0, command.output
+    assert bootstrapped[0].database_url == "sqlite:///override.db"
+    assert configured == [None, None]
 
 
 def test_plugin_migration_chain_preserves_core_stamp_and_validates_model_ownership(

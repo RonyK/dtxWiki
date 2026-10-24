@@ -32,7 +32,7 @@ from backend.services.ops.input_maintenance import (
 )
 
 PRE_INPUT_REVISION = "efcbcf724889"
-CURRENT_HEAD = "7e2b9c4d6a18"
+CURRENT_HEAD = "c31a6d907e42"
 
 
 def _database(tmp_path, revision=PRE_INPUT_REVISION):

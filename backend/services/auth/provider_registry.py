@@ -79,11 +79,25 @@ class ProviderRegistry:
             ):
                 raise ValueError("invalid or duplicate auth method descriptor")
             capabilities = descriptor.capabilities
+            is_saml = descriptor.protocol == "saml2"
             if (
                 capabilities.pkce not in {"required", "supported", "unsupported"}
                 or capabilities.nonce not in {"supported", "unsupported"}
                 or capabilities.id_token not in {"signed", "none"}
-                or (capabilities.id_token == "none" and capabilities.reauthentication)
+                or (
+                    capabilities.id_token == "none"
+                    and capabilities.reauthentication
+                    and not is_saml
+                )
+                or (
+                    is_saml
+                    and (
+                        descriptor.interaction != "redirect"
+                        or capabilities.pkce != "unsupported"
+                        or capabilities.nonce != "unsupported"
+                        or capabilities.id_token != "none"
+                    )
+                )
             ):
                 raise ValueError("invalid auth method capabilities")
             Draft202012Validator.check_schema(dict(descriptor.config_schema))
@@ -158,10 +172,16 @@ class ProviderRegistry:
             if key.endswith("secret_ref") and value:
                 resolve_secret(value)
         capabilities = method.descriptor.capabilities
-        if capabilities.pkce == "unsupported" and not config.get("client_secret_ref"):
-            raise ValueError("login without PKCE requires a confidential client")
-        if capabilities.nonce == "unsupported" and capabilities.pkce == "unsupported":
-            raise ValueError("login without nonce requires PKCE")
+        if method.descriptor.protocol != "saml2":
+            if capabilities.pkce == "unsupported" and not config.get(
+                "client_secret_ref"
+            ):
+                raise ValueError("login without PKCE requires a confidential client")
+            if (
+                capabilities.nonce == "unsupported"
+                and capabilities.pkce == "unsupported"
+            ):
+                raise ValueError("login without nonce requires PKCE")
         domains = [domain.strip().lower() for domain in policy.allowed_email_domains]
         if any(not domain or "@" in domain or "/" in domain for domain in domains):
             raise ValueError("invalid allowed email domain")

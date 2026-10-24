@@ -29,7 +29,7 @@ pytestmark = pytest.mark.xdist_group("postgres")
 
 CORE = "efcbcf724889"
 INPUTS = "19db79d3e622"
-CURRENT_HEAD = "7e2b9c4d6a18"
+CURRENT_HEAD = "c31a6d907e42"
 CONTENT_TABLES = ("context_page", "agent_page", "library_item")
 
 

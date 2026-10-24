@@ -6,19 +6,18 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { login, signup } from "../../shared/api/auth";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
+import { isNonSpaAuthPath, safeNextPath } from "../../shared/auth/navigation";
 import { normalizeAccountEmail, normalizeAccountName, validateAccountPassword, rejectMultilinePaste, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
-import { loginMethodStyle } from "./loginMethodBranding";
+import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
+import { SSO_ERROR_CODES } from "./ExternalAuthErrorBanner";
 
 type AuthMode = "login" | "signup";
 
-// Backend-rendered routes outside the SPA (e.g. the OAuth consent page). SPA
-// navigation to these would land on the router catch-all, so they need a
-// full-page load instead.
-const NON_SPA_PATH_PREFIXES = ["/oauth/"];
+export { safeNextPath } from "../../shared/auth/navigation";
 
 export function AuthScreen() {
   const { t, i18n } = useTranslation("auth");
@@ -120,7 +119,7 @@ export function AuthScreen() {
       !credentialFailureRef.current
     ) {
       const next = safeNextPath(searchParams.get("next"));
-      if (isNonSpaPath(next)) {
+      if (isNonSpaAuthPath(next)) {
         window.location.assign(next);
         return;
       }
@@ -164,7 +163,7 @@ export function AuthScreen() {
       const next = searchParams.get("next");
       const target =
         mode === "signup" && !next ? "/dashboard?welcome=1" : safeNextPath(next);
-      if (isNonSpaPath(target)) {
+      if (isNonSpaAuthPath(target)) {
         window.location.assign(target);
       } else {
         navigate(target);
@@ -232,7 +231,7 @@ export function AuthScreen() {
                 return <a className="icon-button" key={method.slug} style={loginMethodStyle(method)}
                   href={`${method.start_url}?${query.toString()}`}>
                   {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : null}
-                  {method.label[i18n.language.startsWith("ko") ? "ko" : "en"] || method.display_name}
+                  {loginMethodLabel(method, i18n.language)}
                 </a>;
               })}
             </div>
@@ -362,32 +361,6 @@ export function AuthScreen() {
       </section>
     </div>
   );
-}
-
-export function safeNextPath(next: string | null) {
-  if (!next || new TextEncoder().encode(next).length > 2048 || /[\\\u0000-\u0020\u007f]/u.test(next)) return "/dashboard";
-  let decoded = next.split(/[?#]/u, 1)[0];
-  for (let count = 0; count < 8; count += 1) {
-    if (!decoded.startsWith("/") || decoded.startsWith("//") || /[\\\u0000-\u0020\u007f]/u.test(decoded)) return "/dashboard";
-    const normalized = new URL(decoded, "https://dtxwiki.invalid").pathname.toLowerCase();
-    if (normalized === "/api" || normalized.startsWith("/api/")) return "/dashboard";
-    try {
-      const value = decodeURIComponent(decoded);
-      if (value === decoded) return next;
-      decoded = value;
-    } catch { return "/dashboard"; }
-  }
-  return "/dashboard";
-}
-
-const SSO_ERROR_CODES = new Set([
-  "sso_transaction_invalid", "sso_assertion_invalid", "sso_provider_unavailable",
-  "sso_idp_error", "account_link_required", "email_unverified", "identity_already_linked",
-  "account_disabled", "signup_not_allowed", "reauthentication_mismatch",
-]);
-
-function isNonSpaPath(path: string) {
-  return NON_SPA_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 function loginLocationWithoutSignupMode(searchParams: URLSearchParams) {

@@ -117,6 +117,17 @@ def test_workspace_create_statuses_and_security_schemes_are_explicit(openapi_sch
         "in": "cookie",
         "name": "dtxwiki_session_reauth",
     }
+    for scheme, cookie in (
+        ("PendingSignupCookie", "dtxwiki_pending_signup"),
+        ("AccountEmailBindingCookie", "dtxwiki_email_reauth_account"),
+        ("AdminEmailBindingCookie", "dtxwiki_email_reauth_admin"),
+    ):
+        security = schema["components"]["securitySchemes"][scheme]
+        assert {key: security[key] for key in ("type", "in", "name")} == {
+            "type": "apiKey",
+            "in": "cookie",
+            "name": cookie,
+        }
     assert member_create["security"] == SESSION_COOKIE_SECURITY
     assert join_create["security"] == SESSION_COOKIE_SECURITY
     assert (
@@ -182,6 +193,31 @@ def test_openapi_security_matches_exhaustive_reviewed_route_matrix(openapi_schem
         schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["get"]["security"]
         == LOGIN_TRANSACTION_SECURITY
     )
+    assert (
+        schema["paths"]["/api/v1/auth/sso/{slug}/callback/continue"]["post"]["security"]
+        == [{"LoginTransactionCookie": []}]
+    )
+    assert schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["post"]["security"] == []
+    for method, path in (
+        ("get", "/api/v1/auth/verification"),
+        ("post", "/api/v1/auth/email-reauthentication/request"),
+    ):
+        assert schema["paths"][path][method]["security"] == [{"SessionCookie": []}]
+    for method, path in (
+        ("get", "/api/v1/auth/pending-signups"),
+        ("post", "/api/v1/auth/pending-signups/email"),
+        ("post", "/api/v1/auth/pending-signups/confirm"),
+    ):
+        assert schema["paths"][path][method]["security"] == [
+            {"PendingSignupCookie": []}
+        ]
+    confirmation = schema["paths"]["/api/v1/auth/email-reauthentication/confirm"][
+        "post"
+    ]
+    assert confirmation["security"] == [
+        {"SessionCookie": [], "AccountEmailBindingCookie": []},
+        {"SessionCookie": [], "AdminEmailBindingCookie": []},
+    ]
 
 
 def test_mcp_client_tombstone_delete_is_browser_session_only(openapi_schema):

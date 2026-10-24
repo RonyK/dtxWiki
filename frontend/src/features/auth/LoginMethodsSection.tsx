@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 
 import {
   getLoginIdentities,
-  reauthenticate,
   setAccountPassword,
   startIdentityFlow,
   unlinkLoginIdentity,
@@ -18,7 +17,8 @@ import {
 } from "../../shared/auth/identityPolicy";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
-import { ExternalReauthenticationButtons } from "./ExternalReauthenticationButtons";
+import { ExternalAuthErrorBanner } from "./ExternalAuthErrorBanner";
+import { IdentityVerificationPanel } from "./IdentityVerificationPanel";
 import { loginMethodStyle } from "./loginMethodBranding";
 import { linkedLoginMethods } from "./loginMethods";
 
@@ -28,7 +28,6 @@ export function LoginMethodsSection() {
   const [data, setData] = useState<LoginIdentities | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,21 +65,6 @@ export function LoginMethodsSection() {
     setAuthenticatedSession(session);
     setData(await getLoginIdentities());
     await refreshSession();
-  }
-
-  async function verify(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      validateAccountPassword(password);
-    } catch (caught) {
-      setError(t((caught as Error).message));
-      return;
-    }
-    await run(async () => {
-      await reauthenticate({ current_password: password });
-      setPassword("");
-      setStatus(t("loginMethods.verified"));
-    });
   }
 
   async function onSetPassword(event: FormEvent<HTMLFormElement>) {
@@ -145,6 +129,7 @@ export function LoginMethodsSection() {
         </p>
       ) : null}
       {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      <ExternalAuthErrorBanner />
       {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
       {data ? (
         <>
@@ -186,29 +171,7 @@ export function LoginMethodsSection() {
           {canManage ? (
             <p className="account-panel-hint">{t("loginMethods.verifyHint")}</p>
           ) : null}
-          {data.has_password && canManage ? (
-            <form className="auth-form" onSubmit={(event) => void verify(event)}>
-              <label className="field-stack">
-                {t("password.current")}
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onKeyDown={preventCompositionSubmit}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-              </label>
-              <button className="icon-button" type="submit" disabled={busy}>
-                {t("loginMethods.verifyPassword")}
-              </button>
-            </form>
-          ) : null}
-          <ExternalReauthenticationButtons
-            methods={linkedProviders}
-            returnTo="/account"
-            onError={setError}
-          />
+          {canManage ? <IdentityVerificationPanel scope="account" returnTo="/account" /> : null}
           {unlinkedProviders.length > 0 ? (
             <div className="auth-actions">
               {unlinkedProviders.map((provider) => (

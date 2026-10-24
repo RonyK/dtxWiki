@@ -138,3 +138,37 @@ def test_plugin_allowlist_compatibility_and_settings_are_fail_closed(
     with pytest.raises(plugins.PluginConfigurationError, match="invalid settings"):
         plugins.load_plugins(settings())
     assert "disabled" not in loaded
+
+    # The update entry point must source its deployment env before plugin
+    # discovery; otherwise plugin-specific env keys look like unknown keys
+    # under the default Settings and configure never sees the deployment.
+    from typer.testing import CliRunner
+
+    from backend.cli import main as cli_main
+    from backend.cli.commands import update
+
+    for key in (
+        "DTXWIKI_PLUGINS",
+        "DTXWIKI_PLUGIN_SSO_CLIENT_SECRET",
+        "DTXWIKI_PLUGIN_SSO_TIMEOUT",
+    ):
+        monkeypatch.setenv(key, "temporary")
+        monkeypatch.delenv(key)
+    env_file = tmp_path / "plugins.env"
+    env_file.write_text(
+        "DTXWIKI_PLUGINS=sso\n"
+        "DTXWIKI_PLUGIN_SSO_CLIENT_SECRET=deployment-secret\n"
+        "DTXWIKI_PLUGIN_SSO_TIMEOUT=9\n"
+    )
+    configured.clear()
+    monkeypatch.setattr(
+        update.update_service, "run_check", lambda *args, **kwargs: None
+    )
+    result = CliRunner().invoke(
+        cli_main.app,
+        ["update", "--check", "--method", "venv", "--env-file", str(env_file)],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(configured) == 1
+    assert configured[0].timeout == 9
+    assert configured[0].client_secret.get_secret_value() == "deployment-secret"

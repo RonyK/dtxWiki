@@ -20,6 +20,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.settings import Settings
 from backend.domain.identity_policy import EmailPolicyError, normalize_email
 from backend.models.audit import AuditEvent
+from backend.models.auth_verification import (
+    AuthPendingSignup,
+    EmailReauthenticationChallenge,
+)
 from backend.models.base import utc_now
 from backend.models.mail import EmailOutbox
 from backend.models.password_reset import PasswordResetToken
@@ -310,6 +314,41 @@ class EmailDeliveryService:
                 token=raw_token,
             ),
             status="queued",
+        )
+        session.add(outbox)
+        session.flush()
+        return outbox
+
+    def queue_signup_confirmation(self, session, *, pending, token):
+        self._assert_configured()
+        outbox = EmailOutbox(
+            id=uuid4(),
+            pending_signup_id=pending.id,
+            recipient_email=pending.email,
+            message_kind="pending_signup",
+            status="queued",
+            attempt_count=0,
+        )
+        outbox.encrypted_token = self.cipher.encrypt(
+            outbox_id=outbox.id, message_kind=outbox.message_kind, token=token
+        )
+        session.add(outbox)
+        session.flush()
+        return outbox
+
+    def queue_reauthentication_email(self, session, *, user, challenge, token):
+        self._assert_configured()
+        outbox = EmailOutbox(
+            id=uuid4(),
+            recipient_user_id=user.id,
+            recipient_email=user.email,
+            reauthentication_challenge_id=challenge.id,
+            message_kind="email_reauthentication",
+            status="queued",
+            attempt_count=0,
+        )
+        outbox.encrypted_token = self.cipher.encrypt(
+            outbox_id=outbox.id, message_kind=outbox.message_kind, token=token
         )
         session.add(outbox)
         session.flush()
@@ -1016,8 +1055,10 @@ class EmailDeliveryService:
                     else "worker:email_delivery"
                 ),
                 action="auth.email.delivery.failed",
-                target_kind="user",
-                target_id=outbox.recipient_user_id,
+                target_kind="user"
+                if outbox.recipient_user_id
+                else "auth_pending_signup",
+                target_id=outbox.recipient_user_id or outbox.pending_signup_id,
                 payload={
                     "message_kind": outbox.message_kind,
                     "delivery_path": stable_path,
@@ -1034,6 +1075,8 @@ class EmailDeliveryService:
         sender = self.settings.mail_from_address
         if not sender:
             raise MailDeliveryConfigurationError("mail sender is not configured")
+        if outbox.message_kind in {"pending_signup", "email_reauthentication"}:
+            return self._render_authentication_confirmation(session, outbox, sender)
         if outbox.message_kind == "password_changed":
             return OutboundMail(
                 recipient=outbox.recipient_email,
@@ -1136,6 +1179,63 @@ class EmailDeliveryService:
                 f"Use this one-time link to {action}:\n\n{url}\n\n"
                 "If you did not request this, you can ignore this message.\n"
                 "본인이 요청하지 않았다면 이 메일을 무시하세요."
+            ),
+        )
+
+    def _render_authentication_confirmation(self, session, outbox, sender):
+        if outbox.message_kind == "pending_signup":
+            resource = session.get(AuthPendingSignup, outbox.pending_signup_id)
+            path = "/auth/signup/verify"
+            subject = "Complete your dtxWiki registration"
+            valid = resource is not None and resource.email == outbox.recipient_email
+        else:
+            resource = session.get(
+                EmailReauthenticationChallenge, outbox.reauthentication_challenge_id
+            )
+            user = session.get(User, outbox.recipient_user_id)
+            path = (
+                f"/auth/verify?scope={resource.scope}" if resource else "/auth/verify"
+            )
+            subject = "Confirm your dtxWiki account operation"
+            valid = (
+                resource is not None
+                and resource.revoked_at is None
+                and user is not None
+                and user.status == "active"
+                and user.session_generation == resource.session_generation
+                and user.email == outbox.recipient_email
+                and hashlib.sha256(user.email.encode()).hexdigest()
+                == resource.recipient_digest
+            )
+        if (
+            not valid
+            or resource.consumed_at is not None
+            or resource.expires_at <= utc_now()
+            or not outbox.encrypted_token
+        ):
+            raise MailDeliveryError("confirmation is no longer deliverable")
+        token = self.cipher.decrypt(
+            outbox_id=outbox.id,
+            message_kind=outbox.message_kind,
+            envelope=outbox.encrypted_token,
+        )
+        if not secrets.compare_digest(
+            resource.token_digest or "", hashlib.sha256(token.encode()).hexdigest()
+        ):
+            raise MailDeliveryError("confirmation has been replaced")
+        url = one_time_token_link(
+            (self.settings.public_base_url or "").rstrip("/"), path, token
+        )
+        return OutboundMail(
+            recipient=outbox.recipient_email,
+            sender=sender,
+            subject=subject,
+            text_body=(
+                "Open this link in the browser that started the request, "
+                "then confirm:\n\n"
+                f"{url}\n\n요청을 시작한 브라우저에서 링크를 열고 확인하세요.\n"
+                "If you did not request this, ignore this message. / "
+                "본인이 요청하지 않았다면 무시하세요."
             ),
         )
 

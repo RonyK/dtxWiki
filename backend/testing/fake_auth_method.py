@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import secrets
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -108,3 +109,63 @@ class FakeAuthMethod:
         if assertion is None:
             raise AuthMethodError("fake_invalid_code")
         return replace(assertion, nonce_verified=True)
+
+
+class FakeSamlMethod:
+    """Canned POST assertions exercising SAML correlation, without SAML crypto."""
+
+    descriptor = AuthMethodDescriptor(
+        method_id="test_saml",
+        protocol="saml2",
+        capabilities=MethodCapabilities(
+            pkce="unsupported",
+            nonce="unsupported",
+            id_token="none",
+            reauthentication=True,
+        ),
+    )
+
+    def __init__(self):
+        self.requests: list[BeginRequest] = []
+        self.callbacks: list[CallbackInput] = []
+        self._pending: dict[str, str] = {}
+
+    def validate_config(self, raw: Mapping) -> Mapping:
+        return {**raw, "issuer": raw.get("issuer", FAKE_ISSUER)}
+
+    def begin(
+        self, provider: ProviderContext, request: BeginRequest
+    ) -> RedirectInstruction:
+        if request.nonce is not None or request.code_challenge is not None:
+            raise AuthMethodError("fake_saml_received_oidc_secrets")
+        self.requests.append(request)
+        request_id = "_" + secrets.token_urlsafe(24)
+        self._pending[request_id] = request.state
+        return RedirectInstruction(
+            url=FAKE_ISSUER + "/sso?" + urlencode({"RelayState": request.state}),
+            protocol_request_id=request_id,
+        )
+
+    def complete(
+        self, provider: ProviderContext, callback: CallbackInput
+    ) -> ExternalAssertion:
+        self.callbacks.append(callback)
+        request_id = callback.protocol_request_id
+        state = self._pending.pop(request_id, None)
+        if (
+            callback.http_method != "POST"
+            or callback.expected_nonce is not None
+            or callback.pkce_verifier is not None
+            or state is None
+            or callback.form.get("RelayState") != state
+            or callback.form.get("InResponseTo") != request_id
+            or callback.form.get("SAMLResponse") != "valid"
+        ):
+            raise AuthMethodError("fake_saml_invalid_response")
+        return ExternalAssertion(
+            issuer=provider.config["issuer"],
+            subject="fake-saml-subject",
+            email="fake@example.test",
+            email_verified=True,
+            authenticated_at=datetime.now(UTC),
+        )

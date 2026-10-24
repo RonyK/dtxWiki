@@ -18,6 +18,7 @@ from sqlalchemy import select
 from backend.app.bootstrap import bootstrap as bootstrap_app
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
+from backend.cli.invocation import invocation_settings
 from backend.models.user import User
 from backend.models.workspace import Workspace
 from backend.services import server_admin_service
@@ -292,7 +293,7 @@ def users_issue_pat(
     except (ApiTokenServiceError, ValueError) as exc:
         typer.echo(f"issue-pat failed: {exc}", err=True)
         raise typer.Exit(2) from exc
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     bootstrap_app(settings)
     session_factory = make_session_factory_from_settings(settings)
     try:
@@ -377,7 +378,7 @@ def _cli_normalize_email(value: str) -> str:
 
 
 def make_user_admin_service(db: str | None) -> UserAdminService:
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     bootstrap_app(settings)
     return UserAdminService(
         session_factory=make_session_factory_from_settings(settings),
@@ -386,7 +387,7 @@ def make_user_admin_service(db: str | None) -> UserAdminService:
 
 
 def password_recovery_context(db: str | None):
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     bootstrap_app(settings)
     return settings, make_session_factory_from_settings(settings)
 
@@ -474,7 +475,7 @@ def parse_duration_seconds(value: str) -> int:
 
 
 def _admin_session_factory(db: str | None):
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     bootstrap_app(settings)
     return make_session_factory_from_settings(settings)
 
@@ -630,7 +631,7 @@ def workspace_members_remove(
 
 
 def make_workspace_membership_service(db: str | None) -> WorkspaceMembershipService:
-    settings = Settings(database_url=db) if db else Settings()
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
     bootstrap_app(settings)
     return WorkspaceMembershipService(
         session_factory=make_session_factory_from_settings(settings),

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import DeclarativeBase
     from starlette.types import ASGIApp
 
-    from backend.spi.auth import AuthMethodPlugin, CredentialMethodPlugin
+    from backend.spi.auth import AuthMethodPlugin
 
 
 @dataclass(frozen=True)
@@ -74,9 +74,7 @@ class DtxwikiPlugin:
     requires_spi: str
     settings_model: type[BaseModel] | None = None
     configure: Callable[[BaseModel | None], None] | None = None
-    auth_methods: (
-        Callable[[], Iterable[AuthMethodPlugin | CredentialMethodPlugin]] | None
-    ) = None
+    auth_methods: Callable[[], Iterable[AuthMethodPlugin]] | None = None
     mount: Callable[[], PluginMount] | None = None
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[Any]] | None = None
     worker_handlers: Callable[[], Mapping[str, JobHandler]] | None = None

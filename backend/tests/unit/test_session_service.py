@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -550,6 +552,42 @@ def test_recent_reauthentication_proof_rejects_tamper_expiry_and_wrong_password(
     )
     assert verified.user_id == result.user.user_id
     assert verified.session_generation == 0
+    old_payload, old_signature = proof.proof_token.split(".")
+    old_key = (
+        f"dtxwiki.recent_reauthentication.v1\0{session_service.token_codec.secret}"
+    ).encode()
+    assert hmac.compare_digest(
+        old_signature,
+        _base64url_encode(hmac.digest(old_key, old_payload.encode(), hashlib.sha256)),
+    )
+    with session_service.session_factory.begin() as session:
+        scoped = session_service.issue_external_reauthentication(
+            session,
+            user_id=result.user.user_id,
+            session_generation=0,
+            scope="account",
+            session_token=result.session_token,
+        )
+    assert (
+        session_service.verify_recent_reauthentication(
+            proof_token=scoped.proof_token,
+            user_id=result.user.user_id,
+            scope="account",
+            session_token=result.session_token,
+        ).scope
+        == "account"
+    )
+    scoped_payload, scoped_signature = scoped.proof_token.split(".")
+    # Pin the historical reader's signing domain: a rollback must reject an
+    # email account proof instead of treating it as unrestricted admin proof.
+    legacy_signature = _base64url_encode(
+        hmac.digest(
+            old_key,
+            scoped_payload.encode(),
+            hashlib.sha256,
+        )
+    )
+    assert not hmac.compare_digest(scoped_signature, legacy_signature)
     payload, signature = proof.proof_token.split(".", maxsplit=1)
     with pytest.raises(RecentReauthenticationRequiredError):
         session_service.verify_recent_reauthentication(

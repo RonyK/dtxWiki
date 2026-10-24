@@ -29,6 +29,8 @@ import {
 import { getAuthCapabilities, getLoginIdentities, reauthenticate, type LoginMethod } from "../../shared/api/auth";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { ExternalReauthenticationButtons } from "../auth/ExternalReauthenticationButtons";
+import { ExternalAuthErrorBanner } from "../auth/ExternalAuthErrorBanner";
+import { IdentityVerificationPanel } from "../auth/IdentityVerificationPanel";
 import { linkedLoginMethods } from "../auth/loginMethods";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { StatusBanner } from "../../shared/components/StatusBanner";
@@ -59,10 +61,12 @@ type RecoveryCapabilityState = {
 export function AdminUserRecoverySection() {
   const { t } = useTranslation("settings");
   const auth = useOptionalAuth();
-  const hasPassword = auth?.user?.has_password !== false;
+  const usesPasswordVerification = auth?.user?.has_password !== false
+    && auth?.user?.session_method !== "ext";
   const [externalVerified, setExternalVerified] = useState(false);
+  const [currentSessionAccepted, setCurrentSessionAccepted] = useState(false);
   const [returnedFromProvider] = useState(() => new URLSearchParams(window.location.search).has("sso_verified"));
-  const requiresPassword = hasPassword && !externalVerified;
+  const requiresPassword = usesPasswordVerification && !externalVerified;
   const [reauthenticationMethods, setReauthenticationMethods] = useState<LoginMethod[]>([]);
   const verificationParams = new URLSearchParams(window.location.search);
   verificationParams.set("sso_verified", "1");
@@ -187,6 +191,7 @@ export function AdminUserRecoverySection() {
   function lockDirectory(message: string) {
     setDirectoryUnlocked(false);
     setExternalVerified(false);
+    setCurrentSessionAccepted(false);
     setReauthenticatedUntil(null);
     setUnlockError(message);
     setQuery("");
@@ -425,8 +430,10 @@ export function AdminUserRecoverySection() {
           </span>
         </StatusBanner>
       ) : null}
+      <ExternalAuthErrorBanner />
+      {!usesPasswordVerification && unlockError ? <StatusBanner tone="warning">{unlockError}</StatusBanner> : null}
       {!directoryUnlocked ? (
-        <form className="admin-user-reauth" onSubmit={onUnlockDirectory}>
+        usesPasswordVerification ? <form className="admin-user-reauth" onSubmit={onUnlockDirectory}>
           <div>
             <strong>
               {t("userRecovery.unlock.title", {
@@ -434,16 +441,16 @@ export function AdminUserRecoverySection() {
               })}
             </strong>
             <p className="meta-line">
-              {hasPassword ? t("userRecovery.unlock.description", {
+              {t("userRecovery.unlock.description", {
                 defaultValue:
                   "Re-enter your server-admin password before viewing the instance user directory.",
-              }) : t("loginMethods.adminVerifyHint", { ns: "auth" })}
+              })}
             </p>
           </div>
           {unlockError ? (
             <StatusBanner tone="warning">{unlockError}</StatusBanner>
           ) : null}
-          {hasPassword ? <><label
+          <label
             className="field-stack"
             htmlFor="admin-user-directory-password"
           >
@@ -478,15 +485,21 @@ export function AdminUserRecoverySection() {
               : t("userRecovery.unlock.action", {
                   defaultValue: "Unlock user search",
                 })}
-          </button></> : null}
+          </button>
           <ExternalReauthenticationButtons methods={reauthenticationMethods}
             returnTo={reauthenticationReturnTo}
             onError={setUnlockError} />
-        </form>
+        </form> : <IdentityVerificationPanel scope="admin" returnTo={reauthenticationReturnTo}
+          onVerified={(until, _target, mode) => {
+            setDirectoryUnlocked(true);
+            setExternalVerified(true);
+            setCurrentSessionAccepted(mode === "session");
+            setReauthenticatedUntil(until);
+          }} />
       ) : (
         <>
           <StatusBanner tone="info">
-            {t("userRecovery.unlock.unlocked", {
+            {currentSessionAccepted ? t("verification.sessionAccepted", { ns: "auth" }) : t("userRecovery.unlock.unlocked", {
               defaultValue: "Protected user search is unlocked until {{date}}.",
               date: reauthenticatedUntil
                 ? formatVersionTimestamp(reauthenticatedUntil)

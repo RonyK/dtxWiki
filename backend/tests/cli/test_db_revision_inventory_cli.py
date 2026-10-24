@@ -90,7 +90,7 @@ def test_sqlite_probe_does_not_create_sidecars_or_change_bytes_or_mtime(tmp_path
     assert _fingerprint(db) == before
     payload = json.loads(result.stdout)
     assert payload["code"] == {
-        "alembic_heads": ["7e2b9c4d6a18"],
+        "alembic_heads": ["c31a6d907e42"],
         "known_alternate_revisions": [
             "0005_library_multiformat_conversion",
             "0012_graph_view_observations",

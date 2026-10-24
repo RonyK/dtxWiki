@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Res
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.api.auth_cookies import ADMIN_PROOF_PATHS, clear_reauthentication_cookies
 from backend.api.deps import SessionFactoryDep
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import Settings
@@ -49,11 +50,13 @@ from backend.services.api_token_service import (
     WorkspaceGrantRequest,
 )
 from backend.services.audit_service import AuditService
+from backend.services.auth.login_transactions import AuthFlowError
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.mail_delivery import EmailDeliveryService
 from backend.services.password_recovery_service import (
     EMAIL_VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL,
     EMAIL_VERIFICATION_RESEND_RATE_LIMIT_WINDOW_SECONDS,
+    EmailVerificationSessionRequiredError,
     InvalidPasswordResetTokenError,
     PasswordRecoveryError,
     PasswordRecoveryRateLimiter,
@@ -612,10 +615,21 @@ def request_email_verification(
 def confirm_email_verification(
     request_body: EmailVerificationConfirmRequest,
     response: Response,
+    request: Request,
     recovery_service: PasswordRecoveryServiceDep,
+    session_service: SessionServiceDep,
 ):
+    current_session = None
+    token = request.cookies.get(request.app.state.settings.session_cookie_name)
+    if token:
+        try:
+            _, current_session = session_service.authenticate_session_context(token)
+        except SessionServiceError:
+            pass
     try:
-        recovery_service.consume_email_verification(token=request_body.token)
+        recovery_service.consume_email_verification(
+            token=request_body.token, current_session=current_session
+        )
     except PasswordRecoveryError as exc:
         return no_store_response(password_recovery_error_response(exc))
     set_no_store_headers(response)
@@ -940,28 +954,35 @@ def require_recent_server_admin_reauthentication(
     admin: Annotated[AuthenticatedUser, Depends(require_server_admin)],
     session_service: SessionServiceDep,
 ) -> VerifiedRecentReauthentication:
-    proof = request.cookies.get(
-        recent_reauthentication_cookie_name(request.app.state.settings)
-    )
-    if proof is None:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error_code": "recent_reauthentication_required",
-                "message": "recent password reauthentication is required",
-            },
-        )
+    from backend.services.auth.reauthentication_policy import ReauthenticationPolicy
+
     try:
-        verified = session_service.verify_recent_reauthentication(
-            proof_token=proof,
-            user_id=admin.user_id,
+        verified = ReauthenticationPolicy(
+            session_service.session_factory,
+            session_service,
+            request.app.state.auth_providers,
+            request.app.state.settings.mail_configured,
+        ).require(
+            session_token=current_session_token(request),
+            scope="admin",
+            proof_token=request.cookies.get(
+                recent_reauthentication_cookie_name(request.app.state.settings), ""
+            ),
         )
-    except RecentReauthenticationRequiredError as exc:
+    except SessionServiceError as exc:
         raise HTTPException(
             status_code=401,
             detail={
                 "error_code": "recent_reauthentication_required",
-                "message": "recent password reauthentication is required",
+                "message": "recent reauthentication is required",
+            },
+        ) from exc
+    except AuthFlowError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": exc.code,
+                "message": "server-admin privileges are required",
             },
         ) from exc
     return verified
@@ -1025,17 +1046,18 @@ def set_recent_reauthentication_cookie(
 ) -> None:
     from backend.api.cookie_budget import set_bounded_cookie
 
-    set_bounded_cookie(
-        response,
-        key=recent_reauthentication_cookie_name(settings),
-        value=result.proof_token,
-        httponly=True,
-        secure=session_cookie_secure_for_request(settings, request),
-        samesite="strict",
-        max_age=RECENT_REAUTHENTICATION_TTL_SECONDS,
-        expires=result.reauthenticated_until,
-        path="/api/v1/admin",
-    )
+    for path in ADMIN_PROOF_PATHS:
+        set_bounded_cookie(
+            response,
+            key=recent_reauthentication_cookie_name(settings),
+            value=result.proof_token,
+            httponly=True,
+            secure=session_cookie_secure_for_request(settings, request),
+            samesite="strict",
+            max_age=RECENT_REAUTHENTICATION_TTL_SECONDS,
+            expires=result.reauthenticated_until,
+            path=path,
+        )
 
 
 def clear_recent_reauthentication_cookie(
@@ -1043,12 +1065,10 @@ def clear_recent_reauthentication_cookie(
     settings: Settings,
     request: Request,
 ) -> None:
-    response.delete_cookie(
-        key=recent_reauthentication_cookie_name(settings),
-        httponly=True,
+    clear_reauthentication_cookies(
+        response,
+        settings,
         secure=session_cookie_secure_for_request(settings, request),
-        samesite="strict",
-        path="/api/v1/admin",
     )
 
 
@@ -1129,10 +1149,14 @@ def api_token_error_response(exc: ApiTokenServiceError) -> JSONResponse:
 
 
 def password_recovery_error_response(exc: PasswordRecoveryError) -> JSONResponse:
+    if isinstance(exc, EmailVerificationSessionRequiredError):
+        status_code = 401
+    else:
+        status_code = 400 if isinstance(exc, InvalidPasswordResetTokenError) else 422
     return build_rest_error_response(
         error_code=exc.error_code,
         message=str(exc) or exc.error_code,
-        status_code=(400 if isinstance(exc, InvalidPasswordResetTokenError) else 422),
+        status_code=status_code,
     )
 
 

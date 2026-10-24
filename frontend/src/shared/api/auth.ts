@@ -21,7 +21,7 @@ export type AuthUser = {
   is_server_admin?: boolean;
   // Authoritative MCP OAuth availability (https issuer only) from GET /auth/me;
   // the MCP-access UI uses this server truth instead of a client URL heuristic.
-  oauth_available?: boolean;
+  oauth_available?: boolean | null;
   oauth_unavailable_reason?: string | null;
   // The canonical MCP endpoint under the server's configured public origin.
   // The screen shows and copies this rather than deriving one from the
@@ -31,7 +31,7 @@ export type AuthUser = {
   // client using a URL client identifier authorizes without DCR). Absent on
   // older/non-/me responses; treat undefined as "unknown, assume enabled"
   // the same way oauth_available's own default does.
-  oauth_dcr_enabled?: boolean;
+  oauth_dcr_enabled?: boolean | null;
 };
 
 export type AuthSession = {
@@ -74,18 +74,7 @@ type ReauthenticateResponse = {
   };
 };
 
-export type LoginMethod = {
-  slug: string;
-  method_id: string;
-  protocol: string;
-  display_name: string;
-  label: { ko: string; en: string };
-  icon_url: string | null;
-  background?: string | null;
-  foreground?: string | null;
-  start_url: string;
-  supports_reauthentication: boolean;
-};
+export type LoginMethod = components["schemas"]["LoginMethodCapability"];
 
 export type LoginIdentity = {
   id: string;
@@ -233,6 +222,45 @@ export function unlinkLoginIdentity(id: string) {
 export function setAccountPassword(newPassword: string) {
   return apiRequest<AuthSessionResponse>("/api/v1/auth/password/set", {
     method: "POST", body: JSON.stringify({ new_password: newPassword }),
+  }).then((response) => response.data);
+}
+
+export type IdentityVerification = components["schemas"]["VerificationData"];
+export type VerificationScope = IdentityVerification["scope"];
+export type PendingSignup = components["schemas"]["PendingSignupData"];
+
+export function getIdentityVerification(scope: VerificationScope, returnTo: string) {
+  const query = new URLSearchParams({ scope, return_to: returnTo });
+  return apiRequest<components["schemas"]["VerificationResponse"]>(`/api/v1/auth/verification?${query}`)
+    .then((response) => response.data);
+}
+
+export function requestEmailReauthentication(scope: VerificationScope, returnTo: string) {
+  return apiRequest<components["schemas"]["EmailReauthenticationRequestResponse"]>("/api/v1/auth/email-reauthentication/request", {
+    method: "POST", body: JSON.stringify({ scope, return_to: returnTo }),
+  }).then((response) => response.data);
+}
+
+export function confirmEmailReauthentication(token: string, scope: VerificationScope) {
+  return apiRequest<components["schemas"]["EmailReauthenticationConfirmResponse"]>("/api/v1/auth/email-reauthentication/confirm", {
+    method: "POST", body: JSON.stringify({ token, scope }),
+  }).then((response) => response.data);
+}
+
+export function getPendingSignup() {
+  return apiRequest<components["schemas"]["PendingSignupResponse"]>("/api/v1/auth/pending-signups")
+    .then((response) => response.data);
+}
+
+export function submitPendingSignupEmail(email: string) {
+  return apiRequest<components["schemas"]["PendingSignupEmailResponse"]>("/api/v1/auth/pending-signups/email", {
+    method: "POST", body: JSON.stringify({ email }),
+  }).then((response) => response.data);
+}
+
+export function confirmPendingSignup(token: string) {
+  return apiRequest<components["schemas"]["PendingSignupConfirmResponse"]>("/api/v1/auth/pending-signups/confirm", {
+    method: "POST", body: JSON.stringify({ token }),
   }).then((response) => response.data);
 }
 

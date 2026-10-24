@@ -6,19 +6,42 @@ import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
+from uuid import UUID
 
 from sqlalchemy import delete, select
 
 from backend.models.auth_identity import AuthLoginTransaction
+from backend.services.auth.return_path import safe_return_path
 from backend.services.db_write_intent import acquire_write_intent
 from backend.spi.auth import BeginRequest
 
 LOGIN_TTL_SECONDS = 600
 
 
+@dataclass(frozen=True)
+class FlowContext:
+    """Routing information from a browser-bound, validated login transaction."""
+
+    purpose: Literal["login", "link", "reauth"]
+    return_to: str
+    user_id: UUID | None = None
+    session_generation: int | None = None
+
+    @classmethod
+    def from_transaction(cls, transaction: AuthLoginTransaction) -> "FlowContext":
+        return cls(
+            purpose=transaction.purpose,
+            return_to=safe_return_path(transaction.return_to),
+            user_id=transaction.user_id,
+            session_generation=transaction.session_generation,
+        )
+
+
 class AuthFlowError(RuntimeError):
-    def __init__(self, code: str):
+    def __init__(self, code: str, context: FlowContext | None = None):
         self.code = code
+        self.context = context
         super().__init__(code)
 
 
@@ -67,6 +90,17 @@ class LoginTransactionStore:
             force_reauthentication=purpose == "reauth",
         )
         instruction = provider.method.begin(provider.context, request)
+        if provider.method.descriptor.protocol == "saml2":
+            request_id = instruction.protocol_request_id
+            if (
+                instruction.http_method != "GET"
+                or not isinstance(request_id, str)
+                or not 0 < len(request_id) <= 512
+                or any(not 0x20 <= ord(character) <= 0x7E for character in request_id)
+            ):
+                # InResponseTo correlation replaces OIDC nonce/PKCE for SAML.
+                # Reject before persisting an unusable browser transaction.
+                raise AuthFlowError("sso_provider_unavailable")
         now = self.now()
         with self.session_factory.begin() as session:
             acquire_write_intent(session)
@@ -99,12 +133,7 @@ class LoginTransactionStore:
         return instruction, binding
 
     def consume(self, provider, *, state, binding):
-        if (
-            not isinstance(state, str)
-            or not isinstance(binding, str)
-            or not (32 <= len(state) <= 128 and 32 <= len(binding) <= 128)
-        ):
-            raise AuthFlowError("sso_transaction_invalid")
+        self._validate_tokens(state, binding)
         with self.session_factory.begin() as session:
             acquire_write_intent(session)
             transaction = session.scalar(
@@ -112,17 +141,49 @@ class LoginTransactionStore:
                 .where(AuthLoginTransaction.state_digest == digest(state))
                 .with_for_update()
             )
-            now = self.now()
-            if (
-                transaction is None
-                or transaction.consumed_at is not None
-                or transaction.expires_at <= now
-                or transaction.provider_slug != provider.slug
-                or transaction.redirect_uri != provider.context.callback_url
-                or not hmac.compare_digest(transaction.binding_digest, digest(binding))
-            ):
-                raise AuthFlowError("sso_transaction_invalid")
-            transaction.consumed_at = now
+            self._validate_transaction(
+                transaction,
+                slug=provider.slug,
+                redirect_uri=provider.context.callback_url,
+                binding=binding,
+            )
+            transaction.consumed_at = self.now()
             session.flush()
             session.expunge(transaction)
             return transaction
+
+    def context_for_callback(
+        self, slug: str, redirect_uri: str, *, state, binding
+    ) -> FlowContext:
+        """Validate saved routing even when the provider has since been disabled."""
+        self._validate_tokens(state, binding)
+        with self.session_factory() as session:
+            transaction = session.scalar(
+                select(AuthLoginTransaction).where(
+                    AuthLoginTransaction.state_digest == digest(state)
+                )
+            )
+            self._validate_transaction(
+                transaction, slug=slug, redirect_uri=redirect_uri, binding=binding
+            )
+            return FlowContext.from_transaction(transaction)
+
+    @staticmethod
+    def _validate_tokens(state, binding):
+        if (
+            not isinstance(state, str)
+            or not isinstance(binding, str)
+            or not (32 <= len(state) <= 128 and 32 <= len(binding) <= 128)
+        ):
+            raise AuthFlowError("sso_transaction_invalid")
+
+    def _validate_transaction(self, transaction, *, slug, redirect_uri, binding):
+        if (
+            transaction is None
+            or transaction.consumed_at is not None
+            or transaction.expires_at <= self.now()
+            or transaction.provider_slug != slug
+            or transaction.redirect_uri != redirect_uri
+            or not hmac.compare_digest(transaction.binding_digest, digest(binding))
+        ):
+            raise AuthFlowError("sso_transaction_invalid")

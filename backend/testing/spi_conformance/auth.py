@@ -56,6 +56,14 @@ def assert_auth_method_contract(
         assert {"signature", "audience"} <= set(rejected_callbacks), (
             "signed OIDC conformance requires bad-signature and bad-audience fixtures"
         )
+    if descriptor.protocol == "saml2":
+        assert descriptor.capabilities.pkce == "unsupported"
+        assert descriptor.capabilities.nonce == "unsupported"
+        assert descriptor.capabilities.id_token == "none"
+        assert begin.nonce is None and begin.code_challenge is None
+        assert {"signature", "audience", "correlation"} <= set(rejected_callbacks), (
+            "SAML conformance requires signature, audience and InResponseTo fixtures"
+        )
 
     def start() -> RedirectInstruction:
         redirect = method.begin(provider, begin)
@@ -65,6 +73,14 @@ def assert_auth_method_contract(
             "HTTPS IdP redirect required"
         )
         assert redirect.http_method in {"GET", "POST"}
+        if descriptor.protocol == "saml2":
+            assert redirect.http_method == "GET", "SAML requires a Redirect request"
+            request_id = redirect.protocol_request_id
+            assert (
+                isinstance(request_id, str)
+                and 0 < len(request_id) <= 512
+                and all(0x20 <= ord(character) <= 0x7E for character in request_id)
+            ), "SAML requires a bounded printable request ID"
         fields = (
             parse_qs(parsed.query)
             if redirect.http_method == "GET"

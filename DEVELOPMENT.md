@@ -168,12 +168,34 @@ session을 관리합니다. IdP access/refresh token을 core DB나 로그에 남
 기본 계약을 확인하고, 실제 IdP의 issuer·서명·nonce·PKCE 실패 경로는 패키지 자체
 테스트로 검증합니다.
 
+SAML adapter는 `protocol="saml2"`, `interaction="redirect"`, PKCE·nonce
+`"unsupported"`, `id_token="none"`을 선언합니다. 현재 시작 요청은 HTTP Redirect만
+지원하며 `begin()`은 출력 가능한 ASCII 1–512자의 `protocol_request_id`를 반환해야
+합니다. core는 이 값을 callback에 전달하지만 SAML 서명·audience·recipient·시간·
+`InResponseTo`·replay 검증은 adapter가 수행합니다. POST 응답은 core의 같은 사이트
+후속 요청에서 처리합니다. `reauthentication=True`는 실제 강제 재인증과 검증된
+`authenticated_at`을 제공할 때만 선언하세요. SAML conformance에는 서명·audience·
+correlation 실패 fixture도 필요합니다.
+
+`on_login` provisioning hook은 core 계정 transaction의 session을 받습니다.
+`on_identity_linked`와 `on_identity_unlinked` 알림은 commit 후 실행되며 실패가
+계정 변경을 되돌리지 않습니다. credential 로그인과 사용자/provider 삭제 hook은
+현재 공개 SPI 계약에 포함되지 않습니다. 웹 lifespan은 worker에서 실행되지 않습니다.
+
+외부 가입 대기와 이메일 재인증은 core 서비스가 담당합니다. `GET /auth/verification`
+및 `GET /auth/pending-signups`는 상태 조회이며 토큰을 소비하지 않습니다. 확인 토큰은
+링크 fragment에서 즉시 제거한 뒤 명시적인 JSON POST로 제출합니다. 목적·세션에 묶인
+이메일 재인증 proof는 별도 서명 도메인의 v2이며 기존 강한 v1 proof는 계속 수용합니다.
+이전 reader는 v2를 거부하므로 계정 확인 proof가 rollback 후 관리자 proof로 해석되지
+않습니다. native session 형식은 기존 v1을 유지합니다.
+
 선택 hook은 다음과 같습니다.
 
 - `settings_model`: Pydantic 모델. 필드별 환경변수는
   `DTXWIKI_PLUGIN_<NAME>_<FIELD>`이며 알 수 없는 키는 거부합니다.
   `configure(model)`은 모든 플러그인의 설정 검증이 끝난 뒤 `Settings` 인스턴스당
-  한 번 실행됩니다.
+  한 번 실행됩니다. CLI는 실행 단위로 Settings와 registry를 공유하고, update·rollback의
+  환경 파일은 플러그인 탐색 전에 해석합니다.
 - `mount() -> PluginMount`: `api_router`는 `/api/v1/ext/<name>` 아래,
   `ui_app`은 `/ext/<name>/` 아래에 core가 mount합니다. 임의 root route를
   등록하는 hook이 아니며, 기존 overlay의 `extra_mount`는 계속 지원합니다.

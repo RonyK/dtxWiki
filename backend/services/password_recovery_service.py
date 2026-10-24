@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.models.api_token import ApiToken
+from backend.models.auth_identity import UserIdentity
 from backend.models.base import utc_now
 from backend.models.mail import PasswordRecoveryRateLimitSlot
 from backend.models.password_reset import PasswordResetToken
@@ -33,6 +34,7 @@ from backend.services.mail_delivery import (
 from backend.services.oauth_service import revoke_all_user_oauth_credentials
 from backend.services.session_service import (
     AuthenticatedUser,
+    VerifiedSession,
     authenticated_user,
     normalize_email,
     validate_password,
@@ -82,6 +84,10 @@ class PasswordRecoveryUserNotFoundError(PasswordRecoveryError):
 
 class InvalidPasswordResetTokenError(PasswordRecoveryError):
     error_code = "invalid_password_reset_token"
+
+
+class EmailVerificationSessionRequiredError(PasswordRecoveryError):
+    error_code = "email_verification_session_required"
 
 
 class ExpiredPasswordResetTokenError(InvalidPasswordResetTokenError):
@@ -829,6 +835,7 @@ class PasswordRecoveryService:
         self,
         *,
         token: str,
+        current_session: VerifiedSession | None = None,
     ) -> EmailVerificationConsumeResult:
         digest = recovery_token_digest(token, purpose="email_verification")
         verified_at = self.now()
@@ -850,6 +857,26 @@ class PasswordRecoveryService:
                 raise InvalidPasswordResetTokenError(
                     "email verification link is invalid or unavailable"
                 )
+            if (
+                user.email_verified_at is None
+                and session.scalar(
+                    select(UserIdentity.id)
+                    .where(UserIdentity.user_id == user.id)
+                    .limit(1)
+                )
+                is not None
+            ):
+                # No-mail SSO signup may approve an unverified address. When
+                # mail is enabled later, mailbox possession alone must not
+                # authorize recovery of an account already bound to an IdP.
+                if (
+                    current_session is None
+                    or current_session.user_id != user.id
+                    or current_session.session_generation != user.session_generation
+                ):
+                    raise EmailVerificationSessionRequiredError(
+                        "Sign in to the original account before verifying its email."
+                    )
             model = session.scalar(
                 select(PasswordResetToken)
                 .where(

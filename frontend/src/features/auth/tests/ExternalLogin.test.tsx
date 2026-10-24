@@ -21,12 +21,16 @@ function Location() { const location = useLocation(); return <output>{location.p
 
 it("uses capability-driven external login, safe next, remember policy and fixed callback errors", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).endsWith("/capabilities")
-    ? json({ data: { signup_enabled: false, password_login: { enabled: false }, login_methods: [provider], password_recovery: { mode: "email", admin_assisted: false } } })
+    ? json({ data: { signup_enabled: false, password_login: { enabled: false }, login_methods: [
+      { ...provider, label: { en: "Continue" } },
+      { ...provider, slug: "company", display_name: "Company SSO", label: { en: "Continue" } },
+    ], password_recovery: { mode: "email", admin_assisted: false } } })
     : json({ error_code: "invalid_session", message: "Missing cookie", request_id: "", warnings: [] }, 401));
   render(<MemoryRouter initialEntries={["/login?auth_error=sso_transaction_invalid&next=%2Foauth%2Fauthorize%3Fstate%3Done"]}>
     <AuthProvider loadInstanceCapabilities><AuthScreen /><Location /></AuthProvider>
   </MemoryRouter>);
-  const button = await screen.findByRole("link", { name: "Continue with Example" });
+  const button = await screen.findByRole("link", { name: "Example" });
+  expect(screen.getByRole("link", { name: "Company SSO" })).toBeInTheDocument();
   expect(button).toHaveStyle({ backgroundColor: "#0055aa", color: "#ffffff" });
   expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Forgot your password?" })).not.toBeInTheDocument();
@@ -48,6 +52,7 @@ it("protects the final external method and refreshes methods after setting a pas
     const url = String(input);
     if (url.endsWith("/auth/me")) return json({ data: { ...user, has_password: hasPassword } });
     if (url.endsWith("/identities")) return json({ data: { has_password: hasPassword, identities: linked ? [{ ...identity, can_unlink: hasPassword }] : [], available_providers: [provider] } });
+    if (url.includes("/verification?")) return json({ data: { scope: "account", mode: "sso", verified: proofAvailable, reauthenticated_until: null, providers: [provider] } });
     if (url.endsWith("/password/set")) {
       expect(JSON.parse(String(init?.body))).toEqual({ new_password: "new-password-123" });
       if (!proofAvailable) return json({ error_code: "recent_reauthentication_required", message: "Recent verification required", request_id: "", warnings: [] }, 401);
@@ -62,7 +67,7 @@ it("protects the final external method and refreshes methods after setting a pas
   });
   render(<AuthProvider><LoginMethodsSection /></AuthProvider>);
   expect(await screen.findByRole("button", { name: "Unlink" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Verify with Example" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Verify with Example" })).toBeInTheDocument();
   expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password-123" } });
   fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "new-password-123" } });

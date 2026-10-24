@@ -1,6 +1,7 @@
 """Account decisions belong to core; adapter claims never create sessions."""
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from sqlalchemy import select
 
@@ -12,6 +13,18 @@ from backend.domain.identity_policy import (
 from backend.models.auth_identity import UserIdentity
 from backend.models.user import User
 from backend.services.auth.login_transactions import AuthFlowError
+
+
+class ResolvedAccount(NamedTuple):
+    user: User
+    identity: UserIdentity
+    created: bool
+    linked: bool
+
+
+@dataclass(frozen=True)
+class PendingSignupRequired:
+    email: str | None
 
 
 def validate_assertion(provider, assertion):
@@ -53,8 +66,11 @@ def assertion_display_name(assertion, email):
 @dataclass
 class AccountResolver:
     sessions: object
+    mail_configured: bool = False
 
-    def resolve(self, session, provider, assertion, transaction, now):
+    def resolve(
+        self, session, provider, assertion, transaction, now, *, email_confirmed=False
+    ):
         validate_assertion(provider, assertion)
         identity_user_id = session.scalar(
             select(UserIdentity.user_id).where(
@@ -106,39 +122,46 @@ class AccountResolver:
             linked = True
             via = "user_link"
         else:
-            trusted = (
+            trusted = email_confirmed or (
                 provider.policy.trust_email_verified
                 and assertion.email_verified is True
             )
-            if not email or not trusted:
-                raise AuthFlowError("email_unverified")
+            user = (
+                session.scalar(
+                    select(User).where(User.email == email).with_for_update()
+                )
+                if email
+                else None
+            )
+            if user is not None:
+                if not (
+                    trusted
+                    and provider.policy.link_policy == "auto_verified_email"
+                    and user.email_verified_at is not None
+                ):
+                    raise AuthFlowError("account_link_required")
+                via = "auto_verified_email"
+            elif not provider.policy.jit_provisioning:
+                raise AuthFlowError("signup_not_allowed")
+            if not email:
+                return PendingSignupRequired(None)
             domain = email.rsplit("@", 1)[-1]
             if (
                 provider.policy.allowed_email_domains
                 and domain not in provider.policy.allowed_email_domains
             ):
                 raise AuthFlowError("signup_not_allowed")
-            user = session.scalar(
-                select(User).where(User.email == email).with_for_update()
-            )
-            if user is not None:
-                if not (
-                    provider.policy.link_policy == "auto_verified_email"
-                    and user.email_verified_at is not None
-                ):
-                    raise AuthFlowError("account_link_required")
-                via = "auto_verified_email"
-            else:
-                if not provider.policy.jit_provisioning:
-                    raise AuthFlowError("signup_not_allowed")
+            if user is None:
+                if self.mail_configured and not trusted:
+                    return PendingSignupRequired(email)
                 user = self.sessions.provision_user(
                     session,
                     email=email,
                     display_name=assertion_display_name(assertion, email),
-                    email_verified_at=now,
+                    email_verified_at=now if trusted else None,
                 )
                 created = True
-                via = "jit"
+                via = "jit_email_confirmed" if email_confirmed else "jit"
             linked = True
         if user is None or user.status != "active":
             raise AuthFlowError("account_disabled")
@@ -168,4 +191,4 @@ class AccountResolver:
         identity.last_email_verified = assertion.email_verified is True
         identity.last_login_at = now
         session.flush()
-        return user, identity, created, linked
+        return ResolvedAccount(user, identity, created, linked)

@@ -2,6 +2,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
@@ -17,26 +18,40 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
 from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
+from backend.models.auth_verification import (
+    AuthPendingSignup,
+    EmailReauthenticationChallenge,
+)
 from backend.models.base import Base
+from backend.models.mail import EmailOutbox
 from backend.models.user import User
 from backend.models.workspace import WorkspaceMembership
 from backend.services import server_admin_service
 from backend.services.audit_service import AuditService
 from backend.services.auth.broker import AuthBroker
-from backend.services.auth.login_transactions import AuthFlowError, digest
+from backend.services.auth.login_transactions import (
+    AuthFlowError,
+    LoginTransactionStore,
+    digest,
+)
 from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.credential_hashing import CredentialHasher
-from backend.services.session_service import SessionService, build_session_token_codec
+from backend.services.mail_delivery import EmailDeliveryService
+from backend.services.session_service import (
+    AuthRateLimitError,
+    SessionService,
+    build_session_token_codec,
+)
 from backend.spi.auth import ExternalAssertion
 from backend.spi.plugins import DtxwikiPlugin
-from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod
+from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod, FakeSamlMethod
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
 ORIGIN = "https://wiki.example.test"
 CALLBACK = "/api/v1/auth/sso/company/callback"
 
 
-def setup_client(page_service, tmp_path, monkeypatch, **policy):
+def setup_client(page_service, tmp_path, monkeypatch, extra_methods=(), **policy):
     provider_file = tmp_path / "providers.toml"
     provider_file.write_text(
         tomlkit.dumps(
@@ -65,7 +80,7 @@ def setup_client(page_service, tmp_path, monkeypatch, **policy):
         version="1.0",
         requires_core=">=0.1,<1",
         requires_spi=">=1.1,<2",
-        auth_methods=lambda: [method],
+        auth_methods=lambda: [method, *extra_methods],
     )
     monkeypatch.setattr(
         plugins.metadata,
@@ -90,6 +105,387 @@ def complete(client, state, code="valid"):
     return client.get(CALLBACK, params={"state": state, "code": code})
 
 
+def configure_external_mail(client, registry, enabled):
+    for settings in (client.app.state.settings, registry.settings):
+        settings.mail_provider = "smtp" if enabled else "none"
+        settings.mail_from_address = "wiki@example.test"
+        settings.smtp_host = "smtp.example.test"
+
+
+def deliver_confirmation(page_service, client, kind):
+    messages = []
+    delivery = EmailDeliveryService(
+        settings=client.app.state.settings,
+        provider=SimpleNamespace(send=messages.append),
+    )
+    with page_service.session_factory() as session:
+        outbox = session.scalar(
+            select(EmailOutbox)
+            .where(EmailOutbox.message_kind == kind)
+            .order_by(EmailOutbox.created_at.desc())
+            .limit(1)
+        )
+        token = delivery.cipher.decrypt(
+            outbox_id=outbox.id, message_kind=kind, envelope=outbox.encrypted_token
+        )
+        outbox_id = outbox.id
+    delivery.deliver(session_factory=page_service.session_factory, outbox_id=outbox_id)
+    assert len(messages) == 1
+    url = next(
+        line for line in messages[0].text_body.splitlines() if line.startswith(ORIGIN)
+    )
+    assert "token" not in urlsplit(url).query
+    assert parse_qs(urlsplit(url).fragment)["token"] == [token]
+    return token
+
+
+def test_external_signup_mail_policy_and_browser_bound_confirmation(
+    page_service, tmp_path, monkeypatch
+):
+    """One signup traversal covers trust, pending delivery and single-use binding."""
+    client, method, registry = setup_client(
+        page_service, tmp_path, monkeypatch, trust_email_verified=False
+    )
+    assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    with page_service.session_factory() as session:
+        user = session.scalar(select(User).where(User.email == "fake@example.test"))
+        assert user.password_hash is None and user.email_verified_at is None
+    method.assertions["collision"] = replace(
+        method.assertions["valid"], subject="another-subject"
+    )
+    assert (
+        "account_link_required"
+        in complete(client, begin(client), "collision").headers["location"]
+    )
+
+    configure_external_mail(client, registry, True)
+    method.assertions["pending"] = replace(
+        method.assertions["valid"],
+        subject="pending",
+        email="pending@example.test",
+        email_verified=False,
+    )
+    target = "/oauth/authorize?client_id=test-client"
+    response = complete(client, begin(client, next=target, remember_me=True), "pending")
+    assert response.headers["location"] == "/auth/signup/verify"
+    assert "dtxwiki_session=" not in response.headers.get("set-cookie", "")
+    status = client.get("/api/v1/auth/pending-signups")
+    assert status.json()["data"] == {
+        "email": "pending@example.test",
+        "email_confirmation_required": True,
+        "requested": True,
+    }
+    with page_service.session_factory() as session:
+        assert (
+            session.scalar(select(User.id).where(User.email == "pending@example.test"))
+            is None
+        )
+        assert session.scalar(select(AuthPendingSignup)).consumed_at is None
+        outbox = session.scalar(
+            select(EmailOutbox).where(EmailOutbox.message_kind == "pending_signup")
+        )
+        assert outbox.recipient_user_id is None and outbox.pending_signup_id is not None
+    token = deliver_confirmation(page_service, client, "pending_signup")
+    stranger = TestClient(client.app, base_url=ORIGIN, follow_redirects=False)
+    endpoint = "/api/v1/auth/pending-signups/confirm"
+    assert (
+        stranger.post(
+            endpoint, json={"token": token}, headers={"Origin": ORIGIN}
+        ).status_code
+        == 400
+    )
+    assert client.post(endpoint, json={"token": token}).status_code == 403
+    with page_service.session_factory.begin() as session:
+        pending = session.scalar(select(AuthPendingSignup))
+        deadline = pending.expires_at
+        pending.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert (
+        client.post(
+            endpoint, json={"token": token}, headers={"Origin": ORIGIN}
+        ).status_code
+        == 400
+    )
+    with page_service.session_factory.begin() as session:
+        session.scalar(select(AuthPendingSignup)).expires_at = deadline
+    confirmed = client.post(endpoint, json={"token": token}, headers={"Origin": ORIGIN})
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["data"]["return_to"] == target
+    assert confirmed.json()["data"]["session"]["user"]["email_verified_at"]
+    assert "Max-Age=2592000" in confirmed.headers["set-cookie"]
+    assert (
+        client.post(
+            endpoint, json={"token": token}, headers={"Origin": ORIGIN}
+        ).status_code
+        == 400
+    )
+    with page_service.session_factory() as session:
+        assert (
+            session.scalar(
+                select(UserIdentity).where(UserIdentity.subject == "pending")
+            ).linked_via
+            == "jit_email_confirmed"
+        )
+
+    # An IdP's email_verified flag cannot verify an address it did not supply.
+    configure_external_mail(client, registry, False)
+    registry.providers["company"] = replace(
+        registry.get("company"),
+        policy=registry.get("company").policy.model_copy(
+            update={"trust_email_verified": True}
+        ),
+    )
+    method.assertions["missing"] = replace(
+        method.assertions["valid"], subject="missing-email", email=None
+    )
+    assert (
+        complete(client, begin(client), "missing").headers["location"]
+        == "/auth/signup/verify"
+    )
+    assert client.get("/api/v1/auth/pending-signups").json()["data"] == {
+        "email": None,
+        "email_confirmation_required": False,
+        "requested": False,
+    }
+    completed = client.post(
+        "/api/v1/auth/pending-signups/email",
+        json={"email": "typed@example.test"},
+        headers={"Origin": ORIGIN},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["data"]["status"] == "complete"
+    assert completed.json()["data"]["session"]["user"]["email_verified_at"] is None
+
+
+def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
+    page_service, tmp_path, monkeypatch
+):
+    """One step-up traversal covers session fallback, mail scope and revocation."""
+    client, method, registry = setup_client(page_service, tmp_path, monkeypatch)
+    method.descriptor = replace(
+        method.descriptor,
+        capabilities=replace(method.descriptor.capabilities, reauthentication=False),
+    )
+    complete(client, begin(client))
+    with page_service.session_factory.begin() as session:
+        user = session.scalar(select(User).where(User.email == "fake@example.test"))
+        user_id = user.id
+        server_admin_service.grant_server_admin(session, user_id, granted_by="test")
+    status = client.get("/api/v1/auth/verification").json()["data"]
+    assert status["mode"] == "session" and status["verified"] is True
+    assert (
+        client.get(
+            "/api/v1/admin/users", params={"query": "fake@example.test"}
+        ).status_code
+        == 200
+    )
+    # Removing the source identity leaves the replacement external session
+    # usable when another SSO method remains, even without a local password.
+    registry.add({"slug": "backup", "method": "test_oidc"})
+    method.assertions["backup"] = replace(
+        method.assertions["valid"], subject="backup-subject"
+    )
+    started = client.post(
+        "/api/v1/auth/sso/backup/link",
+        json={"return_to": "/account"},
+        headers={"Origin": ORIGIN},
+    )
+    assert started.status_code == 200, started.text
+    state = parse_qs(urlsplit(started.json()["data"]["redirect_url"]).query)["state"][0]
+    assert (
+        client.get(
+            "/api/v1/auth/sso/backup/callback",
+            params={"state": state, "code": "backup"},
+        ).status_code
+        == 302
+    )
+    identities = client.get("/api/v1/auth/identities").json()["data"]["identities"]
+    source = next(row for row in identities if row["provider_slug"] == "company")
+    assert (
+        client.delete(
+            f"/api/v1/auth/identities/{source['id']}", headers={"Origin": ORIGIN}
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/v1/auth/verification").json()["data"]["mode"] == "session"
+    installed = client.post(
+        "/api/v1/auth/password/set",
+        json={"new_password": "local-password"},
+        headers={"Origin": ORIGIN},
+    )
+    assert installed.status_code == 200, installed.text
+    configure_external_mail(client, registry, True)
+    status = client.get("/api/v1/auth/verification").json()["data"]
+    assert status["mode"] == "email" and status["verified"] is False
+    request_path = "/api/v1/auth/email-reauthentication/request"
+    confirm_path = "/api/v1/auth/email-reauthentication/confirm"
+    assert (
+        client.post(
+            request_path,
+            json={"scope": "account", "return_to": "/account"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 200
+    )
+    token = deliver_confirmation(page_service, client, "email_reauthentication")
+    assert (
+        client.post(
+            confirm_path,
+            json={"token": token, "scope": "admin"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    stranger = TestClient(client.app, base_url=ORIGIN, follow_redirects=False)
+    stranger.cookies.set("dtxwiki_session", client.cookies.get("dtxwiki_session"))
+    assert (
+        stranger.post(
+            confirm_path,
+            json={"token": token, "scope": "account"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    # A second valid session of the same account/generation is still a
+    # different browser authorization, even if the binding cookie is copied.
+    with page_service.session_factory() as session:
+        alternate = client.app.state.session_service.issue_session(
+            session.get(User, user_id), amr=("ext",), idp="backup"
+        )
+    stranger.cookies.set("dtxwiki_session", alternate.session_token)
+    stranger.cookies.set(
+        "dtxwiki_email_reauth_account",
+        client.cookies.get("dtxwiki_email_reauth_account"),
+    )
+    assert (
+        stranger.post(
+            confirm_path,
+            json={"token": token, "scope": "account"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    with page_service.session_factory.begin() as session:
+        challenge = session.scalar(select(EmailReauthenticationChallenge))
+        deadline = challenge.expires_at
+        challenge.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert (
+        client.post(
+            confirm_path,
+            json={"token": token, "scope": "account"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    with page_service.session_factory.begin() as session:
+        session.scalar(select(EmailReauthenticationChallenge)).expires_at = deadline
+    with page_service.session_factory.begin() as session:
+        user = session.get(User, user_id)
+        user.email = "changed@example.test"
+    assert (
+        client.post(
+            confirm_path,
+            json={"token": token, "scope": "account"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    with page_service.session_factory.begin() as session:
+        session.get(User, user_id).email = "fake@example.test"
+    confirmed = client.post(
+        confirm_path,
+        json={"token": token, "scope": "account"},
+        headers={"Origin": ORIGIN},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    account_proof = client.cookies.get("dtxwiki_session_reauth_account")
+    assert client.get("/api/v1/auth/verification").json()["data"]["verified"] is True
+    # The cookie path is not the scope boundary: copying an account proof
+    # into both admin paths still cannot authorize an admin operation.
+    for path in ("/api/v1/admin", "/api/v1/auth/verification"):
+        client.cookies.set(
+            "dtxwiki_session_reauth",
+            account_proof,
+            domain="wiki.example.test",
+            path=path,
+        )
+    assert (
+        client.get(
+            "/api/v1/admin/users", params={"query": "fake@example.test"}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.get("/api/v1/auth/verification", params={"scope": "admin"}).json()[
+            "data"
+        ]["verified"]
+        is False
+    )
+    assert (
+        client.post(
+            confirm_path,
+            json={"token": token, "scope": "account"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    with page_service.session_factory.begin() as session:
+        session.scalar(select(EmailReauthenticationChallenge)).created_at -= timedelta(
+            seconds=61
+        )
+    assert (
+        client.post(
+            request_path,
+            json={"scope": "admin", "return_to": "/account?tab=security"},
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 200
+    )
+    token = deliver_confirmation(page_service, client, "email_reauthentication")
+    with page_service.session_factory.begin() as session:
+        server_admin_service.revoke_server_admin(session, user_id)
+    denied = client.post(
+        confirm_path,
+        json={"token": token, "scope": "admin"},
+        headers={"Origin": ORIGIN},
+    )
+    assert (
+        denied.status_code == 403
+        and denied.json()["error_code"] == "server_admin_required"
+    )
+    with page_service.session_factory.begin() as session:
+        server_admin_service.grant_server_admin(session, user_id, granted_by="test")
+    result = client.post(
+        confirm_path,
+        json={"token": token, "scope": "admin"},
+        headers={"Origin": ORIGIN},
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["data"]["return_to"] == "/account?tab=security"
+    assert (
+        client.get(
+            "/api/v1/admin/users", params={"query": "fake@example.test"}
+        ).status_code
+        == 200
+    )
+    # Purpose-specific confirmations coexist rather than overwriting each other.
+    assert client.cookies.get("dtxwiki_session_reauth_account") == account_proof
+    assert client.get("/api/v1/auth/verification").json()["data"]["verified"] is True
+    assert (
+        client.get("/api/v1/auth/verification", params={"scope": "admin"}).json()[
+            "data"
+        ]["verified"]
+        is True
+    )
+    with page_service.session_factory.begin() as session:
+        session.get(User, user_id).session_generation += 1
+    assert (
+        client.get(
+            "/api/v1/admin/users", params={"query": "fake@example.test"}
+        ).status_code
+        == 401
+    )
+
+
 def test_browser_bound_login_replay_account_and_oauth_return(
     page_service, tmp_path, monkeypatch
 ):
@@ -97,6 +493,10 @@ def test_browser_bound_login_replay_account_and_oauth_return(
     destination = "/oauth/authorize?client_id=sample&scope=mcp%3Aread%20mcp%3Awrite"
     state = begin(client, next=destination, remember_me=True)
     binding = client.cookies.get("dtxwiki_login_txn")
+    invalid = complete(client, "invalid-state")
+    assert "sso_transaction_invalid" in invalid.headers["location"]
+    assert "set-cookie" not in invalid.headers
+    assert client.cookies.get("dtxwiki_login_txn") == binding
     with page_service.session_factory() as session:
         transaction = session.scalar(select(AuthLoginTransaction))
         assert transaction.state_digest == digest(state)
@@ -123,6 +523,7 @@ def test_browser_bound_login_replay_account_and_oauth_return(
         user["session_method"] == "ext" and user["session_provider_slug"] == "company"
     )
     assert len(method.callbacks) == 1
+    assert "dtxwiki_login_txn" not in success.headers.get("set-cookie", "")
     assert "sso_transaction_invalid" in complete(client, state).headers["location"]
     with page_service.session_factory() as session:
         native = session.get(User, UUID(user["user_id"]))
@@ -163,6 +564,68 @@ def test_browser_bound_login_replay_account_and_oauth_return(
     assert caps["login_methods"][0]["slug"] == "company"
     assert "issuer" not in str(caps)
     assert client.get("/api/v1/capabilities").json()["data"]["auth"] == caps
+    # Browser errors preserve the original OAuth authorize request. A callback
+    # throttled before exchange can recover only a browser-bound destination.
+    throttled_state = begin(client, next=destination)
+
+    def rate_limited(*_args, **_kwargs):
+        raise AuthRateLimitError()
+
+    with monkeypatch.context() as patch:
+        patch.setattr("backend.api.auth_sso.consume_auth_slot", rate_limited)
+        limited = complete(client, throttled_state)
+        parsed = parse_qs(urlsplit(limited.headers["location"]).query)
+        assert parsed == {"auth_error": ["rate_limited"], "next": [destination]}
+        assert "set-cookie" not in limited.headers
+        limited_start = client.get(
+            "/api/v1/auth/sso/company/start", params={"next": destination}
+        )
+        assert limited_start.status_code == 302
+        assert parse_qs(urlsplit(limited_start.headers["location"]).query) == parsed
+    with page_service.session_factory() as session:
+        failure = session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.action == "auth.sso.login.failed")
+            .order_by(AuditEvent.created_at.desc())
+        )
+        assert failure.payload["reason"] == "rate_limited"
+    # A restart can disable a provider while its transaction is still pending.
+    # Recover only saved, fully bound routing; never trust request-supplied next.
+    removed_state = begin(client, next=destination)
+    removed = registry.providers.pop("company")
+    unavailable = complete(client, removed_state)
+    assert parse_qs(urlsplit(unavailable.headers["location"]).query) == {
+        "auth_error": ["sso_provider_unavailable"],
+        "next": [destination],
+    }
+    assert "next" not in parse_qs(
+        urlsplit(complete(other, removed_state).headers["location"]).query
+    )
+    assert "next" not in parse_qs(
+        urlsplit(complete(client, "invalid-state").headers["location"]).query
+    )
+    with page_service.session_factory.begin() as session:
+        transaction = session.scalar(
+            select(AuthLoginTransaction).where(
+                AuthLoginTransaction.state_digest == digest(removed_state)
+            )
+        )
+        transaction.consumed_at = datetime.now(UTC)
+    assert "next" not in parse_qs(
+        urlsplit(complete(client, removed_state).headers["location"]).query
+    )
+    with page_service.session_factory.begin() as session:
+        transaction = session.scalar(
+            select(AuthLoginTransaction).where(
+                AuthLoginTransaction.state_digest == digest(removed_state)
+            )
+        )
+        transaction.consumed_at = None
+        transaction.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert "next" not in parse_qs(
+        urlsplit(complete(client, removed_state).headers["location"]).query
+    )
+    registry.providers["company"] = removed
     # Disabled local login is enforced at the server, not just hidden by UI.
     client.app.state.settings.auth_password_login_enabled = False
     assert (
@@ -181,7 +644,10 @@ def test_browser_bound_login_replay_account_and_oauth_return(
 def test_account_link_reauthentication_last_method_and_revocation(
     page_service, tmp_path, monkeypatch
 ):
-    client, method, registry = setup_client(page_service, tmp_path, monkeypatch)
+    saml = FakeSamlMethod()
+    client, method, registry = setup_client(
+        page_service, tmp_path, monkeypatch, extra_methods=[saml]
+    )
     complete(client, begin(client))
     before = client.cookies.get("dtxwiki_session")
     identity = client.get("/api/v1/auth/identities").json()["data"]["identities"][0]
@@ -197,6 +663,9 @@ def test_account_link_reauthentication_last_method_and_revocation(
         ).status_code
         == 401
     )
+    # A configured origin's spelling must not make equivalent browser origins
+    # fail (the public URL itself remains unchanged for issuer contracts).
+    client.app.state.settings.public_base_url = "https://WIKI.EXAMPLE.TEST:443"
     # Same-site sibling origins are refused, and a proof is required to link.
     assert (
         client.post("/api/v1/auth/sso/company/reauthenticate", json={}).status_code
@@ -213,7 +682,7 @@ def test_account_link_reauthentication_last_method_and_revocation(
         authenticated_at=datetime.now(UTC) - timedelta(hours=1),
     )
 
-    def reauth(code="valid"):
+    def reauth(code="valid", *, post_callback=False):
         start = client.post(
             "/api/v1/auth/sso/company/reauthenticate",
             json={"return_to": "/account"},
@@ -223,14 +692,61 @@ def test_account_link_reauthentication_last_method_and_revocation(
         state = parse_qs(urlsplit(start.json()["data"]["redirect_url"]).query)["state"][
             0
         ]
-        return complete(client, state, code)
+        if not post_callback:
+            return complete(client, state, code)
+        # A real cross-site POST omits native Lax cookies. The first hop must
+        # echo bounded escaped fields without consuming state or calling IdP.
+        external = TestClient(client.app, base_url=ORIGIN, follow_redirects=False)
+        calls = len(method.callbacks)
+        invalid = external.post(CALLBACK, data={str(i): "v" for i in range(21)})
+        assert invalid.status_code == 302
+        invalid = external.post(CALLBACK, data={"code": "x" * (64 * 1024)})
+        assert invalid.status_code == 413
+        first = external.post(
+            CALLBACK,
+            data={"state": state, "code": code, "extra": '"><script>alert(1)</script>'},
+        )
+        assert first.status_code == 200 and len(method.callbacks) == calls
+        assert 'value="&quot;&gt;&lt;script&gt;' in first.text
+        assert "'nonce-" in first.headers["content-security-policy"]
+        assert "set-cookie" not in first.headers
+        with page_service.session_factory() as session:
+            assert (
+                session.scalar(
+                    select(AuthLoginTransaction.consumed_at).where(
+                        AuthLoginTransaction.state_digest == digest(state)
+                    )
+                )
+                is None
+            )
 
-    assert "reauthentication_mismatch" in reauth("old").headers["location"]
+        class Continuation(HTMLParser):
+            action = None
+
+            def __init__(self):
+                super().__init__()
+                self.fields = {}
+
+            def handle_starttag(self, tag, attrs):
+                values = dict(attrs)
+                if tag == "form":
+                    self.action = values["action"]
+                elif tag == "input":
+                    self.fields[values["name"]] = values["value"]
+
+        form = Continuation()
+        form.feed(first.text)
+        assert form.action == CALLBACK + "/continue"
+        assert client.post(form.action, data=form.fields).status_code == 403
+        return client.post(form.action, data=form.fields, headers={"Origin": ORIGIN})
+
+    failed = reauth("old")
+    assert failed.headers["location"] == "/account?auth_error=reauthentication_mismatch"
     method.assertions["wrong"] = replace(
         method.assertions["valid"], subject="other-user"
     )
     assert "reauthentication_mismatch" in reauth("wrong").headers["location"]
-    assert reauth().headers["location"] == "/account"
+    assert reauth(post_callback=True).headers["location"] == "/account"
     assert (
         client.get(
             "/api/v1/admin/users", params={"query": "fake@example.test"}
@@ -305,6 +821,88 @@ def test_account_link_reauthentication_last_method_and_revocation(
     assert complete(client, state).headers["location"] == "/account"
     with page_service.session_factory() as session:
         assert session.scalar(select(UserIdentity)).linked_via == "user_link"
+    registry.add({"slug": "saml", "method": "test_saml"})
+    # A natural SAML descriptor reaches the same POST callback path without
+    # fake OIDC capabilities. An unusable request must not persist a row.
+    with page_service.session_factory() as session:
+        rows_before = session.scalar(
+            select(func.count()).select_from(AuthLoginTransaction)
+        )
+    original_begin = saml.begin
+    transactions = LoginTransactionStore(page_service.session_factory)
+    for request_id, http_method in (
+        (None, "GET"),
+        ("", "GET"),
+        ("x" * 513, "GET"),
+        ("bad\nrequest", "GET"),
+        ("non-ascii-é", "GET"),
+        ("valid", "POST"),
+    ):
+
+        def malformed(
+            provider, request, request_id=request_id, http_method=http_method
+        ):
+            return replace(
+                original_begin(provider, request),
+                protocol_request_id=request_id,
+                http_method=http_method,
+            )
+
+        with monkeypatch.context() as patch:
+            patch.setattr(saml, "begin", malformed)
+            with pytest.raises(AuthFlowError, match="sso_provider_unavailable"):
+                transactions.begin(registry.get("saml"), return_to="/account")
+    with page_service.session_factory() as session:
+        assert (
+            session.scalar(select(func.count()).select_from(AuthLoginTransaction))
+            == rows_before
+        )
+
+    def saml_finish(purpose, *, correlated=True):
+        start = client.post(
+            f"/api/v1/auth/sso/saml/{purpose}",
+            json={"return_to": "/account"},
+            headers={"Origin": ORIGIN},
+        )
+        assert start.status_code == 200, start.text
+        state = parse_qs(urlsplit(start.json()["data"]["redirect_url"]).query)[
+            "RelayState"
+        ][0]
+        with page_service.session_factory() as session:
+            request_id = session.scalar(
+                select(AuthLoginTransaction.protocol_request_id).where(
+                    AuthLoginTransaction.state_digest == digest(state)
+                )
+            )
+        assert request_id and saml.requests[-1].nonce is None
+        assert saml.requests[-1].code_challenge is None
+        form = {
+            "RelayState": state,
+            "SAMLResponse": "valid",
+            "InResponseTo": request_id if correlated else "wrong-request",
+        }
+        assert (
+            client.post("/api/v1/auth/sso/saml/callback", data=form).status_code == 200
+        )
+        return client.post(
+            "/api/v1/auth/sso/saml/callback/continue",
+            data=form,
+            headers={"Origin": ORIGIN},
+        )
+
+    assert (
+        saml_finish("link", correlated=False).headers["location"]
+        == "/account?auth_error=sso_assertion_invalid"
+    )
+    assert saml_finish("link").headers["location"] == "/account"
+    assert saml_finish("reauthenticate").headers["location"] == "/account"
+    assert saml.callbacks[-1].protocol_request_id
+    assert saml.callbacks[-1].expected_nonce is None
+    assert saml.callbacks[-1].pkce_verifier is None
+    assert {
+        row["provider_slug"]
+        for row in client.get("/api/v1/auth/identities").json()["data"]["identities"]
+    } == {"company", "saml"}
 
 
 def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
@@ -339,7 +937,6 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     base = registry.get("company")
     for override, code in [
         ({"jit_provisioning": False}, "signup_not_allowed"),
-        ({"trust_email_verified": False}, "email_unverified"),
         ({"allowed_email_domains": ["elsewhere.test"]}, "signup_not_allowed"),
     ]:
         registry.providers["company"] = replace(
@@ -350,10 +947,8 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     method.assertions["unverified"] = replace(
         method.assertions["new"], email_verified=False
     )
-    assert (
-        "email_unverified"
-        in complete(client, begin(client), "unverified").headers["location"]
-    )
+    # Trust/email policy is exercised below in the dedicated signup traversal;
+    # here keep the same uncreated identity for issuer/hook rollback checks.
     method.assertions["badissuer"] = replace(
         method.assertions["new"], issuer="https://attacker.test"
     )
@@ -377,9 +972,7 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     # Optional IdP profile data must not make an otherwise valid identity
     # unusable. Native signup still enforces its own strict display-name policy.
     del method.on_login
-    method.assertions["new"] = replace(
-        method.assertions["new"], display_name="x" * 33
-    )
+    method.assertions["new"] = replace(method.assertions["new"], display_name="x" * 33)
     assert complete(client, begin(client), "new").headers["location"] == "/dashboard"
     assert client.get("/api/v1/auth/me").json()["data"]["display_name"] == "new"
 

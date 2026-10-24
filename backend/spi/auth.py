@@ -104,16 +104,6 @@ class AuthMethodPlugin(Protocol):
     ) -> ExternalAssertion: ...
 
 
-class CredentialMethodPlugin(Protocol):
-    descriptor: AuthMethodDescriptor
-
-    def validate_config(self, raw: Mapping) -> Mapping: ...
-
-    def verify(
-        self, provider: ProviderContext, identifier: str, secret: str
-    ) -> ExternalAssertion: ...
-
-
 class ProvisioningHook(Protocol):
     def on_login(
         self,
@@ -126,12 +116,8 @@ class ProvisioningHook(Protocol):
 
 
 class IdentityLifecycleHook(Protocol):
-    """Post-commit notifications; a failure must not undo core deletion."""
+    """Post-commit notifications; failures do not undo core identity changes."""
 
     def on_identity_linked(self, provider_slug: str, identity_id: UUID) -> None: ...
 
     def on_identity_unlinked(self, provider_slug: str, identity_id: UUID) -> None: ...
-
-    def on_user_deleted(self, user_id: UUID, identities: tuple) -> None: ...
-
-    def on_provider_deleted(self, provider_slug: str) -> None: ...

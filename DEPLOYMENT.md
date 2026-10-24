@@ -380,6 +380,22 @@ provider 설정에는 HTTPS 대표 URL이 필요하며, `solo_local`의 loopback
 설정만 예외입니다. 서버는 state·nonce·PKCE 거래와 사용자 연결, native 세션 발급을
 관리합니다. 새 계정 자동 생성은 `jit_provisioning = true`인 provider에서만
 허용됩니다. 이메일이 같은 기존 계정은 기본 `confirm` 정책에서 자동 연결되지 않습니다.
+`trust_email_verified = false`이면 IdP의 이메일 인증 주장을 가입 근거로 신뢰하지
+않습니다. SMTP가 설정되어 있으면 가입 대기 상태에서 이메일을 확인한 뒤 계정을
+만들고, SMTP가 없으면 이메일 형식·중복·도메인 정책을 확인해 미검증 이메일로
+등록합니다. IdP가 이메일을 주지 않으면 사용자에게 입력받습니다. 확인 링크는 요청을
+시작한 브라우저에서 열어야 하며 30분 후 만료됩니다. IdP가 해당 이메일을 검증한다는
+운영 정책을 확인한 경우에만 `trust_email_verified = true`로 설정하세요.
+
+SSO 전용 운영에서는 `DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=false`로 설정할 수
+있습니다. 비밀번호 로그인과 활성 provider가 모두 없으면 웹 서버 시작을 거부합니다.
+SSO 사용자는 dtxWiki 비밀번호 없이 계정 관리와 부여받은 관리자 기능을 사용할 수
+있습니다. 민감한 작업의 확인은 SSO 재인증을 우선하고, IdP가 재인증을 지원하지
+않으면 SMTP가 있을 때 이메일 확인을 사용합니다. 둘 다 없으면 현재 유효한 SSO
+세션을 인정하며 사용자 상태·세션 generation·현재 관리자 권한은 계속 검사합니다.
+IdP나 SMTP 장애를 더 약한 확인 방식으로 자동 전환하지 않습니다. 이메일 재인증은
+같은 브라우저 세션과 계정/관리자 목적에 묶이고 확인 링크는 5분 후 만료됩니다.
+
 공개 OIDC helper로 사설망 IdP에 연결하려면 provider 설정의
 `allow_private_network = true`를 명시합니다. IdP URL은 여전히 HTTPS여야 합니다.
 
@@ -395,6 +411,13 @@ worker를 종료하고 같은 환경에서 `dtxwiki bootstrap`을 실행합니�
 `DTXWIKI_AUTO_BOOTSTRAP=false`인 서버와 worker는 필요한 플러그인 migration이
 적용되지 않았으면 시작을 거부합니다. 현재 지원 토폴로지는 단일 DB이며 shard fleet
 migration은 제공하지 않습니다.
+
+이 schema migration과 SQLite→PostgreSQL의 `migrate-data`는 별개입니다.
+`migrate-data`는 source 또는 target에 플러그인 migration 기록이나 지원하지 않는
+추가 테이블·view가 있으면 target 쓰기 전에 거부합니다. 비활성 플러그인의 데이터도
+포함하며 `--force`나 `--dry-run`으로 우회할 수 없습니다. 자체 DB 상태가 없는 로그인
+플러그인은 이 제한의 대상이 아닙니다. 플러그인 데이터는 별도로 지원되는 이관 절차가
+필요합니다.
 
 로그인 UI는 `/api/v1/auth/capabilities`에서 활성 provider를 조회합니다. 계정의
 외부 identity 조회·연결·해제와 최초 비밀번호 설정 API도 core가 제공합니다. 마지막

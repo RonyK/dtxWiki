@@ -10,7 +10,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
 import jwt
@@ -40,9 +40,11 @@ SAFE_AUTHORIZATION_PARAMETERS = frozenset(
 
 @dataclass
 class _Document:
-    value: dict[str, object] | None
-    expires: float
-    refresh_after: float
+    value: dict[str, object] | None = None
+    expires: float = 0
+    refresh_after: float = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    users: int = 0
 
 
 class OidcClient:
@@ -78,35 +80,48 @@ class OidcClient:
     def _document(self, cache, url, *, allow_private_network=False, refresh=False):
         key = (url, allow_private_network)
         with self._lock:
-            now = self.clock()
-            existing = cache.get(key)
-            if existing:
-                cache.move_to_end(key)
-                if (
-                    existing.value is not None
-                    and now < existing.expires
-                    and (not refresh or now < existing.refresh_after)
-                ):
-                    return existing.value
-                if now < existing.refresh_after:
-                    raise AuthMethodError("identity_provider_keys_unavailable")
-            # Retain a bounded attempt marker before I/O, including a cold
-            # miss, so an unavailable IdP cannot make every callback fetch it.
-            cache[key] = _Document(
-                existing.value if existing else None,
-                existing.expires if existing else now,
-                now + self.refresh_interval,
-            )
+            document = cache.get(key)
+            if document is None:
+                if len(cache) >= self.max_cache_entries:
+                    # A slot stays pinned while either a fetch or its waiters
+                    # use it. Evicting it would allow a second concurrent fetch
+                    # for the same URL and an unbounded set of detached locks.
+                    unused = next(
+                        (name for name, item in cache.items() if item.users == 0),
+                        None,
+                    )
+                    if unused is None:
+                        raise AuthMethodError("identity_provider_keys_unavailable")
+                    del cache[unused]
+                document = _Document()
+                cache[key] = document
             cache.move_to_end(key)
-            while len(cache) > self.max_cache_entries:
-                cache.popitem(last=False)
-            value = self.transport.request(
-                "GET", url, allow_private_network=allow_private_network
-            )
-            cache[key] = _Document(
-                value, now + self.cache_ttl, now + self.refresh_interval
-            )
-            return value
+            document.users += 1
+        try:
+            # Serialize only this URL. Slow or unavailable providers cannot
+            # hold the registry lock across network I/O for other providers.
+            with document.lock:
+                now = self.clock()
+                if (
+                    document.value is not None
+                    and now < document.expires
+                    and (not refresh or now < document.refresh_after)
+                ):
+                    return document.value
+                if now < document.refresh_after:
+                    raise AuthMethodError("identity_provider_keys_unavailable")
+                # Retain negative attempts, including cold failures, so every
+                # waiting callback cannot retry an unavailable provider.
+                document.refresh_after = now + self.refresh_interval
+                value = self.transport.request(
+                    "GET", url, allow_private_network=allow_private_network
+                )
+                document.value = value
+                document.expires = self.clock() + self.cache_ttl
+                return value
+        finally:
+            with self._lock:
+                document.users -= 1
 
     def discovery(
         self, issuer: str, *, allow_private_network=False
@@ -227,6 +242,14 @@ class OidcClient:
         return result
 
     def _key(self, metadata: Mapping, header: Mapping, *, allow_private_network=False):
+        algorithm = header["alg"]
+        key_type = (
+            "RSA"
+            if algorithm.startswith(("RS", "PS"))
+            else "EC"
+            if algorithm.startswith("ES")
+            else "OKP"
+        )
         url = https_url(metadata.get("jwks_uri"))
         document = self._document(
             self._jwks, url, allow_private_network=allow_private_network
@@ -246,6 +269,7 @@ class OidcClient:
                 key
                 for key in keys
                 if isinstance(key, dict)
+                and key.get("kty") == key_type
                 and (header.get("kid") is None or key.get("kid") == header["kid"])
                 and key.get("use", "sig") == "sig"
                 and key.get("alg", header["alg"]) == header["alg"]

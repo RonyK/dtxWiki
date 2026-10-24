@@ -307,6 +307,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/email-reauthentication/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Email */
+        post: operations["confirm_email_api_v1_auth_email_reauthentication_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/email-reauthentication/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Email */
+        post: operations["request_email_api_v1_auth_email_reauthentication_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/email-verification/confirm": {
         parameters: {
             query?: never;
@@ -531,6 +565,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/pending-signups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending Signup */
+        get: operations["pending_signup_api_v1_auth_pending_signups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/pending-signups/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pending Confirm */
+        post: operations["pending_confirm_api_v1_auth_pending_signups_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/pending-signups/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pending Email */
+        post: operations["pending_email_api_v1_auth_pending_signups_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/reauthenticate": {
         parameters: {
             query?: never;
@@ -577,6 +662,23 @@ export interface paths {
         put?: never;
         /** Form Callback */
         post: operations["form_callback_api_v1_auth_sso__slug__callback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/callback/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Form Callback Continue */
+        post: operations["form_callback_continue_api_v1_auth_sso__slug__callback_continue_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -682,6 +784,23 @@ export interface paths {
         post?: never;
         /** Delete Revoked Api Token */
         delete: operations["delete_revoked_api_token_api_v1_auth_tokens__token_id__record_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Verification */
+        get: operations["verification_api_v1_auth_verification_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4276,6 +4395,11 @@ export interface components {
         };
         /** @enum {string} */
         CompatibilityReasonCode: "catalog_app_unavailable" | "transport_unavailable" | "server_oauth_unavailable" | "endpoint_unreachable" | "platform_required" | "platform_unsupported" | "shell_required" | "shell_unsupported" | "app_version_required" | "app_version_too_old";
+        /** ConfirmationTokenRequest */
+        ConfirmationTokenRequest: {
+            /** Token */
+            token: string;
+        };
         /** @enum {string} */
         ContextImageMediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
         /** ContextIngressAcceptRequest */
@@ -5614,6 +5738,58 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /** EmailReauthenticationConfirmData */
+        EmailReauthenticationConfirmData: {
+            /**
+             * Reauthenticated Until
+             * Format: date-time
+             */
+            reauthenticated_until: string;
+            /** Return To */
+            return_to: string;
+        };
+        /** EmailReauthenticationConfirmRequest */
+        EmailReauthenticationConfirmRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "admin";
+            /** Token */
+            token: string;
+        };
+        /** EmailReauthenticationConfirmResponse */
+        EmailReauthenticationConfirmResponse: {
+            data: components["schemas"]["EmailReauthenticationConfirmData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** EmailReauthenticationRequest */
+        EmailReauthenticationRequest: {
+            /**
+             * Return To
+             * @default /account
+             */
+            return_to: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "admin";
+        };
+        /** EmailReauthenticationRequestData */
+        EmailReauthenticationRequestData: {
+            /**
+             * Status
+             * @default email_sent
+             * @constant
+             */
+            status: "email_sent";
+        };
+        /** EmailReauthenticationRequestResponse */
+        EmailReauthenticationRequestResponse: {
+            data: components["schemas"]["EmailReauthenticationRequestData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** EmailVerificationConfirmRequest */
         EmailVerificationConfirmRequest: {
@@ -8389,6 +8565,55 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** PendingSignupConfirmData */
+        PendingSignupConfirmData: {
+            /** Return To */
+            return_to: string;
+            session: components["schemas"]["AuthSessionData"];
+        };
+        /** PendingSignupConfirmResponse */
+        PendingSignupConfirmResponse: {
+            data: components["schemas"]["PendingSignupConfirmData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** PendingSignupData */
+        PendingSignupData: {
+            /** Email */
+            email: string | null;
+            /** Email Confirmation Required */
+            email_confirmation_required: boolean;
+            /** Requested */
+            requested: boolean;
+        };
+        /** PendingSignupEmailData */
+        PendingSignupEmailData: {
+            /** Return To */
+            return_to: string;
+            session?: components["schemas"]["AuthSessionData"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "email_sent" | "complete";
+        };
+        /** PendingSignupEmailRequest */
+        PendingSignupEmailRequest: {
+            /**
+             * Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
+            email: string;
+        };
+        /** PendingSignupEmailResponse */
+        PendingSignupEmailResponse: {
+            data: components["schemas"]["PendingSignupEmailData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** PendingSignupResponse */
+        PendingSignupResponse: {
+            data: components["schemas"]["PendingSignupData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** PolicyCard */
         PolicyCard: {
             /** Name */
@@ -9785,6 +10010,30 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VerificationData */
+        VerificationData: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "password" | "sso" | "email" | "session";
+            /** Providers */
+            providers: components["schemas"]["LoginMethodCapability"][];
+            /** Reauthenticated Until */
+            reauthenticated_until?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "admin";
+            /** Verified */
+            verified: boolean;
+        };
+        /** VerificationResponse */
+        VerificationResponse: {
+            data: components["schemas"]["VerificationData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** VersionEntry */
         VersionEntry: {
@@ -11258,6 +11507,72 @@ export interface operations {
             };
         };
     };
+    confirm_email_api_v1_auth_email_reauthentication_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailReauthenticationConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailReauthenticationConfirmResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_email_api_v1_auth_email_reauthentication_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailReauthenticationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailReauthenticationRequestResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     confirm_email_verification_api_v1_auth_email_verification_confirm_post: {
         parameters: {
             query?: never;
@@ -12144,6 +12459,92 @@ export interface operations {
             };
         };
     };
+    pending_signup_api_v1_auth_pending_signups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingSignupResponse"];
+                };
+            };
+        };
+    };
+    pending_confirm_api_v1_auth_pending_signups_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmationTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingSignupConfirmResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pending_email_api_v1_auth_pending_signups_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PendingSignupEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingSignupEmailResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reauthenticate_api_v1_auth_reauthenticate_post: {
         parameters: {
             query?: never;
@@ -12350,6 +12751,37 @@ export interface operations {
         };
     };
     form_callback_api_v1_auth_sso__slug__callback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    form_callback_continue_api_v1_auth_sso__slug__callback_continue_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -12914,6 +13346,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    verification_api_v1_auth_verification_get: {
+        parameters: {
+            query?: {
+                scope?: "account" | "admin";
+                return_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

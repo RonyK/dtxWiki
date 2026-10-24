@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from urllib.parse import parse_qs
 
 import httpx
@@ -80,6 +82,43 @@ def test_signed_id_token_validation_rejects_untrusted_claims_and_keys():
     assert validate(
         token=jwt.encode(_claims(), elliptic, algorithm="ES256", headers={"kid": "ec"})
     )
+    # A provider may omit kid and alg while publishing multiple key types.
+    # Only compatible keys count toward ambiguity; two RSA keys still fail.
+    mixed_keys = [
+        {name: value for name, value in key.items() if name not in {"kid", "alg"}}
+        for key in (public, ec_public)
+    ]
+    mixed_client = OidcClient(
+        transport=JsonTransport(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"keys": mixed_keys})
+            )
+        )
+    )
+    for key, algorithm in ((private, "RS256"), (elliptic, "ES256")):
+        assert mixed_client.validate_id_token(
+            jwt.encode(_claims(), key, algorithm=algorithm),
+            METADATA,
+            issuer=ISSUER,
+            client_id="client-id",
+            nonce="transaction-nonce",
+        )
+    mixed_keys.append({**mixed_keys[0]})
+    ambiguous_client = OidcClient(
+        transport=JsonTransport(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"keys": mixed_keys})
+            )
+        )
+    )
+    with pytest.raises(AuthMethodError, match="signing_key_not_found"):
+        ambiguous_client.validate_id_token(
+            jwt.encode(_claims(), private, algorithm="RS256"),
+            METADATA,
+            issuer=ISSUER,
+            client_id="client-id",
+            nonce="transaction-nonce",
+        )
     assert validate(
         {**_claims(), "aud": ["client-id", "trusted-api"], "azp": "client-id"},
         trusted_audiences=("trusted-api",),
@@ -141,7 +180,64 @@ def test_signed_id_token_validation_rejects_untrusted_claims_and_keys():
         validate({**_claims(), "auth_time": time.time() - 120}, max_age=0)
 
 
+def _assert_slow_discovery_is_single_flight_without_blocking_other_providers():
+    # Independent failure path: sequential transport tests cannot detect a
+    # client-wide lock held across network I/O or duplicate concurrent fetches.
+    entered = Event()
+    release = Event()
+    requests = []
+    slow = "https://slow.example.test"
+    fast = "https://fast.example.test"
+
+    def handler(request):
+        requests.append(str(request.url))
+        if str(request.url).startswith(slow):
+            entered.set()
+            assert release.wait(5), "test did not release discovery"
+        issuer = str(request.url).removesuffix("/.well-known/openid-configuration")
+        return httpx.Response(200, json={**METADATA, "issuer": issuer})
+
+    client = OidcClient(
+        transport=JsonTransport(transport=httpx.MockTransport(handler)),
+        max_cache_entries=2,
+    )
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        first = workers.submit(client.discovery, slow)
+        try:
+            assert entered.wait(2)
+            duplicate = workers.submit(client.discovery, slow)
+            assert (
+                workers.submit(client.discovery, fast).result(timeout=2)["issuer"]
+                == fast
+            )
+        finally:
+            release.set()
+        assert first.result(timeout=2) == duplicate.result(timeout=2)
+    assert sum(url.startswith(slow) for url in requests) == 1
+    assert sum(url.startswith(fast) for url in requests) == 1
+
+    # All active slots stay pinned. A bounded client refuses another URL
+    # instead of allocating detached locks or evicting an in-flight request.
+    entered.clear()
+    release.clear()
+    bounded = OidcClient(
+        transport=client.transport,
+        max_cache_entries=1,
+    )
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        pending = workers.submit(bounded.discovery, slow)
+        try:
+            assert entered.wait(2)
+            with pytest.raises(AuthMethodError, match="keys_unavailable"):
+                bounded.discovery(fast)
+        finally:
+            release.set()
+        assert pending.result(timeout=2)["issuer"] == slow
+    assert bounded.discovery(fast)["issuer"] == fast
+
+
 def test_oidc_code_flow_and_bounded_discovery_jwks_transport(monkeypatch):
+    _assert_slow_discovery_is_single_flight_without_blocking_other_providers()
     private, public = _key()
     now = [0.0]
     requests: list[httpx.Request] = []

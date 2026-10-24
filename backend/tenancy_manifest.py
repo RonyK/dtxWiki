@@ -22,6 +22,8 @@ CONTROL_PLANE_TABLES: frozenset[str] = frozenset(
         "api_tokens",
         "app_metadata",
         "auth_login_transactions",
+        "auth_pending_signups",
+        "email_reauthentication_challenges",
         "email_outbox",
         "oauth_access_token_jti",
         "oauth_clients",
@@ -262,8 +264,7 @@ def physical_split_blockers() -> tuple[str, ...]:
         parent_edges = [edge for edge in edges if edge.parent == parent]
         children = {edge.child for edge in parent_edges}
         lines.append(
-            f"  {parent}: {len(parent_edges)} edge(s) blocking "
-            f"{len(children)} table(s)"
+            f"  {parent}: {len(parent_edges)} edge(s) blocking {len(children)} table(s)"
         )
     return tuple(lines)
 
