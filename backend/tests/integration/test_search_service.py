@@ -1566,9 +1566,8 @@ def test_search_service_entity_lane_uses_page_name_index_and_warnings():
 
 
 def test_exact_entity_hit_short_circuits_fallback_retrieval():
-    """§6.2: one exact hit returns immediately (no retriever cost); multiple
-    exact hits return disambiguation without fallback results masquerading
-    as a resolution; a miss still runs the requested retriever."""
+    """Exact hits share the ranked list without invoking fallback retrieval;
+    a miss still runs the requested retriever."""
 
     class CountingRetriever:
         def __init__(self):
@@ -1598,8 +1597,9 @@ def test_exact_entity_hit_short_circuits_fallback_retrieval():
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
     )
+    shared_title_ids = []
     for slug in ("ambiguous-a", "ambiguous-b"):
-        page_service.write_page(
+        page = page_service.write_page(
             workspace_slug="default",
             slug=slug,
             title="Ambiguous Name",
@@ -1608,6 +1608,7 @@ def test_exact_entity_hit_short_circuits_fallback_retrieval():
             actor_id="00000000-0000-0000-0000-000000000010",
             actor_provenance="browser_session",
         )
+        shared_title_ids.append(page.id)
 
     with session_factory() as session:
         exact = search_service.search(
@@ -1618,7 +1619,6 @@ def test_exact_entity_hit_short_circuits_fallback_retrieval():
         )
         assert counting.calls == 0
         assert exact.tried_lanes == ["entity"]
-        assert exact.disambiguation is None
 
         ambiguous = search_service.search(
             session=session,
@@ -1628,8 +1628,14 @@ def test_exact_entity_hit_short_circuits_fallback_retrieval():
         )
         assert counting.calls == 0
         assert ambiguous.tried_lanes == ["entity"]
-        assert "disambiguation_required" in ambiguous.warnings
-        assert len(ambiguous.disambiguation.candidates) == 2
+        assert [hit.id for hit in ambiguous.ranked_results] == sorted(
+            shared_title_ids, key=str
+        )
+        assert all(
+            hit.match_reason == "exact_title" for hit in ambiguous.ranked_results
+        )
+        assert ambiguous.total_count == 2
+        assert ambiguous.warnings == exact.warnings
 
         miss = search_service.search(
             session=session,

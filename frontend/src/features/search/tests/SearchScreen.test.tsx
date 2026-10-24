@@ -36,10 +36,15 @@ describe("SearchScreen", () => {
               result("context-1", "context_page", "Decision Log", "", 1, {
                 match_reason: "trigram",
                 matched_name: "Decision Log",
+                location: ["Team", "Decisions"],
               }),
               result("source-1", "library_item", "Library Source", "Supporting hit", 0.7, {
                 concept_path: "/library/source-1.md",
                 match_reason: "keyword",
+              }),
+              result("context-2", "context_page", "Decision Log", "Another document with the same title", 0.6, {
+                match_reason: "exact_title",
+                location: ["Team", "Decisions"],
               }),
               result("change-1", "change_set", "Review Change", "Workflow hit", 0.4, {
                 source_ref: { kind: "review_item", id: "review-1" },
@@ -69,11 +74,21 @@ describe("SearchScreen", () => {
     await userEvent.type(screen.getByLabelText("Query"), "needle");
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(await screen.findByText("Decision Log")).toBeInTheDocument();
+    await screen.findByRole("link", { name: "Open Library Source" });
+    const rows = Array.from(container.querySelectorAll(".operations-list > .search-result-row"));
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+      "/context?target=context-1",
+      "/library?target=source-1",
+      "/context?target=context-2",
+      "/review?review=review-1",
+    ]);
+    for (const row of screen.getAllByRole("link", { name: "Open Decision Log" })) {
+      expect(row.querySelector(".search-result-location")).toHaveTextContent(/Team.*Decisions/);
+    }
     expect(searchBody).toEqual({
       query: "needle",
       scope: "all",
-      filters: {},
+      filters: { include_agents: false },
       retrieval_mode: "keyword",
       limit: 20,
     });
@@ -94,13 +109,7 @@ describe("SearchScreen", () => {
         .querySelector(".search-result-location"),
     ).toHaveTextContent("/library/source-1");
     expect(screen.queryByText("/library/source-1.md")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Decision Log" }))
-      .toHaveAttribute("href", "/context?target=context-1");
-    expect(screen.getByRole("link", { name: "Open Library Source" }))
-      .toHaveAttribute("href", "/library?target=source-1");
-    expect(screen.getByRole("link", { name: "Open Review Change" }))
-      .toHaveAttribute("href", "/review?review=review-1");
-    expect(screen.getAllByText("3 results").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("4 results")).toBeInTheDocument();
     // The header states the result count; the rows themselves carry no chips.
     expect(container.querySelectorAll(".search-result-row .count-chip")).toHaveLength(0);
     expect(container.querySelector(".score-pill")).toBeNull();
@@ -305,14 +314,6 @@ describe("SearchScreen", () => {
 
   it("renders accessible C2 search cards with a selected workspace and honest unavailable states", async () => {
     const pageId = "aa123456-1111-4111-8111-111111111111";
-    const duplicateIds = [
-      "bb123456-2222-4222-8222-222222222222",
-      "cc123456-3333-4333-8333-333333333333",
-    ];
-    const abbreviatedPathIds = [
-      "dd123456-4444-4444-8444-444444444444",
-      "ee123456-5555-4555-8555-555555555555",
-    ];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -338,16 +339,6 @@ describe("SearchScreen", () => {
               location: ["Product", "Research", "Very long document title kept in the accessible description", "Search", "Policies"],
               stale: true, citation_available: false,
             }),
-            ...duplicateIds.map((id) => result(id, "context_page", "Shared title", "", 0.9, {
-              concept_path: `/context/p-${id}.md`, matched_name: "Shared title",
-              match_reason: id === duplicateIds[0] ? "keyword" : "hybrid",
-            })),
-            ...abbreviatedPathIds.map((id, index) => result(id, "context_page", "Same visible path", "", 0.85, {
-              location: ["Product", index === 0 ? "Alpha" : "Beta", "Middle", "Search", `A long policy folder title ${index === 0 ? "alpha" : "beta"}`],
-            })),
-            ...["Product", "Operations"].map((root, index) => result(`distinct-${index}`, "context_page", "Distinct locations", "", 0.8, {
-              location: [root, "Policies"],
-            })),
             result("human-path", "context_page", "Search handbook", "A **clean** `snippet`. model_name and model_version. Keep x < 10 and y > 2. `a*b*c` and _emphasis_. vector<T>.", 0.8, {
               concept_path: "/context/search-handbook.md", match_reason: "keyword",
               heading_path: ["Search handbook", "Storage"],
@@ -391,28 +382,8 @@ describe("SearchScreen", () => {
     expect(row).toHaveAccessibleDescription(
       "Product › Research › Very long document title kept in the accessible description › Search › Policies. Title match",
     );
-    for (const descriptionId of row.getAttribute("aria-describedby")!.split(/\s+/)) {
-      expect(document.getElementById(descriptionId)).toBeInTheDocument();
-    }
     expect(row.querySelector("nav, a, button")).toBeNull();
     expect(container.textContent).not.toContain(`/context/p-${pageId}`);
-    const duplicates = screen.getAllByRole("link", { name: "Open Shared title" });
-    duplicateIds.forEach((id, index) => {
-      expect(duplicates[index]).toHaveTextContent(id.slice(0, 8));
-      expect(duplicates[index]).toHaveAccessibleDescription(`ID ${id.slice(0, 8)}`);
-      expect(duplicates[index]).not.toHaveTextContent(`/context/p-${id}`);
-      expect(duplicates[index].querySelector(".search-result-reason")).toBeNull();
-    });
-    const abbreviated = screen.getAllByRole("link", { name: "Open Same visible path" });
-    abbreviatedPathIds.forEach((id, index) => {
-      expect(abbreviated[index]).toHaveTextContent(id.slice(0, 8));
-      expect(abbreviated[index]).toHaveAccessibleDescription(new RegExp(`ID ${id.slice(0, 8)}`));
-      expect(abbreviated[index].querySelector(".search-result-location")).toHaveTextContent("A long policy folder …");
-      expect(abbreviated[index]).toHaveAccessibleDescription(new RegExp(index === 0 ? "Alpha.*alpha" : "Beta.*beta"));
-    });
-    for (const distinct of screen.getAllByRole("link", { name: "Open Distinct locations" })) {
-      expect(distinct.querySelector(".search-result-id")).toBeNull();
-    }
     const handbook = screen.getByRole("link", { name: "Open Search handbook" });
     expect(handbook).toHaveTextContent("/context/search-handbook");
     expect(handbook).toHaveTextContent("A clean snippet.");
@@ -430,66 +401,6 @@ describe("SearchScreen", () => {
     expect(screen.queryByText("No citation")).not.toBeInTheDocument();
     expect(screen.queryByText("stale", { exact: true })).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
-  });
-
-  it("renders disambiguation candidates as navigable links with paths", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = input.toString();
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
-      }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/search`) {
-        return jsonResponse({
-          data: {
-            ranked_results: [
-              result("page-a1", "context_page", "Deploy Checklist", "Alpha", 1),
-              result("page-b2", "context_page", "Deploy Checklist", "Bravo", 1),
-            ],
-            supported_retrieval_modes: ["keyword"],
-            permission_note: null,
-            disambiguation: {
-              status: "ambiguous",
-              candidates: [
-                {
-                  id: "page-a1",
-                  title: "Deploy Checklist",
-                  concept_path: "/context/deploy-checklist-alpha.md",
-                  match_reason: "exact_title",
-                },
-                {
-                  id: "page-b2",
-                  title: "Deploy Checklist",
-                  concept_path: "/context/deploy-checklist-bravo.md",
-                  match_reason: "exact_title",
-                },
-              ],
-            },
-          },
-        });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    });
-
-    render(
-      <MemoryRouter>
-        <SearchScreen />
-      </MemoryRouter>,
-    );
-
-    await user.type(screen.getByLabelText("Query"), "Deploy Checklist");
-    await user.click(screen.getByRole("button", { name: "Search" }));
-
-    // §12.2: candidate click = navigate; the concept path disambiguates
-    // same-named candidates visually.
-    const alpha = await screen.findByRole("link", {
-      name: /Deploy Checklist.*deploy-checklist-alpha/,
-    });
-    const bravo = screen.getByRole("link", {
-      name: /Deploy Checklist.*deploy-checklist-bravo/,
-    });
-    expect(alpha).toHaveAttribute("href", "/context?target=page-a1");
-    expect(bravo).toHaveAttribute("href", "/context?target=page-b2");
   });
 
   it("shows the exact total_count in the header chip even when the displayed list is capped", async () => {
@@ -668,14 +579,14 @@ describe("SearchScreen", () => {
     expect(screen.queryByText("No search run")).not.toBeInTheDocument();
   });
 
-  it("runs search from the q URL parameter", async () => {
+  it("runs search from the q URL parameter with a disabled Agent scope normalized to all", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/search`) {
-        expect(JSON.parse(String(init?.body))).toMatchObject({ query: "needle" });
+        expect(JSON.parse(String(init?.body))).toMatchObject({ query: "needle", scope: "all" });
         return jsonResponse({
           data: {
             ranked_results: [
@@ -690,7 +601,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle"]}>
+      <MemoryRouter initialEntries={["/search?q=needle&scope=agent_page"]}>
         <SearchScreen />
       </MemoryRouter>,
     );

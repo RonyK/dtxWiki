@@ -113,6 +113,8 @@ class KeywordRetriever:
         candidate_limit = max(1, limit * _OVERFETCH)
         results: list[RankedResult] = []
         source_kinds = _source_kinds_for_scope(scope)
+        if not filters.include_agents:
+            source_kinds.discard("agent_page")
         if source_kinds and query.strip():
             results.extend(
                 self._search_fts(

@@ -75,6 +75,12 @@
             "default": null,
             "title": "Format Hint"
           },
+          "include_agents": {
+            "default": true,
+            "description": "Whether Agent pages are included in search results.",
+            "title": "Include Agents",
+            "type": "boolean"
+          },
           "status": {
             "anyOf": [
               {
@@ -247,66 +253,6 @@
   },
   "output": {
     "$defs": {
-      "DisambiguationCandidate": {
-        "additionalProperties": false,
-        "properties": {
-          "concept_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Concept Path"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "match_reason": {
-            "title": "Match Reason",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "match_reason"
-        ],
-        "title": "DisambiguationCandidate",
-        "type": "object"
-      },
-      "DisambiguationPayload": {
-        "additionalProperties": false,
-        "properties": {
-          "candidates": {
-            "items": {
-              "$ref": "#/$defs/DisambiguationCandidate"
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "status": {
-            "const": "ambiguous",
-            "default": "ambiguous",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "candidates"
-        ],
-        "title": "DisambiguationPayload",
-        "type": "object"
-      },
       "EnvelopeWarning": {
         "additionalProperties": false,
         "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
@@ -336,7 +282,6 @@
               "text_not_found",
               "unsupported_filter_tag",
               "unsupported_filter_date",
-              "disambiguation_required",
               "semantic_fallback_used",
               "keyword_lane_unavailable",
               "coverage_gap_recorded",
@@ -927,17 +872,6 @@
       "SearchPayload": {
         "additionalProperties": false,
         "properties": {
-          "disambiguation": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/DisambiguationPayload"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "has_more": {
             "default": false,
             "title": "Has More",

@@ -193,6 +193,7 @@ SPI_PAYLOAD_FIELD_SHAPES = {
         "entity_ref": "dict[str, str] | None",
     },
     "SearchFilters": {
+        "include_agents": "<class 'bool'>",
         "context_type": "list[str] | None",
         "connector_type": "list[str] | None",
         "format_hint": "list[str] | None",

@@ -7,17 +7,17 @@
     "load": "검색에 실패했습니다",
     "loadMore": "결과를 더 불러오지 못했습니다",
     "capabilities": "검색 기능 정보를 불러오지 못했습니다",
-    "indexUnavailable": "이 빌드에서는 검색 인덱스를 사용할 수 없습니다. 라이브러리, 컨텍스트, 에이전트 탐색을 사용하세요."
+    "indexUnavailable": "이 빌드에서는 검색 인덱스를 사용할 수 없습니다. 메뉴에서 문서를 탐색하세요."
   },
   "header": {
     "eyebrow": "워크스페이스 검색",
     "title": "검색",
-    "subtitle": "컨텍스트 페이지, 라이브러리 소스, 에이전트 페이지를 함께 검색합니다."
+    "subtitle": "워크스페이스의 문서를 검색합니다."
   },
   "form": {
     "query": "검색어",
     "clear": "검색 지우기",
-    "queryPlaceholder": "컨텍스트, 라이브러리, 에이전트 페이지 검색",
+    "queryPlaceholder": "워크스페이스 문서 검색",
     "scope": "범위",
     "mode": "모드",
     "submit": "검색"
@@ -62,7 +62,6 @@
     "openUnavailable": "열 수 없음",
     "cannotOpen": "{{title, josaEunNeun}} 아직 검색에서 열 수 없습니다",
     "serverOrder": "결과",
-    "disambiguation": "동일한 이름의 문서",
     "warningSummary": "{{warnings}}",
     "changeScopeMoved": "전체 문서를 표시합니다. 변경 이력은 문서의 히스토리, 활동 또는 리뷰에서 확인하세요.",
     "activity": "활동",
@@ -79,7 +78,7 @@
   },
   "empty": {
     "unavailableTitle": "검색을 사용할 수 없습니다",
-    "unavailableDescription": "검색 인덱스가 오프라인이거나 이 빌드에 배포되지 않았을 때는 라이브러리, 컨텍스트, 에이전트 탐색을 사용하세요.",
+    "unavailableDescription": "검색 인덱스가 오프라인이거나 이 빌드에 배포되지 않았을 때는 메뉴에서 문서를 탐색하세요.",
     "initialTitle": "워크스페이스 검색",
     "initialDescription": "범위를 좁혀 검색하거나 아래 예시로 시작하세요.",
     "openLibrary": "라이브러리 열기",
@@ -95,11 +94,7 @@
     "exact_id": "ID 일치",
     "exact_slug": "경로 일치",
     "exact_title": "제목 일치",
-    "exact_alias": "별칭 일치",
-    "trigram": "유사 이름",
-    "keyword": "키워드",
     "semantic": "의미가 비슷함",
-    "hybrid": "하이브리드",
     "associative": "연관 문서",
     "titleContains": "제목에 검색어 포함",
     "similarName": "비슷한 이름: ‘{{name}}’",
@@ -109,7 +104,6 @@
     "permission_limited": "현재 권한으로 볼 수 없는 제한된 라이브러리 항목과 자료는 검색 결과에서 제외되었습니다",
     "unsupported_filter_tag": "태그 필터는 아직 적용되지 않습니다",
     "unsupported_filter_date": "날짜 필터는 아직 적용되지 않습니다",
-    "disambiguation_required": "동일한 이름의 문서가 여러 개입니다 — 후보를 선택하세요",
     "semantic_fallback_used": "시맨틱 폴백 결과입니다",
     "keyword_lane_unavailable": "이 데이터베이스에서는 로컬 FTS5 검색을 사용할 수 없습니다. 정확 일치와 직접 조회는 계속 동작합니다",
     "coverage_gap_recorded": "근거를 찾지 못해 커버리지 갭이 기록되었습니다",

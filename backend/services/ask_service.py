@@ -76,7 +76,7 @@ ASK_TITLE_MAX_WORDS = 8
 # Search-lane advisory codes that are meaningful on the Ask surface too: the
 # keyword-lane degradation and the restricted-Library exclusion notice are both
 # trust disclosures about the evidence the answer was built on. Codes whose
-# affordance lives only on the search response (e.g. disambiguation candidates)
+# affordance lives only on the search response (e.g. unsupported search filters)
 # are NOT forwarded — they would render an actionless banner on an Ask turn.
 ASK_FORWARDABLE_WARNINGS = frozenset(
     {KEYWORD_LANE_UNAVAILABLE_WARNING, "permission_limited"}

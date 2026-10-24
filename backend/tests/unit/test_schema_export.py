@@ -328,6 +328,13 @@ def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
 
     advertised = {tool.name for tool in list_dtxwiki_tools()}
     assert advertised == set(mcp_schemas)
+    assert "disambiguation" not in mcp_schemas["search"]["output"]["$defs"][
+        "SearchPayload"
+    ]["properties"]
+    filters = mcp_schemas["search"]["input"]["$defs"]["SearchFilters"]
+    assert filters["properties"]["include_agents"]["type"] == "boolean"
+    assert filters["properties"]["include_agents"]["default"] is True
+    assert "include_agents" not in filters.get("required", [])
     ranked = mcp_schemas["search"]["output"]["$defs"]["RankedResult"]
     assert {"summary", "location"}.issubset(ranked["properties"])
     assert {"summary", "location"}.isdisjoint(ranked.get("required", []))

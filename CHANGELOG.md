@@ -10,13 +10,17 @@
 - Put the result type above the title on mobile and allow longer titles to
   wrap. Hide duplicate matched names, generated UUID paths, stale markers, and
   citation-availability labels; clean Markdown syntax from displayed snippets.
+- Use the same result cards and location display for every match reason and
+  duplicate title. Remove separate candidate prompts, short IDs, and path tooltips.
+- Exclude Agent pages from browser search and hide the Agent scope when the
+  Agent Labs feature is off. Apply the preference before search pagination.
 - Exclude changes and feedback from general search and remove the browser's
   change-history search option. Explicit API and MCP change and feedback
   scopes remain available, and old browser change-search links open all results
   with guidance to Activity and Review.
 - Add optional `summary` and `location` search fields with permission-aware
   batch location reads. Skip metadata lists when deriving page summaries and
-  advance the MCP tool contract to revision 14.
+  advance the MCP tool contract to revision 15.
 
 ### Database
 

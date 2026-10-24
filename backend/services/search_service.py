@@ -20,8 +20,6 @@ from backend.repositories.search_projection import (
     WorkspaceFts5ProjectionRepository,
 )
 from backend.schemas.read import (
-    DisambiguationCandidate,
-    DisambiguationPayload,
     RankedResult,
     SearchFilters,
     SearchPayload,
@@ -203,7 +201,6 @@ class SearchService:
         explicit_direct = (
             plan.direct_page_id is not None or plan.explicit_context_slug is not None
         )
-        entity_results: list[RankedResult] = []
         if direct_results:
             tried_lanes.append("direct")
             ranked = sorted(
@@ -227,15 +224,12 @@ class SearchService:
             )
             if symbolic_lane_eligible:
                 tried_lanes.append("entity")
-            # Exact-name hits are resolver results, not candidates for global
-            # reranking. Multiple pages are an explicit disambiguation.
+            # Exact-name hits retain resolver priority without fallback reranking.
             if entity_results:
                 ranked = sorted(
                     entity_results,
                     key=lambda result: (-result.score, str(result.id)),
                 )
-                if len(ranked) > 1:
-                    warnings = [*warnings, "disambiguation_required"]
             else:
                 trigram_eligible = (
                     symbolic_lane_eligible
@@ -335,6 +329,12 @@ class SearchService:
                     primary=[*ranked[:insertion], *associative],
                     fallback=ranked[insertion:],
                 )
+        if not active_filters.include_agents:
+            # Apply the request policy to custom retrievers too, before counts,
+            # pagination, and metadata enrichment use the ranked candidate set.
+            ranked = [
+                result for result in ranked if result.type != EntityKind.AGENT_PAGE
+            ]
         nearest_candidates: list[dict[str, str]] = []
         if (
             not ranked
@@ -376,7 +376,6 @@ class SearchService:
             tried_lanes=tried_lanes,
             raw_query=plan.raw_query,
             normalized_query=plan.query_norm,
-            disambiguation=_disambiguation_payload(entity_results),
             nearest_candidates=nearest_candidates,
         )
 
@@ -912,21 +911,3 @@ def _unsupported_filter_warnings(filters: SearchFilters) -> list[str]:
     if filters.date_from is not None or filters.date_to is not None:
         warnings.append("unsupported_filter_date")
     return warnings
-
-
-def _disambiguation_payload(
-    entity_results: list[RankedResult],
-) -> DisambiguationPayload | None:
-    if len(entity_results) <= 1:
-        return None
-    return DisambiguationPayload(
-        candidates=[
-            DisambiguationCandidate(
-                id=result.id,
-                title=result.title,
-                concept_path=result.concept_path,
-                match_reason=result.match_reason or "exact_title",
-            )
-            for result in entity_results
-        ]
-    )

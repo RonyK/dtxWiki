@@ -22,10 +22,11 @@ import { Spinner } from "../../shared/components/Spinner";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../../shared/lib/searchLimits";
-import { searchResultHref, searchResultLink } from "../../shared/lib/searchResultHref";
+import { searchResultLink } from "../../shared/lib/searchResultHref";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
 const SCOPES: SearchScope[] = [
@@ -40,12 +41,6 @@ const SEARCH_EXAMPLES = [
   { key: "reviewGuideline", defaultValue: "review guideline" },
   { key: "sourceTrustLevel", defaultValue: "source trust level" },
 ];
-type DisambiguationCandidate = {
-  id?: string;
-  concept_path?: string;
-  title?: string;
-};
-
 class SearchIndexUnavailableError extends Error {
   constructor() {
     super();
@@ -55,19 +50,22 @@ class SearchIndexUnavailableError extends Error {
 
 export function SearchScreen() {
   const { t } = useTranslation("search");
-  // P10.1: ambient workspace id for canonical Context permalink hrefs on
-  // search results and disambiguation candidates.
+  const { preferences: labsPreferences } = useLabsPreferences();
+  const includeAgents = labsPreferences.agent;
+  // Ambient workspace id for canonical Context result links.
   const workspaceId = useOptionalWorkspaceContext()?.selectedId ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<SearchScope>("all");
+  const [selectedScope, setScope] = useState<SearchScope>("all");
+  const scope = selectedScope === "agent_page" && !includeAgents ? "all" : selectedScope;
   const [retrievalMode, setRetrievalMode] = useState<string>(() =>
     parseMode(searchParams.get("mode")),
   );
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const searchBaseKey = `${debouncedQuery}:${scope}:${retrievalMode}:${includeAgents}`;
   const indexUnavailableMessage = t("errors.indexUnavailable", {
     defaultValue:
-      "Search index is not available in this build. Try Library, Context, or Agent navigation instead.",
+      "Search index is not available in this build. Use the navigation to browse documents.",
   });
   const { data: capabilities } = useAsyncLoad(
     async () => {
@@ -99,11 +97,11 @@ export function SearchScreen() {
   // and before the new request settles.
   const requestIdRef = useRef(0);
   const {
-    data: payload,
+    data: searchResponse,
     error,
     loading,
     reload,
-  } = useAsyncLoad<SearchPayload | null>(
+  } = useAsyncLoad<{ key: string; payload: SearchPayload } | null>(
     async (signal) => {
       const requestId = ++requestIdRef.current;
       if (!debouncedQuery || capabilities === null) {
@@ -125,6 +123,7 @@ export function SearchScreen() {
           {
             query: debouncedQuery,
             scope,
+            filters: { include_agents: includeAgents },
             retrieval_mode: retrievalMode,
             limit: 20,
           },
@@ -133,7 +132,7 @@ export function SearchScreen() {
         if (signal?.aborted || requestId !== requestIdRef.current) {
           throw new DOMException("Aborted", "AbortError");
         }
-        return result;
+        return { key: searchBaseKey, payload: result };
       } catch (caught) {
         if (caught instanceof DOMException && caught.name === "AbortError") {
           throw caught;
@@ -148,6 +147,8 @@ export function SearchScreen() {
       debouncedQuery,
       scope,
       retrievalMode,
+      includeAgents,
+      searchBaseKey,
       capabilities,
       indexUnavailableMessage,
     ],
@@ -161,12 +162,12 @@ export function SearchScreen() {
       signalAware: true,
     },
   );
+  const payload = searchResponse?.key === searchBaseKey ? searchResponse.payload : null;
   const searchLoading = loading && Boolean(debouncedQuery);
 
   // A5: search is keyset-paged. Accumulate appended pages on top of the loader's
-  // first page, keyed by the active query+scope so a new search drops the stale
+  // first page, keyed by the search parameters and enabled features to drop the stale
   // tail; the cursor guard mirrors the overview Load more.
-  const searchBaseKey = `${debouncedQuery}:${scope}:${retrievalMode}`;
   const [appended, setAppended] = useState<{
     key: string;
     items: RankedSearchResult[];
@@ -217,6 +218,7 @@ export function SearchScreen() {
       const next = await searchWorkspace(workspaceId, {
         query: debouncedQuery,
         scope,
+        filters: { include_agents: includeAgents },
         retrieval_mode: retrievalMode,
         limit: 20,
         cursor: requestCursor,
@@ -250,6 +252,14 @@ export function SearchScreen() {
     setScope(urlScope);
     setDebouncedQuery(urlQuery);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!includeAgents && searchParams.get("scope") === "agent_page") {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("scope");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [includeAgents, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (capabilities === null) return;
@@ -362,7 +372,7 @@ export function SearchScreen() {
             <p className="feature-subtitle">
               {t("header.subtitle", {
                 defaultValue:
-                  "Search across Context pages, Library sources, and Agent pages.",
+                  "Search documents in this workspace.",
               })}
             </p>
           </div>
@@ -388,7 +398,7 @@ export function SearchScreen() {
               id="workspace-search-query"
               maxLength={SEARCH_QUERY_MAX_LENGTH}
               placeholder={t("form.queryPlaceholder", {
-                defaultValue: "Search Context, Library, Agent pages",
+                defaultValue: "Search workspace documents",
               })}
               value={query}
               onChange={updateQuery}
@@ -400,7 +410,7 @@ export function SearchScreen() {
               value={scope}
               onChange={(event) => updateScope(event.target.value as SearchScope)}
             >
-              {SCOPES.map((entry) => (
+              {SCOPES.filter((entry) => includeAgents || entry !== "agent_page").map((entry) => (
                 <option key={entry} value={entry}>
                   {t(`scopes.${entry}`, { defaultValue: defaultScopeLabel(entry) })}
                 </option>
@@ -494,7 +504,7 @@ function SearchResults({
         <p>
           {t("empty.unavailableDescription", {
             defaultValue:
-              "Use Library, Context, or Agent navigation while the search index is offline or not deployed in this build.",
+              "Use the navigation to browse documents while the search index is offline or not deployed in this build.",
           })}
         </p>
       </div>
@@ -576,7 +586,6 @@ function SearchResults({
   return (
     <>
       <SearchAdvisories payload={payload} />
-      <SearchDisambiguation payload={payload} workspaceId={workspaceId} />
       <section className="feature-section">
         <ListPanelHeader
           title={t("results.serverOrder", { defaultValue: "Results" })}
@@ -595,11 +604,6 @@ function SearchResults({
               result={result}
               workspaceId={workspaceId}
               query={query}
-              showShortId={payload.ranked_results.some((other) =>
-                other.id !== result.id &&
-                normalizedText(other.title) === normalizedText(result.title) &&
-                locationLooksSame(resultLocation(other), resultLocation(result))
-              )}
             />
           ))}
         </div>
@@ -629,108 +633,14 @@ function SearchAdvisories({ payload }: { payload: SearchPayload }) {
   );
 }
 
-function SearchDisambiguation({
-  payload,
-  workspaceId,
-}: {
-  payload: SearchPayload;
-  workspaceId: string | null;
-}) {
-  const { t } = useTranslation("search");
-  const disambiguation = payload.disambiguation;
-  const candidates: DisambiguationCandidate[] =
-    disambiguation &&
-    typeof disambiguation === "object" &&
-    "candidates" in disambiguation &&
-    Array.isArray(disambiguation.candidates)
-      ? (disambiguation.candidates as DisambiguationCandidate[])
-      : [];
-  if (candidates.length === 0) {
-    return null;
-  }
-  return (
-    <section className="feature-section search-disambiguation">
-      <div className="panel-header">
-        <span>
-          {t("results.disambiguation", {
-            defaultValue: "Multiple exact matches",
-          })}
-        </span>
-      </div>
-      <div className="search-disambiguation-list">
-        {candidates.map((candidate) => {
-          const href = disambiguationHref(candidate, workspaceId);
-          const key = `${candidate.id}-${candidate.concept_path}`;
-          const label =
-            candidate.title ??
-            (candidate.concept_path
-              ? displayConceptPath(candidate.concept_path)
-              : candidate.concept_path);
-          // §12.2: candidate click = navigate; title alone cannot separate
-          // same-named pages, so the concept path renders alongside.
-          if (!href) {
-            return (
-              <span className="search-disambiguation-candidate" key={key}>
-                <strong>{label}</strong>
-                {candidate.concept_path ? (
-                  <span>{displayConceptPath(candidate.concept_path)}</span>
-                ) : null}
-              </span>
-            );
-          }
-          return (
-            <Link
-              className="search-disambiguation-candidate"
-              key={key}
-              to={href}
-            >
-              <strong>{label}</strong>
-              {candidate.concept_path ? (
-                <span>{candidate.concept_path}</span>
-              ) : null}
-            </Link>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function disambiguationHref(
-  candidate: DisambiguationCandidate,
-  workspaceId: string | null,
-): string | null {
-  if (!candidate.id) {
-    return null;
-  }
-  // Disambiguation candidates come from the context-page entity lane; route
-  // them through the shared href resolver so link semantics stay single-source.
-  return searchResultHref(
-    {
-      id: candidate.id,
-      type: "context_page",
-      title: candidate.title ?? "",
-      snippet: "",
-      score: 0,
-      citation_available: false,
-      stale: false,
-      archived: false,
-      concept_path: candidate.concept_path,
-    },
-    workspaceId,
-  );
-}
-
 function SearchResultRow({
   result,
   workspaceId,
   query,
-  showShortId,
 }: {
   result: RankedSearchResult;
   workspaceId: string | null;
   query: string;
-  showShortId: boolean;
 }) {
   const { t } = useTranslation("search");
   const descriptionId = useId();
@@ -765,7 +675,7 @@ function SearchResultRow({
       ? "Cannot open directly from search · Review link information unavailable"
       : "Cannot open directly from search · Link information unavailable" },
   ) : null;
-  const description = [fullPath, showShortId ? `ID ${result.id.slice(0, 8)}` : null, matchReason, unavailable].filter(Boolean).join(". ");
+  const description = [fullPath, matchReason, unavailable].filter(Boolean).join(". ");
   const content = (
     <>
       <div className="search-result-body">
@@ -783,7 +693,7 @@ function SearchResultRow({
           </p>
         ) : null}
         {location.length > 0 ? (
-          <p className="search-result-location" title={fullPath} aria-hidden="true">
+          <p className="search-result-location" aria-hidden="true">
             <Folder size={13} aria-hidden="true" />
             <span className="search-result-location-parts">
               {locationParts.map((part, index) => (
@@ -800,7 +710,6 @@ function SearchResultRow({
             </span>
           </p>
         ) : null}
-        {showShortId ? <p className="search-result-id">{result.id.slice(0, 8)}</p> : null}
         {matchReason ? (
           <p className="search-result-reason">
             <Search size={13} aria-hidden="true" />{matchReason}
@@ -872,15 +781,6 @@ function presentLocation(location: string[]) {
       ? [{ text: "…", desktop: location.length >= 4, mobile: true }, stage]
       : [stage];
   });
-}
-
-function locationLooksSame(left: string[], right: string[]) {
-  const leftParts = presentLocation(left);
-  const rightParts = presentLocation(right);
-  return (["desktop", "mobile"] as const).some((viewport) =>
-    JSON.stringify(leftParts.filter((part) => part[viewport]).map((part) => part.text)) ===
-    JSON.stringify(rightParts.filter((part) => part[viewport]).map((part) => part.text)),
-  );
 }
 
 // Search previews are plain text. Keep labels/content while removing Markdown
@@ -970,11 +870,7 @@ function defaultMatchReasonLabel(reason: string) {
   if (reason === "exact_id") return "Exact ID";
   if (reason === "exact_title") return "Exact title";
   if (reason === "exact_slug") return "Path match";
-  if (reason === "exact_alias") return "Exact alias";
-  if (reason === "trigram") return "Fuzzy name";
-  if (reason === "grep_wiki") return "Grep";
   if (reason === "semantic") return "Similar meaning";
-  if (reason === "hybrid") return "Hybrid";
   if (reason === "associative") return "Associated";
   return "Keyword";
 }

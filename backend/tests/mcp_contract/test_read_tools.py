@@ -540,33 +540,32 @@ def test_mcp_search_maps_payload_warnings_into_envelope(page_service, actor):
     same channel."""
 
     workspace_id = _workspace_id(page_service)
-    for slug in ("warn-map-a", "warn-map-b"):
-        page_service.write_page(
-            workspace_slug="default",
-            slug=slug,
-            title="Warn Map Twin",
-            body_md=f"# Warn Map Twin\n\n{slug}.",
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-            actor_provenance=actor.provenance,
-        )
+    page_service.write_page(
+        workspace_slug="default",
+        slug="warn-map",
+        title="Warning Mapper",
+        body_md="# Warning Mapper\n\nSearch filter warning.",
+        actor_kind=actor.actor_kind,
+        actor_id=actor.actor_id,
+        actor_provenance=actor.provenance,
+    )
 
     response = dispatch(
         "search",
         {
             "workspace_id": str(workspace_id),
-            "query": "Warn Map Twin",
+            "query": "Warning Mapper",
             "scope": "context_page",
+            "filters": {"tag": ["unapplied"]},
         },
         actor=actor,
         page_service=page_service,
     )
 
     assert response.envelope.result_status == "succeeded"
-    assert "disambiguation_required" in response.data.warnings
+    assert "unsupported_filter_tag" in response.data.warnings
     envelope_codes = [warning.code for warning in response.envelope.warnings]
-    assert "disambiguation_required" in envelope_codes
-    assert len(response.data.disambiguation.candidates) == 2
+    assert "unsupported_filter_tag" in envelope_codes
 
     no_hit = dispatch(
         "search",

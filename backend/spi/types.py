@@ -86,6 +86,10 @@ SearchMatchReason = Literal[
 
 
 class SearchFilters(BaseModel):
+    include_agents: bool = Field(
+        default=True,
+        description="Whether Agent pages are included in search results.",
+    )
     context_type: list[str] | None = None
     connector_type: list[str] | None = None
     format_hint: list[str] | None = None

@@ -533,8 +533,14 @@ export function Shell({ children }: ShellProps) {
             />
           ) : null}
         </div>
+        {/* Remount to clear previews and abort requests when Agent visibility changes. */}
         {isAuthenticated ? (
-          <CommandSearchBox labels={shellLabels} navGroups={navGroups} />
+          <CommandSearchBox
+            key={String(labsPreferences.agent)}
+            includeAgents={labsPreferences.agent}
+            labels={shellLabels}
+            navGroups={navGroups}
+          />
         ) : (
           /* The topbar is a grid and this is its MIDDLE child, so it has to
              carry the same class the real search box does. Signed in,
@@ -868,9 +874,11 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
 }
 
 function CommandSearchBox({
+  includeAgents,
   labels,
   navGroups,
 }: {
+  includeAgents: boolean;
   labels: ShellLabels;
   navGroups: ReturnType<typeof navGroupsForLabels>;
 }) {
@@ -951,7 +959,12 @@ function CommandSearchBox({
       setPreviewLoading(true);
       searchWorkspace(
         selectedId,
-        { query: trimmedQuery, scope: "all", limit: 5 },
+        {
+          query: trimmedQuery,
+          scope: "all",
+          filters: { include_agents: includeAgents },
+          limit: 5,
+        },
         { signal: controller.signal },
       )
         .then((payload) => {
@@ -978,7 +991,7 @@ function CommandSearchBox({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, selectedId, trimmedQuery]);
+  }, [includeAgents, open, selectedId, trimmedQuery]);
 
   useEffect(() => {
     function handleGlobalKeyDown(event: globalThis.KeyboardEvent) {
