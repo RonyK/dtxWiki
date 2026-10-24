@@ -133,6 +133,7 @@ from backend.utils.block_identity import (
     compute_block_map_with_ids,
     heal_block_map,
 )
+from backend.utils.content_hash import same_authored_markdown
 from backend.utils.markdown_outline import parse_outline
 from backend.utils.page_frontmatter import (
     PAGE_TYPES,
@@ -2709,8 +2710,8 @@ class PageService:
                 metadata_patch["placement_parent_node_id"] = str(
                     placement_parent_node_id
                 )
-            # The content hash ignores trailing spaces, including hard breaks.
-            if body_md == current.body_md and (
+            # Preserve NFC/newline no-ops without ignoring Markdown hard breaks.
+            if same_authored_markdown(body_md, current.body_md) and (
                 (
                     current.version_status not in ("editing", "draft")
                     and not requires_human_review
@@ -3004,8 +3005,8 @@ class PageService:
             if placement_changed:
                 metadata_patch["placement_parent_node_id"] = str(destination_node_id)
 
-            # A hard-break-only edit changes Markdown even when its hash matches.
-            if body_md == current.body_md and (
+            # Preserve NFC/newline no-ops without ignoring Markdown hard breaks.
+            if same_authored_markdown(body_md, current.body_md) and (
                 (
                     current.version_status not in ("editing", "draft")
                     and not requires_human_review

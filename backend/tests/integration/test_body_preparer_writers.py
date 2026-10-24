@@ -6,7 +6,9 @@ bytes are literals captured before BodyPreparer extraction, never calculated
 by the normalizer or preparer under test.
 """
 
-from sqlalchemy import select
+from unicodedata import normalize
+
+from sqlalchemy import func, select
 
 from backend.mcp.router import dispatch
 from backend.models.ask import ContextIngressProposal
@@ -117,7 +119,8 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
         # bodies, but a Markdown hard break is a real authored byte change.
         for writer in ("write", "update"):
             slug = f"hard-break-{suffix}-{writer}"
-            initial = _published(page_service, slug, "a\nb\n")
+            authored = "café\nb\n"
+            initial = _published(page_service, slug, authored)
             save = (
                 page_service.write_page
                 if writer == "write"
@@ -125,7 +128,6 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             )
             save_args = dict(
                 title="Golden",
-                body_md="a  \nb\n",
                 actor_kind="human",
                 actor_id=ACTOR_ID,
                 actor_provenance="browser_session",
@@ -134,6 +136,26 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 save_args.update(workspace_slug="default", slug=slug)
             else:
                 save_args.update(page_id=initial.id)
+            for equivalent in (
+                authored.replace("\n", "\r\n"),
+                authored.rstrip("\n"),
+                normalize("NFD", authored),
+            ):
+                unchanged = save(
+                    **save_args,
+                    body_md=equivalent,
+                    base_version_id=initial.version_id,
+                    base_content_hash=initial.content_hash,
+                )
+                assert unchanged.version_id == initial.version_id
+            with session_factory() as session:
+                version_count = session.scalar(
+                    select(func.count(ContextPageVersion.id)).where(
+                        ContextPageVersion.page_id == initial.id
+                    )
+                )
+                assert version_count == 1
+            save_args["body_md"] = "café  \nb\n"
             changed = save(
                 **save_args,
                 base_version_id=initial.version_id,
@@ -150,7 +172,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             _assert_stored(
                 session_factory,
                 changed.version_id,
-                "a  \nb\n",
+                "café  \nb\n",
                 f"hard break {suffix} {writer}",
             )
 
