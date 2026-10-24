@@ -4334,6 +4334,10 @@ function DeploymentSection() {
 
   return (
     <section className="feature-section">
+      <p className="deployment-instance-scope">
+        <ShieldCheck size={14} aria-hidden="true" />
+        {t("setup.systemScopeNote")}
+      </p>
       <DeploymentUpdateCard
         initialStatus={data}
         renderCommand={(command, label) => (

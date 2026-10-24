@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,7 +48,15 @@ describe("Deployment update guidance", () => {
       await user.selectOptions(selector, method);
       expect(screen.getByText(command)).toBeInTheDocument();
       expect(screen.getByRole("list").children).toHaveLength(3);
+      if (method === "uv") {
+        expect(screen.getByText(/Requires Python 3.12 or newer/)).toHaveTextContent("--python <version>");
+        expect(screen.queryByText(/--python/, { selector: "pre" })).not.toBeInTheDocument();
+      }
       if (method === "npx") {
+        const preparation = screen.getByRole("list").children[0] as HTMLElement;
+        expect(within(preparation).getByText(/Before starting, run the release's required checks/)).toHaveTextContent("npx @dtxsuite/dtxwiki@<version> inputs audit");
+        expect(screen.getByText(/Replace @latest below with the same npm version/)).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Detailed npx (run directly) instructions" })).toHaveAttribute("href", expect.stringContaining("#npx"));
         expect(screen.getByRole("heading", { name: "Start the latest version" })).toBeInTheDocument();
         expect(screen.getByRole("heading", { name: "Check the version" })).toBeInTheDocument();
         expect(screen.getByText(/do not launch a second server/)).toBeInTheDocument();
@@ -65,7 +73,8 @@ describe("Deployment update guidance", () => {
   it("checks an absent cache once, forces manual checks, and withdraws a Python target on failure", async () => {
     const fetch = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(response(FRESH))
-      .mockResolvedValueOnce(response({ ...FRESH, check_status: "failed" }));
+      .mockResolvedValueOnce(response({ ...FRESH, check_status: "failed" }))
+      .mockResolvedValueOnce(response(FRESH));
     render(card({ ...FRESH, latest_version: null, update_available: false, check_status: "not_checked", checked_at: null }));
     expect(await screen.findByText("New release")).toBeInTheDocument();
     expect(fetch).toHaveBeenNthCalledWith(1, expect.stringContaining("/admin/deployment/update-check"), expect.objectContaining({ method: "POST", body: '{"force":false}', signal: expect.any(AbortSignal) }));
@@ -78,6 +87,10 @@ describe("Deployment update guidance", () => {
     expect(screen.getByText("0.2.0")).toBeInTheDocument();
     expect(screen.getByText(/Last successful check:/)).not.toHaveTextContent("Not yet checked");
     expect(fetch).toHaveBeenNthCalledWith(2, expect.any(String), expect.objectContaining({ body: '{"force":true}' }));
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByText('uv tool install --force "dtxwiki==0.2.0"')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check now" })).toBeEnabled();
+    expect(fetch).toHaveBeenNthCalledWith(3, expect.any(String), expect.objectContaining({ body: '{"force":true}' }));
   });
 
   it("blocks disabled checks and avoids pinned commands for unverified or older releases", async () => {

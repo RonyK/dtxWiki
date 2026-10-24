@@ -291,7 +291,7 @@
     "loading": "Loading deployment status",
     "loadError": "Failed to load deployment status",
     "subtitle": "Read-only. To change a value, run the shown command in a terminal on the server — the app cannot edit /etc itself.",
-    "systemScopeNote": "These are dtxWiki SERVER settings — they apply to the whole instance (all workspaces), not just this workspace. Server admins only.",
+    "systemScopeNote": "Server admins · these settings apply to the whole instance (all workspaces).",
     "tlsNotReady": "HTTPS is not configured. Set a public https:// URL and let the reverse proxy obtain a certificate (DNS + ports 80/443 must reach this server).",
     "notConfigured": "Not configured",
     "commandsTitle": "Change configuration",
@@ -422,7 +422,7 @@
     },
     "update": {
       "title": "Version & updates",
-      "scope": "Server admins · applies to the whole instance. Run commands in a terminal on the server.",
+      "commandNotice": "Run commands in a terminal on the server.",
       "currentVersion": "Current version",
       "latestVersion": "Latest release",
       "previousLatest": "Previously checked release",
@@ -433,6 +433,7 @@
       "configuredIndex": "Configured package index",
       "pypi": "PyPI",
       "checkNow": "Check now",
+      "checkAgain": "Check again",
       "checking": "Checking…",
       "releaseNotes": "Release notes on GitHub",
       "status": {
@@ -476,18 +477,20 @@
         "verify": "Check the version"
       },
       "prepareDescription": "Read the release notes and documentation prerequisites first. Stop the server and any separately run worker, then back up the database, files, and configuration.",
+      "npxPrepareDescription": "Choose the target version from npm. Before starting, run the release's required checks with that version, for example npx @dtxsuite/dtxwiki@<version> inputs audit. Complete any required repair or migration steps in the documentation.",
       "backupDocs": "Backup and upgrade prerequisites",
       "instructions": {
         "uv": "Run in the environment used for the original uv tool installation. Keep its Python interpreter options and package index/authentication configuration.",
         "pipx": "Use the original pipx environment and Python interpreter options. Keep any package index/authentication configuration.",
         "pip": "Activate the original virtual environment, then run this command with its Python interpreter and existing package index/authentication configuration.",
-        "npx": "After the preparation checks, run this command to start dtxWiki. Add the same server options and environment variables you normally use.",
+        "npx": "Replace @latest below with the same npm version used for the checks in step 1. Start only after those checks pass, using your usual server options and environment variables.",
         "npm": "Update the global npm package using the same user and npm environment as the original installation.",
         "docker": "Follow the documented backup, pinned-version image rebuild, migration, and container recreation procedure for your Compose configuration.",
         "service": "Follow the documented verified-wheel, service stop, upgrade, migration, and service start procedure for your deployment."
       },
       "commandLabel": "Terminal command",
       "noPinnedCommand": "A fresh newer Python release has not been confirmed. Check now, or follow the documentation to select a version without downgrading.",
+      "uvPythonNote": "Requires Python 3.12 or newer. Optionally add --python <version> to the uv command to select a particular interpreter.",
       "npmVersionNote": "@latest uses the npm registry. Its version may differ from the Python package index shown above.",
       "methodDocs": "Detailed {{method}} instructions",
       "restartDescription": "Complete the documented migration and release checks, then restart using your existing command, environment, and options. Refresh this page to confirm the running version.",

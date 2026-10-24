@@ -176,6 +176,10 @@ describe("Settings > Deployment tab", () => {
       (await screen.findAllByText("https://wiki.example.com")).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("https://wiki.example.com/mcp")).toBeInTheDocument();
+    const instanceScope = screen.getByText(/these settings apply to the whole instance \(all workspaces\)/);
+    const updateCard = screen.getByRole("heading", { name: "Version & updates" }).closest("section");
+    expect(instanceScope).toBeInTheDocument();
+    expect(updateCard).not.toContainElement(instanceScope);
     expect(screen.getByText("OAuth access lifetime")).toBeInTheDocument();
     expect(screen.getByText("OAuth client self-registration")).toBeInTheDocument();
     expect(screen.getByText("3600 seconds · Environment override")).toBeInTheDocument();

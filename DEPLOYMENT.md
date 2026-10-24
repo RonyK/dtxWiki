@@ -551,13 +551,19 @@ docker compose up -d app worker
 **지금 확인**은 캐시와 관계없이 다시 조회합니다. 기본 출처는 PyPI이며,
 `DTXWIKI_UPDATE_INDEX_URL`을 설정한 서버는 해당 인덱스만 사용합니다.
 `DTXWIKI_NO_UPDATE_NOTIFIER=true`이면 자동·수동 외부 조회를 모두 하지 않습니다.
+외부 인덱스에 접근할 수 없는 오프라인·폐쇄망 서버에는 이 설정을 권장합니다.
 실패하거나 오래된 결과는 마지막 성공 시각과 함께 표시하며 최신 상태로 확정하지 않습니다.
 
 설치 방법은 직접 선택합니다. uv, pipx, pip 가상환경, npx, npm 전역 설치, Docker,
 서버 서비스/wheel별로 준비 → 갱신 → 시작·확인 순서를 안내합니다. 선택한 방법은 서버에
 저장하지 않습니다. 명령은 서버 터미널에서 실행하며, 기존 Python 환경과 패키지 인덱스·인증
 설정을 유지하세요. npm `@latest`는 npm 레지스트리에서 별도로 결정되는 런처 버전입니다.
-npx 명령은 서버도 시작하므로 릴리스의 사전 확인을 실행 전에 완료해야 합니다.
+uv 기본 명령은 Python 버전을 고정하지 않습니다. Python 3.12 이상을 사용하고,
+특정 인터프리터가 필요할 때만 `--python <버전-또는-경로>` 옵션을 추가하세요.
+npx는 같은 npm 대상 버전을 지정하여 릴리스에서 요구하는 사전 검사 명령을 먼저 실행한 뒤
+서버를 시작하세요. 예를 들어 `inputs audit`은 `npx @dtxsuite/dtxwiki@<version> inputs audit`로
+실행하고, 통과하면 같은 `<version>`으로 서버를 시작합니다. 서버와 같은 OS 계정·환경·DB를
+사용하고 필요한 복구·migration은 상세 문서의 순서를 따르세요.
 
 화면의 안내는 설치·마이그레이션·복구 전체 절차를 대신하지 않습니다.
 [상세 유지보수 문서](https://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/)와

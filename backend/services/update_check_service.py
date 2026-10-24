@@ -266,8 +266,6 @@ def _read_cache(path: Path) -> dict | None:
     if parsed_latest is None:
         return None
     channel = cached.get("channel")
-    if not isinstance(channel, str) or channel not in {"stable", "prerelease"}:
-        return None
     if channel == "stable" and parsed_latest.is_prerelease:
         return None
     checked = cached.get("checked_epoch")
@@ -279,14 +277,12 @@ def _read_cache(path: Path) -> dict | None:
         datetime.fromtimestamp(checked, UTC)
     except (ValueError, OverflowError, OSError):
         return None
-    if "source_fingerprint" in cached:
-        fingerprint = cached["source_fingerprint"]
-        if not isinstance(fingerprint, str) or not re.fullmatch(
-            r"[0-9a-f]{64}", fingerprint
-        ):
-            return None
-    elif "index_url" not in cached or (
-        cached["index_url"] is not None and not isinstance(cached["index_url"], str)
+    if "source_fingerprint" not in cached and (
+        "index_url" not in cached
+        or (
+            cached["index_url"] is not None
+            and not isinstance(cached["index_url"], str)
+        )
     ):
         return None
     return cached
@@ -324,15 +320,7 @@ def _write_cache(path: Path, settings: Settings, latest: str, now) -> None:
 
 
 def _is_fresh(cached: dict, now) -> bool:
-    checked = cached.get("checked_epoch")
-    if isinstance(checked, bool) or not isinstance(checked, (int, float)):
-        return False
-    try:
-        if not math.isfinite(checked):
-            return False
-        age = now() - checked
-    except OverflowError:
-        return False
+    age = now() - cached["checked_epoch"]
     return 0 <= age < CACHE_TTL_SEC  # future-dated (clock skew) -> treat as stale
 
 

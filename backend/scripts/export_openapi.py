@@ -69,6 +69,7 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
     ("GET", "/oauth/consents/cleanup"),
     ("POST", "/oauth/consents/cleanup"),
     ("GET", "/api/v1/admin/deployment"),
+    ("POST", "/api/v1/admin/deployment/update-check"),
     # Epic-2 Phase 1c (job visibility): same require_server_admin-only gate as
     # /admin/deployment, no recent-reauthentication step -- this is an
     # operations surface, not the protected user-recovery directory.

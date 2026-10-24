@@ -6,7 +6,7 @@ import {
   ArrowUpRight,
   Clock3,
   RefreshCw,
-  ShieldCheck,
+  Terminal,
 } from "lucide-react";
 
 import {
@@ -95,7 +95,9 @@ export function DeploymentUpdateCard({
     ? "docker-rebuild-from-a-pinned-version"
     : method === "service"
       ? "systemd-a-verified-local-wheel"
-      : "local-package";
+      : method === "npx"
+        ? "npx"
+        : "local-package";
   const displayStatus = checking ? "checking"
     : status.check_status === "disabled" ? "disabled"
       : status.check_status === "failed" ? "failed"
@@ -109,6 +111,8 @@ export function DeploymentUpdateCard({
   const checkedAt = status.checked_at && !Number.isNaN(Date.parse(status.checked_at))
     ? t("setup.update.checkedAt", { time: new Date(status.checked_at).toLocaleString(i18n.language) })
     : t("setup.update.neverChecked");
+  const checkLabel = t(checking ? "setup.update.checking"
+    : status.check_status === "failed" ? "setup.update.checkAgain" : "setup.update.checkNow");
 
   return (
     <section className="deployment-configuration-card deployment-update-card" aria-labelledby="deployment-update-heading">
@@ -119,9 +123,9 @@ export function DeploymentUpdateCard({
             <StatusPill compact label={t(`setup.update.status.${displayStatus}`)} status={displayStatus} tone={tone} />
           </div>
         </div>
-        <button type="button" className="icon-button deployment-update-refresh" disabled={checking || status.check_status === "disabled"} aria-label={t(checking ? "setup.update.checking" : "setup.update.checkNow")} title={t(checking ? "setup.update.checking" : "setup.update.checkNow")} aria-busy={checking} onClick={() => void check(true)}>
+        <button type="button" className="icon-button deployment-update-refresh" disabled={checking || status.check_status === "disabled"} aria-label={checkLabel} title={checkLabel} aria-busy={checking} onClick={() => void check(true)}>
           <RefreshCw size={15} className={checking ? "is-checking" : undefined} aria-hidden="true" />
-          <span>{t(checking ? "setup.update.checking" : "setup.update.checkNow")}</span>
+          <span>{checkLabel}</span>
         </button>
         <p className="deployment-update-description">{t("setup.update.description")}</p>
       </header>
@@ -175,6 +179,7 @@ export function DeploymentUpdateCard({
                 <div className="deployment-install-step-content">
                   <h4>{t("setup.update.steps.prepare")}</h4>
                   <p>{t("setup.update.prepareDescription")}</p>
+                  {method === "npx" ? <p className="deployment-install-note">{t("setup.update.npxPrepareDescription")}</p> : null}
                   <a className="deployment-update-link" href={UPGRADE_DOCS} target="_blank" rel="noopener noreferrer">{t("setup.update.backupDocs")}<ArrowUpRight size={14} aria-hidden="true" /></a>
                 </div>
               </li>
@@ -184,6 +189,7 @@ export function DeploymentUpdateCard({
                   <h4>{t(method === "npx" ? "setup.update.steps.launch" : "setup.update.steps.update")}</h4>
                   <p>{t(`setup.update.instructions.${method}`)}</p>
                   {command ? renderCommand(command, t("setup.update.commandLabel", { method: t(`setup.update.methods.${method}`) })) : method !== "docker" && method !== "service" ? <p className="deployment-install-note">{t("setup.update.noPinnedCommand")}</p> : null}
+                  {method === "uv" ? <p className="deployment-install-note">{t("setup.update.uvPythonNote")}</p> : null}
                   {(method === "npx" || method === "npm") ? <p className="deployment-install-note">{t("setup.update.npmVersionNote")}</p> : null}
                   <a className="deployment-update-link" href={`${UPGRADE_DOCS}#${docsAnchor}`} target="_blank" rel="noopener noreferrer">{t("setup.update.methodDocs", { method: t(`setup.update.methods.${method}`) })}<ArrowUpRight size={14} aria-hidden="true" /></a>
                 </div>
@@ -199,7 +205,7 @@ export function DeploymentUpdateCard({
           </div>
         ) : null}
       </div>
-      <p className="deployment-update-scope"><ShieldCheck size={14} aria-hidden="true" />{t("setup.update.scope")}</p>
+      <p className="deployment-update-scope"><Terminal size={14} aria-hidden="true" />{t("setup.update.commandNotice")}</p>
     </section>
   );
 }

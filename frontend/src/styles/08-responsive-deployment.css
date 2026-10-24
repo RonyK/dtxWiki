@@ -430,6 +430,21 @@
 }
 
 /* Settings > Setup (read-only deployment status + reconfigure commands) */
+.deployment-instance-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 16px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.deployment-instance-scope > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .deployment-configuration-card.deployment-update-card {
   margin-top: 0;
   min-width: 0;

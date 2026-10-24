@@ -262,24 +262,12 @@ def test_deployment_release_check_cache_only_get_and_explicit_post(
     assert client.post(
         "/api/v1/admin/deployment/update-check", json={"unknown": True}
     ).status_code == 422
-
-
-def test_deployment_release_check_disabled_makes_no_request(
-    page_service, monkeypatch, tmp_path
-):
-    def forbidden(*args, **kwargs):
-        raise AssertionError("disabled notifier must not fetch")
-
-    monkeypatch.setattr(update_check_service, "_fetch_latest", forbidden)
-    monkeypatch.setattr(update_check_service, "default_data_dir", lambda: tmp_path)
-    client = make_client(page_service, no_update_notifier=True, update_index_url=None)
+    # Keep the disabled response's HTTP/schema contract in this endpoint scenario;
+    # detailed no-cache/no-network behavior belongs to the service unit test.
+    monkeypatch.setattr(client.app.state.settings, "no_update_notifier", True)
     response = client.post(
         "/api/v1/admin/deployment/update-check", json={"force": True}
     )
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["check_status"] == "disabled"
-    assert data["source"] == "pypi"
-    assert data["latest_version"] is None
-    assert data["checked_at"] is None
-    assert data["update_available"] is False
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["check_status"] == "disabled"
+    assert len(calls) == 2
