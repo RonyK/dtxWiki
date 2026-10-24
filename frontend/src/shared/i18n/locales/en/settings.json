@@ -422,7 +422,7 @@
     },
     "update": {
       "title": "Version & updates",
-      "scope": "Server admins · applies to the whole dtxWiki instance. Run update commands in a terminal on the server.",
+      "scope": "Server admins · applies to the whole instance. Run commands in a terminal on the server.",
       "currentVersion": "Current version",
       "latestVersion": "Latest release",
       "previousLatest": "Previously checked release",
@@ -455,8 +455,8 @@
         "checked": "The package index was checked. No newer release has been confirmed for this instance.",
         "notChecked": "The package index has not been checked yet."
       },
-      "methodLabel": "Which method did you use to install or run dtxWiki?",
-      "methodHint": "Choose one to see its update instructions. This selection only changes the guide below.",
+      "methodLabel": "Installation method",
+      "methodHint": "Choose how you installed dtxWiki to see the update steps.",
       "methodPlaceholder": "Select an installation method",
       "methods": {
         "uv": "uv tool",
@@ -486,12 +486,14 @@
         "docker": "Follow the documented backup, pinned-version image rebuild, migration, and container recreation procedure for your Compose configuration.",
         "service": "Follow the documented verified-wheel, service stop, upgrade, migration, and service start procedure for your deployment."
       },
-      "commandLabel": "{{method}} update command",
+      "commandLabel": "Terminal command",
       "noPinnedCommand": "A fresh newer Python release has not been confirmed. Check now, or follow the documentation to select a version without downgrading.",
       "npmVersionNote": "@latest uses the npm registry. Its version may differ from the Python package index shown above.",
       "methodDocs": "Detailed {{method}} instructions",
       "restartDescription": "Complete the documented migration and release checks, then restart using your existing command, environment, and options. Refresh this page to confirm the running version.",
-      "verifyDescription": "The command in step 2 starts the server. Refresh this page to confirm the running version; do not launch a second server."
+      "verifyDescription": "The command in step 2 starts the server. Refresh this page to confirm the running version; do not launch a second server.",
+      "description": "Check the latest release and follow the guide for your installation.",
+      "guideTitle": "Update guide"
     }
   },
   "setupScreen": {

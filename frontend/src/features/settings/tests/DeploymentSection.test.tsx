@@ -422,7 +422,7 @@ describe("Settings > Deployment tab", () => {
     expect(await screen.findByText("New release")).toBeInTheDocument();
     expect(screen.getByText("0.2.0")).toBeInTheDocument();
     const selector = screen.getByRole("combobox", {
-      name: "Which method did you use to install or run dtxWiki?",
+      name: "Installation method",
     });
     expect(selector).toHaveValue("");
     expect(within(selector).getAllByRole("option")).toHaveLength(8);

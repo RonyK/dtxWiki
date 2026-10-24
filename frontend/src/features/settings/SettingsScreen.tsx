@@ -4337,7 +4337,7 @@ function DeploymentSection() {
       <DeploymentUpdateCard
         initialStatus={data}
         renderCommand={(command, label) => (
-          <CommandBlock command={command} label={label} />
+          <CommandBlock actionLabel={t("setup.copy")} command={command} label={label} />
         )}
       />
       <StatusBanner tone="info">

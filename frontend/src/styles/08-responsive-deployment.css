@@ -433,125 +433,452 @@
 .deployment-configuration-card.deployment-update-card {
   margin-top: 0;
   min-width: 0;
+  gap: 22px;
+  padding: 24px;
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.deployment-update-header {
+  display: grid;
+  grid-template-areas: "title action" "description action";
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 7px 20px;
+}
+
+.deployment-update-header > div {
+  grid-area: title;
+  min-width: 0;
+}
+
+.deployment-update-card h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+
+.deployment-update-description {
+  grid-area: description;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.deployment-update-refresh {
+  grid-area: action;
+  min-height: 44px;
+  padding-inline: 13px;
+}
+
+.deployment-update-refresh .is-checking {
+  animation: deployment-update-spin 1.2s linear infinite;
+}
+
+@keyframes deployment-update-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deployment-update-refresh .is-checking {
+    animation: none;
+  }
+}
+
+.deployment-update-overview {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
 }
 
 .deployment-update-versions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
   margin: 0;
 }
 
 .deployment-update-versions > div {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  padding: 12px;
   min-width: 0;
+  padding: 18px 24px;
+}
+
+.deployment-update-versions > div + div {
+  border-left: 1px solid var(--border);
 }
 
 .deployment-update-versions dt {
   color: var(--ink-soft);
   font-size: 12px;
+  line-height: 1.5;
 }
 
 .deployment-update-versions dd {
-  margin: 6px 0 0;
-  font-size: 22px;
-  font-weight: 800;
+  margin: 8px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.04em;
   overflow-wrap: anywhere;
 }
 
-.deployment-update-check {
+.deployment-update-overview[data-newer="true"] .deployment-update-latest dd {
+  color: var(--accent);
+}
+
+.deployment-update-connector {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+
+.deployment-update-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.deployment-update-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.deployment-update-message p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.deployment-update-message[data-tone="warn"] {
+  border-radius: var(--radius-control);
+  background: var(--warning-soft);
+  padding: 10px 12px;
+}
+
+.deployment-update-message > svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  color: var(--warning);
+}
+
+.deployment-update-meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px 16px;
 }
 
-.deployment-update-check .meta-line,
-.deployment-update-message {
-  margin: 0;
+.deployment-update-check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.deployment-update-check > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.deployment-update-card .deployment-update-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.65;
+  text-decoration: none;
   overflow-wrap: anywhere;
+}
+
+.deployment-update-link > svg {
+  flex: 0 0 auto;
+}
+
+.deployment-update-card .deployment-update-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .deployment-install-guide {
   display: grid;
-  gap: 8px;
-  padding-top: 14px;
+  gap: 24px;
+  min-width: 0;
+  padding-top: 22px;
   border-top: 1px solid var(--border);
+}
+
+.deployment-install-guide-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+  align-items: center;
+  gap: 20px;
+}
+
+.deployment-install-guide-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.deployment-install-guide-head p {
+  max-width: 44ch;
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.deployment-install-method-field {
   min-width: 0;
 }
 
-.deployment-install-guide > label {
-  font-weight: 700;
+.deployment-install-method-field label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 550;
 }
 
-.deployment-install-guide > select {
+.deployment-install-method-field select {
   width: 100%;
-  max-width: 480px;
   min-width: 0;
   min-height: 44px;
+  background-color: var(--surface);
+  font-size: 13px;
 }
 
 .deployment-install-instructions {
-  display: grid;
-  gap: 12px;
   min-width: 0;
-}
-
-.deployment-install-flow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: var(--ink-soft);
-  font-size: 13px;
 }
 
 .deployment-install-steps {
   display: grid;
-  gap: 16px;
-  margin: 0;
-  padding-left: 24px;
   min-width: 0;
-  list-style: decimal outside;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .deployment-install-steps > li {
-  padding-left: 4px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 14px;
   min-width: 0;
+  padding: 0 0 24px;
   overflow-wrap: anywhere;
 }
 
-.deployment-install-steps h3 {
-  font-size: 15px;
-  margin: 0 0 6px;
+.deployment-install-steps > li:last-child {
+  padding-bottom: 0;
+}
+
+.deployment-install-steps > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 36px;
+  bottom: 8px;
+  left: 13px;
+  width: 1px;
+  background: var(--border);
+}
+
+.deployment-install-step-number {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.deployment-install-step-update > .deployment-install-step-number {
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.deployment-install-step-content {
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.deployment-install-steps h4 {
+  margin: 0 0 7px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
 }
 
 .deployment-install-steps p {
+  max-width: 80ch;
   margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.deployment-install-steps .deployment-install-note {
+  font-size: 12px;
 }
 
 .deployment-install-steps .command-block {
-  margin: 10px 0;
+  gap: 0;
   min-width: 0;
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
 }
 
 .deployment-install-steps .command-block-header {
-  flex-wrap: wrap;
+  min-width: 0;
+  gap: 8px;
+  background: var(--surface-subtle);
+  padding: 2px 10px 2px 14px;
+}
+
+.deployment-install-steps .command-block-header > span {
+  min-width: 0;
+}
+
+.deployment-install-steps .command-block-header span {
+  font-size: 12px;
+  font-weight: 550;
+  text-transform: none;
+}
+
+.deployment-install-steps .command-block-header .icon-button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  border-color: transparent;
+  background: transparent;
 }
 
 .deployment-install-steps .policy-snippet {
   min-height: 0;
   height: auto;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  padding: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.deployment-install-steps .command-block-header .icon-button,
-.deployment-update-check > button {
-  min-height: 44px;
+.deployment-install-steps .command-block-status:empty {
+  display: none;
+}
+
+.deployment-install-steps .command-block-status:not(:empty) {
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+}
+
+.deployment-update-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.deployment-update-scope > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+@media (max-width: 1100px) {
+  .deployment-install-guide-head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .deployment-configuration-card.deployment-update-card {
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .deployment-update-header {
+    grid-template-areas: "title action" "description description";
+    gap: 10px 12px;
+  }
+
+  .deployment-update-card h2 {
+    font-size: 17px;
+  }
+
+  .deployment-update-refresh {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .deployment-update-refresh > span {
+    display: none;
+  }
+
+  .deployment-update-versions > div {
+    padding: 16px;
+  }
+
+  .deployment-update-versions dd {
+    font-size: 25px;
+  }
+
+  .deployment-install-guide {
+    gap: 20px;
+    padding-top: 18px;
+  }
+
+  .deployment-install-steps > li {
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 10px;
+    padding-bottom: 22px;
+  }
+
+  .deployment-install-step-number {
+    height: 24px;
+  }
+
+  .deployment-install-steps > li:not(:last-child)::after {
+    top: 32px;
+    left: 11px;
+  }
 }
 
 .deployment-status-list {

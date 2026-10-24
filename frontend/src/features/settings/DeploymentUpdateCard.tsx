@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  AlertCircle,
+  ArrowRight,
+  ArrowUpRight,
+  Clock3,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react";
 
 import {
   checkDeploymentUpdate,
@@ -99,65 +107,99 @@ export function DeploymentUpdateCard({
     : displayStatus === "current" ? "ok"
       : displayStatus === "failed" || displayStatus === "stale" ? "warn" : "muted";
   const checkedAt = status.checked_at && !Number.isNaN(Date.parse(status.checked_at))
-    ? new Date(status.checked_at).toLocaleString(i18n.language)
+    ? t("setup.update.checkedAt", { time: new Date(status.checked_at).toLocaleString(i18n.language) })
     : t("setup.update.neverChecked");
 
   return (
     <section className="deployment-configuration-card deployment-update-card" aria-labelledby="deployment-update-heading">
-      <div className="deployment-configuration-head">
-        <div className="policy-card-heading">
-          <h2 id="deployment-update-heading">{t("setup.update.title")}</h2>
-          <StatusPill compact label={t(`setup.update.status.${displayStatus}`)} status={displayStatus} tone={tone} />
+      <header className="deployment-update-header">
+        <div>
+          <div className="policy-card-heading">
+            <h2 id="deployment-update-heading">{t("setup.update.title")}</h2>
+            <StatusPill compact label={t(`setup.update.status.${displayStatus}`)} status={displayStatus} tone={tone} />
+          </div>
         </div>
-        <p className="meta-line">{t("setup.update.scope")}</p>
-      </div>
-      <dl className="deployment-update-versions">
-        <div><dt>{t("setup.update.currentVersion")}</dt><dd>{status.current_version ?? t("setup.update.unknownVersion")}</dd></div>
-        <div><dt>{t(status.stale || status.check_status === "failed" ? "setup.update.previousLatest" : "setup.update.latestVersion")}</dt><dd>{status.latest_version ?? "—"}</dd></div>
-      </dl>
-      <div className="deployment-update-check">
-        <p className="meta-line">{t("setup.update.checkedAt", { time: checkedAt })} · {t("setup.update.source", { source: t(status.source === "configured_index" ? "setup.update.configuredIndex" : "setup.update.pypi") })}</p>
-        <button type="button" className="icon-button" disabled={checking || status.check_status === "disabled"} onClick={() => void check(true)}>
-          {t(checking ? "setup.update.checking" : "setup.update.checkNow")}
+        <button type="button" className="icon-button deployment-update-refresh" disabled={checking || status.check_status === "disabled"} aria-label={t(checking ? "setup.update.checking" : "setup.update.checkNow")} title={t(checking ? "setup.update.checking" : "setup.update.checkNow")} aria-busy={checking} onClick={() => void check(true)}>
+          <RefreshCw size={15} className={checking ? "is-checking" : undefined} aria-hidden="true" />
+          <span>{t(checking ? "setup.update.checking" : "setup.update.checkNow")}</span>
         </button>
+        <p className="deployment-update-description">{t("setup.update.description")}</p>
+      </header>
+      <div className="deployment-update-overview" data-newer={newer}>
+        <dl className="deployment-update-versions">
+          <div>
+            <dt>{t("setup.update.currentVersion")}</dt>
+            <dd>{status.current_version ?? t("setup.update.unknownVersion")}</dd>
+          </div>
+          <div className="deployment-update-latest">
+            <dt>{t(status.stale || status.check_status === "failed" ? "setup.update.previousLatest" : "setup.update.latestVersion")}</dt>
+            <dd>{status.latest_version ?? "—"}</dd>
+          </div>
+        </dl>
+        {newer ? <span className="deployment-update-connector" aria-hidden="true"><ArrowRight size={15} /></span> : null}
       </div>
-      <p className="deployment-update-message" role="status" aria-live="polite">{t(`setup.update.message.${displayStatus}`)}</p>
-      <a href="https://github.com/dtxSuite/dtxWiki/releases" target="_blank" rel="noopener noreferrer">{t("setup.update.releaseNotes")}</a>
+      <div className="deployment-update-summary">
+        <div className="deployment-update-message" data-tone={tone} role="status" aria-live="polite">
+          {tone === "warn" ? <AlertCircle size={16} aria-hidden="true" /> : null}
+          <p>{t(`setup.update.message.${displayStatus}`)}</p>
+        </div>
+        <div className="deployment-update-meta">
+          <div className="deployment-update-check">
+            <span><Clock3 size={13} aria-hidden="true" />{checkedAt}</span>
+            <span>{t("setup.update.source", { source: t(status.source === "configured_index" ? "setup.update.configuredIndex" : "setup.update.pypi") })}</span>
+          </div>
+          <a className="deployment-update-link" href="https://github.com/dtxSuite/dtxWiki/releases" target="_blank" rel="noopener noreferrer">{t("setup.update.releaseNotes")}<ArrowUpRight size={14} aria-hidden="true" /></a>
+        </div>
+      </div>
       <div className="deployment-install-guide">
-        <label htmlFor="deployment-install-method">{t("setup.update.methodLabel")}</label>
-        <p className="meta-line" id="deployment-install-method-hint">{t("setup.update.methodHint")}</p>
-        <select id="deployment-install-method" aria-describedby="deployment-install-method-hint" value={method} onChange={(event) => setMethod(event.target.value as InstallMethod | "")}>
-          <option value="">{t("setup.update.methodPlaceholder")}</option>
-          {METHODS.map((value) => <option key={value} value={value}>{t(`setup.update.methods.${value}`)}</option>)}
-        </select>
+        <div className="deployment-install-guide-head">
+          <div>
+            <h3>{t("setup.update.guideTitle")}</h3>
+            <p id="deployment-install-method-hint">{t("setup.update.methodHint")}</p>
+          </div>
+          <div className="deployment-install-method-field">
+            <label htmlFor="deployment-install-method">{t("setup.update.methodLabel")}</label>
+            <select id="deployment-install-method" aria-describedby="deployment-install-method-hint" value={method} onChange={(event) => setMethod(event.target.value as InstallMethod | "")}>
+              <option value="">{t("setup.update.methodPlaceholder")}</option>
+              {METHODS.map((value) => <option key={value} value={value}>{t(`setup.update.methods.${value}`)}</option>)}
+            </select>
+          </div>
+        </div>
         {method ? (
           <div className="deployment-install-instructions" aria-label={t("setup.update.guideLabel", { method: t(`setup.update.methods.${method}`) })}>
-            <div className="deployment-install-flow" aria-hidden="true">
-              <span>1. {t("setup.update.steps.prepare")}</span><span>→</span>
-              <span>2. {t(method === "npx" ? "setup.update.steps.launch" : "setup.update.steps.update")}</span><span>→</span>
-              <span>3. {t(method === "npx" ? "setup.update.steps.verify" : "setup.update.steps.restart")}</span>
-            </div>
-            <ol className="deployment-install-steps">
+            {/* Keep list semantics in Safari when visual markers use list-style: none. */}
+            {/* eslint-disable-next-line jsx-a11y/no-redundant-roles */}
+            <ol className="deployment-install-steps" role="list">
               <li>
-                <h3>{t("setup.update.steps.prepare")}</h3>
-                <p>{t("setup.update.prepareDescription")}</p>
-                <a href={UPGRADE_DOCS} target="_blank" rel="noopener noreferrer">{t("setup.update.backupDocs")}</a>
+                <span className="deployment-install-step-number" aria-hidden="true">1</span>
+                <div className="deployment-install-step-content">
+                  <h4>{t("setup.update.steps.prepare")}</h4>
+                  <p>{t("setup.update.prepareDescription")}</p>
+                  <a className="deployment-update-link" href={UPGRADE_DOCS} target="_blank" rel="noopener noreferrer">{t("setup.update.backupDocs")}<ArrowUpRight size={14} aria-hidden="true" /></a>
+                </div>
+              </li>
+              <li className="deployment-install-step-update">
+                <span className="deployment-install-step-number" aria-hidden="true">2</span>
+                <div className="deployment-install-step-content">
+                  <h4>{t(method === "npx" ? "setup.update.steps.launch" : "setup.update.steps.update")}</h4>
+                  <p>{t(`setup.update.instructions.${method}`)}</p>
+                  {command ? renderCommand(command, t("setup.update.commandLabel", { method: t(`setup.update.methods.${method}`) })) : method !== "docker" && method !== "service" ? <p className="deployment-install-note">{t("setup.update.noPinnedCommand")}</p> : null}
+                  {(method === "npx" || method === "npm") ? <p className="deployment-install-note">{t("setup.update.npmVersionNote")}</p> : null}
+                  <a className="deployment-update-link" href={`${UPGRADE_DOCS}#${docsAnchor}`} target="_blank" rel="noopener noreferrer">{t("setup.update.methodDocs", { method: t(`setup.update.methods.${method}`) })}<ArrowUpRight size={14} aria-hidden="true" /></a>
+                </div>
               </li>
               <li>
-                <h3>{t(method === "npx" ? "setup.update.steps.launch" : "setup.update.steps.update")}</h3>
-                <p>{t(`setup.update.instructions.${method}`)}</p>
-                {command ? renderCommand(command, t("setup.update.commandLabel", { method: t(`setup.update.methods.${method}`) })) : method !== "docker" && method !== "service" ? <p className="meta-line">{t("setup.update.noPinnedCommand")}</p> : null}
-                {(method === "npx" || method === "npm") ? <p className="meta-line">{t("setup.update.npmVersionNote")}</p> : null}
-                <a href={`${UPGRADE_DOCS}#${docsAnchor}`} target="_blank" rel="noopener noreferrer">{t("setup.update.methodDocs", { method: t(`setup.update.methods.${method}`) })}</a>
-              </li>
-              <li>
-                <h3>{t(method === "npx" ? "setup.update.steps.verify" : "setup.update.steps.restart")}</h3>
-                <p>{t(method === "npx" ? "setup.update.verifyDescription" : "setup.update.restartDescription")}</p>
+                <span className="deployment-install-step-number" aria-hidden="true">3</span>
+                <div className="deployment-install-step-content">
+                  <h4>{t(method === "npx" ? "setup.update.steps.verify" : "setup.update.steps.restart")}</h4>
+                  <p>{t(method === "npx" ? "setup.update.verifyDescription" : "setup.update.restartDescription")}</p>
+                </div>
               </li>
             </ol>
           </div>
         ) : null}
       </div>
+      <p className="deployment-update-scope"><ShieldCheck size={14} aria-hidden="true" />{t("setup.update.scope")}</p>
     </section>
   );
 }
