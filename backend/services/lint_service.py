@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session
 
-from backend.models.context import ContextPage
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.lint import LintFinding, LintRun
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
@@ -14,6 +14,7 @@ from backend.repositories.context_visibility import (
     visible_context_version_expression,
     visible_context_version_id,
 )
+from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.schemas.input_policy import validate_request_inputs
 from backend.schemas.lint import (
     LintFindingBatchDecisionFailure,
@@ -521,7 +522,33 @@ class LintService:
             lint_scope="workspace",
             trigger_type=lint_run.trigger_type,
         )
-        return self.run_lint(
+        # Capture the exact published heads observed by this lint run. The
+        # writer rechecks them under the page lock after findings are stored.
+        observed_heads = {
+            page_id: (version_id, body_hash)
+            for page_id, version_id, body_hash in session.execute(
+                join_in_workspace(
+                    select_in_workspace(
+                        ContextPage,
+                        workspace_id=workspace_id,
+                        conditions=(
+                            ContextPageVersion.page_id == ContextPage.id,
+                            ContextPage.lifecycle_status != "archived",
+                        ),
+                    ),
+                    ContextPage,
+                    ContextPageVersion,
+                    workspace_id=workspace_id,
+                    on=ContextPageVersion.id
+                    == ContextPage.current_published_version_id,
+                ).with_only_columns(
+                    ContextPage.id,
+                    ContextPageVersion.id,
+                    ContextPageVersion.content_hash,
+                )
+            )
+        }
+        result = self.run_lint(
             session,
             workspace_id,
             request,
@@ -529,6 +556,111 @@ class LintService:
             actor_id,
             policy=policy,
             run=lint_run,
+            actor=self._system_run_actor(workspace_id),
+        )
+        fix_policy = LintPolicy(workspace)
+        fixable_rules = {
+            rule.rule_id
+            for module in self.lint_registry.modules
+            if module.fixer is not None and fix_policy.fix_existing(module)
+            for rule in module.rules
+        }
+        if fixable_rules and observed_heads:
+            from backend.services.lint_fix_writer import LintFixWriter
+
+            targets = session.scalars(
+                select_in_workspace(
+                    LintFinding,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        LintFinding.target_type == "context_page",
+                        LintFinding.target_id.in_(observed_heads),
+                        LintFinding.rule_id.in_(fixable_rules),
+                        LintFinding.status == "open",
+                    ),
+                )
+                .with_only_columns(LintFinding.target_id)
+                .distinct()
+            ).all()
+            writer = LintFixWriter(
+                lint_registry=self.lint_registry,
+                audit_service=self.audit_service,
+                job_queue=self.job_queue,
+                context_media_repository_factory=self.context_media_repository_factory,
+                self_origins=self.self_origins,
+            )
+            for page_id in targets:
+                version_id, body_hash = observed_heads[page_id]
+                outcome = writer.fix_page(
+                    session,
+                    workspace_id=workspace_id,
+                    run_id=lint_run.id,
+                    page_id=page_id,
+                    base_version_id=version_id,
+                    base_content_hash=body_hash,
+                )
+                if outcome.state == "fixed":
+                    self._reconcile_autofix_target(session, workspace_id, page_id)
+        return result
+
+    def _reconcile_autofix_target(
+        self, session: Session, workspace_id: UUID, page_id: UUID
+    ) -> None:
+        """Resolve only defects absent from every currently lint-visible head."""
+        page = session.scalar(
+            select_in_workspace(
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(ContextPage.id == page_id,),
+            ).execution_options(populate_existing=True)
+        )
+        workspace = session.get(Workspace, workspace_id, populate_existing=True)
+        if page is None or workspace is None or page.workspace_id != workspace_id:
+            return
+        rules = self.lint_registry.rules_for(
+            LintStage.RUN, LintPolicy(workspace), target_type="context_page"
+        )
+        context = LintContext(
+            session,
+            workspace_id,
+            actor=self._system_run_actor(workspace_id),
+            page=page,
+            self_origins=self.self_origins,
+        )
+        reproduced = {
+            (
+                draft.target_id if draft.target_id is not None else page_id,
+                draft.fingerprint,
+            )
+            for rule in rules
+            for draft in findings_for_target(rule, page, context)
+        }
+        for finding in session.scalars(
+            select_in_workspace(
+                LintFinding,
+                workspace_id=workspace_id,
+                conditions=(
+                    LintFinding.target_type == "context_page",
+                    LintFinding.target_id == page_id,
+                    LintFinding.rule_id.in_([rule.rule_id for rule in rules]),
+                    LintFinding.status == "open",
+                ),
+            )
+        ):
+            if (finding.target_id, finding.fingerprint) not in reproduced:
+                finding.status = "fixed"
+                finding.resolved_at = datetime.now(UTC)
+
+    @staticmethod
+    def _system_run_actor(workspace_id: UUID) -> ActorContext:
+        # A queued run is an internal editor regardless of who requested it.
+        # This sees shared drafts while unrelated private edits remain hidden.
+        return ActorContext(
+            actor_kind="system",
+            actor_id="lint-autofix",
+            workspace_id=workspace_id,
+            workspace_role="editor",
+            role="editor",
         )
 
     def list_rules(self, session: Session, workspace_id: UUID) -> LintRuleListData:

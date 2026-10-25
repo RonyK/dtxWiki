@@ -1979,126 +1979,155 @@ class PageService:
             validate_text(reason, field="reason", max_length=2000)
 
         with self.session_factory.begin() as session:
+            return self._submit_context_edit_in_session(
+                session=session, page_id=page_id, version_id=version_id,
+                workspace_id=workspace_id, actor_kind=actor_kind,
+                actor_id=actor_id, actor_provenance=actor_provenance,
+                expected_editing_revision=expected_editing_revision,
+                idempotency_key=idempotency_key, reason=reason,
+                retry_only=retry_only, needs_review=True,
+            )
 
-            def _execute() -> PagePayload:
-                acquire_write_intent(session)
-                self._lock_context_media_usage_intent_for_page(session, page_id)
-                page = context_page_repo.get_page_by_id_for_update(session, page_id)
-                if page is None:
-                    raise PageNotFoundError("page not found")
-                version = self._require_page_version(session, page, version_id)
-                # A DIFFERENT author's version -- editing or not -- must be
-                # opaque not-found here (P2.2/P2.6): a 409 Conflict would itself
-                # confirm "this id exists" to a non-owner regardless of which
-                # fields come back populated. The version's OWN author gets a
-                # clear conflict instead when it simply is not "editing" any
-                # more (already submitted, published, or discarded) -- that is
-                # ordinary same-author feedback, not a disclosure to someone
-                # else.
-                if (
-                    version.created_by_actor_kind != actor_kind
-                    or version.created_by_actor_id != actor_id
-                ):
-                    raise PageNotFoundError("page version not found")
-                if version.version_status != "editing":
-                    raise PageConflictError(
-                        server_version_id=version.id,
-                        server_content_hash=version.content_hash,
-                    )
-                if version.editing_revision != expected_editing_revision:
-                    # The caller's own open edit (ownership checked above):
-                    # name where it stands now, as patch and update do, so the
-                    # caller knows what to re-read before submitting it.
-                    raise PageConflictError(
-                        server_version_id=version.id,
-                        server_content_hash=version.content_hash,
-                        server_editing_revision=version.editing_revision,
-                    )
-                # page.latest_draft_version_id is still a page-global pointer
-                # (P8.2's full removal is out of scope this pass) -- overwriting
-                # it out from under a DIFFERENT author's still-pending draft
-                # would not just move the pointer, it would make
-                # review_service.py's supersession check and
-                # assert_context_publish_candidate(require_latest_draft=True)
-                # silently treat that other, still-unreviewed submission as
-                # stale. Fail this second submit closed instead of corrupting
-                # the first one.
-                existing_draft_id = page.latest_draft_version_id
-                if existing_draft_id is not None and existing_draft_id != version.id:
-                    existing_draft = context_page_repo.get_version(
-                        session, existing_draft_id
-                    )
-                    if (
-                        existing_draft is not None
-                        and existing_draft.version_status == "draft"
-                    ):
-                        raise PageConflictError(
-                            server_version_id=existing_draft.id,
-                            server_content_hash=existing_draft.content_hash,
-                        )
-                # Historical editing versions remain readable, but a new
-                # submission must satisfy today's complete stored-body policy.
-                validate_page_markdown_input(version.body_md)
-                version.version_status = "draft"
-                # ReviewService.apply_decision's supersession check requires
-                # page.latest_draft_version_id == the reviewed version (a
-                # pre-existing page-global-pointer dependency, not something
-                # this method introduces). Without this, approval would reject
-                # every submission from this flow as "stale" unconditionally.
-                page.current_version_id = version.id
-                page.latest_draft_version_id = version.id
-                session.add_all([version, page])
-                session.flush()
-                result = self.change_audit_recorder.record_context_page_write(
-                    session=session,
-                    workspace_id=page.workspace_id,
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
-                    action="page.submit_context_edit_for_review",
-                    page_id=page.id,
-                    version_id=version.id,
-                    payload={"reason": reason},
-                    actor_provenance=actor_provenance,
-                    body=version.body_md,
-                    needs_review=True,
+    def _submit_context_edit_in_session(
+        self,
+        *,
+        session: Session,
+        page_id: UUID,
+        version_id: UUID,
+        workspace_id: UUID,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+        expected_editing_revision: int,
+        idempotency_key: str,
+        reason: str,
+        needs_review: bool,
+        retry_only: bool = False,
+    ) -> PagePayload:
+        """Submit in the caller's transaction with its explicit review intent."""
+        if reason is not None:
+            validate_text(reason, field="reason", max_length=2000)
+
+        def _execute() -> PagePayload:
+            acquire_write_intent(session)
+            self._lock_context_media_usage_intent_for_page(session, page_id)
+            page = context_page_repo.get_page_by_id_for_update(session, page_id)
+            if page is None:
+                raise PageNotFoundError("page not found")
+            version = self._require_page_version(session, page, version_id)
+            # A DIFFERENT author's version -- editing or not -- must be
+            # opaque not-found here (P2.2/P2.6): a 409 Conflict would itself
+            # confirm "this id exists" to a non-owner regardless of which
+            # fields come back populated. The version's OWN author gets a
+            # clear conflict instead when it simply is not "editing" any
+            # more (already submitted, published, or discarded) -- that is
+            # ordinary same-author feedback, not a disclosure to someone
+            # else.
+            if (
+                version.created_by_actor_kind != actor_kind
+                or version.created_by_actor_id != actor_id
+            ):
+                raise PageNotFoundError("page version not found")
+            if version.version_status != "editing":
+                raise PageConflictError(
+                    server_version_id=version.id,
+                    server_content_hash=version.content_hash,
                 )
-                self._refresh_page_links(session, page=page, version=version)
-                return self._payload_from_page(
+            if version.editing_revision != expected_editing_revision:
+                # The caller's own open edit (ownership checked above):
+                # name where it stands now, as patch and update do, so the
+                # caller knows what to re-read before submitting it.
+                raise PageConflictError(
+                    server_version_id=version.id,
+                    server_content_hash=version.content_hash,
+                    server_editing_revision=version.editing_revision,
+                )
+            # page.latest_draft_version_id is still a page-global pointer
+            # (P8.2's full removal is out of scope this pass) -- overwriting
+            # it out from under a DIFFERENT author's still-pending draft
+            # would not just move the pointer, it would make
+            # review_service.py's supersession check and
+            # assert_context_publish_candidate(require_latest_draft=True)
+            # silently treat that other, still-unreviewed submission as
+            # stale. Fail this second submit closed instead of corrupting
+            # the first one.
+            existing_draft_id = page.latest_draft_version_id
+            if existing_draft_id is not None and existing_draft_id != version.id:
+                existing_draft = context_page_repo.get_version(
+                    session, existing_draft_id
+                )
+                if (
+                    existing_draft is not None
+                    and existing_draft.version_status == "draft"
+                ):
+                    raise PageConflictError(
+                        server_version_id=existing_draft.id,
+                        server_content_hash=existing_draft.content_hash,
+                    )
+            # Historical editing versions remain readable, but a new
+            # submission must satisfy today's complete stored-body policy.
+            validate_page_markdown_input(version.body_md)
+            version.version_status = "draft"
+            # ReviewService.apply_decision's supersession check requires
+            # page.latest_draft_version_id == the reviewed version (a
+            # pre-existing page-global-pointer dependency, not something
+            # this method introduces). Without this, approval would reject
+            # every submission from this flow as "stale" unconditionally.
+            page.current_version_id = version.id
+            page.latest_draft_version_id = version.id
+            session.add_all([version, page])
+            session.flush()
+            result = self.change_audit_recorder.record_context_page_write(
+                session=session,
+                workspace_id=page.workspace_id,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                action="page.submit_context_edit_for_review",
+                page_id=page.id,
+                version_id=version.id,
+                payload={"reason": reason},
+                actor_provenance=actor_provenance,
+                body=version.body_md,
+                needs_review=needs_review,
+            )
+            self._refresh_page_links(session, page=page, version=version)
+            return self._payload_from_page(
+                session,
+                page,
+                version,
+                review_item_id=result.review_item_id,
+                change_set_id=result.change_set_id,
+                current_version_id_override=version.id,
+                prepared=self._inspect_saved_body(
                     session,
                     page,
                     version,
-                    review_item_id=result.review_item_id,
-                    change_set_id=result.change_set_id,
-                    current_version_id_override=version.id,
-                    prepared=self._inspect_saved_body(
-                        session,
-                        page,
-                        version,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                        actor_provenance=actor_provenance,
-                    ),
-                )
-
-            return execute_idempotent_write(
-                session,
-                workspace_id=workspace_id,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-                tool_name="submit_context_edit_for_review",
-                idempotency_key=idempotency_key,
-                fingerprint=request_fingerprint(
-                    {
-                        "page_id": str(page_id),
-                        "version_id": str(version_id),
-                        "expected_editing_revision": expected_editing_revision,
-                        "reason": reason,
-                    }
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
                 ),
-                result_model=PagePayload,
-                execute=_execute,
-                retry_only=retry_only,
             )
+
+        return execute_idempotent_write(
+            session,
+            workspace_id=workspace_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            tool_name="submit_context_edit_for_review",
+            idempotency_key=idempotency_key,
+            fingerprint=request_fingerprint(
+                {
+                    "page_id": str(page_id),
+                    "version_id": str(version_id),
+                    "expected_editing_revision": expected_editing_revision,
+                    "reason": reason,
+                    **({"needs_review": False} if not needs_review else {}),
+                }
+            ),
+            result_model=PagePayload,
+            execute=_execute,
+            retry_only=retry_only,
+        )
 
     def discard_context_edit(
         self,
