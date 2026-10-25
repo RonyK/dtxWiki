@@ -78,7 +78,7 @@ export function IdentityVerificationPanel({ scope, returnTo, token = "", onVerif
           <p>{t("verification.restartHint")}</p>
           <div className="auth-actions">
             <button type="button" className="icon-button" onClick={() => setRevision((value) => value + 1)}>{t("verification.retry")}</button>
-            <a href="/login">{t("externalSignup.restart")}</a>
+            <a href="/login">{t("verification.restart")}</a>
           </div>
         </>
       ) : <p role="status">{t("verification.loading")}</p> : token ? (
@@ -91,7 +91,21 @@ export function IdentityVerificationPanel({ scope, returnTo, token = "", onVerif
         </>
       ) : verification.verified ? (
         <StatusBanner tone="info">{t(verification.mode === "session" ? "verification.sessionAccepted" : "verification.verified")}</StatusBanner>
-      ) : verification.mode === "password" ? (
+      ) : <>
+        {verification.allowed_methods.includes("sso") ? (
+          <ExternalReauthenticationButtons methods={verification.providers} returnTo={returnTo} onError={setError} />
+        ) : null}
+        {verification.allowed_methods.includes("email") ? (
+          <>
+            <p>{t("verification.emailHint", { email: auth?.user?.email ?? t("verification.registeredEmail") })}</p>
+            {requested ? <StatusBanner tone="info">{t("verification.sent")}</StatusBanner> : null}
+            <button type="button" className="icon-button" disabled={busy} onClick={() => void run(async () => {
+              await requestEmailReauthentication(scope, returnTo);
+              setRequested(true);
+            })}>{t(requested ? "verification.resend" : "verification.send")}</button>
+          </>
+        ) : null}
+        {verification.allowed_methods.includes("password") ? (
         <form className="auth-form" onSubmit={(event) => void verifyPassword(event)}>
           <label className="field-stack">
             {t("password.current")}
@@ -100,18 +114,8 @@ export function IdentityVerificationPanel({ scope, returnTo, token = "", onVerif
           </label>
           <button type="submit" className="icon-button" disabled={busy}>{t("loginMethods.verifyPassword")}</button>
         </form>
-      ) : verification.mode === "sso" ? (
-        <ExternalReauthenticationButtons methods={verification.providers} returnTo={returnTo} onError={setError} />
-      ) : verification.mode === "email" ? (
-        <>
-          <p>{t("verification.emailHint", { email: auth?.user?.email ?? t("verification.registeredEmail") })}</p>
-          {requested ? <StatusBanner tone="info">{t("verification.sent")}</StatusBanner> : null}
-          <button type="button" className="icon-button" disabled={busy} onClick={() => void run(async () => {
-            await requestEmailReauthentication(scope, returnTo);
-            setRequested(true);
-          })}>{t(requested ? "verification.resend" : "verification.send")}</button>
-        </>
-      ) : null}
+        ) : null}
+      </>}
     </div>
   );
 }

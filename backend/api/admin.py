@@ -34,6 +34,8 @@ from backend.app.errors import build_rest_error_response
 from backend.app.settings import oauth_token_lifetime_report
 from backend.mcp.envelope import advisory_warnings
 from backend.schemas.admin_users import (
+    AdminIdentityRebindRequest,
+    AdminIdentityRebindResponse,
     AdminPasswordResetRequest,
     AdminPasswordResetResponse,
     AdminUserListResponse,
@@ -65,6 +67,10 @@ from backend.services.admin_context_media import (
 )
 from backend.services.admin_user_recovery import AdminUserRecoveryService
 from backend.services.audit_service import AuditService
+from backend.services.auth.identity_recovery import (
+    IdentityRecoveryError,
+    IdentityRecoveryService,
+)
 from backend.services.context_media_orphan_sweep import (
     list_orphans as list_context_media_orphans,
 )
@@ -246,6 +252,15 @@ def admin_search_users(
                     "display_name": record.user.display_name,
                     "status": record.user.status,
                     "email_verified_at": record.user.email_verified_at,
+                    "identities": [
+                        {
+                            "identity_id": identity.id,
+                            "provider_slug": identity.provider_slug,
+                            "issuer": identity.issuer,
+                            "subject": identity.subject,
+                        }
+                        for identity in record.identities
+                    ],
                     "workspaces": [
                         {
                             "workspace_id": membership.workspace_id,
@@ -263,6 +278,41 @@ def admin_search_users(
             "offset": result.offset,
         }
     }
+
+
+@router.post(
+    "/users/{user_id}/identities/rebind",
+    response_model=AdminIdentityRebindResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_rebind_identity(
+    request: Request,
+    body: AdminIdentityRebindRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    user_id: UUID,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = IdentityRecoveryService(
+            session_factory, request.app.state.auth_providers
+        ).rebind(
+            user_id=user_id,
+            **body.model_dump(),
+            actor_id=str(admin.user_id),
+            actor_user_id=admin.user_id,
+            actor_session_generation=admin.session_generation,
+        )
+    except IdentityRecoveryError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=exc.status_code
+        )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return {"data": result}
 
 
 @router.post(

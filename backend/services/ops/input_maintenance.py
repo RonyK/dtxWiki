@@ -21,6 +21,7 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
     REVISION,
     RULES,
     audit,
+    rule_sql,
 )
 from backend.models.normalized_keys import normalize_search_key
 from backend.repositories.input_metadata_repair import InputMetadataRepairRepository
@@ -32,7 +33,8 @@ from backend.services.ops.migration_preflight import (
 )
 
 # These explicit revisions retain the complete input CHECK contract; the
-# index and auth additions do not change input-policy constraints.
+# auth revisions allow absent native email; all present addresses retain the
+# frozen scalar policy, and every named CHECK remains required.
 CONSTRAINED_REVISIONS = frozenset(
     {REVISION, "ef53a0a7061c", "7e2b9c4d6a18", "c31a6d907e42"}
 )
@@ -42,6 +44,7 @@ SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
         "efcbcf724889",
     }
 )
+_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"7e2b9c4d6a18", "c31a6d907e42"})
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),
@@ -114,8 +117,10 @@ def audit_inputs(database_url: str) -> list[dict]:
     engine = make_non_mutating_engine(database_url)
     try:
         with engine.connect() as connection:
-            _preflight(connection)
+            revision = _preflight(connection)
             report = audit(connection, allow_missing=True)
+            if revision in _OPTIONAL_NATIVE_EMAIL_REVISIONS:
+                report = _audit_optional_native_email(connection, report)
             report.extend(audit_preserved_inputs(connection))
             if "email_outbox" in sa.inspect(connection).get_table_names():
                 outbox = _table(connection, "email_outbox")
@@ -145,6 +150,31 @@ def audit_inputs(database_url: str) -> list[dict]:
             return report
     finally:
         engine.dispose()
+
+
+def _audit_optional_native_email(connection, report):
+    """Keep frozen audits exact for old schemas without rejecting SSO NULLs."""
+    rule = next(
+        rule for rule in RULES if (rule.table, rule.field) == ("users", "email")
+    )
+    if not any(item["rule"] == rule.name for item in report):
+        return report
+    predicate = f"email IS NOT NULL AND NOT ({rule_sql(rule, connection.dialect.name)})"
+    count = connection.scalar(sa.text(f"SELECT count(*) FROM users WHERE {predicate}"))
+    current = [item for item in report if item["rule"] != rule.name]
+    if count:
+        identities = connection.scalars(
+            sa.text(f"SELECT id FROM users WHERE {predicate} ORDER BY id LIMIT 5")
+        )
+        current.append(
+            {
+                "rule": rule.name,
+                "classification": "blocking_scalar",
+                "count": count,
+                "ids": [str(identity) for identity in identities],
+            }
+        )
+    return current
 
 
 def repair_input(

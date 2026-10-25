@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from backend.spi.plugins import JobHandler
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class JobHandler:
+    """Internal built-in ABI; public plugin callbacks use backend.spi types."""
+
+    business: Callable[..., dict[str, Any]]
+    completes_in_service: bool
+    on_failure: Callable[..., None] | None = None
+
 
 _HANDLERS: dict[str, JobHandler] = {}
 

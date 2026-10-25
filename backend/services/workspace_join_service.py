@@ -69,7 +69,7 @@ class WorkspaceJoinRequestView:
     request_id: UUID
     workspace_id: UUID
     requester_user_id: UUID
-    requester_email: str
+    requester_email: str | None
     requester_display_name: str
     status: str
     attempt_no: int

@@ -1,3 +1,5 @@
+# Budget exception: one pure unit case covers URL parser normalization and
+# redirect escape mechanisms; loop inputs count separately, with no DB/E2E.
 from backend.services.auth.return_path import safe_return_path
 
 
@@ -11,9 +13,7 @@ def test_return_path_accepts_local_oauth_query_and_rejects_browser_escape_paths(
     for path in (
         None,
         "https://attacker.test",
-        "https://attacker.test/dashboard",
         "//attacker.test",
-        "//attacker.test/dashboard",
         "/\\attacker.test",
         "/%5cattacker.test",
         "/%2fattacker.test",

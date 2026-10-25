@@ -119,6 +119,8 @@ class AuthAccountService:
             live = _locked_user(session, user, verified)
             if live.password_hash is not None:
                 raise AuthFlowError("password_already_set")
+            if not live.email:
+                raise AuthFlowError("native_email_required")
             live.password_hash = password_hash
             live.session_generation += 1
             issued = _issue_replacement(self.sessions, live, verified)
@@ -145,4 +147,5 @@ def _issue_replacement(sessions, live, verified):
         authenticated_at=verified.authenticated_at,
         amr=verified.amr,
         idp=verified.idp,
+        session_id=verified.session_id,
     )

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from backend.models.api_token import ApiToken
 from backend.models.auth_identity import UserIdentity
 from backend.models.base import utc_now
-from backend.models.mail import PasswordRecoveryRateLimitSlot
+from backend.models.mail import EmailOutbox, PasswordRecoveryRateLimitSlot
 from backend.models.password_reset import PasswordResetToken
 from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
@@ -471,6 +471,11 @@ class PasswordRecoveryService:
                 )
             if user is None or user.status != "active":
                 raise PasswordRecoveryUserNotFoundError("active user not found")
+            if not user.email:
+                raise PasswordRecoveryConfigurationError(
+                    "Recover the external identity through its provider "
+                    "or identity rebind."
+                )
             if delivery == "email" and user.email_verified_at is None:
                 raise PasswordRecoveryConfigurationError(
                     "email delivery requires a verified user email"
@@ -739,12 +744,14 @@ class PasswordRecoveryService:
         *,
         user_id: UUID,
         actor_id: str,
+        email: str | None = None,
         expires_in_seconds: int = DEFAULT_EMAIL_VERIFICATION_TTL_SECONDS,
     ) -> PasswordResetIssueResult:
         with _EMAIL_VERIFICATION_ISSUE_LOCK:
             return self._issue_email_verification_serialized(
                 user_id=user_id,
                 actor_id=actor_id,
+                email=email,
                 expires_in_seconds=expires_in_seconds,
             )
 
@@ -753,6 +760,7 @@ class PasswordRecoveryService:
         *,
         user_id: UUID,
         actor_id: str,
+        email: str | None,
         expires_in_seconds: int,
     ) -> PasswordResetIssueResult:
         if self.public_base_url is None or self.mail_delivery_service is None:
@@ -770,6 +778,22 @@ class PasswordRecoveryService:
             )
             if user is None or user.status != "active":
                 raise PasswordRecoveryUserNotFoundError("active user not found")
+            recipient = normalize_email(email) if email is not None else user.email
+            if not recipient:
+                raise InvalidPasswordResetRequestError(
+                    "A native email address is required."
+                )
+            if user.email is not None and recipient != user.email:
+                raise InvalidPasswordResetRequestError(
+                    "Native email replacement is not supported."
+                )
+            occupied = session.scalar(
+                select(User.id).where(User.email == recipient, User.id != user.id)
+            )
+            if occupied is not None:
+                raise InvalidPasswordResetRequestError(
+                    "The native email address is unavailable."
+                )
             if user.email_verified_at is not None:
                 return PasswordResetIssueResult(
                     token_id=user.id,
@@ -785,6 +809,8 @@ class PasswordRecoveryService:
                 purpose="email_verification",
                 revoked_at=issued_at,
             )
+            if user.email is None:
+                user.pending_email = recipient
             model = PasswordResetToken(
                 user_id=user.id,
                 token_digest=digest,
@@ -805,6 +831,7 @@ class PasswordRecoveryService:
                     token_model=model,
                     raw_token=raw_token,
                     message_kind="email_verification",
+                    recipient_email=recipient,
                 )
             except MailDeliveryError as exc:
                 raise PasswordRecoveryConfigurationError(str(exc)) from exc
@@ -866,9 +893,8 @@ class PasswordRecoveryService:
                 )
                 is not None
             ):
-                # No-mail SSO signup may approve an unverified address. When
-                # mail is enabled later, mailbox possession alone must not
-                # authorize recovery of an account already bound to an IdP.
+                # Mailbox possession cannot replace the native session of an
+                # externally authenticated account during native enrollment.
                 if (
                     current_session is None
                     or current_session.user_id != user.id
@@ -890,6 +916,33 @@ class PasswordRecoveryService:
                 raise InvalidPasswordResetTokenError(
                     "email verification link is invalid or unavailable"
                 )
+            if user.email is None:
+                recipient = session.scalar(
+                    select(EmailOutbox.recipient_email).where(
+                        EmailOutbox.token_id == model.id,
+                        EmailOutbox.message_kind == "email_verification",
+                    )
+                )
+                if not user.pending_email or recipient != user.pending_email:
+                    raise InvalidPasswordResetTokenError(
+                        "Native email enrollment is unavailable."
+                    )
+                if (
+                    session.scalar(select(User.id).where(User.email == recipient))
+                    is not None
+                ):
+                    raise InvalidPasswordResetTokenError(
+                        "The native email address is unavailable."
+                    )
+                try:
+                    with session.begin_nested():
+                        user.email = recipient
+                        user.pending_email = None
+                        session.flush()
+                except IntegrityError as exc:
+                    raise InvalidPasswordResetTokenError(
+                        "The native email address is unavailable."
+                    ) from exc
             claimed = session.execute(
                 update(PasswordResetToken)
                 .where(

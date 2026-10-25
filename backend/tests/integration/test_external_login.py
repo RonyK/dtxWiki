@@ -1,3 +1,7 @@
+# Budget exception: core-owned login, linking, confirmation, browser binding and
+# concurrent first-login writes have distinct authorization failure mechanisms.
+# Existing traversals share fixtures and count loop/parameter inputs separately;
+# protocol crypto stays in unit tests, and only SameSite gets one browser case.
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -19,7 +23,6 @@ from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
 from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
 from backend.models.auth_verification import (
-    AuthPendingSignup,
     EmailReauthenticationChallenge,
 )
 from backend.models.base import Base
@@ -142,124 +145,85 @@ def deliver_confirmation(page_service, client, kind):
 def test_external_signup_mail_policy_and_browser_bound_confirmation(
     page_service, tmp_path, monkeypatch
 ):
-    """One signup traversal covers trust, pending delivery and single-use binding."""
+    """SSO profile claims never occupy the native email credential namespace."""
     client, method, registry = setup_client(
         page_service, tmp_path, monkeypatch, trust_email_verified=False
     )
     assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    user = client.get("/api/v1/auth/me").json()["data"]
+    user_id = UUID(user["user_id"])
+    assert user["email"] is None and not user["has_password"]
     with page_service.session_factory() as session:
-        user = session.scalar(select(User).where(User.email == "fake@example.test"))
-        assert user.password_hash is None and user.email_verified_at is None
+        identity = session.scalar(select(UserIdentity))
+        assert identity.last_email == "fake@example.test"
+        assert session.scalar(select(func.count()).select_from(EmailOutbox)) == 0
     method.assertions["collision"] = replace(
         method.assertions["valid"], subject="another-subject"
     )
     assert (
-        "account_link_required"
-        in complete(client, begin(client), "collision").headers["location"]
+        complete(client, begin(client), "collision").headers["location"] == "/dashboard"
     )
-
-    configure_external_mail(client, registry, True)
-    method.assertions["pending"] = replace(
-        method.assertions["valid"],
-        subject="pending",
-        email="pending@example.test",
-        email_verified=False,
-    )
-    target = "/oauth/authorize?client_id=test-client"
-    response = complete(client, begin(client, next=target, remember_me=True), "pending")
-    assert response.headers["location"] == "/auth/signup/verify"
-    assert "dtxwiki_session=" not in response.headers.get("set-cookie", "")
-    status = client.get("/api/v1/auth/pending-signups")
-    assert status.json()["data"] == {
-        "email": "pending@example.test",
-        "email_confirmation_required": True,
-        "requested": True,
-    }
-    with page_service.session_factory() as session:
-        assert (
-            session.scalar(select(User.id).where(User.email == "pending@example.test"))
-            is None
-        )
-        assert session.scalar(select(AuthPendingSignup)).consumed_at is None
-        outbox = session.scalar(
-            select(EmailOutbox).where(EmailOutbox.message_kind == "pending_signup")
-        )
-        assert outbox.recipient_user_id is None and outbox.pending_signup_id is not None
-    token = deliver_confirmation(page_service, client, "pending_signup")
-    stranger = TestClient(client.app, base_url=ORIGIN, follow_redirects=False)
-    endpoint = "/api/v1/auth/pending-signups/confirm"
-    assert (
-        stranger.post(
-            endpoint, json={"token": token}, headers={"Origin": ORIGIN}
-        ).status_code
-        == 400
-    )
-    assert client.post(endpoint, json={"token": token}).status_code == 403
-    with page_service.session_factory.begin() as session:
-        pending = session.scalar(select(AuthPendingSignup))
-        deadline = pending.expires_at
-        pending.expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    assert (
-        client.post(
-            endpoint, json={"token": token}, headers={"Origin": ORIGIN}
-        ).status_code
-        == 400
-    )
-    with page_service.session_factory.begin() as session:
-        session.scalar(select(AuthPendingSignup)).expires_at = deadline
-    confirmed = client.post(endpoint, json={"token": token}, headers={"Origin": ORIGIN})
-    assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["data"]["return_to"] == target
-    assert confirmed.json()["data"]["session"]["user"]["email_verified_at"]
-    assert "Max-Age=2592000" in confirmed.headers["set-cookie"]
-    assert (
-        client.post(
-            endpoint, json={"token": token}, headers={"Origin": ORIGIN}
-        ).status_code
-        == 400
-    )
-    with page_service.session_factory() as session:
-        assert (
-            session.scalar(
-                select(UserIdentity).where(UserIdentity.subject == "pending")
-            ).linked_via
-            == "jit_email_confirmed"
-        )
-
-    # An IdP's email_verified flag cannot verify an address it did not supply.
-    configure_external_mail(client, registry, False)
-    registry.providers["company"] = replace(
-        registry.get("company"),
-        policy=registry.get("company").policy.model_copy(
-            update={"trust_email_verified": True}
-        ),
-    )
+    other_id = client.get("/api/v1/auth/me").json()["data"]["user_id"]
+    assert other_id != str(user_id)
     method.assertions["missing"] = replace(
         method.assertions["valid"], subject="missing-email", email=None
     )
     assert (
-        complete(client, begin(client), "missing").headers["location"]
-        == "/auth/signup/verify"
+        complete(client, begin(client), "missing").headers["location"] == "/dashboard"
     )
-    assert client.get("/api/v1/auth/pending-signups").json()["data"] == {
-        "email": None,
-        "email_confirmation_required": False,
-        "requested": False,
-    }
-    completed = client.post(
-        "/api/v1/auth/pending-signups/email",
-        json={"email": "typed@example.test"},
+    assert client.get("/api/v1/auth/me").json()["data"]["email"] is None
+
+    # Native email enrollment is an explicit, same-session mailbox confirmation.
+    assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    endpoint = "/api/v1/auth/email-verification/request"
+    rejected = client.post(
+        endpoint, json={"email": "native@example.test"}, headers={"Origin": ORIGIN}
+    )
+    assert rejected.status_code == 422
+    configure_external_mail(client, registry, True)
+    assert client.get("/api/v1/auth/capabilities").json()["data"]["password_login"][
+        "email_enrollment_enabled"
+    ]
+    sent = client.post(
+        endpoint, json={"email": "native@example.test"}, headers={"Origin": ORIGIN}
+    )
+    assert sent.status_code == 202, sent.text
+    token = deliver_confirmation(page_service, client, "email_verification")
+    stranger = TestClient(client.app, base_url=ORIGIN, follow_redirects=False)
+    confirm = "/api/v1/auth/email-verification/confirm"
+    assert stranger.post(confirm, json={"token": token}).status_code == 401
+    assert client.post(confirm, json={"token": token}).status_code == 200
+    assert (
+        client.get("/api/v1/auth/me").json()["data"]["email"] == "native@example.test"
+    )
+    assert client.post(confirm, json={"token": token}).status_code == 400
+    installed = client.post(
+        "/api/v1/auth/password/set",
+        json={"new_password": "local-password"},
         headers={"Origin": ORIGIN},
     )
-    assert completed.status_code == 200, completed.text
-    assert completed.json()["data"]["status"] == "complete"
-    assert completed.json()["data"]["session"]["user"]["email_verified_at"] is None
+    assert installed.status_code == 200, installed.text
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "native@example.test", "password": "local-password"},
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/v1/auth/me").json()["data"]["user_id"] == str(user_id)
 
 
 def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
     page_service, tmp_path, monkeypatch
 ):
     """One step-up traversal covers session fallback, mail scope and revocation."""
+    # This combined authorization traversal exceeds one minute's normal account
+    # quota. Dedicated auth API tests own throttling; keep this failure boundary
+    # focused on identity, purpose, expiry and revocation checks.
+    monkeypatch.setattr(
+        "backend.services.session_service.AUTH_RATE_LIMIT_PER_EMAIL", 100
+    )
+
     client, method, registry = setup_client(page_service, tmp_path, monkeypatch)
     method.descriptor = replace(
         method.descriptor,
@@ -267,7 +231,11 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
     )
     complete(client, begin(client))
     with page_service.session_factory.begin() as session:
-        user = session.scalar(select(User).where(User.email == "fake@example.test"))
+        user = session.scalar(
+            select(User)
+            .join(UserIdentity)
+            .where(UserIdentity.subject == "fake-subject")
+        )
         user_id = user.id
         server_admin_service.grant_server_admin(session, user_id, granted_by="test")
     status = client.get("/api/v1/auth/verification").json()["data"]
@@ -278,6 +246,27 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
         ).status_code
         == 200
     )
+    service = client.app.state.session_service
+    primary = service.token_codec.verify_session(client.cookies.get("dtxwiki_session"))
+    assert status["reauthenticated_until"] is not None
+    assert status["allowed_methods"] == ["sso"]
+    later = primary.authenticated_at + timedelta(seconds=3600)
+    service = replace(
+        service, token_codec=replace(service.token_codec, now=lambda: later)
+    )
+    client.app.state.session_service = service
+    aged = client.get("/api/v1/auth/verification").json()["data"]
+    assert aged["mode"] == "sso" and not aged["verified"]
+    # No email or password is required, and cap=false suppresses forced IdP login.
+    start = client.post(
+        "/api/v1/auth/sso/company/reauthenticate", json={}, headers={"Origin": ORIGIN}
+    )
+    assert start.status_code == 200, start.text
+    assert not method.requests[-1].force_reauthentication
+    state = parse_qs(urlsplit(start.json()["data"]["redirect_url"]).query)["state"][0]
+    assert complete(client, state).headers["location"] == "/account"
+    assert client.get("/api/v1/auth/verification").json()["data"]["verified"]
+
     # Removing the source identity leaves the replacement external session
     # usable when another SSO method remains, even without a local password.
     registry.add({"slug": "backup", "method": "test_oidc"})
@@ -306,7 +295,21 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
         ).status_code
         == 200
     )
-    assert client.get("/api/v1/auth/verification").json()["data"]["mode"] == "session"
+    status = client.get("/api/v1/auth/verification").json()["data"]
+    assert status["mode"] == "sso" and not status["verified"]
+    start = client.post(
+        "/api/v1/auth/sso/backup/reauthenticate", json={}, headers={"Origin": ORIGIN}
+    )
+    state = parse_qs(urlsplit(start.json()["data"]["redirect_url"]).query)["state"][0]
+    assert (
+        client.get(
+            "/api/v1/auth/sso/backup/callback",
+            params={"state": state, "code": "backup"},
+        ).headers["location"]
+        == "/account"
+    )
+    with page_service.session_factory.begin() as session:
+        session.get(User, user_id).email = "fake@example.test"
     installed = client.post(
         "/api/v1/auth/password/set",
         json={"new_password": "local-password"},
@@ -314,8 +317,15 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
     )
     assert installed.status_code == 200, installed.text
     configure_external_mail(client, registry, True)
+    service = client.app.state.session_service
+    later = service.token_codec.now() + timedelta(seconds=3601)
+    service = replace(
+        service, token_codec=replace(service.token_codec, now=lambda: later)
+    )
+    client.app.state.session_service = service
     status = client.get("/api/v1/auth/verification").json()["data"]
-    assert status["mode"] == "email" and status["verified"] is False
+    assert status["mode"] == "sso" and status["verified"] is False
+    assert status["allowed_methods"] == ["password", "sso", "email"]
     request_path = "/api/v1/auth/email-reauthentication/request"
     confirm_path = "/api/v1/auth/email-reauthentication/confirm"
     assert (
@@ -476,6 +486,11 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
         ]["verified"]
         is True
     )
+    # Policy removal is distinct from proof expiry: a valid scoped proof keeps
+    # its original deadline even when no method remains for another challenge.
+    registry.providers.clear()
+    monkeypatch.setattr(client.app.state.settings, "mail_provider", "none")
+    assert client.get("/api/v1/admin/users").status_code == 200
     with page_service.session_factory.begin() as session:
         session.get(User, user_id).session_generation += 1
     assert (
@@ -493,7 +508,13 @@ def test_browser_bound_login_replay_account_and_oauth_return(
     destination = "/oauth/authorize?client_id=sample&scope=mcp%3Aread%20mcp%3Awrite"
     state = begin(client, next=destination, remember_me=True)
     binding = client.cookies.get("dtxwiki_login_txn")
-    invalid = complete(client, "invalid-state")
+
+    def no_unbound_quota(*_args, **_kwargs):
+        pytest.fail("an unbound callback consumed authentication quota")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("backend.api.auth_sso.consume_auth_slot", no_unbound_quota)
+        invalid = complete(client, "invalid-state")
     assert "sso_transaction_invalid" in invalid.headers["location"]
     assert "set-cookie" not in invalid.headers
     assert client.cookies.get("dtxwiki_login_txn") == binding
@@ -518,7 +539,7 @@ def test_browser_bound_login_replay_account_and_oauth_return(
         and "Secure" in success.headers["set-cookie"]
     )
     user = client.get("/api/v1/auth/me").json()["data"]
-    assert user["email"] == "fake@example.test" and not user["has_password"]
+    assert user["email"] is None and not user["has_password"]
     assert (
         user["session_method"] == "ext" and user["session_provider_slug"] == "company"
     )
@@ -551,7 +572,7 @@ def test_browser_bound_login_replay_account_and_oauth_return(
         method.assertions["valid"], email="changed@example.test", email_verified=False
     )
     assert complete(client, begin(client)).status_code == 302
-    assert client.get("/api/v1/auth/me").json()["data"]["email"] == "fake@example.test"
+    assert client.get("/api/v1/auth/me").json()["data"]["email"] is None
     with page_service.session_factory.begin() as session:
         identity = session.scalar(select(UserIdentity))
         assert (
@@ -645,16 +666,38 @@ def test_account_link_reauthentication_last_method_and_revocation(
     page_service, tmp_path, monkeypatch
 ):
     saml = FakeSamlMethod()
+    # This combined authorization traversal exceeds one minute's normal account
+    # quota. Dedicated auth API tests own throttling; keep this failure boundary
+    # focused on identity, purpose, expiry and revocation checks.
+    monkeypatch.setattr(
+        "backend.services.session_service.AUTH_RATE_LIMIT_PER_EMAIL", 100
+    )
+
     client, method, registry = setup_client(
         page_service, tmp_path, monkeypatch, extra_methods=[saml]
     )
     complete(client, begin(client))
     before = client.cookies.get("dtxwiki_session")
+    service = client.app.state.session_service
+    later = service.token_codec.now() + timedelta(seconds=3601)
+    service = replace(
+        service, token_codec=replace(service.token_codec, now=lambda: later)
+    )
+    client.app.state.session_service = service
+    method.assertions["valid"] = replace(
+        method.assertions["valid"], authenticated_at=later
+    )
+    original_complete = saml.complete
+    saml.complete = lambda provider, callback: replace(
+        original_complete(provider, callback), authenticated_at=later
+    )
     identity = client.get("/api/v1/auth/identities").json()["data"]["identities"][0]
     assert not identity["can_unlink"]
     with page_service.session_factory.begin() as session:
         user_id = session.scalar(
-            select(User.id).where(User.email == "fake@example.test")
+            select(User.id)
+            .join(UserIdentity)
+            .where(UserIdentity.subject == "fake-subject")
         )
         server_admin_service.grant_server_admin(session, user_id, granted_by="test")
     assert (
@@ -760,6 +803,8 @@ def test_account_link_reauthentication_last_method_and_revocation(
         refused.status_code == 409
         and refused.json()["error_code"] == "last_login_method"
     )
+    with page_service.session_factory.begin() as session:
+        session.get(User, user_id).email = "native-linked@example.test"
     installed = client.post(
         "/api/v1/auth/password/set",
         json={"new_password": "new-password"},
@@ -915,21 +960,15 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
         json={"email": "fake@example.test", "password": "password"},
     )
     assert signup.status_code == 201
-    registry.providers["company"] = replace(
-        registry.get("company"),
-        policy=registry.get("company").policy.model_copy(
-            update={"link_policy": "auto_verified_email"}
-        ),
-    )
-    assert (
-        "account_link_required" in complete(client, begin(client)).headers["location"]
-    )
+    native_id = signup.json()["data"]["user"]["user_id"]
     with page_service.session_factory.begin() as session:
-        user = session.scalar(select(User).where(User.email == "fake@example.test"))
-        user.email_verified_at = datetime.now(UTC)
+        session.get(User, UUID(native_id)).email_verified_at = datetime.now(UTC)
     assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    current = client.get("/api/v1/auth/me").json()["data"]
+    assert current["email"] is None and current["user_id"] != native_id
     with page_service.session_factory() as session:
-        assert session.scalar(select(UserIdentity)).linked_via == "auto_verified_email"
+        assert session.scalar(select(UserIdentity)).linked_via == "jit"
+        assert session.get(User, UUID(native_id)).email == "fake@example.test"
     # Separate new identities exercise JIT, trust and domain gates.
     method.assertions["new"] = ExternalAssertion(
         issuer=FAKE_ISSUER, subject="new", email="new@example.test", email_verified=True
@@ -966,15 +1005,80 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     assert "secret-from-provider-sdk" not in rejected.text
     with page_service.session_factory() as session:
         assert (
-            session.scalar(select(User.id).where(User.email == "new@example.test"))
+            session.scalar(select(UserIdentity.id).where(UserIdentity.subject == "new"))
             is None
         )
     # Optional IdP profile data must not make an otherwise valid identity
     # unusable. Native signup still enforces its own strict display-name policy.
-    del method.on_login
+    from uuid import uuid4
+
+    from backend.scripts.seed_dev import seed_default_workspace
+    from backend.spi.auth import LoginContext, ProvisioningResult, WorkspaceRoleRequest
+
+    with page_service.session_factory.begin() as session:
+        workspace_id = seed_default_workspace(session).id
+    missing_workspace = uuid4()
+    registry.providers["company"] = replace(
+        base,
+        policy=base.policy.model_copy(
+            update={
+                "provisioning_workspace_roles": {
+                    str(workspace_id): ["viewer", "editor"],
+                    str(missing_workspace): ["viewer"],
+                },
+            }
+        ),
+    )
+    # Each rejected declaration must roll back native JIT and identity binding.
+    for request in (
+        WorkspaceRoleRequest(uuid4(), "viewer"),
+        WorkspaceRoleRequest(workspace_id, "owner"),
+        WorkspaceRoleRequest(missing_workspace, "viewer"),
+    ):
+        method.on_login = lambda _context, request=request: ProvisioningResult(
+            (request,)
+        )
+        assert (
+            "sso_assertion_invalid"
+            in complete(client, begin(client), "new").headers["location"]
+        )
+        with page_service.session_factory() as session:
+            assert (
+                session.scalar(
+                    select(UserIdentity.id).where(UserIdentity.subject == "new")
+                )
+                is None
+            )
+
+    def provision(context):
+        assert isinstance(context, LoginContext)
+        return ProvisioningResult((WorkspaceRoleRequest(workspace_id, "viewer"),))
+
+    method.on_login = provision
     method.assertions["new"] = replace(method.assertions["new"], display_name="x" * 33)
     assert complete(client, begin(client), "new").headers["location"] == "/dashboard"
-    assert client.get("/api/v1/auth/me").json()["data"]["display_name"] == "new"
+    current = client.get("/api/v1/auth/me").json()["data"]
+    assert current["display_name"] == "User"
+    granted_user = UUID(current["user_id"])
+    # Same-role requests are idempotent; a differing role preserves the existing
+    # human grant and produces the explicit diagnostic instead of upgrading it.
+    assert complete(client, begin(client), "new").headers["location"] == "/dashboard"
+    method.on_login = lambda _context: ProvisioningResult(
+        (WorkspaceRoleRequest(workspace_id, "editor"),)
+    )
+    assert complete(client, begin(client), "new").headers["location"] == "/dashboard"
+    with page_service.session_factory() as session:
+        assert (
+            session.get(WorkspaceMembership, (granted_user, workspace_id)).role
+            == "viewer"
+        )
+        preserved = session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "auth.provisioning.role_preserved"
+            )
+        )
+        assert preserved.payload["requested_role"] == "editor"
+        assert preserved.payload["existing_role"] == "viewer"
 
 
 @pytest.mark.parametrize(
@@ -1050,17 +1154,15 @@ def test_durable_transaction_and_first_login_have_one_database_winner(
             subject="concurrent-new",
             email="concurrent@example.test",
         )
+        with factory() as session:
+            users_before = session.scalar(select(func.count()).select_from(User))
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(finish, [pending(), pending()]))
         assert results[0].session.user.user_id == results[1].session.user.user_id
         with factory() as session:
             assert (
-                session.scalar(
-                    select(func.count())
-                    .select_from(User)
-                    .where(User.email == "concurrent@example.test")
-                )
-                == 1
+                session.scalar(select(func.count()).select_from(User))
+                == users_before + 1
             )
             assert (
                 session.scalar(
@@ -1082,7 +1184,9 @@ def test_durable_transaction_and_first_login_have_one_database_winner(
         if dialect == "postgresql":
             with factory.begin() as session:
                 old_owner = session.scalar(
-                    select(User).where(User.email == "concurrent@example.test")
+                    select(User)
+                    .join(UserIdentity)
+                    .where(UserIdentity.subject == "concurrent-new")
                 )
                 new_owner = sessions.provision_user(
                     session, email="new-owner@example.test"

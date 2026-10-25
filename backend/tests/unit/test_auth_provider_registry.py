@@ -1,6 +1,10 @@
+# Budget exception: protocol capabilities, directory admission, workspace-role
+# allowlists and branding are distinct configuration failures. Count loop inputs;
+# keep them in one unit case rather than repeating HTTP login traversals.
 import io
 from dataclasses import replace
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 import pytest
 from PIL import Image
@@ -30,7 +34,7 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
     assert not (tmp_path / "must-not-exist.sqlite").exists()
     settings = Settings(public_base_url="https://wiki.example.test")
     method = FakeAuthMethod()
-    for method_id in ("password", "core.password", "core.oidc", "invalid/method"):
+    for method_id in ("password", "core.password", "invalid/method"):
         method.descriptor = replace(FakeAuthMethod.descriptor, method_id=method_id)
         with pytest.raises(ValueError):
             ProviderRegistry(settings, [method])
@@ -64,8 +68,38 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
     registry.add({"slug": "test-", "method": "test_oidc"})
     assert registry.get("test-").context.callback_url.endswith("/test-/callback")
     exposed = registry.login_methods()[0]
+    assert exposed["display_name"] == ""
     assert exposed["label"]["ko"] == "예제 로그인"
     assert exposed["background"] == "#FFFFFF" and exposed["foreground"] == "#000000"
+    configured = ProviderRegistry(settings, [method])
+    workspace_id = str(uuid4())
+    configured.add(
+        {
+            "slug": "company",
+            "method": "test_oidc",
+            "display_name": " Company ",
+            "directory_enabled": True,
+            "directory_tenant": "company.example",
+            "provisioning_workspace_roles": {workspace_id: ["viewer", "editor"]},
+        }
+    )
+    assert configured.login_methods()[0]["display_name"] == "Company"
+    assert configured.get("company").policy.directory_tenant == "company.example"
+    for extra in (
+        {"link_policy": "auto_verified_email"},
+        {"directory_enabled": True},
+        {"directory_tenant": " "},
+        {"provisioning_workspace_roles": {workspace_id: ["owner"]}},
+        {"provisioning_workspace_roles": {"not-a-uuid": ["viewer"]}},
+    ):
+        with pytest.raises(ValueError):
+            ProviderRegistry(settings, [method]).add(
+                {
+                    "slug": "invalid-policy",
+                    "method": "test_oidc",
+                    **extra,
+                }
+            )
     with Image.open(io.BytesIO(registry.icons["test_oidc"])) as icon:
         assert icon.mode == "RGBA" and icon.size == (16, 16)
     for invalid in (b"not a PNG", b"x" * 16385):

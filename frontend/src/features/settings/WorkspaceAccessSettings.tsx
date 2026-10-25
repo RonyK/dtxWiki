@@ -11,6 +11,7 @@ import {
   getWorkspaceAccess,
   listWorkspaceJoinRequests,
   listWorkspaceMembers,
+  listWorkspaceMemberCandidates,
   removeWorkspaceMember,
   updateWorkspaceAccess,
   updateWorkspaceMemberRole,
@@ -20,6 +21,8 @@ import {
   type WorkspaceMember,
   type WorkspaceMemberInviteRole,
   type WorkspaceMemberRole,
+  type WorkspaceMemberSelector,
+  type WorkspaceMemberCandidate,
   type WorkspaceVisibility,
 } from "../../shared/api/workspaceAccess";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
@@ -50,7 +53,7 @@ type WorkspaceSettingsTarget = {
 };
 
 type PendingMemberAction =
-  | { kind: "first-share"; email: string; role: WorkspaceMemberInviteRole }
+  | { kind: "first-share"; selector: WorkspaceMemberSelector; label: string; role: WorkspaceMemberInviteRole }
   | { kind: "promote"; member: WorkspaceMember }
   | { kind: "self-demote"; member: WorkspaceMember; role: WorkspaceMemberRole }
   | { kind: "remove"; member: WorkspaceMember };
@@ -113,6 +116,11 @@ export function WorkspaceMembersSection() {
     null,
   );
   const memberGeneration = useRef(0);
+  const candidateGeneration = useRef(0);
+  const [directoryEnabled, setDirectoryEnabled] = useState(false);
+  const [candidates, setCandidates] = useState<WorkspaceMemberCandidate[]>([]);
+  const [candidateHasMore, setCandidateHasMore] = useState(false);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
   const appliedMemberFilterRef = useRef({ query, roleFilter });
 
   const [joinRequests, setJoinRequests] = useState<WorkspaceJoinRequest[]>([]);
@@ -128,7 +136,23 @@ export function WorkspaceMembersSection() {
   let exactLoginEmail = "";
   try { exactLoginEmail = normalizeAccountEmail(queryDraft); } catch { /* Search may be a name rather than an email. */ }
   const canAddExactLoginEmail = looksLikeLoginEmail(exactLoginEmail);
+  const exactUserId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(queryDraft.trim()) ? queryDraft.trim() : "";
+  const exactSelector: WorkspaceMemberSelector | null = exactUserId ? { user_id: exactUserId } : canAddExactLoginEmail ? { email: exactLoginEmail } : null;
   const invalidLoginEmail = queryDraft.includes("@") && !exactLoginEmail;
+
+  useEffect(() => {
+    setDirectoryEnabled(false);
+    setCandidates([]);
+    setCandidatesLoading(false);
+    setCandidateHasMore(false);
+    candidateGeneration.current += 1;
+    if (!target || !isOwner) return;
+    const controller = new AbortController();
+    void listWorkspaceMemberCandidates(target.id, "", controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setDirectoryEnabled(result.enabled); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [isOwner, target]);
 
   useEffect(() => {
     if (!target || !isOwner) {
@@ -258,22 +282,42 @@ export function WorkspaceMembersSection() {
       query: nextQuery,
     };
     setQuery(nextQuery);
+    if (directoryEnabled && target && nextQuery.length >= 2) {
+      const generation = ++candidateGeneration.current;
+      setCandidatesLoading(true);
+      setCandidates([]);
+      setCandidateHasMore(false);
+      void listWorkspaceMemberCandidates(target.id, nextQuery)
+        .then((result) => {
+          if (generation !== candidateGeneration.current) return;
+          setCandidates(result.items);
+          setCandidateHasMore(result.has_more);
+          setDirectoryEnabled(result.enabled);
+        })
+        .catch((caught) => { if (generation === candidateGeneration.current) setMemberError(apiErrorMessage(caught)); })
+        .finally(() => { if (generation === candidateGeneration.current) setCandidatesLoading(false); });
+    } else {
+      candidateGeneration.current += 1;
+      setCandidates([]);
+      setCandidateHasMore(false);
+      setCandidatesLoading(false);
+    }
   }
 
   function onAddMember() {
-    const email = exactLoginEmail;
-    if (!email || !target) {
+    if (!exactSelector || !target) {
       return;
     }
     setMemberError(null);
     setMemberNotice(null);
-    void submitAddMember(email, addRole, false);
+    void submitAddMember(exactSelector, addRole, false, exactUserId || exactLoginEmail);
   }
 
   async function submitAddMember(
-    email: string,
+    selector: WorkspaceMemberSelector,
     role: WorkspaceMemberInviteRole,
     confirmFirstShare: boolean,
+    label: string,
   ) {
     if (!target) {
       return;
@@ -282,16 +326,17 @@ export function WorkspaceMembersSection() {
     setMemberError(null);
     try {
       const result = await addWorkspaceMember(target.id, {
-        email,
+        ...selector,
         role,
         confirm_first_share: confirmFirstShare,
       });
+      setCandidates((current) => current.filter((candidate) => candidate.user_id !== result.member.user_id));
       setPendingAction(null);
       setAddRole("viewer");
       setMemberNotice(
         result.created
-          ? t("workspaceMembers.notice.added", { email })
-          : t("workspaceMembers.notice.alreadyMember", { email }),
+          ? t("workspaceMembers.notice.added", { email: label })
+          : t("workspaceMembers.notice.alreadyMember", { email: label }),
       );
       const appliedFilter = appliedMemberFilterRef.current;
       const hasActiveMemberFilter =
@@ -317,7 +362,7 @@ export function WorkspaceMembersSection() {
         caught instanceof ApiError &&
         caught.body.error_code === "workspace_first_share_confirmation_required"
       ) {
-        setPendingAction({ kind: "first-share", email, role });
+        setPendingAction({ kind: "first-share", selector, label, role });
       } else {
         setPendingAction(null);
         setMemberError(apiErrorMessage(caught));
@@ -356,7 +401,7 @@ export function WorkspaceMembersSection() {
       setPendingAction(null);
       setMemberNotice(
         t("workspaceMembers.notice.roleChanged", {
-          name: member.display_name || member.email,
+          name: member.display_name || member.email || member.user_id,
           role: roleLabel(t, role),
         }),
       );
@@ -423,7 +468,7 @@ export function WorkspaceMembersSection() {
       }
       setMemberNotice(
         t("workspaceMembers.notice.removed", {
-          name: member.display_name || member.email,
+          name: member.display_name || member.email || member.user_id,
         }),
       );
       // UI-09: in-place filter instead of setMemberReloadKey, same reason as
@@ -465,15 +510,15 @@ export function WorkspaceMembersSection() {
       setJoinNotice(
         decision !== "approve"
           ? t("workspaceMembers.join.notice.rejected", {
-              name: request.requester_display_name || request.requester_email,
+              name: request.requester_display_name || request.requester_email || request.requester_user_id,
             })
           : result.membership_created
             ? t("workspaceMembers.join.notice.approved", {
-                name: request.requester_display_name || request.requester_email,
+                name: request.requester_display_name || request.requester_email || request.requester_user_id,
               })
             : t("workspaceMembers.join.notice.alreadyMember", {
                 defaultValue: "{{name}} is already a member; no role was changed.",
-                name: request.requester_display_name || request.requester_email,
+                name: request.requester_display_name || request.requester_email || request.requester_user_id,
               }),
       );
       setJoinReloadKey((current) => current + 1);
@@ -561,7 +606,6 @@ export function WorkspaceMembersSection() {
               aria-labelledby="workspace-member-query-label"
               autoComplete="off"
               autoCapitalize="none"
-              inputMode="email"
               onChange={(event) => setQueryDraft(event.target.value)}
               placeholder={t("workspaceMembers.filters.queryPlaceholder")}
               spellCheck={false}
@@ -598,9 +642,9 @@ export function WorkspaceMembersSection() {
             <div>
               <strong>{t("workspaceMembers.add.fromSearchTitle")}</strong>
               <span id="workspace-member-add-status">
-                {canAddExactLoginEmail
+                {exactSelector
                   ? t("workspaceMembers.add.fromSearchReady", {
-                      email: exactLoginEmail,
+                      email: exactUserId || exactLoginEmail,
                     })
                   : invalidLoginEmail
                     ? t("auth:validation.email")
@@ -621,7 +665,7 @@ export function WorkspaceMembersSection() {
             </label>
             <button
               className="icon-button primary"
-              disabled={memberBusyId === "add" || !canAddExactLoginEmail}
+              disabled={memberBusyId === "add" || !exactSelector}
               onClick={onAddMember}
               type="button"
             >
@@ -631,6 +675,24 @@ export function WorkspaceMembersSection() {
             </button>
           </div>
         </form>
+
+        {directoryEnabled ? (
+          <div className="account-panel" aria-label={t("workspaceMembers.directory.title")}>
+            <p>{t("workspaceMembers.directory.hint")}</p>
+            {candidatesLoading ? <p role="status">{t("workspaceMembers.directory.loading")}</p> : null}
+            {candidates.length > 0 ? <ul className="workspace-member-list">
+              {candidates.map((candidate) => <li key={candidate.user_id}>
+                <strong>{candidate.display_name || candidate.user_id}</strong>
+                <span>{candidate.provider_name} · {candidate.identity_label}</span>
+                <button type="button" className="icon-button" disabled={memberBusyId !== null}
+                  onClick={() => void submitAddMember({ user_id: candidate.user_id }, addRole, false, candidate.display_name || candidate.user_id)}>
+                  {t("workspaceMembers.directory.add", { name: candidate.display_name || candidate.user_id })}
+                </button>
+              </li>)}
+            </ul> : null}
+            {candidateHasMore ? <p>{t("workspaceMembers.directory.refine")}</p> : null}
+          </div>
+        ) : null}
 
         <div className="workspace-member-active-filter" role="status">
           {query || roleFilter !== "all" ? (
@@ -660,8 +722,8 @@ export function WorkspaceMembersSection() {
             {members.map((member) => (
               <div className="workspace-member-row" key={member.user_id} role="listitem">
                 <div className="workspace-member-identity">
-                  <strong>{member.display_name || member.email}</strong>
-                  <span>{member.email}</span>
+                  <strong>{member.display_name || member.email || member.user_id}</strong>
+                  <span>{member.email ?? member.user_id}</span>
                   <span className="meta-line">
                     {t("workspaceMembers.joined", {
                       date: formatDisplayDateTime(member.joined_at, i18n.language),
@@ -681,7 +743,7 @@ export function WorkspaceMembersSection() {
                 <div className="workspace-member-actions">
                   <label className="visually-hidden" htmlFor={`member-role-${member.user_id}`}>
                     {t("workspaceMembers.roleFor", {
-                      name: member.display_name || member.email,
+                      name: member.display_name || member.email || member.user_id,
                     })}
                   </label>
                   <select
@@ -763,9 +825,9 @@ export function WorkspaceMembersSection() {
               <div className="workspace-member-row" key={request.request_id} role="listitem">
                 <div className="workspace-member-identity">
                   <strong>
-                    {request.requester_display_name || request.requester_email}
+                    {request.requester_display_name || request.requester_email || request.requester_user_id}
                   </strong>
-                  <span>{request.requester_email}</span>
+                  <span>{request.requester_email ?? request.requester_user_id}</span>
                   <span className="meta-line">
                     {t("workspaceMembers.join.requested", {
                       date: formatDisplayDateTime(request.requested_at, i18n.language),
@@ -835,9 +897,10 @@ export function WorkspaceMembersSection() {
               return;
             }
             void submitAddMember(
-              pendingAction.email,
+              pendingAction.selector,
               pendingAction.role,
               pendingAction.kind === "first-share",
+              pendingAction.label,
             );
           }}
           workspaceTitle={target.title}
@@ -1342,8 +1405,8 @@ function MemberActionDialog({
   const isSelfDemote = action.kind === "self-demote";
   const name =
     action.kind === "first-share"
-      ? action.email
-      : action.member.display_name || action.member.email;
+      ? action.label
+      : action.member.display_name || action.member.email || action.member.user_id;
   const title = isFirstShare
     ? t("workspaceMembers.dialog.firstShareTitle")
     : isRemove

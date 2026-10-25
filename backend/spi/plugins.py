@@ -7,11 +7,16 @@ API and UI routes are mounted by core in a plugin-owned namespace.
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import UUID
 
 if TYPE_CHECKING:
     import typer
@@ -23,13 +28,100 @@ if TYPE_CHECKING:
     from backend.spi.auth import AuthMethodPlugin
 
 
+type JobValue = (
+    str | int | float | bool | None | tuple["JobValue", ...] | Mapping[str, "JobValue"]
+)
+
+
+def _freeze(value: object) -> JobValue:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return value
+    if isinstance(value, Mapping) and all(isinstance(key, str) for key in value):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    raise ValueError("worker payload must contain finite JSON values")
+
+
+def _thaw(value: JobValue) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
+class JobInput:
+    job_id: UUID
+    workspace_id: UUID
+    job_type: str
+    trigger_type: str
+    payload: Mapping[str, JobValue]
+    idempotency_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.payload, Mapping):
+            raise ValueError("worker payload must be an object")
+        object.__setattr__(self, "payload", _freeze(self.payload))
+
+
+@dataclass(frozen=True)
+class WorkerContext:
+    """Invocation facts, without core ORM or queue mutation capabilities.
+
+    Plugins are trusted in-process extensions and use their own configured
+    resources. This contract reduces coupling; it is not process isolation.
+    """
+
+    now: datetime
+
+
+@dataclass(frozen=True)
+class JobResult:
+    detail: Mapping[str, JobValue]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.detail, Mapping):
+            raise ValueError("worker result must be an object")
+        object.__setattr__(self, "detail", _freeze(self.detail))
+
+    def to_dict(self) -> dict[str, Any]:
+        return _thaw(self.detail)
+
+
+class PluginJobError(RuntimeError):
+    """A stable diagnostic code, never a remote exception message."""
+
+    def __init__(self, code: str) -> None:
+        if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", code):
+            raise ValueError("worker error code is invalid")
+        self.code = code
+        super().__init__(code)
+
+
+class RetryableJobError(PluginJobError):
+    """Core retries this failure within its configured attempt budget."""
+
+
+class PermanentJobError(PluginJobError):
+    """Core marks this failure terminal on its first attempt."""
+
+
+@dataclass(frozen=True)
+class JobFailure:
+    code: str
+    retryable: bool
+
+
 @dataclass(frozen=True)
 class JobHandler:
-    """Worker business handler; core continues to own queue transactions."""
+    """Typed business callback; core owns claim, completion and failure."""
 
-    business: Callable[..., dict[str, Any]]
-    completes_in_service: bool
-    on_failure: Callable[..., None] | None = None
+    business: Callable[[WorkerContext, JobInput], JobResult]
+    on_failure: Callable[[WorkerContext, JobInput, JobFailure], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -82,4 +174,17 @@ class DtxwikiPlugin:
     migrations: PluginMigrations | None = None
 
 
-__all__ = ["DtxwikiPlugin", "JobHandler", "PluginMigrations", "PluginMount"]
+__all__ = [
+    "DtxwikiPlugin",
+    "JobFailure",
+    "JobHandler",
+    "JobInput",
+    "JobResult",
+    "JobValue",
+    "PermanentJobError",
+    "PluginJobError",
+    "PluginMigrations",
+    "PluginMount",
+    "RetryableJobError",
+    "WorkerContext",
+]

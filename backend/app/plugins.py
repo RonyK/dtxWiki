@@ -20,7 +20,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import event
 
-from backend.spi.plugins import DtxwikiPlugin, PluginMigrations, PluginMount
+from backend.spi.plugins import DtxwikiPlugin, JobHandler, PluginMigrations, PluginMount
 
 if TYPE_CHECKING:
     import typer
@@ -79,13 +79,13 @@ class PluginRegistry:
                     await stack.enter_async_context(plugin.lifespan(app))
             yield
 
-    def worker_handlers(self) -> dict:
+    def worker_handlers(self) -> dict[str, JobHandler]:
         # Importing runtime installs the built-in handlers before collision
         # checks, including when a web-only process loads an extension.
         if any(plugin.worker_handlers is not None for plugin in self.plugins):
             from backend.worker import runtime  # noqa: F401
 
-        from backend.worker.registry import JobHandler, get_handler
+        from backend.worker.registry import get_handler
 
         handlers = {}
         for plugin in self.plugins:
@@ -97,6 +97,11 @@ class PluginRegistry:
                     or name in handlers
                     or get_handler(name) is not None
                     or not isinstance(handler, JobHandler)
+                    or not callable(handler.business)
+                    or (
+                        handler.on_failure is not None
+                        and not callable(handler.on_failure)
+                    )
                 ):
                     raise PluginConfigurationError(
                         f"plugin {plugin.name}: invalid or duplicate "

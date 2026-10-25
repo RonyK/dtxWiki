@@ -275,7 +275,7 @@ class ApiTokenUpdateRequest(BaseModel):
 
 class AuthUserData(BaseModel):
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     status: str
     email_verified_at: datetime | None = None
@@ -348,6 +348,11 @@ class PasswordResetRequestData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EmailVerificationRequest(BaseModel):
+    email: EmailInput | None = None
+    model_config = ConfigDict(extra="forbid")
+
+
 class EmailVerificationData(BaseModel):
     requested: bool = False
     verified: bool = False
@@ -364,6 +369,7 @@ class PasswordRecoveryCapabilities(BaseModel):
 
 class PasswordLoginCapability(BaseModel):
     enabled: bool
+    email_enrollment_enabled: bool
 
 
 class LoginMethodCapability(BaseModel):

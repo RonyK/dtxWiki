@@ -67,7 +67,7 @@ def validate_display_name(value: str) -> str:
     return value
 
 
-def normalize_display_name(value: str | None, email: str) -> str:
+def normalize_display_name(value: str | None, email: str | None) -> str:
     if value is not None and (
         not isinstance(value, str) or _invalid_single_line(value)
     ):
@@ -75,7 +75,7 @@ def normalize_display_name(value: str | None, email: str) -> str:
     normalized = (value or "").strip(TRIM_CHARACTERS)
     if normalized:
         return validate_display_name(normalized)
-    candidate = email.split("@", maxsplit=1)[0].strip(TRIM_CHARACTERS)
+    candidate = (email or "").split("@", maxsplit=1)[0].strip(TRIM_CHARACTERS)
     try:
         return validate_display_name(candidate)
     except DisplayNamePolicyError:

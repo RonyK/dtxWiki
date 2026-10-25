@@ -161,7 +161,7 @@ describe("Workspace Settings membership and access", () => {
     const memberLookup = screen.getByRole("searchbox", {
       name: "Find or add members",
     });
-    expect(screen.getByText("Add exact login email")).toBeInTheDocument();
+    expect(screen.getByText("Add an exact account")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
     fireEvent.change(memberLookup, { target: { value: "a".repeat(65) + "@example.test" } });
     expect(memberLookup).toHaveAccessibleDescription(/at most 254 UTF-8 bytes/);
@@ -172,7 +172,7 @@ describe("Workspace Settings membership and access", () => {
       memberLookup,
       "person@example.com",
     );
-    expect(screen.getByText(/Add person@example.com as a workspace member/))
+    expect(screen.getByText(/Add account person@example.com/))
       .toBeInTheDocument();
     expect(
       within(screen.getByLabelText("Initial role")).queryByRole("option", {
@@ -509,7 +509,7 @@ describe("Workspace Settings membership and access", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(27);
   });
 
-  it("reports an existing exact-email member without claiming a Viewer role", async () => {
+  it("reports an existing email-less UUID member without claiming a Viewer role", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
@@ -519,7 +519,7 @@ describe("Workspace Settings membership and access", () => {
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return memberPage([
           member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          { ...member(MEMBER_ID, "", "Editor", "editor", false), email: null },
         ]);
       }
       if (
@@ -533,15 +533,10 @@ describe("Workspace Settings membership and access", () => {
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members` &&
         init?.method === "POST"
       ) {
+        expect(JSON.parse(String(init.body))).toEqual({ user_id: MEMBER_ID, role: "editor", confirm_first_share: false });
         return jsonResponse({
           data: {
-            member: member(
-              MEMBER_ID,
-              "editor@example.com",
-              "Editor",
-              "editor",
-              false,
-            ),
+            member: { ...member(MEMBER_ID, "", "Editor", "editor", false), email: null },
             created: false,
             first_share: false,
             first_share_warning_code: null,
@@ -556,14 +551,14 @@ describe("Workspace Settings membership and access", () => {
     await screen.findByRole("combobox", { name: "Role for Editor" });
     await user.type(
       screen.getByRole("searchbox", { name: "Find or add members" }),
-      "editor@example.com",
+      MEMBER_ID,
     );
     await user.selectOptions(screen.getByLabelText("Initial role"), "editor");
     await user.click(screen.getByRole("button", { name: "Add member" }));
 
     expect(
       await screen.findByText(
-        "editor@example.com is already a member; no role was changed.",
+        `${MEMBER_ID} is already a member; no role was changed.`,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/requested viewer access/i)).not.toBeInTheDocument();
@@ -1810,7 +1805,7 @@ function workspaceList(
 
 function member(
   userId: string,
-  email: string,
+  email: string | null,
   displayName: string,
   role: "viewer" | "editor" | "owner",
   anchor: boolean,

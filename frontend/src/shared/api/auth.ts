@@ -9,7 +9,7 @@ import type { components } from "./types.gen";
 
 export type AuthUser = {
   user_id: string;
-  email: string;
+  email: string | null;
   display_name: string;
   status: string;
   email_verified_at?: string | null;
@@ -93,7 +93,7 @@ export type LoginIdentities = {
 type AuthCapabilitiesResponse = {
   data: {
     signup_enabled: boolean;
-    password_login?: { enabled: boolean };
+    password_login?: { enabled: boolean; email_enrollment_enabled?: boolean };
     login_methods?: LoginMethod[];
     password_recovery: {
       mode: "email" | "admin_assisted" | "disabled";
@@ -227,7 +227,6 @@ export function setAccountPassword(newPassword: string) {
 
 export type IdentityVerification = components["schemas"]["VerificationData"];
 export type VerificationScope = IdentityVerification["scope"];
-export type PendingSignup = components["schemas"]["PendingSignupData"];
 
 export function getIdentityVerification(scope: VerificationScope, returnTo: string) {
   const query = new URLSearchParams({ scope, return_to: returnTo });
@@ -244,23 +243,6 @@ export function requestEmailReauthentication(scope: VerificationScope, returnTo:
 export function confirmEmailReauthentication(token: string, scope: VerificationScope) {
   return apiRequest<components["schemas"]["EmailReauthenticationConfirmResponse"]>("/api/v1/auth/email-reauthentication/confirm", {
     method: "POST", body: JSON.stringify({ token, scope }),
-  }).then((response) => response.data);
-}
-
-export function getPendingSignup() {
-  return apiRequest<components["schemas"]["PendingSignupResponse"]>("/api/v1/auth/pending-signups")
-    .then((response) => response.data);
-}
-
-export function submitPendingSignupEmail(email: string) {
-  return apiRequest<components["schemas"]["PendingSignupEmailResponse"]>("/api/v1/auth/pending-signups/email", {
-    method: "POST", body: JSON.stringify({ email }),
-  }).then((response) => response.data);
-}
-
-export function confirmPendingSignup(token: string) {
-  return apiRequest<components["schemas"]["PendingSignupConfirmResponse"]>("/api/v1/auth/pending-signups/confirm", {
-    method: "POST", body: JSON.stringify({ token }),
   }).then((response) => response.data);
 }
 
@@ -303,10 +285,10 @@ export function requestPasswordReset(input: { email: string }) {
   ).then((response) => response.data);
 }
 
-export function requestEmailVerification() {
+export function requestEmailVerification(email?: string) {
   return apiRequest<EmailVerificationResponse>(
     "/api/v1/auth/email-verification/request",
-    { method: "POST" },
+    { method: "POST", ...(email ? { body: JSON.stringify({ email }) } : {}) },
   ).then((response) => response.data);
 }
 

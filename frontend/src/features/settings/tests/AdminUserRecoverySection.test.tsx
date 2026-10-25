@@ -76,13 +76,13 @@ describe("AdminUserRecoverySection", () => {
           return jsonResponse({ data: {
             has_password: false,
             identities: [{ provider_slug: "company" }],
-            available_providers: [{ slug: "company", display_name: "Company SSO", supports_reauthentication: true }],
+            available_providers: [{ slug: "company", display_name: "Company SSO", label: {}, supports_reauthentication: true }],
           } });
         }
         if (url.startsWith(`${BASE}/api/v1/auth/verification?`)) {
           return jsonResponse({ data: {
-            scope: "admin", mode: "sso", verified: false, reauthenticated_until: null,
-            providers: [{ slug: "company", display_name: "Company SSO", supports_reauthentication: true }],
+            scope: "admin", mode: "sso", verified: externalProof, allowed_methods: ["sso"], reauthenticated_until: null,
+            providers: [{ slug: "company", display_name: "Company SSO", label: {}, supports_reauthentication: true }],
           } });
         }
         if (url === `${BASE}/api/v1/auth/reauthenticate`) {
@@ -101,10 +101,7 @@ describe("AdminUserRecoverySection", () => {
           return jsonResponse(reauthResponse());
         }
         if (url.startsWith(`${BASE}/api/v1/admin/users?`)) {
-          if (externalSession && externalProof) {
-            externalProof = false;
-            return jsonResponse({ data: { items: [], total: 0, offset: 0 } });
-          }
+          if (externalSession) externalProof = false;
           return jsonResponse(
             {
               error_code: "recent_reauthentication_required",
@@ -748,7 +745,8 @@ describe("AdminUserRecoverySection", () => {
 
   it("keeps delivery actions independent and disables email for an unverified address", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    let ssoOnly = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/auth/reauthenticate`) {
         return jsonResponse(reauthResponse());
@@ -757,12 +755,20 @@ describe("AdminUserRecoverySection", () => {
         return jsonResponse(authCapabilities());
       }
       if (url.startsWith(`${BASE}/api/v1/admin/users?`)) {
-        return jsonResponse(userSearchResponse(false));
+        const result = userSearchResponse(false);
+        return jsonResponse(ssoOnly ? { data: { ...result.data, items: [{ ...result.data.items[0], email: null,
+          identities: [{ identity_id: "identity-1", provider_slug: "company", issuer: "https://idp.example.test", subject: "old-subject" }],
+        }] } } : result);
+      }
+      if (url.endsWith(`/admin/users/${USER_ID}/identities/rebind`)) {
+        expect(JSON.parse(String(init?.body))).toEqual({ identity_id: "identity-1", expected_issuer: "https://idp.example.test", expected_subject: "old-subject",
+          provider_slug: "company", issuer: "https://idp.example.test", subject: "new-subject", reason: "Company verified" });
+        return jsonResponse({ data: { user_id: USER_ID, identity_id: "identity-1", provider_slug: "company", issuer: "https://idp.example.test", subject: "new-subject" } });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    const { container } = render(<AdminUserRecoverySection />);
+    const { container, unmount } = render(<AdminUserRecoverySection />);
     await searchForUser(user, "alex@example.com");
     expect(
       await screen.findByRole("button", { name: "Send recovery email" }),
@@ -786,6 +792,23 @@ describe("AdminUserRecoverySection", () => {
       ).getByText("Issue one-time link"),
     ).toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+    // An email-less target has a different recovery boundary: selecting its
+    // UUID/identity must never reveal a native reset link or change email.
+    unmount();
+    ssoOnly = true;
+    render(<AdminUserRecoverySection />);
+    await searchForUser(user, USER_ID);
+    expect(screen.getByRole("button", { name: "Send recovery email" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Issue one-time link" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Reconnect SSO identity" }));
+    const rebind = screen.getByRole("dialog", { name: "Reconnect this account’s SSO identity" });
+    const save = within(rebind).getByRole("button", { name: "Reconnect SSO identity" });
+    expect(save).toBeDisabled();
+    await user.type(within(rebind).getByLabelText("New subject"), "new-subject");
+    await user.type(within(rebind).getByLabelText("Reason and independent verification reference"), "Company verified");
+    await user.type(within(rebind).getByLabelText("Type the target account UUID to confirm"), USER_ID);
+    await user.click(save);
+    expect(await screen.findByText("The selected SSO identity was reconnected. Existing sessions were revoked.")).toBeInTheDocument();
   });
 
   it("requires both a verified target and ready server mail capability", async () => {

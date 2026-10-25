@@ -19,7 +19,6 @@ class MethodCapabilities:
     id_token: Literal["signed", "none"] = "signed"
     nonce: Literal["supported", "unsupported"] = "supported"
     reauthentication: bool = False
-    idp_logout: bool = False
 
 
 @dataclass(frozen=True)
@@ -88,6 +87,10 @@ class ExternalAssertion:
     idp_session_id: str | None = None
     groups: tuple[str, ...] = ()
     nonce_verified: bool = False
+    # Only a tenant established by the adapter's verified IdP evidence or
+    # bounded server configuration belongs here. Core compares it with the
+    # operator's directory policy before exposing company membership.
+    tenant_id: str | None = None
 
 
 class AuthMethodPlugin(Protocol):
@@ -104,15 +107,34 @@ class AuthMethodPlugin(Protocol):
     ) -> ExternalAssertion: ...
 
 
+@dataclass(frozen=True)
+class LoginContext:
+    user_id: UUID
+    identity_id: UUID
+    provider: ProviderContext
+    assertion: ExternalAssertion
+    created: bool
+
+
+@dataclass(frozen=True)
+class WorkspaceRoleRequest:
+    workspace_id: UUID
+    role: Literal["viewer", "editor"]
+
+
+@dataclass(frozen=True)
+class ProvisioningResult:
+    """Add-only requests; core validates and applies them in its transaction.
+
+    Existing different roles remain unchanged. Operator allowlists bound every
+    request; plugins cannot request ownership, server administration or removal.
+    """
+
+    workspace_roles: tuple[WorkspaceRoleRequest, ...] = ()
+
+
 class ProvisioningHook(Protocol):
-    def on_login(
-        self,
-        session,
-        user_id: UUID,
-        provider_slug: str,
-        assertion: ExternalAssertion,
-        created: bool,
-    ) -> None: ...
+    def on_login(self, context: LoginContext) -> ProvisioningResult: ...
 
 
 class IdentityLifecycleHook(Protocol):

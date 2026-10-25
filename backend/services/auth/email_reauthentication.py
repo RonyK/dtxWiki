@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.models.auth_verification import EmailReauthenticationChallenge
 from backend.models.user import User
 from backend.services import server_admin_service
-from backend.services.auth.external_signup import CONFIRMATION_RESEND_SECONDS
 from backend.services.auth.login_transactions import AuthFlowError, digest
 from backend.services.auth.reauthentication_policy import (
     ReauthenticationPolicy,
@@ -28,6 +27,7 @@ from backend.services.session_service import (
 )
 
 EMAIL_REAUTHENTICATION_TTL_SECONDS = 5 * 60
+CONFIRMATION_RESEND_SECONDS = 60
 
 
 @dataclass
@@ -47,6 +47,7 @@ class EmailReauthenticationService:
         if (
             user is None
             or user.status != "active"
+            or not user.email
             or user.session_generation != current.session_generation
         ):
             raise AuthFlowError("sso_transaction_invalid")
@@ -60,7 +61,7 @@ class EmailReauthenticationService:
         self, *, session_token: str, scope: VerificationScope, return_to: str
     ) -> str:
         decision = self.policy.inspect(session_token=session_token, scope=scope)
-        if decision.mode != "email":
+        if "email" not in decision.allowed_methods:
             raise AuthFlowError("recent_reauthentication_required")
         binding, token = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = self.now()
@@ -102,7 +103,7 @@ class EmailReauthenticationService:
                 id=uuid4(),
                 user_id=user.id,
                 session_generation=user.session_generation,
-                session_digest=digest(session_token),
+                session_digest=self.sessions.session_binding(session_token),
                 binding_digest=digest(binding),
                 recipient_digest=digest(user.email),
                 token_digest=digest(token),
@@ -150,7 +151,8 @@ class EmailReauthenticationService:
                 or challenge.expires_at <= self.now()
                 or not hmac.compare_digest(challenge.binding_digest, digest(binding))
                 or not hmac.compare_digest(
-                    challenge.session_digest, digest(session_token)
+                    challenge.session_digest,
+                    self.sessions.session_binding(session_token),
                 )
                 or not hmac.compare_digest(
                     challenge.recipient_digest, digest(user.email)

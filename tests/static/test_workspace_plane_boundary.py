@@ -407,11 +407,11 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
     "backend/api/auth_verification.py": (
-        "Identity-plane only: browser-bound pending signup and purpose-bound "
+        "Identity-plane only: browser-bound purpose-bound "
         "reauthentication challenges use global users/identity/outbox records, "
         "never workspace document or membership data."
     ),
-    "backend/api/auth_sso.py": (
+    "backend/api/auth_dependencies.py": (
         "Builds the external-login broker over control-plane users, identities "
         "and browser login transactions. Provisioning uses the existing Personal "
         "workspace account-creation boundary; no workspace content is queried."

@@ -127,14 +127,14 @@
       "role": "Initial role",
       "action": "Add member",
       "adding": "Adding…",
-      "fromSearchTitle": "Add exact login email",
-      "fromSearchReady": "Add {{email}} as a workspace member.",
-      "fromSearchHint": "Enter a complete login email above to add an existing active user."
+      "fromSearchTitle": "Add an exact account",
+      "fromSearchReady": "Add account {{email}}.",
+      "fromSearchHint": "Enter an exact account UUID or native login email to add an existing account."
     },
     "filters": {
       "query": "Find or add members",
-      "queryPlaceholder": "Name or exact login email",
-      "queryHelp": "Search the current member list. A complete login email can also be added from the same field.",
+      "queryPlaceholder": "Name, account UUID, or native login email",
+      "queryHelp": "Search existing members. Add by exact account UUID or native login email.",
       "role": "Role filter",
       "search": "Search",
       "active": "Showing {{query}} · {{role}}",
@@ -201,6 +201,13 @@
       "confirmSelfDemote": "Give up Owner access",
       "confirmOwner": "Grant Owner access",
       "confirmRemove": "Remove member"
+    },
+    "directory": {
+      "title": "Company account directory",
+      "hint": "Search to find accounts in the company directory enabled for this workspace. The provider and account identifier distinguish the selected account.",
+      "loading": "Searching company accounts…",
+      "add": "Add {{name}}",
+      "refine": "More accounts match. Refine your search."
     }
   },
   "workspaceAccess": {
@@ -1157,6 +1164,20 @@
       "reauthentication": "Your current password is incorrect. Try again.",
       "unavailable": "That delivery method is unavailable. Close this dialog and explicitly choose an available recovery action.",
       "generic": "Password reset could not be issued. Try again."
+    },
+    "rebind": {
+      "action": "Reconnect SSO identity",
+      "title": "Reconnect this account’s SSO identity",
+      "warning": "Verify the person and the new identity through your organization’s separate trusted process first. This changes the selected SSO identity, revokes existing sessions, and does not create a temporary login link or change a native email login.",
+      "noEmail": "This account uses SSO. Email recovery and temporary login links are unavailable without a native email login.",
+      "currentIdentity": "Current SSO identity",
+      "provider": "New provider slug",
+      "issuer": "New issuer",
+      "subject": "New subject",
+      "reason": "Reason and independent verification reference",
+      "confirmUser": "Type the target account UUID to confirm",
+      "complete": "The selected SSO identity was reconnected. Existing sessions were revoked.",
+      "failed": "The SSO identity could not be reconnected. Verify your administrator session and the identity details."
     }
   },
   "jobs": {

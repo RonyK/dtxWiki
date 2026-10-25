@@ -12,7 +12,7 @@ from backend.models.user import User
 @dataclass(frozen=True)
 class AuthenticatedUser:
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     status: str
     email_verified_at: datetime | None = None
@@ -40,6 +40,7 @@ class NativeSessionCodec(Protocol):
         issued_at: datetime | None = None,
         amr: tuple[str, ...] | None = None,
         idp: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, datetime]: ...
 
 
@@ -62,6 +63,7 @@ def issue_native_session(
     authenticated_at: datetime | None = None,
     amr: tuple[str, ...] | None = None,
     idp: str | None = None,
+    session_id: str | None = None,
 ) -> SessionResult:
     issued_at = codec.now().astimezone(UTC).replace(microsecond=0)
     token, expires_at = codec.issue(
@@ -71,6 +73,7 @@ def issue_native_session(
         issued_at=issued_at,
         amr=amr,
         idp=idp,
+        session_id=session_id,
     )
     return SessionResult(
         user=authenticated_user(user),

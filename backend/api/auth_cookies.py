@@ -4,11 +4,8 @@ from starlette.responses import Response
 
 from backend.api.cookie_budget import set_bounded_cookie
 from backend.app.settings import Settings
-from backend.services.session_service import RECENT_REAUTHENTICATION_TTL_SECONDS
 
 ADMIN_PROOF_PATHS = ("/api/v1/admin", "/api/v1/auth/verification")
-PENDING_SIGNUP_COOKIE = "dtxwiki_pending_signup"
-PENDING_SIGNUP_PATH = "/api/v1/auth/pending-signups"
 
 
 def account_reauthentication_cookie_name(settings: Settings) -> str:
@@ -24,7 +21,7 @@ def set_account_reauthentication_cookie(response, settings, *, secure, result):
         secure=secure,
         samesite="strict",
         path="/api/v1/auth",
-        max_age=RECENT_REAUTHENTICATION_TTL_SECONDS,
+        max_age=settings.auth_reauthentication_max_age_seconds,
         expires=result.reauthenticated_until,
     )
 

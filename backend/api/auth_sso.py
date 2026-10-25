@@ -2,11 +2,10 @@
 
 import html
 import secrets
-from typing import Annotated
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -24,34 +23,31 @@ from backend.api.auth import (
     set_session_cookie,
 )
 from backend.api.auth_cookies import (
-    PENDING_SIGNUP_COOKIE,
-    PENDING_SIGNUP_PATH,
     account_reauthentication_cookie_name,
     set_account_reauthentication_cookie,
 )
-from backend.api.deps import SessionFactoryDep
+from backend.api.auth_dependencies import (
+    AccountServiceDep,
+    BrokerDep,
+    flow_error,
+    policy_for_request,
+)
 from backend.api.middleware.security_headers import CSP_SCRIPT_NONCE_STATE_KEY
 from backend.api.request_origin import require_same_origin
-from backend.app.errors import build_rest_error_response
 from backend.schemas.auth import (
     AuthSessionResponse,
     CapabilitiesResponse,
     LoginMethodCapability,
 )
 from backend.services.auth.account_management import (
-    AuthAccountService,
     IdentityNotFoundError,
 )
-from backend.services.auth.broker import AuthBroker
-from backend.services.auth.events import AuthEvents
-from backend.services.auth.external_signup import ExternalSignupService
 from backend.services.auth.login_transactions import (
     LOGIN_TTL_SECONDS,
     AuthFlowError,
     FlowContext,
 )
 from backend.services.auth.return_path import safe_return_path
-from backend.services.mail_delivery import build_email_delivery_service
 from backend.services.session_service import (
     AuthRateLimitError,
     SessionServiceError,
@@ -64,82 +60,6 @@ BINDING_COOKIE = "dtxwiki_login_txn"
 BINDING_PATH = "/api/v1/auth/sso"
 CALLBACK_MAX_BYTES = 64 * 1024
 CALLBACK_MAX_FIELDS = 20
-
-
-def get_auth_events(session_factory: SessionFactoryDep) -> AuthEvents:
-    return AuthEvents(session_factory)
-
-
-AuthEventsDep = Annotated[AuthEvents, Depends(get_auth_events)]
-
-
-def get_signups(
-    request: Request,
-    session_factory: SessionFactoryDep,
-    sessions: SessionServiceDep,
-    events: AuthEventsDep,
-) -> ExternalSignupService:
-    return ExternalSignupService(
-        session_factory,
-        request.app.state.auth_providers,
-        sessions,
-        build_email_delivery_service(request.app.state.settings),
-        events,
-        sessions.token_codec.now,
-    )
-
-
-SignupDep = Annotated[ExternalSignupService, Depends(get_signups)]
-
-
-def get_broker(
-    request: Request,
-    session_factory: SessionFactoryDep,
-    sessions: SessionServiceDep,
-    events: AuthEventsDep,
-    signups: SignupDep,
-) -> AuthBroker:
-    return AuthBroker(
-        session_factory,
-        request.app.state.auth_providers,
-        sessions,
-        events=events,
-        signups=signups,
-        mail_configured=request.app.state.settings.mail_configured,
-    )
-
-
-BrokerDep = Annotated[AuthBroker, Depends(get_broker)]
-
-
-def get_accounts(
-    request: Request,
-    session_factory: SessionFactoryDep,
-    sessions: SessionServiceDep,
-    events: AuthEventsDep,
-) -> AuthAccountService:
-    return AuthAccountService(
-        session_factory, request.app.state.auth_providers, sessions, events
-    )
-
-
-AccountServiceDep = Annotated[AuthAccountService, Depends(get_accounts)]
-
-
-def flow_error(exc):
-    return no_store_response(
-        build_rest_error_response(
-            exc.code,
-            "The external authentication operation could not be completed.",
-            status_code=409
-            if exc.code in {"last_login_method", "identity_already_linked"}
-            else 429
-            if exc.code == "rate_limited"
-            else 403
-            if exc.code == "server_admin_required"
-            else 400,
-        )
-    )
 
 
 def same_origin(request):
@@ -159,15 +79,8 @@ def set_account_proof(response, settings, request, result):
     )
 
 
-def require_account_proof(request, sessions, user_id):
-    from backend.services.auth.reauthentication_policy import ReauthenticationPolicy
-
-    ReauthenticationPolicy(
-        sessions.session_factory,
-        sessions,
-        request.app.state.auth_providers,
-        request.app.state.settings.mail_configured,
-    ).require(
+def require_account_proof(request, sessions):
+    policy_for_request(request, sessions).require(
         session_token=current_session_token(request),
         scope="account",
         proof_token=request.cookies.get(
@@ -229,7 +142,7 @@ def start(
     try:
         # No account identifier exists yet. Consume only the IP axis rather
         # than making every visitor share one global per-email bucket.
-        consume_auth_slot(auth_client_ip(request), "")
+        consume_auth_slot(auth_client_ip(request), namespace="sso_start")
         provider = broker.provider(slug)
         instruction, binding = broker.transactions.begin(
             provider,
@@ -371,10 +284,16 @@ def recover_callback_context(slug, request, broker, state, binding):
     base = (request.app.state.settings.public_base_url or "").rstrip("/")
     if not base:
         return None
+    provider = broker.providers.providers.get(slug)
+    redirect_uri = (
+        provider.context.callback_url
+        if provider is not None
+        else f"{base}/api/v1/auth/sso/{slug}/callback"
+    )
     try:
         return broker.transactions.context_for_callback(
             slug,
-            f"{base}/api/v1/auth/sso/{slug}/callback",
+            redirect_uri,
             state=state,
             binding=binding,
         )
@@ -386,8 +305,12 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
     params = form if form is not None else query
     state = params.get("state") or params.get("RelayState")
     binding = request.cookies.get(BINDING_COOKIE)
+    # A relay's Origin does not authenticate its submitted fields. Validate the
+    # one-time browser binding before charging the victim's authentication quota;
+    # consume() rechecks it under lock before any IdP call.
+    if recover_callback_context(slug, request, broker, state, binding) is None:
+        return callback_error("sso_transaction_invalid")
     try:
-        consume_auth_slot(auth_client_ip(request), "")
         current = None
         token = request.cookies.get(request.app.state.settings.session_cookie_name)
         if token:
@@ -395,6 +318,11 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
                 _, current = sessions.authenticate_session_context(token)
             except SessionServiceError:
                 pass
+        consume_auth_slot(
+            auth_client_ip(request),
+            user_id=current.user_id if current else None,
+            namespace="sso_callback",
+        )
         result = broker.complete(
             slug,
             state=state,
@@ -402,6 +330,7 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
             query=query,
             form=form,
             current_session=current,
+            current_session_token=token,
         )
         response = no_store_response(
             RedirectResponse(result.return_to, status_code=302)
@@ -409,20 +338,6 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
         if result.session is not None:
             set_session_cookie(
                 response, request.app.state.settings, request, result.session
-            )
-        if result.pending_signup is not None:
-            from backend.services.auth.external_signup import PENDING_SIGNUP_TTL_SECONDS
-
-            response.set_cookie(
-                PENDING_SIGNUP_COOKIE,
-                result.pending_signup.binding,
-                httponly=True,
-                secure=session_cookie_secure_for_request(
-                    request.app.state.settings, request
-                ),
-                samesite="lax",
-                path=PENDING_SIGNUP_PATH,
-                max_age=PENDING_SIGNUP_TTL_SECONDS,
             )
         if result.reauthentication is not None:
             set_recent_reauthentication_cookie(
@@ -474,15 +389,12 @@ def start_account_flow(slug, body, request, broker, sessions, purpose):
         user, verified = sessions.authenticate_session_context(
             current_session_token(request)
         )
-        consume_auth_slot(auth_client_ip(request), user.email)
+        consume_auth_slot(
+            auth_client_ip(request), user_id=user.user_id, namespace="sso_start"
+        )
         if purpose == "link":
-            require_account_proof(request, sessions, user.user_id)
+            require_account_proof(request, sessions)
         provider = broker.provider(slug)
-        if (
-            purpose == "reauth"
-            and not provider.method.descriptor.capabilities.reauthentication
-        ):
-            raise AuthFlowError("reauthentication_mismatch")
         instruction, binding = broker.transactions.begin(
             provider,
             purpose=purpose,
@@ -490,6 +402,7 @@ def start_account_flow(slug, body, request, broker, sessions, purpose):
             remember_me=verified.remember_me,
             user_id=user.user_id,
             session_generation=verified.session_generation,
+            session_digest=sessions.session_binding(current_session_token(request)),
         )
         if instruction.http_method != "GET":
             raise AuthFlowError("sso_provider_unavailable")
@@ -581,7 +494,7 @@ def unlink(
         user, verified = sessions.authenticate_session_context(
             current_session_token(request)
         )
-        require_account_proof(request, sessions, user.user_id)
+        require_account_proof(request, sessions)
         issued = accounts.unlink_identity(
             user,
             verified,
@@ -621,7 +534,7 @@ def set_password(
         user, verified = sessions.authenticate_session_context(
             current_session_token(request)
         )
-        require_account_proof(request, sessions, user.user_id)
+        require_account_proof(request, sessions)
         issued = accounts.set_initial_password(user, verified, body.new_password)
         from fastapi.encoders import jsonable_encoder
         from fastapi.responses import JSONResponse

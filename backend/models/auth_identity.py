@@ -29,8 +29,7 @@ class UserIdentity(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             "user_id", "provider_slug", name="uq_user_identities_user_provider"
         ),
         CheckConstraint(
-            "linked_via IN ('jit', 'jit_email_confirmed', 'auto_verified_email', "
-            "'user_link', 'admin', 'scim')",
+            "linked_via IN ('jit', 'user_link', 'admin', 'scim')",
             name="user_identity_linked_via_check",
         ),
         Index("ix_user_identities_provider_slug", "provider_slug"),
@@ -44,6 +43,7 @@ class UserIdentity(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     email_at_link: Mapped[str | None] = mapped_column(Text)
     last_email: Mapped[str | None] = mapped_column(Text)
+    directory_tenant: Mapped[str | None] = mapped_column(Text)
     last_email_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
@@ -75,6 +75,7 @@ class AuthLoginTransaction(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")
     )
     session_generation: Mapped[int | None] = mapped_column(Integer)
+    session_digest: Mapped[str | None] = mapped_column(Text)
     return_to: Mapped[str] = mapped_column(Text, nullable=False)
     remember_me: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()

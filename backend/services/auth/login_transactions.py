@@ -73,6 +73,7 @@ class LoginTransactionStore:
         remember_me=False,
         user_id=None,
         session_generation=None,
+        session_digest=None,
     ):
         state = secrets.token_urlsafe(32)
         binding = secrets.token_urlsafe(32)
@@ -87,7 +88,8 @@ class LoginTransactionStore:
                 if capabilities.pkce != "unsupported"
                 else None
             ),
-            force_reauthentication=purpose == "reauth",
+            force_reauthentication=purpose == "reauth"
+            and capabilities.reauthentication,
         )
         instruction = provider.method.begin(provider.context, request)
         if provider.method.descriptor.protocol == "saml2":
@@ -123,6 +125,7 @@ class LoginTransactionStore:
                     purpose=purpose,
                     user_id=user_id,
                     session_generation=session_generation,
+                    session_digest=session_digest,
                     return_to=return_to,
                     remember_me=remember_me,
                     protocol_request_id=instruction.protocol_request_id,

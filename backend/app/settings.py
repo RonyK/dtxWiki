@@ -39,6 +39,7 @@ SESSION_TTL_DEFAULT_SECONDS = 60 * 60 * 12
 SESSION_REMEMBERED_TTL_DEFAULT_SECONDS = 60 * 60 * 24 * 30
 SESSION_REMEMBERED_REFRESH_THRESHOLD_DEFAULT_SECONDS = 60 * 60 * 24 * 7
 SESSION_REMEMBERED_ABSOLUTE_TTL_DEFAULT_SECONDS = 60 * 60 * 24 * 90
+AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS = 60 * 60
 # Every request body is bounded before routing and authentication; the
 # upload routes that legitimately need more carry their own, larger bounds
 # (backend/api/middleware/request_body_limit.py).
@@ -58,8 +59,7 @@ _RETIRED_DEFAULT_SESSION_SECRET_SHA256 = (
     "4a2c406a513a7d39768444571f948c649f89eeb2a93cdd1a219f53e09daf2440"
 )
 _SESSION_SECRET_GUIDANCE = (
-    "Generate one with: python3 -c "
-    "\"import secrets; print(secrets.token_urlsafe(64))\""
+    'Generate one with: python3 -c "import secrets; print(secrets.token_urlsafe(64))"'
 )
 
 logger = logging.getLogger("dtxwiki.startup")
@@ -188,6 +188,10 @@ class Settings(BaseSettings):
         gt=0,
     )
     session_cookie_name: str = "dtxwiki_session"
+    auth_reauthentication_max_age_seconds: int = Field(
+        default=AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS,
+        gt=0,
+    )
     session_cookie_secure: bool | None = None
     # Keep the raw operator value nullable so mode-derived defaults remain
     # distinguishable from an explicit true/false override.
@@ -780,9 +784,7 @@ class Settings(BaseSettings):
                 f"{_SESSION_SECRET_GUIDANCE}"
             )
         if inline_secret:
-            problem = session_secret_problem(
-                inline_secret, remote=self.is_remote_mode
-            )
+            problem = session_secret_problem(inline_secret, remote=self.is_remote_mode)
             if problem is not None:
                 raise RuntimeError(
                     f"DTXWIKI_SESSION_SECRET {problem}. {_SESSION_SECRET_GUIDANCE}"
@@ -956,8 +958,7 @@ def _resolve_session_secret(
             value = _read_session_secret_file(path)
         except FileNotFoundError as exc:
             raise RuntimeError(
-                f"DTXWIKI_SESSION_SECRET_FILE points to {path}, which does not "
-                "exist."
+                f"DTXWIKI_SESSION_SECRET_FILE points to {path}, which does not exist."
             ) from exc
         except (OSError, ValueError) as exc:
             raise RuntimeError(

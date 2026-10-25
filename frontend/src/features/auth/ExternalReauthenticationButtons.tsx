@@ -3,16 +3,15 @@ import { useTranslation } from "react-i18next";
 
 import { startIdentityFlow, type LoginMethod } from "../../shared/api/auth";
 import { apiErrorMessage } from "../../shared/api/client";
-import { loginMethodStyle } from "./loginMethodBranding";
+import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
 
 export function ExternalReauthenticationButtons({ methods, returnTo, onError }: {
   methods: LoginMethod[];
   returnTo: string;
   onError: (message: string) => void;
 }) {
-  const { t } = useTranslation("auth");
+  const { t, i18n } = useTranslation("auth");
   const [busy, setBusy] = useState(false);
-  const available = methods.filter((method) => method.supports_reauthentication);
 
   async function begin(slug: string) {
     setBusy(true);
@@ -26,11 +25,11 @@ export function ExternalReauthenticationButtons({ methods, returnTo, onError }: 
     }
   }
 
-  if (available.length === 0) return null;
+  if (methods.length === 0) return null;
 
   return (
     <div className="auth-actions">
-      {available.map((method) => (
+      {methods.map((method) => (
         <button
           type="button"
           className="icon-button"
@@ -39,9 +38,10 @@ export function ExternalReauthenticationButtons({ methods, returnTo, onError }: 
           key={method.slug}
           onClick={() => void begin(method.slug)}
         >
-          {t("loginMethods.verifyProvider", { provider: method.display_name })}
+          {t(method.supports_reauthentication ? "loginMethods.verifyProvider" : "loginMethods.confirmProvider", { provider: loginMethodLabel(method, i18n.language) })}
         </button>
       ))}
+      {methods.some((method) => !method.supports_reauthentication) ? <p className="field-hint">{t("verification.ssoConfirmationHint")}</p> : null}
     </div>
   );
 }

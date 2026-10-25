@@ -9,12 +9,33 @@ export type AdminUserWorkspace = {
 
 export type AdminUser = {
   user_id: string;
-  email: string;
+  email: string | null;
   display_name: string;
   status: string;
   email_verified_at: string | null;
   workspaces: AdminUserWorkspace[];
+  identities?: AdminUserIdentity[];
 };
+
+export type AdminUserIdentity = {
+  identity_id: string;
+  provider_slug: string;
+  issuer: string;
+  subject: string;
+};
+
+export type AdminIdentityRebindRequest = AdminUserIdentity & {
+  expected_issuer: string;
+  expected_subject: string;
+  reason: string;
+};
+
+export async function rebindAdminIdentity(userId: string, request: AdminIdentityRebindRequest) {
+  return apiRequest<{ data: AdminUserIdentity & { user_id: string } }>(
+    `/api/v1/admin/users/${encodeURIComponent(userId)}/identities/rebind`,
+    { method: "POST", body: JSON.stringify(request) },
+  ).then((response) => response.data);
+}
 
 export type AdminUserSearchResult = {
   items: AdminUser[];

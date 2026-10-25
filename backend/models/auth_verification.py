@@ -1,37 +1,12 @@
-"""Browser-bound external signup and purpose-bound email verification."""
+"""Single-use email confirmation bound to one account session and purpose."""
 
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    CheckConstraint,
-    ForeignKey,
-    Index,
-    Integer,
-    Text,
-    Uuid,
-)
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import Base, CreatedAtMixin, UTCDateTime, UuidPrimaryKeyMixin
-
-
-class AuthPendingSignup(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
-    __tablename__ = "auth_pending_signups"
-    __table_args__ = (Index("ix_auth_pending_signups_expires_at", "expires_at"),)
-
-    binding_digest: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    provider_slug: Mapped[str] = mapped_column(Text, nullable=False)
-    assertion_data: Mapped[dict] = mapped_column(JSON, nullable=False)
-    email: Mapped[str | None] = mapped_column(Text)
-    return_to: Mapped[str] = mapped_column(Text, nullable=False)
-    remember_me: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    token_digest: Mapped[str | None] = mapped_column(Text, unique=True)
-    email_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
-    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class EmailReauthenticationChallenge(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -41,6 +16,7 @@ class EmailReauthenticationChallenge(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             "scope IN ('account', 'admin')", name="email_reauth_scope_check"
         ),
         Index("ix_email_reauth_expires_at", "expires_at"),
+        Index("ix_email_reauth_user_created_at", "user_id", "created_at"),
     )
 
     user_id: Mapped[UUID] = mapped_column(

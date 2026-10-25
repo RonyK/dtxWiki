@@ -41,6 +41,7 @@ type AuthContextValue = {
   capabilitiesChecked: boolean;
   signupEnabled: boolean;
   passwordLoginEnabled: boolean;
+  emailEnrollmentEnabled: boolean;
   loginMethods: LoginMethod[];
   passwordRecoveryMode: PasswordRecoveryMode;
   passwordRecoveryAdminAssisted: boolean;
@@ -72,6 +73,7 @@ export function AuthProvider({
   const [capabilitiesChecked, setCapabilitiesChecked] = useState(false);
   const [signupEnabled, setSignupEnabled] = useState(false);
   const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(true);
+  const [emailEnrollmentEnabled, setEmailEnrollmentEnabled] = useState(false);
   const [loginMethods, setLoginMethods] = useState<LoginMethod[]>([]);
   const [passwordRecoveryMode, setPasswordRecoveryMode] =
     useState<PasswordRecoveryMode>("disabled");
@@ -173,6 +175,7 @@ export function AuthProvider({
     // form visible after the server disables self-service registration.
     setCapabilitiesChecked(false);
     setSignupEnabled(false);
+    setEmailEnrollmentEnabled(false);
     setLoginMethods([]);
     setPasswordRecoveryMode("disabled");
     setPasswordRecoveryAdminAssisted(false);
@@ -181,6 +184,7 @@ export function AuthProvider({
       const capabilities = await getAuthCapabilities();
       setSignupEnabled(capabilities.signup_enabled === true);
       setPasswordLoginEnabled(capabilities.password_login?.enabled ?? true);
+      setEmailEnrollmentEnabled(capabilities.password_login?.email_enrollment_enabled === true);
       setLoginMethods(capabilities.login_methods ?? []);
       setPasswordRecoveryMode(
         capabilities.password_recovery?.mode ?? "disabled",
@@ -296,6 +300,7 @@ export function AuthProvider({
       capabilitiesChecked,
       signupEnabled,
       passwordLoginEnabled,
+      emailEnrollmentEnabled,
       loginMethods,
       passwordRecoveryMode,
       passwordRecoveryAdminAssisted,
@@ -319,6 +324,7 @@ export function AuthProvider({
       status,
       signupEnabled,
       passwordLoginEnabled,
+      emailEnrollmentEnabled,
       loginMethods,
       passwordRecoveryMode,
       passwordRecoveryAdminAssisted,

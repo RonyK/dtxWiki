@@ -10,6 +10,7 @@ def test_remembered_session_lifetime_defaults_and_independent_normal_ttl():
     settings = Settings(session_ttl_seconds=123)
 
     assert settings.session_ttl_seconds == 123
+    assert settings.auth_reauthentication_max_age_seconds == 3600
     assert settings.session_remembered_ttl_seconds == 60 * 60 * 24 * 30
     assert settings.session_remembered_refresh_threshold_seconds == 60 * 60 * 24 * 7
     assert settings.session_remembered_absolute_ttl_seconds == 60 * 60 * 24 * 90
@@ -64,6 +65,7 @@ def test_normal_session_ttl_override_has_no_remembered_lifetime_relationship():
 
 
 def test_remembered_session_lifetimes_load_from_exact_environment_keys(monkeypatch):
+    monkeypatch.setenv("DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS", "2400")
     monkeypatch.setenv("DTXWIKI_SESSION_REMEMBERED_TTL_SECONDS", "300")
     monkeypatch.setenv(
         "DTXWIKI_SESSION_REMEMBERED_REFRESH_THRESHOLD_SECONDS",
@@ -73,6 +75,7 @@ def test_remembered_session_lifetimes_load_from_exact_environment_keys(monkeypat
 
     settings = Settings()
 
+    assert settings.auth_reauthentication_max_age_seconds == 2400
     assert settings.session_remembered_ttl_seconds == 300
     assert settings.session_remembered_refresh_threshold_seconds == 30
     assert settings.session_remembered_absolute_ttl_seconds == 900
@@ -87,6 +90,8 @@ def test_ordinary_session_ttl_is_rejected_at_construction(value):
 
     with pytest.raises(ValidationError, match="session_ttl_seconds"):
         Settings(session_ttl_seconds=value)
+    with pytest.raises(ValidationError, match="auth_reauthentication_max_age_seconds"):
+        Settings(auth_reauthentication_max_age_seconds=value)
 
 
 def test_session_lifetime_defaults_have_one_definition():

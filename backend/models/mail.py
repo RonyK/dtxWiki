@@ -49,19 +49,14 @@ class EmailOutbox(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         CheckConstraint(
             "message_kind IN "
             "('password_reset', 'email_verification', 'password_changed', "
-            "'job_failed', 'reconciliation_reminder', 'pending_signup', "
+            "'job_failed', 'reconciliation_reminder', "
             "'email_reauthentication')",
             name="email_outbox_message_kind_check",
         ),
         CheckConstraint(
-            "(message_kind = 'pending_signup' AND recipient_user_id IS NULL "
-            "AND pending_signup_id IS NOT NULL "
-            "AND reauthentication_challenge_id IS NULL) OR "
             "(message_kind = 'email_reauthentication' "
-            "AND recipient_user_id IS NOT NULL AND pending_signup_id IS NULL "
             "AND reauthentication_challenge_id IS NOT NULL) OR "
-            "(message_kind NOT IN ('pending_signup', 'email_reauthentication') "
-            "AND recipient_user_id IS NOT NULL AND pending_signup_id IS NULL "
+            "(message_kind != 'email_reauthentication' "
             "AND reauthentication_challenge_id IS NULL)",
             name="email_outbox_recipient_check",
         ),
@@ -77,13 +72,10 @@ class EmailOutbox(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
     )
 
-    recipient_user_id: Mapped[UUID | None] = mapped_column(
+    recipient_user_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    pending_signup_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("auth_pending_signups.id", ondelete="CASCADE")
+        nullable=False,
     )
     reauthentication_challenge_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),

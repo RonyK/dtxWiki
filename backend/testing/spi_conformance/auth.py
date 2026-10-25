@@ -14,8 +14,11 @@ from backend.spi.auth import (
     BeginRequest,
     CallbackInput,
     ExternalAssertion,
+    LoginContext,
     ProviderContext,
+    ProvisioningResult,
     RedirectInstruction,
+    WorkspaceRoleRequest,
 )
 
 CallbackFactory = Callable[[RedirectInstruction], CallbackInput]
@@ -30,6 +33,8 @@ def assert_auth_method_contract(
     rejected_callbacks: Mapping[str, CallbackFactory],
     expected_issuer: str,
     expected_subject: str,
+    expected_tenant_id: str | None = None,
+    login: LoginContext | None = None,
 ) -> None:
     """Run successful and rejected flows against caller-supplied IdP fixtures.
 
@@ -46,7 +51,7 @@ def assert_auth_method_contract(
     assert descriptor.capabilities.nonce in {"supported", "unsupported"}
     assert descriptor.capabilities.id_token in {"signed", "none"}
     assert descriptor.branding.label and all(
-        isinstance(locale, str) and isinstance(label, str) and label
+        isinstance(locale, str) and isinstance(label, str) and label.strip()
         for locale, label in descriptor.branding.label.items()
     ), "invalid branding"
     Draft202012Validator.check_schema(descriptor.config_schema)
@@ -104,6 +109,8 @@ def assert_auth_method_contract(
     assertion = method.complete(provider, successful_callback(start()))
     assert isinstance(assertion, ExternalAssertion)
     assert (assertion.issuer, assertion.subject) == (expected_issuer, expected_subject)
+    if expected_tenant_id is not None:
+        assert assertion.tenant_id == expected_tenant_id, "unexpected verified tenant"
     if descriptor.capabilities.nonce == "supported":
         assert assertion.nonce_verified, "adapter did not verify the sent nonce"
     for name, factory in rejected_callbacks.items():
@@ -113,3 +120,16 @@ def assert_auth_method_contract(
         except AuthMethodError:
             continue
         raise AssertionError(f"adapter accepted invalid IdP response: {name}")
+    hook = getattr(method, "on_login", None)
+    if hook is not None:
+        assert isinstance(login, LoginContext), "provisioning needs a login fixture"
+        provisioned = hook(login)
+        assert isinstance(provisioned, ProvisioningResult), (
+            "invalid provisioning result"
+        )
+        assert isinstance(provisioned.workspace_roles, tuple)
+        assert all(
+            isinstance(request, WorkspaceRoleRequest)
+            and request.role in {"viewer", "editor"}
+            for request in provisioned.workspace_roles
+        ), "invalid workspace role request"

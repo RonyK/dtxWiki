@@ -3,11 +3,40 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api.auth_cookies import ADMIN_PROOF_PATHS, clear_reauthentication_cookies
+from backend.api.auth_cookies import (
+    ADMIN_PROOF_PATHS,
+    account_reauthentication_cookie_name,
+    clear_reauthentication_cookies,
+    set_account_reauthentication_cookie,
+)
+from backend.api.auth_dependencies import (
+    SessionServiceDep as SessionServiceDep,
+)
+from backend.api.auth_dependencies import (
+    get_session_service as get_session_service,
+)
+from backend.api.auth_dependencies import (
+    no_store_response as no_store_response,
+)
+from backend.api.auth_dependencies import (
+    policy_for_request,
+)
+from backend.api.auth_dependencies import (
+    set_no_store_headers as set_no_store_headers,
+)
 from backend.api.deps import SessionFactoryDep
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import Settings
@@ -25,6 +54,7 @@ from backend.schemas.auth import (
     AuthSessionResponse,
     CredentialWorkspacePage,
     EmailVerificationConfirmRequest,
+    EmailVerificationRequest,
     EmailVerificationResponse,
     LoginRequest,
     PasswordChangeRequest,
@@ -57,13 +87,14 @@ from backend.services.password_recovery_service import (
     EMAIL_VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL,
     EMAIL_VERIFICATION_RESEND_RATE_LIMIT_WINDOW_SECONDS,
     EmailVerificationSessionRequiredError,
+    InvalidPasswordResetRequestError,
     InvalidPasswordResetTokenError,
+    PasswordRecoveryConfigurationError,
     PasswordRecoveryError,
     PasswordRecoveryRateLimiter,
     PasswordRecoveryService,
 )
 from backend.services.session_service import (
-    RECENT_REAUTHENTICATION_TTL_SECONDS,
     AuthenticatedUser,
     AuthRateLimitError,
     DisplayNameInputPolicyError,
@@ -80,7 +111,6 @@ from backend.services.session_service import (
     SignupDisabledError,
     SuspendedUserError,
     VerifiedRecentReauthentication,
-    build_session_token_codec,
     consume_auth_slot,
 )
 
@@ -95,28 +125,6 @@ REST_ERROR_RESPONSES = {
     422: {"model": RESTErrorBody},
     429: {"model": RESTErrorBody},
 }
-
-
-def get_session_service(
-    request: Request,
-    session_factory: SessionFactoryDep,
-) -> SessionService:
-    if hasattr(request.app.state, "session_service"):
-        return request.app.state.session_service
-    settings = request.app.state.settings
-    service = SessionService(
-        session_factory=session_factory,
-        credential_hasher=CredentialHasher(),
-        token_codec=build_session_token_codec(settings),
-        app_mode=settings.app_mode,
-        signup_enabled=settings.effective_signup_enabled,
-        audit_service=AuditService(),
-    )
-    request.app.state.session_service = service
-    return service
-
-
-SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
 
 
 def get_api_token_service(
@@ -226,6 +234,10 @@ def auth_capabilities(request: Request, response: Response):
             ),
             "password_login": {
                 "enabled": request.app.state.settings.auth_password_login_enabled,
+                "email_enrollment_enabled": (
+                    request.app.state.settings.mail_configured
+                    and request.app.state.settings.auth_password_login_enabled
+                ),
             },
             "login_methods": request.app.state.auth_providers.login_methods(),
             "password_recovery": {
@@ -329,7 +341,7 @@ def reauthenticate(
         try:
             consume_auth_slot(
                 client_ip=auth_client_ip(request),
-                email=user.email,
+                user_id=user.user_id,
             )
         except AuthRateLimitError:
             session_service.audit_reauthentication_failure(
@@ -340,6 +352,7 @@ def reauthenticate(
         result = session_service.reauthenticate(
             user_id=user.user_id,
             current_password=request_body.current_password,
+            session_token=current_session_token(request),
         )
     except SessionServiceError as exc:
         return auth_error_response(exc)
@@ -349,9 +362,12 @@ def reauthenticate(
         request=request,
         result=result,
     )
-    from backend.api.auth_sso import set_account_proof
-
-    set_account_proof(response, request.app.state.settings, request, result)
+    set_account_reauthentication_cookie(
+        response,
+        request.app.state.settings,
+        secure=session_cookie_secure_for_request(request.app.state.settings, request),
+        result=result,
+    )
     return {
         "data": {
             "reauthenticated_until": result.reauthenticated_until,
@@ -453,7 +469,7 @@ def change_password(
             # trace. Mirror reauthenticate's slot + rate-limit-failure audit.
             consume_auth_slot(
                 client_ip=auth_client_ip(request),
-                email=user.email,
+                user_id=user.user_id,
             )
         except AuthRateLimitError:
             session_service.audit_password_change_failure(
@@ -559,39 +575,55 @@ def request_email_verification(
     session_factory: SessionFactoryDep,
     session_service: SessionServiceDep,
     recovery_service: PasswordRecoveryServiceDep,
+    request_body: Annotated[EmailVerificationRequest | None, Body()] = None,
 ):
     try:
         user = current_session_user(request, session_service)
-        # Twin of /password-reset/request's limiter, on a disjoint `purpose` so
-        # an anonymous reset spray against this user's address cannot also
-        # exhaust their verification-resend budget (AUTH-02). Consumed before
-        # any EmailOutbox/Job row can be created.
         settings = request.app.state.settings
+        candidate = request_body.email if request_body else None
+        if user.email is None:
+            from backend.api.request_origin import require_same_origin
+
+            require_same_origin(request)
+            if not settings.mail_configured or not settings.auth_password_login_enabled:
+                raise PasswordRecoveryConfigurationError(
+                    "native email enrollment is unavailable"
+                )
+            if candidate is None:
+                raise InvalidPasswordResetRequestError("an email address is required")
+            policy_for_request(request, session_service).require(
+                session_token=current_session_token(request),
+                scope="account",
+                proof_token=request.cookies.get(
+                    account_reauthentication_cookie_name(settings), ""
+                ),
+            )
+        recipient = candidate or user.email
+        if recipient is None:
+            raise InvalidPasswordResetRequestError("an email address is required")
+        consume_auth_slot(auth_client_ip(request), user_id=user.user_id)
         with session_factory.begin() as session:
             PasswordRecoveryRateLimiter(
                 secret=settings.effective_session_secret
             ).consume(
                 session=session,
                 client_ip=auth_client_ip(request),
-                email=user.email,
+                email=recipient,
                 purpose="email_verification",
             )
-            # On top of the shared ip/email throttle above: a tighter,
-            # account-scoped resend cap. This is one already-authenticated
-            # account being resent to repeatedly (resend spam), not network
-            # credential guessing, so it's keyed on email only.
             PasswordRecoveryRateLimiter(
                 secret=settings.effective_session_secret,
                 per_email=EMAIL_VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL,
                 window_seconds=EMAIL_VERIFICATION_RESEND_RATE_LIMIT_WINDOW_SECONDS,
             ).consume_email_only(
                 session=session,
-                email=user.email,
+                email=recipient,
                 purpose="email_verification_resend",
             )
         result = recovery_service.issue_email_verification(
             user_id=user.user_id,
             actor_id=str(user.user_id),
+            email=candidate,
         )
     except SessionServiceError as exc:
         return no_store_response(auth_error_response(exc))
@@ -954,15 +986,8 @@ def require_recent_server_admin_reauthentication(
     admin: Annotated[AuthenticatedUser, Depends(require_server_admin)],
     session_service: SessionServiceDep,
 ) -> VerifiedRecentReauthentication:
-    from backend.services.auth.reauthentication_policy import ReauthenticationPolicy
-
     try:
-        verified = ReauthenticationPolicy(
-            session_service.session_factory,
-            session_service,
-            request.app.state.auth_providers,
-            request.app.state.settings.mail_configured,
-        ).require(
+        verified = policy_for_request(request, session_service).require(
             session_token=current_session_token(request),
             scope="admin",
             proof_token=request.cookies.get(
@@ -1054,7 +1079,7 @@ def set_recent_reauthentication_cookie(
             httponly=True,
             secure=session_cookie_secure_for_request(settings, request),
             samesite="strict",
-            max_age=RECENT_REAUTHENTICATION_TTL_SECONDS,
+            max_age=settings.auth_reauthentication_max_age_seconds,
             expires=result.reauthenticated_until,
             path=path,
         )
@@ -1158,32 +1183,6 @@ def password_recovery_error_response(exc: PasswordRecoveryError) -> JSONResponse
         message=str(exc) or exc.error_code,
         status_code=status_code,
     )
-
-
-def set_no_store_headers(response: Response) -> None:
-    """Mark a response uncacheable.
-
-    Applies to the injected sub-response of a handler that returns a plain
-    dict. FastAPI merges those headers into the final response only on that
-    path -- see :func:`no_store_response` for handlers that return a Response
-    object directly.
-    """
-
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Pragma"] = "no-cache"
-
-
-def no_store_response(response: JSONResponse) -> JSONResponse:
-    """Mark a directly-returned Response uncacheable.
-
-    When a handler returns a Response instance, FastAPI skips the
-    ``sub_response.headers`` merge entirely, so headers set on the injected
-    ``response`` parameter are silently dropped. Every early ``return`` of an
-    error response therefore has to carry the directives itself.
-    """
-
-    set_no_store_headers(response)
-    return response
 
 
 def status_code_for_auth_error(exc: SessionServiceError) -> int:

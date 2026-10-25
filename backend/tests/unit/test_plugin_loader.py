@@ -1,5 +1,9 @@
 """The opt-in plugin boundary rejects invalid deployments before hooks run."""
 
+# Budget exception: these loop inputs exercise independent discovery, version,
+# env-validation and secret-redaction failures before configure can run. Keep
+# one unit traversal; HTTP, migrations and plugin business logic are elsewhere.
+
 from dataclasses import replace
 from traceback import format_exception
 from types import SimpleNamespace

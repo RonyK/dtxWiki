@@ -43,6 +43,18 @@ from backend.services.job_hints import (
 from backend.services.job_queue import DEFAULT_JOB_MAX_ATTEMPTS, JobQueueService
 from backend.services.library_service import LibraryCandidateInput, LibraryService
 from backend.services.mail_delivery import EmailDeliveryService
+from backend.spi.plugins import (
+    JobFailure,
+    JobInput,
+    JobResult,
+    PermanentJobError,
+    PluginJobError,
+    RetryableJobError,
+    WorkerContext,
+)
+from backend.spi.plugins import (
+    JobHandler as PluginJobHandler,
+)
 from backend.worker.registry import JobHandler, get_handler, register
 
 logger = logging.getLogger(__name__)
@@ -69,7 +81,7 @@ if TYPE_CHECKING:
 # Everything else is treated as potentially transient and retried up to the
 # shared DEFAULT_JOB_MAX_ATTEMPTS budget (max-total-attempts semantics,
 # matching reclaim_stale_jobs).
-_TERMINAL_JOB_ERRORS = (FeedbackItemNotFoundError, ValueError)
+_TERMINAL_JOB_ERRORS = (FeedbackItemNotFoundError, ValueError, PermanentJobError)
 
 
 class WorkerShutdownRequested(BaseException):
@@ -369,7 +381,9 @@ class OneShotWorker:
             return
         try:
             with session.begin_nested():
-                if job.job_type == "library_conversion":
+                if isinstance(handler, PluginJobHandler):
+                    self._notify_plugin_failure(handler, job, error, manual_retryable)
+                elif job.job_type == "library_conversion":
                     handler.on_failure(
                         self,
                         session,
@@ -1434,13 +1448,58 @@ class OneShotWorker:
         handler without touching queue state (the orchestrator owns complete/fail).
         Returns the ``detail`` dict for ``WorkerDispatchResult``.
         """
-        return self._handler_for(job).business(self, session, job, None)
+        handler = self._handler_for(job)
+        if isinstance(handler, PluginJobHandler):
+            return self._run_plugin_job(handler, job)
+        return handler.business(self, session, job, None)
 
-    def _handler_for(self, job: Job | _ClaimedJob) -> JobHandler:
+    def _handler_for(self, job: Job | _ClaimedJob) -> JobHandler | PluginJobHandler:
         handler = self._plugin_handlers.get(job.job_type) or get_handler(job.job_type)
         if handler is None:
             raise ValueError(f"unsupported worker job type: {job.job_type}")
         return handler
+
+    @staticmethod
+    def _plugin_job_input(job: Job | _ClaimedJob) -> JobInput:
+        return JobInput(
+            job_id=job.id,
+            workspace_id=job.workspace_id,
+            job_type=job.job_type,
+            trigger_type=job.trigger_type,
+            payload=job.target_ref,
+            idempotency_key=job.idempotency_key,
+        )
+
+    def _run_plugin_job(
+        self, handler: PluginJobHandler, job: Job | _ClaimedJob
+    ) -> dict[str, Any]:
+        try:
+            request = self._plugin_job_input(job)
+        except ValueError:
+            raise PermanentJobError("plugin_job_input_invalid") from None
+        try:
+            result = handler.business(WorkerContext(datetime.now(UTC)), request)
+        except PluginJobError:
+            raise
+        except Exception:
+            raise RetryableJobError("plugin_job_failed") from None
+        if not isinstance(result, JobResult):
+            raise PermanentJobError("plugin_job_result_invalid")
+        return result.to_dict()
+
+    def _notify_plugin_failure(
+        self,
+        handler: PluginJobHandler,
+        job: Job | _ClaimedJob,
+        error: str,
+        retryable: bool,
+    ) -> None:
+        if handler.on_failure is not None:
+            handler.on_failure(
+                WorkerContext(datetime.now(UTC)),
+                self._plugin_job_input(job),
+                JobFailure(error, retryable),
+            )
 
     def _business_library_discovery(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
@@ -2171,7 +2230,9 @@ class OneShotWorker:
             return
         try:
             with session_factory.begin() as marker_session:
-                if job.job_type == "library_conversion":
+                if isinstance(handler, PluginJobHandler):
+                    self._notify_plugin_failure(handler, job, error, manual_retryable)
+                elif job.job_type == "library_conversion":
                     handler.on_failure(
                         self,
                         marker_session,
@@ -2262,9 +2323,14 @@ class OneShotWorker:
         # Single-phase legacy path: extraction/bundle let the service own the
         # complete/fail transition (queue_job=job); discovery/feedback complete
         # here in the wrapper (their services do not take a job).
-        detail = handler.business(
-            self, session, job, job if handler.completes_in_service else None
-        )
+        if isinstance(handler, PluginJobHandler):
+            detail = self._run_plugin_job(handler, job)
+            completes_in_service = False
+        else:
+            detail = handler.business(
+                self, session, job, job if handler.completes_in_service else None
+            )
+            completes_in_service = handler.completes_in_service
         if (
             job.job_type == RECONCILIATION_REMINDER_JOB_TYPE
             and detail.get("unresolved") is True
@@ -2283,7 +2349,7 @@ class OneShotWorker:
                         ),
                     )
                 )
-        if not handler.completes_in_service:
+        if not completes_in_service:
             self.job_queue.complete(session=session, job=job)
         return WorkerDispatchResult(
             job_id=job.id,

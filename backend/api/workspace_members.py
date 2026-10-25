@@ -1,13 +1,15 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Path, Query, Response
+from fastapi import APIRouter, Path, Query, Request, Response
 
+from backend.api.auth_dependencies import no_store_response, set_no_store_headers
 from backend.api.deps import RestActorDep, SessionFactoryDep
 from backend.app.errors import build_rest_error_response
 from backend.schemas.common import RESTErrorBody
 from backend.schemas.workspace_membership import (
     WorkspaceMemberAddRequest,
+    WorkspaceMemberCandidatesResponse,
     WorkspaceMemberListResponse,
     WorkspaceMemberMutationResponse,
     WorkspaceMemberRemovalResponse,
@@ -42,6 +44,53 @@ REST_ERROR_RESPONSES = {
 
 def _service(session_factory: SessionFactoryDep) -> WorkspaceMembershipService:
     return WorkspaceMembershipService(session_factory=session_factory)
+
+
+@router.get(
+    "/{workspace_id}/member-candidates",
+    response_model=WorkspaceMemberCandidatesResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_workspace_member_candidates(
+    workspace_id: Annotated[UUID, Path()],
+    actor: RestActorDep,
+    session_factory: SessionFactoryDep,
+    request: Request,
+    response: Response,
+    query: Annotated[str, Query(max_length=320)] = "",
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+):
+    set_no_store_headers(response)
+    if actor.user_id is None:
+        return no_store_response(_human_session_required())
+    try:
+        result = _service(session_factory).list_member_candidates(
+            workspace_id=workspace_id,
+            actor_user_id=actor.user_id,
+            providers=getattr(request.app.state, "auth_providers", None),
+            query=query,
+            limit=limit,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return no_store_response(_membership_error(exc, 404))
+    except WorkspaceMembershipForbiddenError as exc:
+        return no_store_response(_membership_error(exc, 403))
+    return {
+        "data": {
+            "enabled": result.enabled,
+            "items": [
+                {
+                    "user_id": item.user_id,
+                    "display_name": item.display_name,
+                    "provider_name": item.provider_name,
+                    "identity_label": item.identity_label,
+                    "identity_verified": True,
+                }
+                for item in result.items
+            ],
+            "has_more": result.has_more,
+        }
+    }
 
 
 @router.get(
@@ -116,6 +165,7 @@ def add_workspace_member(
             actor_user_id=actor.user_id,
             workspace_id=workspace_id,
             email=request_body.email,
+            user_id=request_body.user_id,
             role=request_body.role,
             confirm_first_share=request_body.confirm_first_share,
         )

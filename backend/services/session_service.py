@@ -7,7 +7,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.settings import (
+    AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS,
     SESSION_REMEMBERED_ABSOLUTE_TTL_DEFAULT_SECONDS,
     SESSION_REMEMBERED_REFRESH_THRESHOLD_DEFAULT_SECONDS,
     SESSION_REMEMBERED_TTL_DEFAULT_SECONDS,
@@ -68,7 +69,7 @@ DEFAULT_REMEMBERED_SESSION_ABSOLUTE_TTL_SECONDS = (
 RECENT_REAUTHENTICATION_TOKEN_KIND = "recent_reauthentication"
 RECENT_REAUTHENTICATION_TOKEN_VERSION = 1
 SCOPED_REAUTHENTICATION_TOKEN_VERSION = 2
-RECENT_REAUTHENTICATION_TTL_SECONDS = 5 * 60
+RECENT_REAUTHENTICATION_TTL_SECONDS = AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS
 MIN_PASSWORD_LENGTH = identity_policy.NEW_PASSWORD_MIN_LENGTH
 _AUTH_IP_BUCKET: dict[str, list[float]] = {}
 _AUTH_EMAIL_BUCKET: dict[str, list[float]] = {}
@@ -133,6 +134,7 @@ class VerifiedSession:
     authenticated_at: datetime | None
     amr: tuple[str, ...] | None = None
     idp: str | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -182,7 +184,7 @@ class RecentReauthenticationCodec:
             "sg": session_generation,
         }
         if scope is not None:
-            if scope not in {"account", "admin"} or (
+            if scope not in {"account", "admin", "primary"} or (
                 not isinstance(session_digest, str)
                 or len(session_digest) != 64
                 or any(char not in "0123456789abcdef" for char in session_digest)
@@ -240,7 +242,7 @@ class RecentReauthenticationCodec:
             )
         scope, session_digest = payload.get("scope"), payload.get("sid")
         if signed_version == SCOPED_REAUTHENTICATION_TOKEN_VERSION:
-            if scope not in {"account", "admin"} or (
+            if scope not in {"account", "admin", "primary"} or (
                 not isinstance(session_digest, str)
                 or len(session_digest) != 64
                 or any(char not in "0123456789abcdef" for char in session_digest)
@@ -252,8 +254,21 @@ class RecentReauthenticationCodec:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof kind is unsupported"
             )
-        exp = payload.get("exp")
-        if not isinstance(exp, int) or self.now().timestamp() >= exp:
+        exp, issued_at = payload.get("exp"), payload.get("iat")
+        now = self.now().timestamp()
+        if (
+            type(exp) is not int
+            or type(issued_at) is not int
+            or not 0 <= issued_at <= now
+            or issued_at >= exp
+        ):
+            raise RecentReauthenticationRequiredError(
+                "recent reauthentication proof lifetime is invalid"
+            )
+        # A shorter operator policy applies immediately to already-issued
+        # proofs. Raising the policy never extends their signed expiry.
+        effective_expiry = min(exp, issued_at + self.ttl_seconds)
+        if now >= effective_expiry:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof is expired"
             )
@@ -268,9 +283,9 @@ class RecentReauthenticationCodec:
                 session_generation=session_generation,
                 scope=payload.get("scope"),
                 session_digest=payload.get("sid"),
-                expires_at=datetime.fromtimestamp(exp, UTC),
+                expires_at=datetime.fromtimestamp(effective_expiry, UTC),
             )
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, OverflowError, OSError) as exc:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication proof subject is invalid"
             ) from exc
@@ -326,6 +341,7 @@ class SessionTokenCodec:
         issued_at: datetime | None = None,
         amr: tuple[str, ...] | None = None,
         idp: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, datetime]:
         issued_at = (issued_at or self.now()).astimezone(UTC).replace(microsecond=0)
         authenticated_at = (
@@ -352,7 +368,10 @@ class SessionTokenCodec:
             "sg": user.session_generation,
             "remembered": remember_me,
             "auth_time": int(authenticated_at.timestamp()),
+            "sid": session_id or secrets.token_urlsafe(32),
         }
+        if not self._valid_session_id(payload["sid"]):
+            raise ValueError("session identity is invalid")
         if amr is not None:
             if not _valid_amr(amr):
                 raise ValueError("session authentication methods are invalid")
@@ -387,7 +406,7 @@ class SessionTokenCodec:
             payload = json.loads(_base64url_decode(encoded_payload))
         except (ValueError, json.JSONDecodeError) as exc:
             raise InvalidSessionError("session token payload is invalid") from exc
-        if payload.get("v") != SESSION_TOKEN_VERSION:
+        if not isinstance(payload, dict) or payload.get("v") != SESSION_TOKEN_VERSION:
             raise InvalidSessionError("session token version is unsupported")
         if payload.get("kind") != SESSION_TOKEN_KIND:
             raise InvalidSessionError("session token kind is unsupported")
@@ -419,8 +438,7 @@ class SessionTokenCodec:
         authenticated_at_claim = payload.get("auth_time")
         issued_at_claim = payload.get("iat")
         if (
-            remembered_claim is True
-            and isinstance(authenticated_at_claim, int)
+            isinstance(authenticated_at_claim, int)
             and isinstance(issued_at_claim, int)
             and 0 <= authenticated_at_claim <= issued_at_claim <= exp
         ):
@@ -432,7 +450,7 @@ class SessionTokenCodec:
             except (OverflowError, OSError, ValueError):
                 authenticated_at = None
             else:
-                remember_me = True
+                remember_me = remembered_claim is True
         try:
             amr_claim = payload.get("amr")
             idp_claim = payload.get("idp")
@@ -442,6 +460,17 @@ class SessionTokenCodec:
                 raise InvalidSessionError("session authentication methods are invalid")
             if idp_claim is not None and not _valid_idp(idp_claim):
                 raise InvalidSessionError("session identity provider is invalid")
+            session_id = payload.get("sid")
+            if session_id is None:
+                # Published native tokens predate SID. Only a cryptographically
+                # verified token can acquire this deterministic renewal identity.
+                session_id = hmac.digest(
+                    f"dtxwiki.session.identity.v1\0{self.secret}".encode(),
+                    token.encode(),
+                    "sha256",
+                ).hex()
+            elif not self._valid_session_id(session_id):
+                raise InvalidSessionError("session identity is invalid")
             return VerifiedSession(
                 user_id=UUID(str(payload["sub"])),
                 session_generation=session_generation,
@@ -450,9 +479,18 @@ class SessionTokenCodec:
                 authenticated_at=authenticated_at,
                 amr=tuple(amr_claim) if amr_claim is not None else None,
                 idp=idp_claim,
+                session_id=session_id,
             )
         except (KeyError, ValueError) as exc:
             raise InvalidSessionError("session token subject is invalid") from exc
+
+    @staticmethod
+    def _valid_session_id(value: object) -> bool:
+        return (
+            isinstance(value, str)
+            and 32 <= len(value) <= 128
+            and ascii_token_is_valid(value, 128)
+        )
 
     def remembered_refresh_due(self, verified: VerifiedSession) -> bool:
         if not verified.remember_me or verified.authenticated_at is None:
@@ -518,6 +556,7 @@ class SessionService:
     signup_enabled: bool = False
     audit_service: AuditService | None = None
     recent_reauthentication_codec: RecentReauthenticationCodec | None = None
+    reauthentication_max_age_seconds: int = RECENT_REAUTHENTICATION_TTL_SECONDS
 
     def assert_signup_enabled(self) -> None:
         if not self.signup_enabled:
@@ -560,7 +599,7 @@ class SessionService:
         self,
         session: Session,
         *,
-        email: str,
+        email: str | None,
         display_name: str | None = None,
         password: str | None = None,
         email_verified_at: datetime | None = None,
@@ -573,8 +612,12 @@ class SessionService:
         complete identity binding transaction.
         """
 
-        normalized_email = normalize_email(email)
+        normalized_email = normalize_email(email) if email is not None else None
         if password is not None:
+            if normalized_email is None:
+                raise EmailInputPolicyError(
+                    "password credentials require a native email"
+                )
             validate_password(password)
         name = normalize_display_name(display_name, normalized_email)
         user = User(
@@ -699,6 +742,7 @@ class SessionService:
                     authenticated_at=verified.authenticated_at,
                     amr=verified.amr,
                     idp=verified.idp,
+                    session_id=verified.session_id,
                 )
         if refreshed is not None and not self._audit_session_renewal(
             verified=verified,
@@ -859,6 +903,7 @@ class SessionService:
         *,
         user_id: UUID,
         current_password: str,
+        session_token: str | None = None,
     ) -> RecentReauthenticationResult:
         validate_password(current_password, new=False)
         result: RecentReauthenticationResult | None = None
@@ -883,9 +928,17 @@ class SessionService:
                     payload={"reason": "invalid_credentials"},
                 )
             else:
+                current = self.token_codec.verify_session(session_token or "")
+                if (
+                    current.user_id != user.id
+                    or current.session_generation != user.session_generation
+                ):
+                    raise InvalidSessionError("session token has been revoked")
                 result = self._reauthentication_codec().issue(
                     user_id=user.id,
                     session_generation=user.session_generation,
+                    scope="primary",
+                    session_digest=self.session_binding(session_token),
                 )
                 self._emit_session_audit(
                     session,
@@ -924,7 +977,7 @@ class SessionService:
         *,
         user_id: UUID,
         session_generation: int,
-        scope: str | None = None,
+        scope: str = "primary",
         session_token: str | None = None,
     ) -> RecentReauthenticationResult:
         """Issue native step-up proof after a broker-verified external login.
@@ -948,9 +1001,7 @@ class SessionService:
             user_id=user.id,
             session_generation=user.session_generation,
             scope=scope,
-            session_digest=hashlib.sha256(session_token.encode()).hexdigest()
-            if session_token
-            else None,
+            session_digest=self.session_binding(session_token or ""),
         )
         self._emit_session_audit(
             session,
@@ -972,11 +1023,11 @@ class SessionService:
     ) -> VerifiedRecentReauthentication:
         verified = self._reauthentication_codec().verify(proof_token)
         if verified.scope is not None and (
-            verified.scope != scope
+            verified.scope not in {scope, "primary"}
             or session_token is None
             or not hmac.compare_digest(
                 verified.session_digest or "",
-                hashlib.sha256(session_token.encode()).hexdigest(),
+                self.session_binding(session_token),
             )
         ):
             raise RecentReauthenticationRequiredError(
@@ -1043,6 +1094,7 @@ class SessionService:
         authenticated_at: datetime | None = None,
         amr: tuple[str, ...] | None = None,
         idp: str | None = None,
+        session_id: str | None = None,
     ) -> SessionResult:
         return self.issue_session(
             user,
@@ -1050,6 +1102,7 @@ class SessionService:
             authenticated_at=authenticated_at,
             amr=amr,
             idp=idp,
+            session_id=session_id,
         )
 
     def issue_session(
@@ -1060,6 +1113,7 @@ class SessionService:
         authenticated_at: datetime | None = None,
         amr: tuple[str, ...] | None = None,
         idp: str | None = None,
+        session_id: str | None = None,
     ) -> SessionResult:
         """Issue a native session inside the caller's account transaction.
 
@@ -1076,30 +1130,48 @@ class SessionService:
             authenticated_at=authenticated_at,
             amr=amr,
             idp=idp,
+            session_id=session_id,
         )
 
     def _reauthentication_codec(self) -> RecentReauthenticationCodec:
         if self.recent_reauthentication_codec is not None:
-            return self.recent_reauthentication_codec
+            return replace(
+                self.recent_reauthentication_codec,
+                ttl_seconds=self.reauthentication_max_age_seconds,
+            )
         return RecentReauthenticationCodec(
             secret=self.token_codec.secret,
             now=self.token_codec.now,
+            ttl_seconds=self.reauthentication_max_age_seconds,
         )
+
+    def session_binding(self, session_token: str) -> str:
+        current = self.token_codec.verify_session(session_token)
+        if current.session_id is None:
+            raise InvalidSessionError("session identity is missing")
+        return hashlib.sha256(current.session_id.encode()).hexdigest()
 
     def _assert_active(self, user: User) -> None:
         if user.status != "active":
             raise SuspendedUserError("user is not active")
 
 
-def consume_auth_slot(client_ip: str, email: str) -> None:
-    """Rate-limit ``/auth/login`` and ``/auth/signup`` attempts.
+def consume_auth_slot(
+    client_ip: str,
+    email: str = "",
+    *,
+    user_id: UUID | None = None,
+    namespace: str | None = None,
+) -> None:
+    """Rate-limit authentication attempts by IP and account identifier.
 
-    Same sliding-window counter as ``oauth_service.consume_token_slot``:
-    two-axis buckets (per-IP and per-email) over a 60-second tail keyed on
-    ``time.monotonic``. The per-email bucket throttles online brute force
-    against a single account (email is case/whitespace-folded so variants
-    share one bucket); the per-IP bucket bounds credential spray across many
-    accounts. Buckets are in-process module globals — the single-process
+    Anonymous attempts use normalized native email. Authenticated operations
+    use the user UUID, so email-less SSO accounts have independent quotas and
+    profile email changes cannot evade them. External starts/callbacks use
+    separate namespaces so they cannot exhaust native password quotas.
+    The shared per-IP bucket within each namespace bounds
+    credential spray across many accounts. Both axes use a 60-second tail on
+    ``time.monotonic``. Buckets are in-process module globals — the single-process
     deployment invariant (ADR A12) makes them authoritative.
 
     Raises:
@@ -1107,20 +1179,23 @@ def consume_auth_slot(client_ip: str, email: str) -> None:
             maps this to HTTP 429.
     """
     now = time.monotonic()
+    ip_key = f"{namespace}:{client_ip}" if namespace else client_ip
     # FastAPI runs synchronous auth endpoints in a thread pool. Keep both
     # limit axes and the opportunistic sweep in one critical section so a
     # concurrent request cannot mutate a bucket while another iterates or
     # deletes it, and so one attempt consumes both axes atomically.
     with _AUTH_BUCKET_LOCK:
         ip_bucket = [
-            stamp for stamp in _AUTH_IP_BUCKET.get(client_ip, []) if now - stamp < 60
+            stamp for stamp in _AUTH_IP_BUCKET.get(ip_key, []) if now - stamp < 60
         ]
         if len(ip_bucket) >= AUTH_RATE_LIMIT_PER_IP:
             raise AuthRateLimitError("auth rate limit exceeded for client IP")
         ip_bucket.append(now)
-        _AUTH_IP_BUCKET[client_ip] = ip_bucket
+        _AUTH_IP_BUCKET[ip_key] = ip_bucket
 
-        email_key = email.strip().lower()
+        email_key = f"user:{user_id}" if user_id else email.strip().lower()
+        if email_key and namespace:
+            email_key = f"{namespace}:{email_key}"
         if email_key:
             email_bucket = [
                 stamp

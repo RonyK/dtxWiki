@@ -1,3 +1,6 @@
+# Budget exception: one complete upgrade/downgrade/re-upgrade traversal per DB
+# covers both unreleased revisions. Constraint/guard input loops are counted;
+# SQLite CHECK/FK rebuilds and PostgreSQL transactional DDL require real DBs.
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -13,6 +16,7 @@ from sqlalchemy.exc import DBAPIError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models import Base
+from backend.services.ops.input_maintenance import audit_inputs
 
 PARENT = "ef53a0a7061c"
 REVISION = "7e2b9c4d6a18"
@@ -111,6 +115,9 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             for column in inspector.get_columns("users")
             if column["name"] == "password_hash"
         )["nullable"]
+        columns = {column["name"]: column for column in inspector.get_columns("users")}
+        assert columns["email"]["nullable"]
+        assert columns["pending_email"]["nullable"]
         assert ("issuer", "subject") in {
             tuple(unique["column_names"])
             for unique in inspector.get_unique_constraints("user_identities")
@@ -143,20 +150,24 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             "purpose": "link",
             "user_id": external_id,
             "session_generation": 0,
+            "session_digest": "stable-browser-session",
             "return_to": "/settings",
             "created_at": now,
             "expires_at": now + timedelta(minutes=10),
         }
         with engine.begin() as connection:
-            connection.execute(
-                users.insert(), _user(external_id, None, "external@example.com")
-            )
+            connection.execute(users.insert(), _user(external_id, None, None))
             connection.execute(identities.insert(), identity)
             connection.execute(transactions.insert(), transaction)
             assert (
                 connection.scalar(sa.select(identities.c.last_email_verified)) is False
             )
             assert connection.scalar(sa.select(transactions.c.remember_me)) is False
+            assert connection.scalar(sa.select(identities.c.directory_tenant)) is None
+            assert (
+                connection.scalar(sa.select(transactions.c.session_digest))
+                == "stable-browser-session"
+            )
             # Check each independent storage boundary without another migration.
             for table, values in (
                 (identities, {**identity, "id": _id(), "user_id": existing_id}),
@@ -198,11 +209,13 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                     }
 
         command.upgrade(config, EMAIL_REVISION)
-        # Compare against independent ORM metadata on both dialects. Restrict
-        # this follow-up's parity assertion to its tables: PostgreSQL's frozen
-        # library/workspace schema has unrelated redundant unique constraints.
+        assert audit_inputs(database_url) == []
+        # Independent ORM parity covers every changed table on both dialects.
+        # Frozen library/workspace tables have unrelated redundant constraints.
         auth_tables = {
-            "auth_pending_signups",
+            "users",
+            "user_identities",
+            "auth_login_transactions",
             "email_reauthentication_challenges",
             "email_outbox",
         }
@@ -217,33 +230,22 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 connection, opts={"include_object": include_auth_object}
             )
             assert compare_metadata(context, Base.metadata) == []
+        assert "auth_pending_signups" not in inspect(engine).get_table_names()
         metadata = sa.MetaData()
-        pending = sa.Table("auth_pending_signups", metadata, autoload_with=engine)
         challenges = sa.Table(
             "email_reauthentication_challenges", metadata, autoload_with=engine
         )
         outbox = sa.Table("email_outbox", metadata, autoload_with=engine)
-        assert "ix_auth_pending_signups_expires_at" in {
-            index["name"] for index in inspect(engine).get_indexes(pending.name)
-        }
-        assert "ix_email_reauth_expires_at" in {
+        assert not outbox.c.recipient_user_id.nullable
+        assert "pending_signup_id" not in outbox.c
+        assert {"ix_email_reauth_expires_at", "ix_email_reauth_user_created_at"} <= {
             index["name"] for index in inspect(engine).get_indexes(challenges.name)
-        }
-        signup = {
-            "id": _id(),
-            "binding_digest": "pending-browser",
-            "provider_slug": "example",
-            "assertion_data": {"issuer": "https://issuer.example", "subject": "new"},
-            "return_to": "/oauth/authorize?client_id=preserved",
-            "token_digest": "pending-token",
-            "created_at": now,
-            "expires_at": now + timedelta(minutes=30),
         }
         challenge = {
             "id": _id(),
             "user_id": existing_id,
             "session_generation": 0,
-            "session_digest": "native-session",
+            "session_digest": "stable-native-session",
             "binding_digest": "email-browser",
             "recipient_digest": "email-digest",
             "token_digest": "email-token",
@@ -254,22 +256,14 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
         }
         message = {
             "id": _id(),
-            "recipient_user_id": None,
-            "pending_signup_id": signup["id"],
-            "recipient_email": "pending@example.com",
-            "message_kind": "pending_signup",
+            "recipient_user_id": existing_id,
+            "recipient_email": "existing@example.com",
+            "reauthentication_challenge_id": challenge["id"],
+            "message_kind": "email_reauthentication",
             "status": "queued",
             "attempt_count": 0,
             "created_at": now,
             "updated_at": now,
-        }
-        reauth_message = {
-            **message,
-            "id": _id(),
-            "recipient_user_id": existing_id,
-            "pending_signup_id": None,
-            "reauthentication_challenge_id": challenge["id"],
-            "message_kind": "email_reauthentication",
         }
         with engine.begin() as connection:
             preserved = (
@@ -281,16 +275,10 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             )
             assert preserved["recipient_user_id"] == existing_id
             assert preserved["attempt_count"] == 2
-            assert preserved["pending_signup_id"] is None
             assert preserved["reauthentication_challenge_id"] is None
-            connection.execute(pending.insert(), signup)
             connection.execute(challenges.insert(), challenge)
             connection.execute(outbox.insert(), message)
-            connection.execute(outbox.insert(), reauth_message)
-            assert connection.scalar(sa.select(pending.c.remember_me)) is False
             for table, values in (
-                (pending, {**signup, "id": _id(), "token_digest": "other"}),
-                (pending, {**signup, "id": _id(), "binding_digest": "other"}),
                 (challenges, {**challenge, "id": _id()}),
                 (
                     challenges,
@@ -310,49 +298,36 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                         "user_id": _id(),
                     },
                 ),
-                (outbox, {**message, "id": _id(), "pending_signup_id": None}),
-                (outbox, {**message, "id": _id(), "recipient_user_id": existing_id}),
-                (outbox, {**message, "id": _id(), "message_kind": "password_changed"}),
-                (outbox, {**message, "id": _id(), "pending_signup_id": _id()}),
-                (outbox, {**message, "id": _id(), "token_id": _id()}),
-                (outbox, {**reauth_message, "id": _id(), "recipient_user_id": None}),
+                (outbox, {**message, "id": _id(), "recipient_user_id": None}),
                 (
                     outbox,
-                    {
-                        **reauth_message,
-                        "id": _id(),
-                        "reauthentication_challenge_id": _id(),
-                    },
+                    {**message, "id": _id(), "reauthentication_challenge_id": None},
                 ),
+                (
+                    outbox,
+                    {**message, "id": _id(), "reauthentication_challenge_id": _id()},
+                ),
+                (outbox, {**message, "id": _id(), "message_kind": "pending_signup"}),
+                (outbox, {**message, "id": _id(), "message_kind": "password_changed"}),
+                (outbox, {**message, "id": _id(), "token_id": _id()}),
             ):
                 with pytest.raises(DBAPIError), connection.begin_nested():
                     connection.execute(table.insert(), values)
 
         with pytest.raises(RuntimeError, match="would discard data"):
             command.downgrade(config, REVISION)
-        assert {pending.name, challenges.name} <= set(inspect(engine).get_table_names())
-        # CASCADE and the two old outbox FKs must survive SQLite's rebuild.
+        assert challenges.name in inspect(engine).get_table_names()
+        # CASCADE and both published outbox FKs survive SQLite's rebuild.
         with engine.begin() as connection:
-            connection.execute(pending.delete())
-            assert (
-                connection.scalar(
-                    sa.select(sa.func.count())
-                    .select_from(outbox)
-                    .where(outbox.c.message_kind == "pending_signup")
-                )
-                == 0
-            )
             connection.execute(challenges.delete())
             assert (
                 connection.scalar(sa.select(sa.func.count()).select_from(outbox)) == 1
             )
         command.downgrade(config, REVISION)
-        assert {pending.name, challenges.name}.isdisjoint(
-            inspect(engine).get_table_names()
-        )
+        assert challenges.name not in inspect(engine).get_table_names()
         old_outbox = sa.Table("email_outbox", sa.MetaData(), autoload_with=engine)
         assert not old_outbox.c.recipient_user_id.nullable
-        assert "pending_signup_id" not in old_outbox.c
+        assert "reauthentication_challenge_id" not in old_outbox.c
         with engine.begin() as connection:
             assert connection.scalar(sa.select(old_outbox.c.attempt_count)) == 2
             with pytest.raises(DBAPIError), connection.begin_nested():
@@ -362,17 +337,35 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                         **{
                             key: value
                             for key, value in message.items()
-                            if key != "pending_signup_id"
+                            if key != "reauthentication_challenge_id"
                         },
                         "id": _id(),
-                        "recipient_user_id": existing_id,
                     },
                 )
-        with pytest.raises(RuntimeError, match="1 passwordless account"):
+        # Each incompatible state must refuse before any destructive DDL.
+        for patch in (
+            {"email": "external@example.com"},
+            {"password_hash": "external-local-hash", "email": None},
+            {"email": "external@example.com", "pending_email": "pending@example.com"},
+        ):
+            if patch:
+                with engine.begin() as connection:
+                    connection.execute(
+                        users.update().where(users.c.id == external_id).values(**patch)
+                    )
+            with pytest.raises(RuntimeError, match="incompatible account"):
+                command.downgrade(config, PARENT)
+            assert {"user_identities", "auth_login_transactions"} <= set(
+                inspect(engine).get_table_names()
+            )
+        with engine.begin() as connection:
+            connection.execute(
+                users.update()
+                .where(users.c.id == external_id)
+                .values(pending_email=None)
+            )
+        with pytest.raises(RuntimeError, match="would discard data"):
             command.downgrade(config, PARENT)
-        assert {"user_identities", "auth_login_transactions"} <= set(
-            inspect(engine).get_table_names()
-        )
         with engine.begin() as connection:
             assert (
                 connection.scalar(
@@ -380,7 +373,6 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 )
                 == "preserved-local-hash"
             )
-            # Deleting the native account removes identities and bound attempts.
             connection.execute(users.delete().where(users.c.id == external_id))
             assert (
                 connection.scalar(sa.select(sa.func.count()).select_from(identities))
@@ -394,11 +386,12 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
         assert {"user_identities", "auth_login_transactions"}.isdisjoint(
             inspect(engine).get_table_names()
         )
-        assert not next(
-            column
-            for column in inspect(engine).get_columns("users")
-            if column["name"] == "password_hash"
-        )["nullable"]
+        columns = {
+            column["name"]: column for column in inspect(engine).get_columns("users")
+        }
+        assert not columns["email"]["nullable"]
+        assert not columns["password_hash"]["nullable"]
+        assert "pending_email" not in columns
         command.upgrade(config, EMAIL_REVISION)
         users, _, _ = _tables()
         with engine.connect() as connection:
@@ -406,20 +399,27 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 connection.scalar(sa.select(users.c.password_hash))
                 == "preserved-local-hash"
             )
+            assert connection.scalar(sa.select(users.c.pending_email)) is None
     finally:
         if upgraded:
-            # A failed assertion must still leave the dedicated database empty.
+            # Dedicated DB starts empty. Cleanup includes downgrade-refusing data.
             with engine.begin() as connection:
                 present = set(inspect(connection).get_table_names())
                 for table in (
                     "email_outbox",
                     "email_reauthentication_challenges",
-                    "auth_pending_signups",
+                    "auth_login_transactions",
+                    "user_identities",
                 ):
                     if table in present:
                         connection.execute(sa.text(f"DELETE FROM {table}"))
-                connection.execute(
-                    sa.text("DELETE FROM users WHERE password_hash IS NULL")
-                )
+                columns = {
+                    column["name"]
+                    for column in inspect(connection).get_columns("users")
+                }
+                predicate = "password_hash IS NULL OR email IS NULL"
+                if "pending_email" in columns:
+                    predicate += " OR pending_email IS NOT NULL"
+                connection.execute(sa.text("DELETE FROM users WHERE " + predicate))
             command.downgrade(config, "base")
         engine.dispose()

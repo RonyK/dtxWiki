@@ -1,7 +1,6 @@
 import json
 import sys
 
-from backend.api.auth_cookies import PENDING_SIGNUP_COOKIE
 from backend.api.auth_sso import BINDING_COOKIE
 from backend.api.auth_verification import email_binding_name
 from backend.app.main import create_app
@@ -18,17 +17,12 @@ SESSION_OR_BEARER_SECURITY = [
     {"SessionCookie": []},
     {"HTTPBearer": []},
 ]
-RECENT_REAUTHENTICATION_SECURITY = [
-    {
-        "SessionCookie": [],
-        "RecentReauthenticationCookie": [],
-    }
-]
-ACCOUNT_REAUTHENTICATION_SECURITY = [
-    {"SessionCookie": [], "AccountReauthenticationCookie": []}
-]
+# Fresh primary authentication also satisfies confirmation without a proof
+# cookie. OpenAPI describes the required credential; the scope extension below
+# records the additional server-side freshness policy.
+RECENT_REAUTHENTICATION_SECURITY = SESSION_COOKIE_SECURITY
+ACCOUNT_REAUTHENTICATION_SECURITY = SESSION_COOKIE_SECURITY
 LOGIN_TRANSACTION_SECURITY = [{"LoginTransactionCookie": []}]
-PENDING_SIGNUP_SECURITY = [{"PendingSignupCookie": []}]
 EMAIL_REAUTHENTICATION_SECURITY = [
     {"SessionCookie": [], "AccountEmailBindingCookie": []},
     {"SessionCookie": [], "AdminEmailBindingCookie": []},
@@ -102,6 +96,7 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
 OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
+    ("POST", "/api/v1/admin/users/{user_id}/identities/rebind"),
 }
 
 OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
@@ -113,12 +108,6 @@ OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
 OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {
     ("GET", "/api/v1/auth/sso/{slug}/callback"),
     ("POST", "/api/v1/auth/sso/{slug}/callback/continue"),
-}
-
-OPENAPI_PENDING_SIGNUP_ROUTES: set[RouteKey] = {
-    ("GET", "/api/v1/auth/pending-signups"),
-    ("POST", "/api/v1/auth/pending-signups/email"),
-    ("POST", "/api/v1/auth/pending-signups/confirm"),
 }
 
 OPENAPI_EMAIL_REAUTHENTICATION_ROUTES: set[RouteKey] = {
@@ -212,9 +201,6 @@ def reviewed_openapi_security() -> dict[RouteKey, list[dict[str, list]]]:
         }
     )
     route_security.update(
-        {route: PENDING_SIGNUP_SECURITY for route in OPENAPI_PENDING_SIGNUP_ROUTES}
-    )
-    route_security.update(
         {
             route: EMAIL_REAUTHENTICATION_SECURITY
             for route in OPENAPI_EMAIL_REAUTHENTICATION_ROUTES
@@ -249,11 +235,6 @@ def build_openapi_schema() -> dict:
         "in": "cookie",
         "name": BINDING_COOKIE,
     }
-    security_schemes["PendingSignupCookie"] = {
-        "type": "apiKey",
-        "in": "cookie",
-        "name": PENDING_SIGNUP_COOKIE,
-    }
     security_schemes["AccountEmailBindingCookie"] = {
         "type": "apiKey",
         "in": "cookie",
@@ -270,6 +251,10 @@ def build_openapi_schema() -> dict:
         operation = schema.get("paths", {}).get(path, {}).get(method.lower())
         if operation is not None:
             operation["security"] = security
+            if (method, path) in OPENAPI_RECENT_REAUTHENTICATION_ROUTES:
+                operation["x-dtxwiki-confirmation-scope"] = "admin"
+            elif (method, path) in OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES:
+                operation["x-dtxwiki-confirmation-scope"] = "account"
     _pin_http_response_descriptions(schema)
     return schema
 

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- External login plugins support immediate SSO signup without email, SMTP, or a
+  local password. External profile email stays separate from native login email;
+  accounts never merge automatically by email. Members can be added by user UUID,
+  with an optional company directory restricted to a configured provider/tenant.
+- Sensitive account and server-admin actions accept a primary login or confirmation
+  from the last 60 minutes by default. `DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS`
+  configures the window. This also changes password admins: a recent password login
+  needs no separate proof, and proof lifetime increases from 5 to 60 minutes.
+  Session renewal preserves confirmation binding and does not extend freshness.
+- Server admins can rebind an externally verified identity to an existing user UUID
+  after independent ownership verification. Recovery preserves data and roles and
+  revokes sessions, pending challenges, and API/OAuth credentials.
+- Plugin provisioning returns constrained membership requests; worker handlers use
+  typed public inputs and results instead of core database/runtime objects.
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin

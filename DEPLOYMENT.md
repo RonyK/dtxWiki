@@ -379,22 +379,47 @@ IdP의 redirect URI는 대표 URL에서 고정적으로 만들어집니다. 위 
 provider 설정에는 HTTPS 대표 URL이 필요하며, `solo_local`의 loopback HTTP 개발
 설정만 예외입니다. 서버는 state·nonce·PKCE 거래와 사용자 연결, native 세션 발급을
 관리합니다. 새 계정 자동 생성은 `jit_provisioning = true`인 provider에서만
-허용됩니다. 이메일이 같은 기존 계정은 기본 `confirm` 정책에서 자동 연결되지 않습니다.
-`trust_email_verified = false`이면 IdP의 이메일 인증 주장을 가입 근거로 신뢰하지
-않습니다. SMTP가 설정되어 있으면 가입 대기 상태에서 이메일을 확인한 뒤 계정을
-만들고, SMTP가 없으면 이메일 형식·중복·도메인 정책을 확인해 미검증 이메일로
-등록합니다. IdP가 이메일을 주지 않으면 사용자에게 입력받습니다. 확인 링크는 요청을
-시작한 브라우저에서 열어야 하며 30분 후 만료됩니다. IdP가 해당 이메일을 검증한다는
-운영 정책을 확인한 경우에만 `trust_email_verified = true`로 설정하세요.
+허용됩니다. SSO 계정은 UUID와 검증된 `(issuer, subject)`로 즉시 생성하며 이메일·SMTP·
+로컬 비밀번호가 필요하지 않습니다. `users.email`은 native 로그인 주소 전용으로 NULL을
+허용합니다. IdP 이메일은 identity 프로필에만 기록하고 native 주소로 복사하거나 기존
+계정과 자동 연결하지 않습니다. `auto_verified_email` 설정은 시작 시 거부합니다.
+`allowed_email_domains`를 설정하면 `trust_email_verified = true`와 IdP의 검증된 이메일이
+필요합니다. 이 조건을 충족하지 못하는 provider는 해당 가입 제한과 함께 사용할 수 없습니다.
+기존 계정에 연결하려면 그 계정으로 로그인한 뒤 명시적인 연결 절차를 사용합니다.
 
 SSO 전용 운영에서는 `DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=false`로 설정할 수
 있습니다. 비밀번호 로그인과 활성 provider가 모두 없으면 웹 서버 시작을 거부합니다.
 SSO 사용자는 dtxWiki 비밀번호 없이 계정 관리와 부여받은 관리자 기능을 사용할 수
-있습니다. 민감한 작업의 확인은 SSO 재인증을 우선하고, IdP가 재인증을 지원하지
-않으면 SMTP가 있을 때 이메일 확인을 사용합니다. 둘 다 없으면 현재 유효한 SSO
-세션을 인정하며 사용자 상태·세션 generation·현재 관리자 권한은 계속 검사합니다.
-IdP나 SMTP 장애를 더 약한 확인 방식으로 자동 전환하지 않습니다. 이메일 재인증은
-같은 브라우저 세션과 계정/관리자 목적에 묶이고 확인 링크는 5분 후 만료됩니다.
+있습니다. account/admin 민감 작업은 최근 로그인 또는 본인 확인부터 기본 60분 동안
+허용합니다. `DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS=3600`으로 기간을 조정할 수
+있으며 현재 설정·proof·세션 만료 중 가장 빠른 시각을 상한으로 사용합니다. 이 정책은
+비밀번호 관리자에게도 적용됩니다. 비밀번호로 방금 로그인했다면 별도 확인 없이 관리자
+작업이 가능하고 proof의 기본 유효기간도 이전 5분에서 60분으로 변경됩니다. 일반 세션의
+12시간/remembered 30일 수명은 별도이며 활동·자동 갱신·민감 작업으로 확인 기간을 늘리지
+않습니다. 기간이 지나면 사용 가능한 비밀번호·SSO·native 이메일 중에서 확인 방법을
+선택합니다. 강제 재인증을 지원하지 않는 IdP도 기존 identity와 브라우저 세션에 묶인
+SSO 왕복으로 확인할 수 있습니다. 이것은 IdP가 비밀번호나 MFA를 다시 물었다는 뜻은
+아닙니다. IdP나 SMTP 장애를 더 약한 확인 방식으로 자동 전환하지 않습니다. 이메일
+확인 링크는 별도로 5분 후 만료하며 account/admin 목적과 안정적인 세션 ID에 묶입니다.
+
+멤버 추가는 정확한 사용자 UUID를 기본으로 지원합니다. 기존 native 이메일로 추가하는
+방식도 유지하며 SMTP가 없던 배포에 `email_verified_at`을 새 필수조건으로 요구하지
+않습니다. IdP 프로필 이메일은 멤버 검색·추가에 사용하지 않습니다. 회사 후보 검색은
+provider의 `directory_enabled = true`, `directory_tenant = "validated-tenant"`를 운영자가
+명시한 경우에만 켭니다. adapter가 검증해 반환한 tenant가 설정값과 일치해야 하며, 같은
+provider/tenant identity를 가진 소유자가 같은 범위의 후보만 검색합니다. 공개/social
+provider에는 기본적으로 끕니다. 후보의 이름은 표시용이며 UUID와 신뢰된 조직 표시를
+확인하고 선택합니다. 가입 후 선택적으로 native 이메일을 등록하려면 SMTP와 비밀번호
+로그인이 켜져 있어야 하고 기존 계정 세션에서 해당 주소의 확인을 완료해야 합니다.
+
+이메일 없는 SSO 계정은 IdP에서 먼저 복구합니다. subject 변경 시에는 별도로 소유권을
+확인한 서버 관리자가 보호된 사용자 화면에서 UUID 기준 identity 재연결을 할 수 있습니다.
+CLI는 `dtxwiki users rebind-identity --help`를 참고하세요. 기존 issuer/subject가 예상값과
+다르거나 새 identity가 이미 연결돼 있으면 거부합니다. UUID·데이터·역할은 유지하고
+세션·대기 확인·복구 메일·API/OAuth 자격 증명은 폐기합니다. 이전 IdP 계정은 IdP에서
+퇴직·차단해야 합니다. 매핑 삭제만으로 이전 identity의 JIT 재가입을 영구 차단하지는
+않습니다. 유일한 IdP의 장애는 IdP 복구 또는 사전 승인된 다른 IdP가 필요합니다.
+SSO 서버 관리자 지정은 `dtxwiki admin grant --user-id <UUID>`를 사용합니다.
 
 공개 OIDC helper로 사설망 IdP에 연결하려면 provider 설정의
 `allow_private_network = true`를 명시합니다. IdP URL은 여전히 HTTPS여야 합니다.

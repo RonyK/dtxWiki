@@ -99,7 +99,7 @@ export function AccountSecurityScreen() {
     // button below. Shell preloads this once its banner needs it, but a user
     // can land here directly (deep link, or before Shell's own gate has
     // fired), so fetch it on demand rather than assume it is warm.
-    if (!user || user.email_verified_at || capabilitiesChecked) {
+    if (!user?.email || user.email_verified_at || capabilitiesChecked) {
       return;
     }
     void refreshCapabilities();
@@ -263,7 +263,7 @@ export function AccountSecurityScreen() {
                 <UserRound size={18} aria-hidden="true" />
                 <div>
                   <strong>{user.display_name}</strong>
-                  <span>{user.email}</span>
+                  <span>{user.email ?? t("account.noEmail")}</span>
                 </div>
               </div>
               {/* A server with no mail provider has no email verification at
@@ -281,7 +281,7 @@ export function AccountSecurityScreen() {
                   auth-bootstrap routes, so for an already-verified account it
                   stays at its "disabled" default and the pill vanished on
                   every server, not just no-mail ones. */}
-              {emailVerificationOffered || user.email_verified_at ? (
+              {user.email && (emailVerificationOffered || user.email_verified_at) ? (
               <div className="account-email-verification">
                 <StatusPill
                   compact

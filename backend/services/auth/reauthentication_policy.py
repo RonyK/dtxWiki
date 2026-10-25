@@ -1,6 +1,7 @@
-"""Choose one confirmation method from live account and provider state."""
+"""Choose confirmation methods from live account and provider state."""
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from backend.services import server_admin_service
 from backend.services.auth.login_transactions import AuthFlowError
 from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.session_service import (
+    RECENT_REAUTHENTICATION_TTL_SECONDS,
     RecentReauthenticationRequiredError,
     SessionService,
     VerifiedRecentReauthentication,
@@ -18,6 +20,7 @@ from backend.services.session_service import (
 )
 
 VerificationScope = Literal["account", "admin"]
+VerificationMethod = Literal["password", "sso", "email"]
 VerificationMode = Literal["password", "sso", "email", "session"]
 
 
@@ -26,11 +29,25 @@ class VerificationDecision:
     mode: VerificationMode
     session: VerifiedSession
     providers: tuple[str, ...] = ()
+    allowed_methods: tuple[VerificationMethod, ...] = ()
     proof: VerifiedRecentReauthentication | None = None
+    primary_until: datetime | None = None
+
+    @property
+    def reauthenticated_until(self) -> datetime | None:
+        deadlines = [
+            value
+            for value in (
+                self.primary_until,
+                self.proof.expires_at if self.proof else None,
+            )
+            if value is not None
+        ]
+        return min(self.session.expires_at, max(deadlines)) if deadlines else None
 
     @property
     def verified(self) -> bool:
-        return self.mode == "session" or self.proof is not None
+        return self.reauthenticated_until is not None
 
 
 @dataclass(frozen=True)
@@ -39,6 +56,7 @@ class ReauthenticationPolicy:
     sessions: SessionService
     providers: ProviderRegistry
     mail_configured: bool
+    max_age_seconds: int = RECENT_REAUTHENTICATION_TTL_SECONDS
 
     def inspect(
         self, *, session_token: str, scope: VerificationScope, proof_token: str = ""
@@ -58,23 +76,32 @@ class ReauthenticationPolicy:
                     )
                 )
             )
-        # Unlinking the source identity rotates the native session but keeps
-        # its original authentication claims. Remaining linked methods still
-        # make this a valid external session for account confirmation.
-        external = "ext" in (current.amr or ()) and bool(linked)
-        methods = self.providers.providers
-        capable = tuple(
-            slug
-            for slug in linked
-            if slug in methods
-            and methods[slug].method.descriptor.capabilities.reauthentication
-        )
-        if external:
-            mode = "sso" if capable else "email" if self.mail_configured else "session"
-        elif user.has_password:
-            mode = "password"
+        capable = tuple(sorted(linked.intersection(self.providers.providers)))
+        methods: list[VerificationMethod] = []
+        if user.has_password and user.email:
+            methods.append("password")
+        if capable:
+            methods.append("sso")
+        # Native email enrollment is the trust boundary. A legacy native email
+        # remains eligible even if SMTP was disabled when it was registered.
+        if self.mail_configured and user.email:
+            methods.append("email")
+        external = "ext" in (current.amr or ())
+        if external and "sso" in methods:
+            mode: VerificationMode = "sso"
+        elif methods:
+            mode = methods[0]
         else:
-            raise RecentReauthenticationRequiredError("a primary login is required")
+            mode = "session"
+        now = self.sessions.token_codec.now()
+        primary_until = None
+        if current.authenticated_at is not None and current.authenticated_at <= now:
+            deadline = min(
+                current.expires_at,
+                current.authenticated_at + timedelta(seconds=self.max_age_seconds),
+            )
+            if now < deadline:
+                primary_until = deadline
         proof = None
         if proof_token:
             try:
@@ -86,7 +113,16 @@ class ReauthenticationPolicy:
                 )
             except RecentReauthenticationRequiredError:
                 pass
-        return VerificationDecision(mode, current, capable, proof)
+        if not methods and primary_until is None and proof is None:
+            raise RecentReauthenticationRequiredError("a primary login is required")
+        return VerificationDecision(
+            mode="session" if primary_until is not None else mode,
+            session=current,
+            providers=capable,
+            allowed_methods=tuple(methods),
+            proof=proof,
+            primary_until=primary_until,
+        )
 
     def require(
         self, *, session_token: str, scope: VerificationScope, proof_token: str = ""
@@ -98,9 +134,10 @@ class ReauthenticationPolicy:
             raise RecentReauthenticationRequiredError(
                 "recent reauthentication is required"
             )
-        # Current-session acceptance is a policy decision; it issues no new proof.
-        return decision.proof or VerifiedRecentReauthentication(
-            decision.session.user_id,
-            decision.session.session_generation,
-            expires_at=decision.session.expires_at,
+        return VerifiedRecentReauthentication(
+            user_id=decision.session.user_id,
+            session_generation=decision.session.session_generation,
+            scope="primary" if decision.primary_until else decision.proof.scope,
+            session_digest=self.sessions.session_binding(session_token),
+            expires_at=decision.reauthenticated_until,
         )

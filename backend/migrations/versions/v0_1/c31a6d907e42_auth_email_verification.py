@@ -1,4 +1,4 @@
-"""Add browser-bound external signup and scoped email reauthentication.
+"""Add purpose-bound email confirmation for sensitive account operations.
 
 Revision ID: c31a6d907e42
 Revises: 7e2b9c4d6a18
@@ -17,37 +17,14 @@ _OLD_MESSAGE_KINDS = (
     "'job_failed', 'reconciliation_reminder'"
 )
 _RECIPIENT_CHECK = (
-    "(message_kind = 'pending_signup' AND recipient_user_id IS NULL "
-    "AND pending_signup_id IS NOT NULL AND reauthentication_challenge_id IS NULL) OR "
-    "(message_kind = 'email_reauthentication' AND recipient_user_id IS NOT NULL "
-    "AND pending_signup_id IS NULL AND reauthentication_challenge_id IS NOT NULL) OR "
-    "(message_kind NOT IN ('pending_signup', 'email_reauthentication') "
-    "AND recipient_user_id IS NOT NULL AND pending_signup_id IS NULL "
+    "(message_kind = 'email_reauthentication' "
+    "AND reauthentication_challenge_id IS NOT NULL) OR "
+    "(message_kind != 'email_reauthentication' "
     "AND reauthentication_challenge_id IS NULL)"
 )
 
 
 def upgrade() -> None:
-    op.create_table(
-        "auth_pending_signups",
-        sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("binding_digest", sa.Text(), nullable=False, unique=True),
-        sa.Column("provider_slug", sa.Text(), nullable=False),
-        sa.Column("assertion_data", sa.JSON(), nullable=False),
-        sa.Column("email", sa.Text(), nullable=True),
-        sa.Column("return_to", sa.Text(), nullable=False),
-        sa.Column(
-            "remember_me", sa.Boolean(), nullable=False, server_default=sa.false()
-        ),
-        sa.Column("token_digest", sa.Text(), nullable=True, unique=True),
-        sa.Column("email_requested_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index(
-        "ix_auth_pending_signups_expires_at", "auth_pending_signups", ["expires_at"]
-    )
     op.create_table(
         "email_reauthentication_challenges",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -73,18 +50,14 @@ def upgrade() -> None:
         "email_reauthentication_challenges",
         ["expires_at"],
     )
+    op.create_index(
+        "ix_email_reauth_user_created_at",
+        "email_reauthentication_challenges",
+        ["user_id", "created_at"],
+    )
     with op.batch_alter_table("email_outbox") as batch:
-        batch.add_column(sa.Column("pending_signup_id", sa.Uuid(), nullable=True))
         batch.add_column(
             sa.Column("reauthentication_challenge_id", sa.Uuid(), nullable=True)
-        )
-        batch.alter_column("recipient_user_id", existing_type=sa.Uuid(), nullable=True)
-        batch.create_foreign_key(
-            "fk_email_outbox_pending_signup",
-            "auth_pending_signups",
-            ["pending_signup_id"],
-            ["id"],
-            ondelete="CASCADE",
         )
         batch.create_foreign_key(
             "fk_email_outbox_reauthentication_challenge",
@@ -96,52 +69,38 @@ def upgrade() -> None:
         batch.drop_constraint("email_outbox_message_kind_check", type_="check")
         batch.create_check_constraint(
             "email_outbox_message_kind_check",
-            f"message_kind IN ({_OLD_MESSAGE_KINDS}, "
-            "'pending_signup', 'email_reauthentication')",
+            f"message_kind IN ({_OLD_MESSAGE_KINDS}, 'email_reauthentication')",
         )
         batch.create_check_constraint("email_outbox_recipient_check", _RECIPIENT_CHECK)
 
 
 def downgrade() -> None:
-    # Refuse before any DDL. Even consumed/expired rows are authentication
-    # evidence; a downgrade must not silently erase that persisted state.
+    # Even consumed/expired rows are evidence. Refuse before any DDL.
     connection = op.get_bind()
-    populated = [
-        table
-        for table in ("auth_pending_signups", "email_reauthentication_challenges")
-        if connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))
-    ]
     if connection.scalar(
+        sa.text("SELECT count(*) FROM email_reauthentication_challenges")
+    ) or connection.scalar(
         sa.text(
-            "SELECT count(*) FROM email_outbox WHERE message_kind IN "
-            "('pending_signup', 'email_reauthentication')"
+            "SELECT count(*) FROM email_outbox "
+            "WHERE message_kind = 'email_reauthentication'"
         )
     ):
-        populated.append("email_outbox")
-    if populated:
-        raise RuntimeError(
-            "auth email verification downgrade would discard data in "
-            + ", ".join(populated)
-        )
+        raise RuntimeError("auth email verification downgrade would discard data")
     with op.batch_alter_table("email_outbox") as batch:
         batch.drop_constraint("email_outbox_recipient_check", type_="check")
         batch.drop_constraint("email_outbox_message_kind_check", type_="check")
         batch.create_check_constraint(
-            "email_outbox_message_kind_check",
-            f"message_kind IN ({_OLD_MESSAGE_KINDS})",
+            "email_outbox_message_kind_check", f"message_kind IN ({_OLD_MESSAGE_KINDS})"
         )
-        batch.drop_constraint("fk_email_outbox_pending_signup", type_="foreignkey")
         batch.drop_constraint(
             "fk_email_outbox_reauthentication_challenge", type_="foreignkey"
         )
-        batch.drop_column("pending_signup_id")
         batch.drop_column("reauthentication_challenge_id")
-        batch.alter_column("recipient_user_id", existing_type=sa.Uuid(), nullable=False)
+    op.drop_index(
+        "ix_email_reauth_user_created_at",
+        table_name="email_reauthentication_challenges",
+    )
     op.drop_index(
         "ix_email_reauth_expires_at", table_name="email_reauthentication_challenges"
     )
     op.drop_table("email_reauthentication_challenges")
-    op.drop_index(
-        "ix_auth_pending_signups_expires_at", table_name="auth_pending_signups"
-    )
-    op.drop_table("auth_pending_signups")

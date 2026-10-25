@@ -24,6 +24,7 @@ it("uses capability-driven external login, safe next, remember policy and fixed 
     ? json({ data: { signup_enabled: false, password_login: { enabled: false }, login_methods: [
       { ...provider, label: { en: "Continue" } },
       { ...provider, slug: "company", display_name: "Company SSO", label: { en: "Continue" } },
+      { ...provider, slug: "localized", display_name: "", label: { en: "Localized provider" } },
     ], password_recovery: { mode: "email", admin_assisted: false } } })
     : json({ error_code: "invalid_session", message: "Missing cookie", request_id: "", warnings: [] }, 401));
   render(<MemoryRouter initialEntries={["/login?auth_error=sso_transaction_invalid&next=%2Foauth%2Fauthorize%3Fstate%3Done"]}>
@@ -31,6 +32,7 @@ it("uses capability-driven external login, safe next, remember policy and fixed 
   </MemoryRouter>);
   const button = await screen.findByRole("link", { name: "Example" });
   expect(screen.getByRole("link", { name: "Company SSO" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Localized provider" })).toBeInTheDocument();
   expect(button).toHaveStyle({ backgroundColor: "#0055aa", color: "#ffffff" });
   expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Forgot your password?" })).not.toBeInTheDocument();
@@ -45,14 +47,20 @@ it("uses capability-driven external login, safe next, remember policy and fixed 
 });
 
 it("protects the final external method and refreshes methods after setting a password and unlinking", async () => {
+  let nativeEmail: string | null = null;
   let hasPassword = false;
   let linked = true;
   let proofAvailable = false;
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/auth/me")) return json({ data: { ...user, has_password: hasPassword } });
+    if (url.endsWith("/auth/me")) return json({ data: { ...user, email: nativeEmail, has_password: hasPassword } });
+    if (url.endsWith("/capabilities")) return json({ data: { signup_enabled: false, password_login: { enabled: true, email_enrollment_enabled: true }, password_recovery: { mode: "email", admin_assisted: false } } });
+    if (url.endsWith("/email-verification/request")) {
+      expect(JSON.parse(String(init?.body))).toEqual({ email: user.email });
+      return json({ data: { requested: true, verified: false } });
+    }
     if (url.endsWith("/identities")) return json({ data: { has_password: hasPassword, identities: linked ? [{ ...identity, can_unlink: hasPassword }] : [], available_providers: [provider] } });
-    if (url.includes("/verification?")) return json({ data: { scope: "account", mode: "sso", verified: proofAvailable, reauthenticated_until: null, providers: [provider] } });
+    if (url.includes("/verification?")) return json({ data: { scope: "account", mode: "sso", verified: proofAvailable, reauthenticated_until: null, allowed_methods: ["sso"], providers: [provider] } });
     if (url.endsWith("/password/set")) {
       expect(JSON.parse(String(init?.body))).toEqual({ new_password: "new-password-123" });
       if (!proofAvailable) return json({ error_code: "recent_reauthentication_required", message: "Recent verification required", request_id: "", warnings: [] }, 401);
@@ -65,10 +73,21 @@ it("protects the final external method and refreshes methods after setting a pas
     }
     throw new Error(`Unexpected URL ${url}`);
   });
-  render(<AuthProvider><LoginMethodsSection /></AuthProvider>);
+  const enrollment = render(<AuthProvider><LoginMethodsSection /></AuthProvider>);
   expect(await screen.findByRole("button", { name: "Unlink" })).toBeDisabled();
   expect(await screen.findByRole("button", { name: "Verify with Example" })).toBeInTheDocument();
   expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
+  fireEvent.change(await screen.findByLabelText("Email for optional email login"), { target: { value: user.email } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect email login" }));
+  expect(await screen.findByText("A confirmation link was sent. Open it in this browser to connect your email login.")).toBeInTheDocument();
+  expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
+  // A separate explicit email confirmation updates /me. Sending mail alone
+  // must not expose the local-password form or replace the SSO identity.
+  enrollment.unmount();
+  nativeEmail = user.email;
+  render(<AuthProvider><LoginMethodsSection /></AuthProvider>);
+  await screen.findByLabelText("New password");
   fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password-123" } });
   fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "new-password-123" } });
   fireEvent.click(screen.getByRole("button", { name: "Set password" }));

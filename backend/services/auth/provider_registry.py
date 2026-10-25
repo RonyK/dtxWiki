@@ -8,7 +8,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Literal
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from jsonschema import Draft202012Validator
 from PIL import Image
@@ -44,6 +46,9 @@ class ProviderPolicy(BaseModel):
     allowed_email_domains: list[str] = []
     link_policy: str = "confirm"
     trust_email_verified: bool = False
+    provisioning_workspace_roles: dict[str, list[Literal["viewer", "editor"]]] = {}
+    directory_enabled: bool = False
+    directory_tenant: str | None = None
     config: dict = {}
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -102,7 +107,7 @@ class ProviderRegistry:
                 raise ValueError("invalid auth method capabilities")
             Draft202012Validator.check_schema(dict(descriptor.config_schema))
             if not descriptor.branding.label or any(
-                not isinstance(label, str) or not 0 < len(label) <= 200
+                not isinstance(label, str) or not 0 < len(label.strip()) <= 200
                 for label in descriptor.branding.label.values()
             ):
                 raise ValueError("invalid auth method label")
@@ -139,13 +144,41 @@ class ProviderRegistry:
         if (
             not provider_slug_valid(policy.slug)
             or policy.slug in self.providers
-            or policy.link_policy not in {"confirm", "auto_verified_email"}
+            or policy.link_policy != "confirm"
             or (
                 policy.display_name is not None
-                and not 0 < len(policy.display_name) <= 200
+                and not 0 < len(policy.display_name.strip()) <= 200
             )
         ):
             raise ValueError("invalid or duplicate auth provider")
+        tenant = policy.directory_tenant
+        if tenant is not None and (
+            not isinstance(tenant, str)
+            or not 0 < len(tenant) <= 200
+            or tenant != tenant.strip()
+            or any(ord(char) < 0x20 or ord(char) == 0x7F for char in tenant)
+        ):
+            raise ValueError("invalid directory tenant")
+        if policy.directory_enabled and not tenant:
+            raise ValueError("directory_enabled requires directory_tenant")
+        for workspace_id, roles in policy.provisioning_workspace_roles.items():
+            try:
+                canonical_id = str(UUID(workspace_id))
+            except ValueError as exc:
+                raise ValueError("invalid provisioning workspace UUID") from exc
+            if (
+                canonical_id != workspace_id
+                or not roles
+                or len(set(roles)) != len(roles)
+            ):
+                raise ValueError("invalid provisioning workspace roles")
+        policy = policy.model_copy(
+            update={
+                "display_name": policy.display_name.strip()
+                if policy.display_name is not None
+                else None,
+            }
+        )
         if not policy.enabled:
             return
         method = self.methods.get(policy.method)
@@ -203,7 +236,7 @@ class ProviderRegistry:
                 "slug": provider.slug,
                 "method_id": provider.policy.method,
                 "protocol": provider.method.descriptor.protocol,
-                "display_name": provider.policy.display_name or provider.slug,
+                "display_name": provider.policy.display_name or "",
                 "label": dict(provider.method.descriptor.branding.label),
                 **self.colors[provider.policy.method],
                 "icon_url": (

@@ -177,17 +177,32 @@ SAML adapter는 `protocol="saml2"`, `interaction="redirect"`, PKCE·nonce
 `authenticated_at`을 제공할 때만 선언하세요. SAML conformance에는 서명·audience·
 correlation 실패 fixture도 필요합니다.
 
-`on_login` provisioning hook은 core 계정 transaction의 session을 받습니다.
+`on_login(context: LoginContext) -> ProvisioningResult`는 불변 사용자 UUID·identity UUID·
+provider·검증된 assertion을 받고 `WorkspaceRoleRequest` 목록만 반환합니다. Session이나
+ORM 모델을 전달하지 않습니다. 운영자의 `provisioning_workspace_roles`는 workspace UUID별
+`viewer`/`editor` 허용 목록입니다. core가 같은 계정 transaction에서 이를 검사해 없는
+멤버십만 추가합니다. 기존 다른 역할은 유지하고 감사 기록을 남기며 역할 축소·삭제·owner·
+server-admin 부여는 지원하지 않습니다. 잘못된 요청이나 hook 예외는 로그인 전체를
+되돌립니다. 이는 신뢰된 in-process 플러그인 계약이며 코드 실행 sandbox가 아닙니다.
 `on_identity_linked`와 `on_identity_unlinked` 알림은 commit 후 실행되며 실패가
 계정 변경을 되돌리지 않습니다. credential 로그인과 사용자/provider 삭제 hook은
 현재 공개 SPI 계약에 포함되지 않습니다. 웹 lifespan은 worker에서 실행되지 않습니다.
 
-외부 가입 대기와 이메일 재인증은 core 서비스가 담당합니다. `GET /auth/verification`
-및 `GET /auth/pending-signups`는 상태 조회이며 토큰을 소비하지 않습니다. 확인 토큰은
-링크 fragment에서 즉시 제거한 뒤 명시적인 JSON POST로 제출합니다. 목적·세션에 묶인
-이메일 재인증 proof는 별도 서명 도메인의 v2이며 기존 강한 v1 proof는 계속 수용합니다.
-이전 reader는 v2를 거부하므로 계정 확인 proof가 rollback 후 관리자 proof로 해석되지
-않습니다. native session 형식은 기존 v1을 유지합니다.
+SSO 가입은 이메일 없이 완료합니다. 가입 전 대기 테이블·API·화면은 제공하지 않습니다.
+`GET /auth/verification`은 확인 상태와 사용 가능한 방법을 조회하며 기간을 연장하지
+않습니다. 본인 확인은 기본 60분이고 서버 설정으로 조정합니다. 확인 토큰은 링크
+fragment에서 즉시 제거한 뒤 명시적인 JSON POST로 제출합니다. 미출시 proof v2를
+account/admin 이메일 확인과 primary(비밀번호·동일 SSO identity) 확인으로 구분하고
+안정적인 세션 ID에 묶습니다. remembered 갱신은 ID와 최초 auth_time을 보존합니다.
+출시된 native session v1에는 서명 검증 후 결정적인 ID를 부여하며, 만료된 과거 proof나
+이 브랜치의 이전 v2를 위한 별도 호환 reader는 두지 않습니다. native 세션 형식은
+기존 v1을 유지합니다.
+
+플러그인 worker handler는 `JobInput`, `WorkerContext`를 받고 `JobResult`를 반환합니다.
+입력은 불변 JSON payload·job/workspace UUID·trigger·idempotency key이고 context는 현재
+시각만 제공합니다. ORM·Session·내부 worker runtime은 전달하지 않습니다. 재시도 가능한
+실패는 `RetryableJobError`, 영구 실패는 `PermanentJobError`로 구분하며 core가 lease·
+ack·재시도 한도와 지연을 관리합니다. 작업은 중복 전달에 안전하게 구현해야 합니다.
 
 선택 hook은 다음과 같습니다.
 

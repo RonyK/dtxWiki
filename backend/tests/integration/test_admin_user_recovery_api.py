@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,11 +8,13 @@ from sqlalchemy import func, select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
+from backend.models.auth_identity import UserIdentity
 from backend.models.mail import EmailOutbox
 from backend.models.password_reset import PasswordResetToken
 from backend.models.user import User
 from backend.services import server_admin_service
 from backend.services import session_service as session_service_module
+from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.password_recovery_service import (
     PasswordRecoveryAuthorizationError,
@@ -20,9 +23,10 @@ from backend.services.password_recovery_service import (
 )
 from backend.services.session_service import RecentReauthenticationCodec
 from backend.services.user_admin_service import UserAdminService
+from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod
 
 
-def admin_client(page_service, *, server_admin=True, mail=False):
+def admin_client(page_service, *, server_admin=True, mail=False, aged=True):
     values = {
         "database_url": "sqlite+pysqlite:///:memory:",
         "session_secret": "admin-recovery-api-test-secret",
@@ -64,11 +68,26 @@ def admin_client(page_service, *, server_admin=True, mail=False):
         json={"email": admin.email, "password": "correct-password"},
     )
     assert login.status_code == 200, login.text
+    # Primary password login is accepted for the configured 60-minute window;
+    # these proof-failure regressions begin after that window, while the
+    # ordinary native session remains valid. No wall-clock sleep is needed.
+    service = client.app.state.session_service
+    if aged:
+        later = service.token_codec.now() + timedelta(seconds=3601)
+        client.app.state.session_service = replace(
+            service, token_codec=replace(service.token_codec, now=lambda: later)
+        )
     return client, admin, target
 
 
 def test_server_admin_search_requires_recent_http_only_proof(page_service):
-    client, admin, target = admin_client(page_service)
+    client, admin, target = admin_client(page_service, aged=False)
+    assert client.get("/api/v1/admin/users").status_code == 200
+    service = client.app.state.session_service
+    later = service.token_codec.now() + timedelta(seconds=3600)
+    client.app.state.session_service = replace(
+        service, token_codec=replace(service.token_codec, now=lambda: later)
+    )
 
     missing_proof = client.get(
         "/api/v1/admin/users",
@@ -82,20 +101,15 @@ def test_server_admin_search_requires_recent_http_only_proof(page_service):
     response = client.get("/api/v1/admin/users", params={"query": "Recovery Target"})
 
     assert missing_proof.status_code == 401
-    assert (
-        missing_proof.json()["error_code"]
-        == "recent_reauthentication_required"
-    )
+    assert missing_proof.json()["error_code"] == "recent_reauthentication_required"
     assert reauthenticated.status_code == 200, reauthenticated.text
     assert reauthenticated.json()["data"]["reauthenticated_until"]
     set_cookies = reauthenticated.headers.get_list("set-cookie")
     proof_cookie = next(
-        header
-        for header in set_cookies
-        if header.startswith("dtxwiki_session_reauth=")
+        header for header in set_cookies if header.startswith("dtxwiki_session_reauth=")
     )
     assert "HttpOnly" in proof_cookie
-    assert "Max-Age=300" in proof_cookie
+    assert "Max-Age=3600" in proof_cookie
     assert "Path=/api/v1/admin" in proof_cookie
     assert "SameSite=strict" in proof_cookie
     assert not any(header.startswith("dtxwiki_session=") for header in set_cookies)
@@ -189,6 +203,12 @@ def test_reauthentication_proof_is_revoked_by_generation_change_and_logout(
         },
     )
     assert changed.status_code == 200
+    service = client.app.state.session_service
+    later = service.token_codec.now() + timedelta(seconds=3601)
+    service = replace(
+        service, token_codec=replace(service.token_codec, now=lambda: later)
+    )
+    client.app.state.session_service = service
     revoked = client.get("/api/v1/admin/users")
     assert revoked.status_code == 401
     assert revoked.json()["error_code"] == "recent_reauthentication_required"
@@ -198,10 +218,12 @@ def test_reauthentication_proof_is_revoked_by_generation_change_and_logout(
         json={"current_password": "replacement-password"},
     )
     assert renewed.status_code == 200
-    assert client.cookies.get("dtxwiki_session_reauth") is not None
+    assert (
+        client.cookies.get("dtxwiki_session_reauth", path="/api/v1/admin") is not None
+    )
     logged_out = client.post("/api/v1/auth/logout")
     assert logged_out.status_code == 200
-    assert client.cookies.get("dtxwiki_session_reauth") is None
+    assert client.cookies.get("dtxwiki_session_reauth", path="/api/v1/admin") is None
     logout_cookie = logged_out.headers.get("set-cookie", "")
     assert "dtxwiki_session_reauth=" in logout_cookie
     assert "Path=/api/v1/admin" in logout_cookie
@@ -223,9 +245,7 @@ def test_admin_link_reset_requires_recent_proof_and_is_one_time_reveal(
         json=request,
     )
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count()).select_from(PasswordResetToken)
-        ) == 0
+        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
     reauthenticated = client.post(
         "/api/v1/auth/reauthenticate",
         json={"current_password": "correct-password"},
@@ -259,10 +279,13 @@ def test_admin_reset_rejects_expired_and_wrong_user_proofs(page_service):
     cookie_name = f"{settings.session_cookie_name}_reauth"
     expired = RecentReauthenticationCodec(
         secret=settings.effective_session_secret,
-        now=lambda: datetime.now(UTC) - timedelta(minutes=10),
+        now=lambda: (
+            client.app.state.session_service.token_codec.now() - timedelta(minutes=61)
+        ),
     ).issue(user_id=admin.user_id, session_generation=0)
     wrong_user = RecentReauthenticationCodec(
         secret=settings.effective_session_secret,
+        now=client.app.state.session_service.token_codec.now,
     ).issue(user_id=target.user_id, session_generation=0)
     payload = {
         "delivery": "link",
@@ -282,17 +305,13 @@ def test_admin_reset_rejects_expired_and_wrong_user_proofs(page_service):
     )
 
     assert expired_response.status_code == 401
-    assert expired_response.json()["error_code"] == (
-        "recent_reauthentication_required"
-    )
+    assert expired_response.json()["error_code"] == ("recent_reauthentication_required")
     assert wrong_user_response.status_code == 401
     assert wrong_user_response.json()["error_code"] == (
         "recent_reauthentication_required"
     )
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count()).select_from(PasswordResetToken)
-        ) == 0
+        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
 
 
 def test_admin_email_reset_requires_verified_email_and_never_returns_link(
@@ -304,10 +323,13 @@ def test_admin_email_reset_requires_verified_email_and_never_returns_link(
         "expires_in_seconds": 1800,
         "revoke_api_tokens": True,
     }
-    assert client.post(
-        "/api/v1/auth/reauthenticate",
-        json={"current_password": "correct-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"current_password": "correct-password"},
+        ).status_code
+        == 200
+    )
 
     unverified = client.post(
         f"/api/v1/admin/users/{target.user_id}/password-reset",
@@ -329,9 +351,7 @@ def test_admin_email_reset_requires_verified_email_and_never_returns_link(
     assert "dtxr_" not in queued.text
     with page_service.session_factory() as session:
         outbox = session.scalar(
-            select(EmailOutbox).where(
-                EmailOutbox.message_kind == "password_reset"
-            )
+            select(EmailOutbox).where(EmailOutbox.message_kind == "password_reset")
         )
         assert outbox is not None
 
@@ -339,10 +359,13 @@ def test_admin_email_reset_requires_verified_email_and_never_returns_link(
 def test_workspace_owner_without_server_admin_cannot_search_or_reset(page_service):
     client, _, target = admin_client(page_service, server_admin=False)
 
-    assert client.post(
-        "/api/v1/auth/reauthenticate",
-        json={"current_password": "correct-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"current_password": "correct-password"},
+        ).status_code
+        == 200
+    )
     assert client.get("/api/v1/admin/users").status_code == 403
     denied = client.post(
         f"/api/v1/admin/users/{target.user_id}/password-reset",
@@ -357,10 +380,13 @@ def test_workspace_owner_without_server_admin_cannot_search_or_reset(page_servic
 
 def test_admin_reset_rechecks_live_grant_after_reauthentication(page_service):
     client, admin, target = admin_client(page_service)
-    assert client.post(
-        "/api/v1/auth/reauthenticate",
-        json={"current_password": "correct-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"current_password": "correct-password"},
+        ).status_code
+        == 200
+    )
     with page_service.session_factory.begin() as session:
         assert server_admin_service.revoke_server_admin(session, admin.user_id)
 
@@ -376,9 +402,7 @@ def test_admin_reset_rechecks_live_grant_after_reauthentication(page_service):
     assert denied.status_code == 403
     assert denied.json()["error_code"] == "server_admin_required"
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count()).select_from(PasswordResetToken)
-        ) == 0
+        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
 
 
 def test_admin_reset_issue_transaction_rejects_stale_grant(page_service):
@@ -408,9 +432,7 @@ def test_admin_reset_issue_transaction_rejects_stale_grant(page_service):
         )
 
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count()).select_from(PasswordResetToken)
-        ) == 0
+        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
 
 
 def test_admin_reset_issue_transaction_rejects_stale_reauthentication_generation(
@@ -439,9 +461,7 @@ def test_admin_reset_issue_transaction_rejects_stale_reauthentication_generation
         )
 
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count()).select_from(PasswordResetToken)
-        ) == 0
+        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
 
 
 def test_admin_reset_generation_change_at_write_boundary_returns_exact_401(
@@ -449,19 +469,23 @@ def test_admin_reset_generation_change_at_write_boundary_returns_exact_401(
     monkeypatch,
 ):
     client, admin, target = admin_client(page_service)
-    assert client.post(
-        "/api/v1/auth/reauthenticate",
-        json={"current_password": "correct-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"current_password": "correct-password"},
+        ).status_code
+        == 200
+    )
     original_verify = (
         session_service_module.SessionService.verify_recent_reauthentication
     )
 
-    def verify_then_revoke(self, *, proof_token, user_id):
+    def verify_then_revoke(self, *, proof_token, user_id, **kwargs):
         verified = original_verify(
             self,
             proof_token=proof_token,
             user_id=user_id,
+            **kwargs,
         )
         with page_service.session_factory.begin() as session:
             admin_model = session.get(User, admin.user_id)
@@ -487,9 +511,7 @@ def test_admin_reset_generation_change_at_write_boundary_returns_exact_401(
     assert response.status_code == 401
     assert response.json()["error_code"] == "recent_reauthentication_required"
     with page_service.session_factory() as session:
-        assert session.scalar(
-            select(func.count()).select_from(PasswordResetToken)
-        ) == 0
+        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 0
 
 
 def test_admin_reset_is_bound_to_target_user_id_not_reassigned_email(page_service):
@@ -509,10 +531,13 @@ def test_admin_reset_is_bound_to_target_user_id_not_reassigned_email(page_servic
         target_model.email = "renamed-target@example.com"
         session.flush()
         decoy_model.email = target.email
-    assert client.post(
-        "/api/v1/auth/reauthenticate",
-        json={"current_password": "correct-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"current_password": "correct-password"},
+        ).status_code
+        == 200
+    )
 
     issued = client.post(
         f"/api/v1/admin/users/{target.user_id}/password-reset",
@@ -530,3 +555,94 @@ def test_admin_reset_is_bound_to_target_user_id_not_reassigned_email(page_servic
             select(PasswordResetToken).order_by(PasswordResetToken.created_at.desc())
         )
         assert token is not None and token.user_id == target.user_id
+
+    # Rebinding an email-less external identity is the same exact-user boundary,
+    # but has independent CAS/unique-collision and credential-revocation failures.
+    # Keep it in this UUID-target traversal instead of adding another DB case.
+    registry = ProviderRegistry(client.app.state.settings, [FakeAuthMethod()])
+    registry.add({"slug": "company", "method": "test_oidc"})
+    client.app.state.auth_providers = registry
+    sessions = client.app.state.session_service
+    with page_service.session_factory.begin() as session:
+        live = session.get(User, target.user_id)
+        live.email = None
+        live.password_hash = None
+        live.email_verified_at = None
+        identity = UserIdentity(
+            user_id=target.user_id,
+            provider_slug="company",
+            issuer=FAKE_ISSUER,
+            subject="old-target",
+            linked_via="jit",
+            directory_tenant="old-tenant",
+        )
+        session.add_all(
+            [
+                identity,
+                UserIdentity(
+                    user_id=decoy.user_id,
+                    provider_slug="company",
+                    issuer=FAKE_ISSUER,
+                    subject="occupied",
+                    linked_via="jit",
+                ),
+            ]
+        )
+        session.flush()
+        identity_id, generation = identity.id, live.session_generation
+        target_session = sessions.issue_session(live, amr=("ext",), idp="company")
+    stale_client = TestClient(client.app)
+    stale_client.cookies.set("dtxwiki_session", target_session.session_token)
+    assert stale_client.get("/api/v1/auth/me").status_code == 200
+    # A fresh primary login authorizes this sensitive operation for 60 minutes.
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": _admin.email, "password": "correct-password"},
+        ).status_code
+        == 200
+    )
+    endpoint = f"/api/v1/admin/users/{target.user_id}/identities/rebind"
+    rebind = {
+        "identity_id": str(identity_id),
+        "expected_issuer": FAKE_ISSUER,
+        "expected_subject": "old-target",
+        "provider_slug": "company",
+        "issuer": FAKE_ISSUER,
+        "subject": "new-target",
+        "reason": "verified independently by company administrator",
+    }
+    stale = client.post(endpoint, json={**rebind, "expected_subject": "stale-snapshot"})
+    assert stale.status_code == 409 and stale.json()["error_code"] == "identity_changed"
+    collision = client.post(endpoint, json={**rebind, "subject": "occupied"})
+    assert (
+        collision.status_code == 409
+        and collision.json()["error_code"] == "identity_already_linked"
+    )
+    with page_service.session_factory() as session:
+        assert session.get(User, target.user_id).session_generation == generation
+        assert session.get(UserIdentity, identity_id).subject == "old-target"
+    rebound = client.post(endpoint, json=rebind)
+    assert rebound.status_code == 200, rebound.text
+    assert rebound.json()["data"]["user_id"] == str(target.user_id)
+    with page_service.session_factory() as session:
+        live = session.get(User, target.user_id)
+        assert live.email is None and live.password_hash is None
+        assert live.session_generation == generation + 1
+        identity = session.get(UserIdentity, identity_id)
+        assert identity.subject == "new-target" and identity.directory_tenant is None
+        assert (
+            session.scalar(
+                select(UserIdentity).where(UserIdentity.user_id == decoy.user_id)
+            ).subject
+            == "occupied"
+        )
+        assert (
+            session.scalar(
+                select(PasswordResetToken).where(
+                    PasswordResetToken.user_id == target.user_id
+                )
+            ).revoked_at
+            is not None
+        )
+    assert stale_client.get("/api/v1/auth/me").status_code == 401

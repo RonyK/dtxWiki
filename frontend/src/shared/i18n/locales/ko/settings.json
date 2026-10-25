@@ -127,14 +127,14 @@
       "role": "초기 역할",
       "action": "멤버 추가",
       "adding": "추가 중…",
-      "fromSearchTitle": "정확한 로그인 이메일 추가",
-      "fromSearchReady": "{{email}} 사용자를 워크스페이스 멤버로 추가합니다.",
-      "fromSearchHint": "위 입력란에 기존 활성 사용자의 전체 로그인 이메일을 입력하세요."
+      "fromSearchTitle": "정확한 계정 추가",
+      "fromSearchReady": "{{email}} 계정을 추가합니다.",
+      "fromSearchHint": "기존 계정을 추가하려면 정확한 계정 UUID 또는 native 로그인 이메일을 입력하세요."
     },
     "filters": {
       "query": "멤버 찾기 또는 추가",
-      "queryPlaceholder": "이름 또는 정확한 로그인 이메일",
-      "queryHelp": "현재 멤버 목록을 검색합니다. 전체 로그인 이메일을 입력하면 같은 입력란에서 멤버를 추가할 수 있습니다.",
+      "queryPlaceholder": "이름, 계정 UUID 또는 native 로그인 이메일",
+      "queryHelp": "현재 멤버를 검색합니다. 정확한 계정 UUID 또는 native 로그인 이메일로 추가할 수 있습니다.",
       "role": "역할 필터",
       "search": "검색",
       "active": "표시 중: {{query}} · {{role}}",
@@ -201,6 +201,13 @@
       "confirmSelfDemote": "소유자 권한 포기",
       "confirmOwner": "소유자 권한 부여",
       "confirmRemove": "멤버 제거"
+    },
+    "directory": {
+      "title": "회사 계정 디렉터리",
+      "hint": "검색하면 이 워크스페이스에서 허용한 회사 디렉터리의 계정을 찾을 수 있습니다. 제공자와 계정 식별값을 확인해 대상을 선택하세요.",
+      "loading": "회사 계정 검색 중…",
+      "add": "{{name}} 추가",
+      "refine": "일치하는 계정이 더 있습니다. 검색 범위를 좁혀 주세요."
     }
   },
   "workspaceAccess": {
@@ -1157,6 +1164,20 @@
       "reauthentication": "현재 비밀번호가 올바르지 않습니다. 다시 시도하세요.",
       "unavailable": "이 전달 방법을 사용할 수 없습니다. 창을 닫고 사용 가능한 복구 작업을 명시적으로 선택하세요.",
       "generic": "비밀번호 재설정을 발급하지 못했습니다. 다시 시도하세요."
+    },
+    "rebind": {
+      "action": "SSO identity 다시 연결",
+      "title": "선택한 계정의 SSO identity 다시 연결",
+      "warning": "먼저 조직의 별도 신뢰할 수 있는 절차로 본인과 새 identity를 확인하세요. 선택한 SSO identity를 변경하고 기존 세션을 무효화합니다. 임시 로그인 링크를 만들거나 native 이메일 로그인을 변경하지 않습니다.",
+      "noEmail": "SSO를 사용하는 계정입니다. native 이메일 로그인이 없으면 이메일 복구와 임시 로그인 링크를 사용할 수 없습니다.",
+      "currentIdentity": "현재 SSO identity",
+      "provider": "새 제공자 slug",
+      "issuer": "새 issuer",
+      "subject": "새 subject",
+      "reason": "변경 이유와 별도 본인 확인 근거",
+      "confirmUser": "확인하려면 대상 계정 UUID를 입력하세요",
+      "complete": "선택한 SSO identity를 다시 연결하고 기존 세션을 무효화했습니다.",
+      "failed": "SSO identity를 다시 연결하지 못했습니다. 관리자 본인 확인과 identity 정보를 확인하세요."
     }
   },
   "jobs": {

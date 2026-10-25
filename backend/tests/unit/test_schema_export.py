@@ -118,7 +118,6 @@ def test_workspace_create_statuses_and_security_schemes_are_explicit(openapi_sch
         "name": "dtxwiki_session_reauth",
     }
     for scheme, cookie in (
-        ("PendingSignupCookie", "dtxwiki_pending_signup"),
         ("AccountEmailBindingCookie", "dtxwiki_email_reauth_account"),
         ("AdminEmailBindingCookie", "dtxwiki_email_reauth_admin"),
     ):
@@ -203,14 +202,6 @@ def test_openapi_security_matches_exhaustive_reviewed_route_matrix(openapi_schem
         ("post", "/api/v1/auth/email-reauthentication/request"),
     ):
         assert schema["paths"][path][method]["security"] == [{"SessionCookie": []}]
-    for method, path in (
-        ("get", "/api/v1/auth/pending-signups"),
-        ("post", "/api/v1/auth/pending-signups/email"),
-        ("post", "/api/v1/auth/pending-signups/confirm"),
-    ):
-        assert schema["paths"][path][method]["security"] == [
-            {"PendingSignupCookie": []}
-        ]
     confirmation = schema["paths"]["/api/v1/auth/email-reauthentication/confirm"][
         "post"
     ]

@@ -478,13 +478,21 @@ def test_workspace_members_add_list_and_remove(tmp_path):
     assert listed.exit_code == 0
     assert json.loads(listed.stdout)[0]["role"] == "viewer"
 
+    # Reuse the same traversal to exercise email-less UUID targeting through
+    # Typer parsing and both service wrappers, without another DB/test case.
+    with session_factory.begin() as session:
+        target = session.scalar(select(User).where(User.email == "member@example.com"))
+        target_id = str(target.id)
+        target.email = target.password_hash = None
+
     promoted = runner.invoke(
         cli_main.app,
         [
             "workspace",
             "members",
             "add",
-            "member@example.com",
+            "--user-id",
+            target_id,
             "--workspace",
             "default",
             "--role",
@@ -503,7 +511,8 @@ def test_workspace_members_add_list_and_remove(tmp_path):
             "workspace",
             "members",
             "remove",
-            "member@example.com",
+            "--user-id",
+            target_id,
             "--workspace",
             "default",
             "--db",

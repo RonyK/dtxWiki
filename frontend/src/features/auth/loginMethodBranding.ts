@@ -3,12 +3,8 @@ import type { CSSProperties } from "react";
 import type { LoginMethod } from "../../shared/api/auth";
 
 export function loginMethodLabel(method: LoginMethod, language: string): string {
-  return method.display_name.trim()
-    || method.label[language]
-    || method.label[language.split("-")[0]]
-    || method.label.en
-    || Object.values(method.label).find((label) => label.trim())
-    || method.slug;
+  return [method.display_name, method.label[language], method.label[language.split("-")[0]], method.label.en]
+    .find((label) => label?.trim())?.trim() || method.slug;
 }
 
 export function loginMethodStyle(method: LoginMethod): CSSProperties | undefined {

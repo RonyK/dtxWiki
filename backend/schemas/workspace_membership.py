@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.schemas.auth import EmailInput
 from backend.schemas.common import RESTResponseBase
@@ -12,7 +12,7 @@ WorkspaceMemberRole = Literal["viewer", "editor", "owner"]
 
 class WorkspaceMemberItem(BaseModel):
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     status: str
     role: WorkspaceMemberRole
@@ -39,11 +39,36 @@ class WorkspaceMemberListResponse(RESTResponseBase):
 
 
 class WorkspaceMemberAddRequest(BaseModel):
-    email: EmailInput
+    user_id: UUID | None = None
+    email: EmailInput | None = None
     role: str = Field(default="viewer", min_length=1, max_length=32)
     confirm_first_share: bool = False
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _one_selector(self):
+        if (self.user_id is None) == (self.email is None):
+            raise ValueError("provide exactly one of user_id or native email")
+        return self
+
+
+class WorkspaceMemberCandidateItem(BaseModel):
+    user_id: UUID
+    display_name: str
+    provider_name: str
+    identity_label: str
+    identity_verified: Literal[True] = True
+
+
+class WorkspaceMemberCandidatesData(BaseModel):
+    enabled: bool
+    items: list[WorkspaceMemberCandidateItem]
+    has_more: bool
+
+
+class WorkspaceMemberCandidatesResponse(RESTResponseBase):
+    data: WorkspaceMemberCandidatesData
 
 
 class WorkspaceMemberRoleUpdateRequest(BaseModel):

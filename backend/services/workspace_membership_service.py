@@ -6,14 +6,17 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from backend.domain.input_policy import (
     validate_text,
 )
+from backend.models.auth_identity import UserIdentity
 from backend.models.base import utc_now
 from backend.models.normalized_keys import normalize_search_key
 from backend.models.user import User
@@ -23,6 +26,9 @@ from backend.policy.rbac import normalize_role
 from backend.services.audit_service import AuditService
 from backend.services.oauth_service import revoke_workspace_oauth_consent
 from backend.services.session_service import InvalidCredentialsError, normalize_email
+
+if TYPE_CHECKING:
+    from backend.services.auth.provider_registry import ProviderRegistry
 
 FIRST_SHARE_WARNING_CODE = "workspace_first_share_confirmation_required"
 FIRST_SHARE_WARNING = (
@@ -58,6 +64,10 @@ class WorkspaceMembershipConflictError(WorkspaceMembershipServiceError):
 
 class WorkspaceMembershipValidationError(WorkspaceMembershipServiceError):
     error_code = "workspace_role_invalid"
+
+
+class WorkspaceMemberSelectorInvalidError(WorkspaceMembershipValidationError):
+    error_code = "validation_failed"
 
 
 class WorkspaceMemberCursorInvalidError(WorkspaceMembershipServiceError):
@@ -97,7 +107,7 @@ class WorkspaceLastOwnerLockedError(WorkspaceMembershipConflictError):
 @dataclass(frozen=True)
 class WorkspaceMemberView:
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     status: str
     workspace_id: UUID
@@ -138,6 +148,21 @@ class WorkspaceMemberRemoval:
 
 
 @dataclass(frozen=True)
+class WorkspaceMemberCandidate:
+    user_id: UUID
+    display_name: str
+    provider_name: str
+    identity_label: str
+
+
+@dataclass(frozen=True)
+class WorkspaceMemberCandidates:
+    enabled: bool
+    items: list[WorkspaceMemberCandidate]
+    has_more: bool = False
+
+
+@dataclass(frozen=True)
 class WorkspaceMembershipService:
     """The single mutation seam for workspace membership administration.
 
@@ -148,6 +173,90 @@ class WorkspaceMembershipService:
 
     session_factory: object
     audit_service: AuditService = field(default_factory=AuditService)
+
+    def list_member_candidates(
+        self,
+        *,
+        workspace_id: UUID,
+        actor_user_id: UUID,
+        providers: ProviderRegistry | None,
+        query: str = "",
+        limit: int = 10,
+    ) -> WorkspaceMemberCandidates:
+        """Search only the actor's explicitly enabled, verified company directory."""
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50")
+        normalized_query = _normalize_member_query(query)
+        with self.session_factory() as session:
+            workspace = self._require_workspace(session, workspace_id=workspace_id)
+            self._require_owner(session, workspace.id, actor_user_id)
+            configured = {
+                slug: provider
+                for slug, provider in (providers.providers.items() if providers else ())
+                if provider.policy.directory_enabled
+                and provider.policy.directory_tenant
+            }
+            actor_identities = session.scalars(
+                select(UserIdentity).where(UserIdentity.user_id == actor_user_id)
+            )
+            allowed = {
+                identity.provider_slug: configured[identity.provider_slug]
+                for identity in actor_identities
+                if identity.provider_slug in configured
+                and identity.directory_tenant
+                == configured[identity.provider_slug].policy.directory_tenant
+            }
+            if not allowed:
+                return WorkspaceMemberCandidates(False, [])
+            if len(normalized_query) < 2:
+                return WorkspaceMemberCandidates(True, [])
+            company_predicates = [
+                and_(
+                    UserIdentity.provider_slug == slug,
+                    UserIdentity.directory_tenant == provider.policy.directory_tenant,
+                )
+                for slug, provider in allowed.items()
+            ]
+            rows = session.execute(
+                select(User, UserIdentity.provider_slug)
+                .join(UserIdentity, UserIdentity.user_id == User.id)
+                .where(
+                    User.status == "active",
+                    or_(*company_predicates),
+                    User.member_search_key.contains(normalized_query, autoescape=True),
+                    ~select(WorkspaceMembership.user_id)
+                    .where(
+                        WorkspaceMembership.workspace_id == workspace.id,
+                        WorkspaceMembership.user_id == User.id,
+                    )
+                    .exists(),
+                )
+                .order_by(User.member_search_key, User.id, UserIdentity.provider_slug)
+                .execution_options(yield_per=50)
+            )
+            items = []
+            seen = set()
+            for user, slug in rows:
+                # The shared search index also contains native email. Only the
+                # normalized display name may produce company-directory results.
+                if user.id in seen or normalized_query not in normalize_search_key(
+                    user.display_name
+                ):
+                    continue
+                if len(items) == limit:
+                    return WorkspaceMemberCandidates(True, items, True)
+                seen.add(user.id)
+                provider = allowed[slug]
+                identifier = str(user.id)
+                items.append(
+                    WorkspaceMemberCandidate(
+                        user_id=user.id,
+                        display_name=user.display_name,
+                        provider_name=provider.policy.display_name or slug,
+                        identity_label=f"{identifier[:8]}…{identifier[-8:]}",
+                    )
+                )
+            return WorkspaceMemberCandidates(True, items)
 
     def list_members(
         self,
@@ -284,7 +393,8 @@ class WorkspaceMembershipService:
         self,
         *,
         workspace_slug: str,
-        email: str,
+        email: str | None = None,
+        user_id: UUID | None = None,
         role: str,
         actor_user_id: UUID | None = None,
     ) -> WorkspaceMemberView:
@@ -294,6 +404,7 @@ class WorkspaceMembershipService:
             return self.add_member_with_metadata(
                 workspace_slug=workspace_slug,
                 email=email,
+                user_id=user_id,
                 role=role,
                 actor_user_id=actor_user_id,
                 confirm_first_share=True,
@@ -301,13 +412,13 @@ class WorkspaceMembershipService:
         except WorkspaceMembershipConflictError as exc:
             if exc.error_code != "workspace_membership_role_conflict":
                 raise
-        normalized_email = normalize_email(email)
+        selector = _target_user_selector(email=email, user_id=user_id)
         with self.session_factory() as session:
             workspace = self._require_workspace(
                 session,
                 workspace_slug=workspace_slug,
             )
-            user = session.scalar(select(User).where(User.email == normalized_email))
+            user = session.scalar(select(User).where(selector))
             if user is None:
                 raise InvalidCredentialsError("user not found")
             workspace_id = workspace.id
@@ -323,13 +434,14 @@ class WorkspaceMembershipService:
         self,
         *,
         actor_user_id: UUID | None,
-        email: str,
+        email: str | None = None,
+        user_id: UUID | None = None,
         role: str = "viewer",
         confirm_first_share: bool = False,
         workspace_id: UUID | None = None,
         workspace_slug: str | None = None,
     ) -> WorkspaceMemberMutation:
-        normalized_email = normalize_email(email)
+        selector = _target_user_selector(email=email, user_id=user_id)
         normalized_role = _normalize_requested_role(role)
         with self.session_factory.begin() as session:
             workspace = self._require_workspace(
@@ -339,9 +451,7 @@ class WorkspaceMembershipService:
                 for_update=True,
             )
             self._require_owner(session, workspace.id, actor_user_id)
-            user = session.scalar(
-                select(User).where(User.email == normalized_email).with_for_update()
-            )
+            user = session.scalar(select(User).where(selector).with_for_update())
             if user is None:
                 raise InvalidCredentialsError("user not found")
             if user.status != "active":
@@ -451,13 +561,19 @@ class WorkspaceMembershipService:
                 member_count=self._member_count(session, workspace.id),
             )
 
-    def remove_member(self, *, workspace_slug: str, email: str) -> bool:
+    def remove_member(
+        self,
+        *,
+        workspace_slug: str,
+        email: str | None = None,
+        user_id: UUID | None = None,
+    ) -> bool:
         """Compatibility wrapper used by the existing operator CLI."""
 
-        normalized_email = normalize_email(email)
+        selector = _target_user_selector(email=email, user_id=user_id)
         with self.session_factory() as session:
             workspace = self._require_workspace(session, workspace_slug=workspace_slug)
-            user = session.scalar(select(User).where(User.email == normalized_email))
+            user = session.scalar(select(User).where(selector))
             if user is None:
                 raise InvalidCredentialsError("user not found")
             membership = session.get(WorkspaceMembership, (user.id, workspace.id))
@@ -844,6 +960,20 @@ class WorkspaceMembershipService:
             event_summary=action,
             retention_class="sensitive",
         )
+
+
+def _target_user_selector(
+    *, email: str | None, user_id: UUID | None
+) -> ColumnElement[bool]:
+    if (email is None) == (user_id is None):
+        raise WorkspaceMemberSelectorInvalidError(
+            "provide exactly one of user_id or native email"
+        )
+    return (
+        User.id == user_id
+        if user_id is not None
+        else User.email == normalize_email(email)
+    )
 
 
 def _normalize_member_query(value: str) -> str:

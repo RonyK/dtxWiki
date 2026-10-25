@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   getLoginIdentities,
+  requestEmailVerification,
   setAccountPassword,
   startIdentityFlow,
   unlinkLoginIdentity,
@@ -13,24 +14,31 @@ import { apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
 import {
   preventCompositionSubmit,
+  normalizeAccountEmail,
   validateAccountPassword,
 } from "../../shared/auth/identityPolicy";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
+import { textInputLimit } from "../../shared/lib/inputPolicy";
 import { ExternalAuthErrorBanner } from "./ExternalAuthErrorBanner";
 import { IdentityVerificationPanel } from "./IdentityVerificationPanel";
-import { loginMethodStyle } from "./loginMethodBranding";
+import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
 import { linkedLoginMethods } from "./loginMethods";
 
 export function LoginMethodsSection() {
-  const { t } = useTranslation("auth");
-  const { user, setAuthenticatedSession, refreshSession } = useAuth();
+  const { t, i18n } = useTranslation("auth");
+  const { user, setAuthenticatedSession, refreshSession, capabilitiesChecked, emailEnrollmentEnabled, refreshCapabilities } = useAuth();
   const [data, setData] = useState<LoginIdentities | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [nativeEmail, setNativeEmail] = useState("");
+
+  useEffect(() => {
+    if (user && !user.email && !capabilitiesChecked) void refreshCapabilities();
+  }, [capabilitiesChecked, refreshCapabilities, user]);
 
   useEffect(() => {
     let active = true;
@@ -101,6 +109,17 @@ export function LoginMethodsSection() {
     });
   }
 
+  async function onConnectEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    let email: string;
+    try { email = normalizeAccountEmail(nativeEmail); }
+    catch { setError(t("validation.email")); return; }
+    await run(async () => {
+      await requestEmailVerification(email);
+      setStatus(t("loginMethods.emailConnectionSent"));
+    });
+  }
+
   const providers = data?.available_providers ?? [];
   const linkedProviders = data ? linkedLoginMethods(data) : [];
   const linkedSlugs = new Set(linkedProviders.map((provider) => provider.slug));
@@ -110,9 +129,10 @@ export function LoginMethodsSection() {
   const canManage = data !== null && (
     !data.has_password || providers.length > 0 || data.identities.length > 0
   );
-  const providerName = (slug: string) => (
-    providers.find((provider) => provider.slug === slug)?.display_name ?? slug
-  );
+  const providerName = (slug: string) => {
+    const provider = providers.find((item) => item.slug === slug);
+    return provider ? loginMethodLabel(provider, i18n.language) : slug;
+  };
   const currentSessionLabel = user?.session_provider_slug
     ? providerName(user.session_provider_slug)
     : t("loginMethods.password");
@@ -183,12 +203,21 @@ export function LoginMethodsSection() {
                   disabled={busy}
                   onClick={() => void linkProvider(provider.slug)}
                 >
-                  {t("loginMethods.link", { provider: provider.display_name })}
+                  {t("loginMethods.link", { provider: loginMethodLabel(provider, i18n.language) })}
                 </button>
               ))}
             </div>
           ) : null}
-          {!data.has_password ? (
+          {!user?.email && emailEnrollmentEnabled ? <form className="auth-form" onSubmit={(event) => void onConnectEmail(event)}>
+            <p>{t("loginMethods.emailConnectionHint")}</p>
+            <label className="field-stack">{t("loginMethods.nativeEmail")}
+              <input type="email" required autoComplete="email" {...textInputLimit(320)} value={nativeEmail} disabled={busy}
+                onKeyDown={preventCompositionSubmit}
+                onChange={(event) => setNativeEmail(event.target.value)} />
+            </label>
+            <button type="submit" className="icon-button" disabled={busy}>{t("loginMethods.connectEmail")}</button>
+          </form> : null}
+          {!data.has_password && user?.email ? (
             <form
               className="auth-form"
               onSubmit={(event) => void onSetPassword(event)}

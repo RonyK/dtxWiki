@@ -1,3 +1,5 @@
+# Budget exception: nullable native credentials and revocation need the existing
+# session factory, but are verified here without repeating SSO HTTP round trips.
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -34,11 +36,17 @@ def test_passwordless_user_requires_external_auth_and_generation_bound_step_up(
         assert user.personal_workspace_id == user.default_workspace_id
         assert user.personal_workspace_id is not None
         proof = service.issue_external_reauthentication(
-            session, user_id=user.id, session_generation=0
+            session,
+            user_id=user.id,
+            session_generation=0,
+            session_token=result.session_token,
         )
     assert result.user.has_password is False
     service.verify_recent_reauthentication(
-        proof_token=proof.proof_token, user_id=result.user.user_id
+        proof_token=proof.proof_token,
+        user_id=result.user.user_id,
+        scope="account",
+        session_token=result.session_token,
     )
 
     hashes = []
@@ -68,7 +76,10 @@ def test_passwordless_user_requires_external_auth_and_generation_bound_step_up(
     service.logout(result.session_token)
     with pytest.raises(RecentReauthenticationRequiredError):
         service.verify_recent_reauthentication(
-            proof_token=proof.proof_token, user_id=result.user.user_id
+            proof_token=proof.proof_token,
+            user_id=result.user.user_id,
+            scope="account",
+            session_token=result.session_token,
         )
     with (
         pytest.raises(RecentReauthenticationRequiredError),

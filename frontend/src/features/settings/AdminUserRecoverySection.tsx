@@ -22,16 +22,15 @@ import { createPortal } from "react-dom";
 
 import {
   issueAdminPasswordReset,
+  rebindAdminIdentity,
   searchAdminUsers,
   type AdminPasswordResetDelivery,
   type AdminUser,
 } from "../../shared/api/adminUsers";
-import { getAuthCapabilities, getLoginIdentities, reauthenticate, type LoginMethod } from "../../shared/api/auth";
+import { getAuthCapabilities, reauthenticate } from "../../shared/api/auth";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
-import { ExternalReauthenticationButtons } from "../auth/ExternalReauthenticationButtons";
 import { ExternalAuthErrorBanner } from "../auth/ExternalAuthErrorBanner";
 import { IdentityVerificationPanel } from "../auth/IdentityVerificationPanel";
-import { linkedLoginMethods } from "../auth/loginMethods";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
@@ -61,13 +60,10 @@ type RecoveryCapabilityState = {
 export function AdminUserRecoverySection() {
   const { t } = useTranslation("settings");
   const auth = useOptionalAuth();
-  const usesPasswordVerification = auth?.user?.has_password !== false
-    && auth?.user?.session_method !== "ext";
+  const usesPasswordVerification = auth === null;
   const [externalVerified, setExternalVerified] = useState(false);
   const [currentSessionAccepted, setCurrentSessionAccepted] = useState(false);
-  const [returnedFromProvider] = useState(() => new URLSearchParams(window.location.search).has("sso_verified"));
   const requiresPassword = usesPasswordVerification && !externalVerified;
-  const [reauthenticationMethods, setReauthenticationMethods] = useState<LoginMethod[]>([]);
   const verificationParams = new URLSearchParams(window.location.search);
   verificationParams.set("sso_verified", "1");
   const reauthenticationReturnTo = `${window.location.pathname}?${verificationParams}${window.location.hash}`;
@@ -88,6 +84,7 @@ export function AdminUserRecoverySection() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchValidation, setSearchValidation] = useState<string | null>(null);
   const [target, setTarget] = useState<AdminUser | null>(null);
+  const [rebindTarget, setRebindTarget] = useState<AdminUser | null>(null);
   const [delivery, setDelivery] = useState<AdminPasswordResetDelivery>("email");
   const [recoveryMode, setRecoveryMode] = useState<RecoveryMode>("ordinary");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -104,31 +101,11 @@ export function AdminUserRecoverySection() {
     });
 
   useEffect(() => {
-    if (auth?.user?.has_password === undefined) return;
-    let active = true;
-    void getLoginIdentities().then((data) => {
-      if (active) setReauthenticationMethods(linkedLoginMethods(data));
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, [auth?.user?.has_password, auth?.user?.user_id]);
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (!returnedFromProvider || !auth?.user?.email) return;
+    if (!params.has("sso_verified")) return;
     params.delete("sso_verified");
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
-    let active = true;
-    // The protected server response proves the callback's short-lived proof;
-    // a query parameter alone never unlocks the directory.
-    void searchAdminUsers(auth.user.email, { limit: 1 }).then(() => {
-      if (active) {
-        setDirectoryUnlocked(true);
-        setExternalVerified(true);
-        setReauthenticatedUntil(null);
-      }
-    }).catch((caught) => { if (active) setUnlockError(apiErrorMessage(caught)); });
-    return () => { active = false; };
-  }, [auth?.user?.email, returnedFromProvider]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -268,8 +245,8 @@ export function AdminUserRecoverySection() {
     if (
       user.status !== "active" ||
       (selectedDelivery === "email" &&
-        (!user.email_verified_at || !recoveryCapability.emailReady)) ||
-      (selectedDelivery === "link" && !recoveryCapability.linkReady)
+        (!user.email || !user.email_verified_at || !recoveryCapability.emailReady)) ||
+      (selectedDelivery === "link" && (!user.email || !recoveryCapability.linkReady))
     ) {
       return;
     }
@@ -326,7 +303,7 @@ export function AdminUserRecoverySection() {
           return;
         }
         setIssuedLink({
-          email: target.email,
+          email: target.email ?? target.user_id,
           expiresAt: result.expires_at,
           resetUrl: result.reset_url,
           revokeApiTokens: result.revoke_api_tokens,
@@ -486,9 +463,6 @@ export function AdminUserRecoverySection() {
                   defaultValue: "Unlock user search",
                 })}
           </button>
-          <ExternalReauthenticationButtons methods={reauthenticationMethods}
-            returnTo={reauthenticationReturnTo}
-            onError={setUnlockError} />
         </form> : <IdentityVerificationPanel scope="admin" returnTo={reauthenticationReturnTo}
           onVerified={(until, _target, mode) => {
             setDirectoryUnlocked(true);
@@ -508,9 +482,6 @@ export function AdminUserRecoverySection() {
                   }),
             })}
           </StatusBanner>
-          <ExternalReauthenticationButtons methods={reauthenticationMethods}
-            returnTo={reauthenticationReturnTo}
-            onError={setUnlockError} />
           {searchError ? (
             <StatusBanner tone="warning">{searchError}</StatusBanner>
           ) : null}
@@ -586,8 +557,8 @@ export function AdminUserRecoverySection() {
                     <li className="admin-user-card" key={user.user_id}>
                       <div className="admin-user-card-main">
                         <div className="admin-user-identity">
-                          <strong>{user.display_name || user.email}</strong>
-                          <span>{user.email}</span>
+                          <strong>{user.display_name || user.email || user.user_id}</strong>
+                          <span>{user.email ?? user.user_id}</span>
                         </div>
                         <div className="admin-user-statuses">
                           <StatusPill
@@ -604,7 +575,7 @@ export function AdminUserRecoverySection() {
                             status={user.status}
                             tone={user.status === "active" ? "ok" : "muted"}
                           />
-                          <StatusPill
+                          {user.email ? <StatusPill
                             compact
                             label={
                               user.email_verified_at
@@ -619,7 +590,7 @@ export function AdminUserRecoverySection() {
                               user.email_verified_at ? "verified" : "unverified"
                             }
                             tone={user.email_verified_at ? "ok" : "warn"}
-                          />
+                          /> : null}
                         </div>
                         <p className="admin-user-workspaces">
                           {user.workspaces.length
@@ -650,6 +621,7 @@ export function AdminUserRecoverySection() {
                           className="icon-button primary admin-user-recovery-action"
                           disabled={
                             user.status !== "active" ||
+                            !user.email ||
                             !user.email_verified_at ||
                             !recoveryCapability.emailReady
                           }
@@ -665,6 +637,7 @@ export function AdminUserRecoverySection() {
                           className="icon-button primary admin-user-recovery-action"
                           disabled={
                             user.status !== "active" ||
+                            !user.email ||
                             !recoveryCapability.linkReady
                           }
                           onClick={() => openRecovery(user, "link")}
@@ -675,7 +648,14 @@ export function AdminUserRecoverySection() {
                             defaultValue: "Issue one-time link",
                           })}
                         </button>
-                        {user.status === "active" && !user.email_verified_at ? (
+                        {user.status === "active" && (user.identities?.length ?? 0) > 0 ? (
+                          <button className="icon-button" type="button" onClick={() => setRebindTarget(user)}>
+                            {t("userRecovery.rebind.action")}
+                          </button>
+                        ) : null}
+                        {user.status === "active" && !user.email ? (
+                          <p className="meta-line">{t("userRecovery.rebind.noEmail")}</p>
+                        ) : user.status === "active" && !user.email_verified_at ? (
                           <p className="meta-line">
                             {t("userRecovery.emailUnverifiedActionHint", {
                               defaultValue:
@@ -761,8 +741,87 @@ export function AdminUserRecoverySection() {
       {issuedLink ? (
         <OneTimeLinkDialog link={issuedLink} onClose={dismissIssuedLink} />
       ) : null}
+      {rebindTarget ? <IdentityRebindDialog target={rebindTarget} onCancel={() => setRebindTarget(null)}
+        onComplete={() => {
+          setRebindTarget(null);
+          setSuccessNotice(t("userRecovery.rebind.complete"));
+          void loadUsers(submittedQuery, offset);
+        }} /> : null}
     </section>
   );
+}
+
+function IdentityRebindDialog({ target, onCancel, onComplete }: {
+  target: AdminUser;
+  onCancel: () => void;
+  onComplete: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const identities = target.identities ?? [];
+  const [identityId, setIdentityId] = useState(identities[0]?.identity_id ?? "");
+  const current = identities.find((identity) => identity.identity_id === identityId);
+  const [provider, setProvider] = useState(current?.provider_slug ?? "");
+  const [issuer, setIssuer] = useState(current?.issuer ?? "");
+  const [subject, setSubject] = useState("");
+  const [reason, setReason] = useState("");
+  const [confirmedUserId, setConfirmedUserId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!current || confirmedUserId.trim() !== target.user_id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await rebindAdminIdentity(target.user_id, {
+        identity_id: current.identity_id,
+        expected_issuer: current.issuer,
+        expected_subject: current.subject,
+        provider_slug: provider.trim(), issuer: issuer.trim(), subject: subject.trim(), reason: reason.trim(),
+      });
+      onComplete();
+    } catch (caught) {
+      setError(apiErrorMessage(caught, t("userRecovery.rebind.failed")));
+    } finally { setBusy(false); }
+  }
+
+  return <AccessibleDialog busy={busy} labelledBy="admin-identity-rebind-title" onCancel={onCancel}>
+    <form className="modal-panel admin-recovery-modal" onSubmit={(event) => void submit(event)}>
+      <h2 id="admin-identity-rebind-title">{t("userRecovery.rebind.title")}</h2>
+      <StatusBanner tone="warning">{t("userRecovery.rebind.warning")}</StatusBanner>
+      <p>{target.display_name || target.user_id}</p><code>{target.user_id}</code>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      <label className="field-stack">{t("userRecovery.rebind.currentIdentity")}
+        <select value={identityId} disabled={busy} onChange={(event) => {
+          const next = identities.find((identity) => identity.identity_id === event.target.value);
+          setIdentityId(event.target.value); setProvider(next?.provider_slug ?? ""); setIssuer(next?.issuer ?? ""); setSubject("");
+        }}>
+          {identities.map((identity) => <option key={identity.identity_id} value={identity.identity_id}>{identity.provider_slug}: {identity.subject}</option>)}
+        </select>
+      </label>
+      {current ? <p className="meta-line">{current.issuer}</p> : null}
+      <label className="field-stack">{t("userRecovery.rebind.provider")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(64)} value={provider} onChange={(event) => setProvider(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.issuer")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(2048)} value={issuer} onChange={(event) => setIssuer(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.subject")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(512)} value={subject} onChange={(event) => setSubject(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.reason")}
+        <input required disabled={busy} {...textInputLimit(500)} value={reason} onChange={(event) => setReason(event.target.value)} />
+      </label>
+      <label className="field-stack">{t("userRecovery.rebind.confirmUser")}
+        <input required autoComplete="off" disabled={busy} {...textInputLimit(36)} value={confirmedUserId} onChange={(event) => setConfirmedUserId(event.target.value)} />
+      </label>
+      <div className="modal-actions">
+        <button type="button" className="icon-button" disabled={busy} onClick={onCancel}>{t("userRecovery.dialog.cancel", { defaultValue: "Cancel" })}</button>
+        <button type="submit" className="icon-button primary" disabled={busy || !current || confirmedUserId.trim() !== target.user_id}>{t("userRecovery.rebind.action")}</button>
+      </div>
+    </form>
+  </AccessibleDialog>;
 }
 
 function RecoveryConfirmationDialog({
@@ -824,7 +883,7 @@ function RecoveryConfirmationDialog({
           {t("userRecovery.dialog.description", {
             defaultValue:
               "This starts recovery for {{email}}. The user chooses the new password; you cannot view it.",
-            email: target.email,
+          email: target.email ?? target.user_id,
           })}
         </p>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}

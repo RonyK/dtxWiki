@@ -507,6 +507,7 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "/api/v1/workspaces/{workspace_id}/join-requests/{request_id}",
     ),
     ("GET", "/api/v1/workspaces/{workspace_id}/members"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/member-candidates"),
     ("POST", "/api/v1/workspaces/{workspace_id}/members"),
     (
         "PATCH",

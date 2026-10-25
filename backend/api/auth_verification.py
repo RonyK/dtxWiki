@@ -1,4 +1,4 @@
-"""HTTP delivery for browser-bound signup and purpose-bound confirmation."""
+"""HTTP delivery for purpose-bound account confirmation."""
 
 from typing import Annotated
 
@@ -12,30 +12,22 @@ from backend.api.auth import (
     no_store_response,
     recent_reauthentication_cookie_name,
     session_cookie_secure_for_request,
-    session_payload,
     set_no_store_headers,
     set_recent_reauthentication_cookie,
-    set_session_cookie,
 )
 from backend.api.auth_cookies import (
-    PENDING_SIGNUP_COOKIE,
     account_reauthentication_cookie_name,
     set_account_reauthentication_cookie,
 )
-from backend.api.auth_sso import SignupDep, flow_error
+from backend.api.auth_dependencies import flow_error, policy_for_request
 from backend.api.cookie_budget import set_bounded_cookie
 from backend.api.deps import SessionFactoryDep
 from backend.api.request_origin import require_same_origin
 from backend.schemas.auth_verification import (
-    ConfirmationTokenRequest,
     EmailReauthenticationConfirmRequest,
     EmailReauthenticationConfirmResponse,
     EmailReauthenticationRequest,
     EmailReauthenticationRequestResponse,
-    PendingSignupConfirmResponse,
-    PendingSignupEmailRequest,
-    PendingSignupEmailResponse,
-    PendingSignupResponse,
     VerificationResponse,
     VerificationScope,
 )
@@ -44,28 +36,15 @@ from backend.services.auth.email_reauthentication import (
     EmailReauthenticationService,
 )
 from backend.services.auth.login_transactions import AuthFlowError
-from backend.services.auth.reauthentication_policy import ReauthenticationPolicy
 from backend.services.auth.return_path import safe_return_path
 from backend.services.mail_delivery import build_email_delivery_service
 from backend.services.session_service import (
-    SessionService,
     SessionServiceError,
     consume_auth_slot,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 EMAIL_BINDING_PATH = "/api/v1/auth/email-reauthentication"
-
-
-def policy_for_request(
-    request: Request, sessions: SessionService
-) -> ReauthenticationPolicy:
-    return ReauthenticationPolicy(
-        sessions.session_factory,
-        sessions,
-        request.app.state.auth_providers,
-        request.app.state.settings.mail_configured,
-    )
 
 
 def get_email(
@@ -116,9 +95,8 @@ def verification(
                 "scope": scope,
                 "mode": decision.mode,
                 "verified": decision.verified,
-                "reauthenticated_until": decision.proof.expires_at
-                if decision.proof
-                else None,
+                "reauthenticated_until": decision.reauthenticated_until,
+                "allowed_methods": decision.allowed_methods,
                 "providers": [p for p in providers if p["slug"] in decision.providers],
             }
         }
@@ -126,75 +104,6 @@ def verification(
         return no_store_response(auth_error_response(exc))
     except AuthFlowError as exc:
         return flow_error(exc)
-
-
-@router.get("/pending-signups", response_model=PendingSignupResponse)
-def pending_signup(request: Request, response: Response, signup: SignupDep):
-    try:
-        set_no_store_headers(response)
-        return {"data": signup.status(request.cookies.get(PENDING_SIGNUP_COOKIE))}
-    except AuthFlowError as exc:
-        return flow_error(exc)
-
-
-@router.post("/pending-signups/email", response_model=PendingSignupEmailResponse)
-def pending_email(
-    body: PendingSignupEmailRequest,
-    request: Request,
-    response: Response,
-    signup: SignupDep,
-):
-    require_same_origin(request)
-    try:
-        consume_auth_slot(auth_client_ip(request), body.email)
-        completed, return_to = signup.submit_email(
-            binding=request.cookies.get(PENDING_SIGNUP_COOKIE), email=body.email
-        )
-        set_no_store_headers(response)
-        if completed is not None:
-            set_session_cookie(
-                response, request.app.state.settings, request, completed.session
-            )
-        return {
-            "data": {
-                "status": "complete" if completed else "email_sent",
-                "session": session_payload(completed.session) if completed else None,
-                "return_to": return_to,
-            }
-        }
-    except AuthFlowError as exc:
-        return flow_error(exc)
-    except SessionServiceError as exc:
-        return no_store_response(auth_error_response(exc))
-
-
-@router.post("/pending-signups/confirm", response_model=PendingSignupConfirmResponse)
-def pending_confirm(
-    body: ConfirmationTokenRequest,
-    request: Request,
-    response: Response,
-    signup: SignupDep,
-):
-    require_same_origin(request)
-    try:
-        consume_auth_slot(auth_client_ip(request), "")
-        result = signup.confirm(
-            binding=request.cookies.get(PENDING_SIGNUP_COOKIE), token=body.token
-        )
-        set_session_cookie(
-            response, request.app.state.settings, request, result.session
-        )
-        set_no_store_headers(response)
-        return {
-            "data": {
-                "session": session_payload(result.session),
-                "return_to": result.return_to,
-            }
-        }
-    except AuthFlowError as exc:
-        return flow_error(exc)
-    except SessionServiceError as exc:
-        return no_store_response(auth_error_response(exc))
 
 
 @router.post(
@@ -209,7 +118,8 @@ def request_email(
 ):
     require_same_origin(request)
     try:
-        consume_auth_slot(auth_client_ip(request), "")
+        user = email.sessions.authenticate_session(current_session_token(request))
+        consume_auth_slot(auth_client_ip(request), user_id=user.user_id)
         binding = email.request(
             session_token=current_session_token(request),
             scope=body.scope,
@@ -247,7 +157,8 @@ def confirm_email(
 ):
     require_same_origin(request)
     try:
-        consume_auth_slot(auth_client_ip(request), "")
+        user = email.sessions.authenticate_session(current_session_token(request))
+        consume_auth_slot(auth_client_ip(request), user_id=user.user_id)
         proof, return_to = email.confirm(
             session_token=current_session_token(request),
             scope=body.scope,

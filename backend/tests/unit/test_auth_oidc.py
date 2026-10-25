@@ -1,5 +1,9 @@
 """Protocol security and bounded network behavior for unregistered OIDC helpers."""
 
+# Budget exception: two unit cases separate signed-claim/key validation from
+# HTTP/cache/SSRF behavior. Mutation loops are logical inputs, not one free case;
+# no real IdP, application DB or browser is required for these failure paths.
+
 from __future__ import annotations
 
 import base64

@@ -10,10 +10,13 @@ from backend.spi.auth import (
     CallbackInput,
     ExternalAssertion,
     IdentityLifecycleHook,
+    LoginContext,
     MethodCapabilities,
     ProviderContext,
     ProvisioningHook,
+    ProvisioningResult,
     RedirectInstruction,
+    WorkspaceRoleRequest,
 )
 from backend.spi.context import DatabaseProvider, ToolCallContext
 from backend.spi.conversion import (
@@ -33,7 +36,18 @@ from backend.spi.conversion import (
     SourceLocation,
     UnsupportedConversionError,
 )
-from backend.spi.plugins import DtxwikiPlugin, JobHandler, PluginMigrations, PluginMount
+from backend.spi.plugins import (
+    DtxwikiPlugin,
+    JobFailure,
+    JobHandler,
+    JobInput,
+    JobResult,
+    PermanentJobError,
+    PluginMigrations,
+    PluginMount,
+    RetryableJobError,
+    WorkerContext,
+)
 from backend.spi.preview import (
     PREVIEW_OUTPUT_SCHEMA_VERSION,
     PREVIEW_PROVIDER_SPI_VERSION,
@@ -73,13 +87,22 @@ __all__ = [
     "CallbackInput",
     "ExternalAssertion",
     "IdentityLifecycleHook",
+    "LoginContext",
     "MethodCapabilities",
     "ProviderContext",
     "ProvisioningHook",
+    "ProvisioningResult",
     "RedirectInstruction",
+    "WorkspaceRoleRequest",
     "SPI_VERSION",
     "DtxwikiPlugin",
     "JobHandler",
+    "JobInput",
+    "JobResult",
+    "JobFailure",
+    "PermanentJobError",
+    "RetryableJobError",
+    "WorkerContext",
     "PluginMigrations",
     "PluginMount",
     "CONVERSION_OUTPUT_SCHEMA_VERSION",

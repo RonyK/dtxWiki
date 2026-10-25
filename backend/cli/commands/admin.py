@@ -11,12 +11,14 @@ import sys
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated
+from uuid import UUID
 
 import typer
 from sqlalchemy import select
 
 from backend.app.bootstrap import bootstrap as bootstrap_app
 from backend.app.db import make_session_factory_from_settings
+from backend.app.plugins import load_plugins
 from backend.app.settings import Settings
 from backend.cli.invocation import invocation_settings
 from backend.models.user import User
@@ -30,6 +32,11 @@ from backend.services.api_token_service import (
     WorkspaceGrantRequest,
     normalize_token_name,
 )
+from backend.services.auth.identity_recovery import (
+    IdentityRecoveryError,
+    IdentityRecoveryService,
+)
+from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.mail_delivery import EmailDeliveryService, MailDeliveryError
 from backend.services.password_recovery_service import (
@@ -482,45 +489,53 @@ def _admin_session_factory(db: str | None):
 
 @server_admin_app.command(name="grant")
 def server_admin_grant(
-    email: Annotated[str, typer.Option("--email", help="Email of an existing user.")],
+    email: Annotated[
+        str | None, typer.Option("--email", help="Native email of an existing user.")
+    ] = None,
+    user_id: Annotated[
+        UUID | None,
+        typer.Option("--user-id", help="Exact user UUID, including SSO accounts."),
+    ] = None,
     db: str | None = typer.Option(None, help="Override database URL."),
 ) -> None:
     """Grant instance-level (server) admin to an existing user."""
     factory = _admin_session_factory(db)
     with factory.begin() as session:
-        user = session.scalar(
-            select(User).where(User.email == _cli_normalize_email(email))
-        )
+        user = _cli_target_user(session, email=email, user_id=user_id)
         if user is None:
+            target = f"user ID {user_id}" if user_id else f"email {email!r}"
             typer.echo(
-                f"admin grant failed: no user with email {email!r} "
-                f"(create one first: dtxwiki users add {email})",
+                f"admin grant failed: no user with {target}",
                 err=True,
             )
             raise typer.Exit(2)
         server_admin_service.grant_server_admin(session, user.id, granted_by="cli")
-    typer.echo(f"granted server-admin to {email}")
+    typer.echo(f"granted server-admin to {email or user.id}")
 
 
 @server_admin_app.command(name="revoke")
 def server_admin_revoke(
-    email: Annotated[str, typer.Option("--email", help="Email of the admin user.")],
+    email: Annotated[
+        str | None, typer.Option("--email", help="Native email of the admin user.")
+    ] = None,
+    user_id: Annotated[
+        UUID | None, typer.Option("--user-id", help="Exact admin user UUID.")
+    ] = None,
     db: str | None = typer.Option(None, help="Override database URL."),
 ) -> None:
     """Revoke instance-level (server) admin from a user."""
     factory = _admin_session_factory(db)
     with factory.begin() as session:
-        user = session.scalar(
-            select(User).where(User.email == _cli_normalize_email(email))
-        )
+        user = _cli_target_user(session, email=email, user_id=user_id)
         if user is None:
-            typer.echo(f"admin revoke failed: no user with email {email!r}", err=True)
+            target = f"user ID {user_id}" if user_id else f"email {email!r}"
+            typer.echo(f"admin revoke failed: no user with {target}", err=True)
             raise typer.Exit(2)
         removed = server_admin_service.revoke_server_admin(session, user.id)
     if removed:
-        typer.echo(f"revoked server-admin from {email}")
+        typer.echo(f"revoked server-admin from {email or user.id}")
     else:
-        typer.echo(f"{email} was not a server-admin")
+        typer.echo(f"{email or user.id} was not a server-admin")
 
 
 @server_admin_app.command(name="list")
@@ -549,7 +564,70 @@ def server_admin_list(
         typer.echo("no server admins")
         return
     for row in rows:
-        typer.echo(f"{row['email']} (granted_by={row['granted_by']})")
+        typer.echo(
+            f"{row['user_id']} {row['email'] or '(SSO)'} "
+            f"(granted_by={row['granted_by']})"
+        )
+
+
+def _cli_target_user(session, *, email: str | None, user_id: UUID | None):
+    if (email is None) == (user_id is None):
+        raise typer.BadParameter("Supply exactly one of --email or --user-id.")
+    return (
+        session.get(User, user_id)
+        if user_id
+        else session.scalar(
+            select(User).where(User.email == _cli_normalize_email(email))
+        )
+    )
+
+
+@users_app.command(name="rebind-identity")
+def users_rebind_identity(
+    user_id: Annotated[UUID, typer.Option("--user-id")],
+    identity_id: Annotated[UUID, typer.Option("--identity-id")],
+    expected_issuer: Annotated[str, typer.Option("--expected-issuer")],
+    expected_subject: Annotated[str, typer.Option("--expected-subject")],
+    provider_slug: Annotated[str, typer.Option("--provider")],
+    issuer: Annotated[str, typer.Option("--issuer")],
+    subject: Annotated[str, typer.Option("--subject")],
+    reason: Annotated[
+        str,
+        typer.Option(
+            "--reason", help="Out-of-band ownership verification and recovery reason."
+        ),
+    ],
+    db: str | None = typer.Option(None, help="Override database URL."),
+) -> None:
+    """Rebind a verified user's external identity, preserving its UUID.
+
+    Verify ownership separately and retire the old IdP identity first. The
+    operation revokes the user's sessions and API/OAuth credentials.
+    """
+    settings = invocation_settings(database_url=db) if db else invocation_settings()
+    bootstrap_app(settings)
+    providers = ProviderRegistry(settings, load_plugins(settings).auth_methods())
+    try:
+        result = IdentityRecoveryService(
+            make_session_factory_from_settings(settings), providers
+        ).rebind(
+            user_id=user_id,
+            identity_id=identity_id,
+            expected_issuer=expected_issuer,
+            expected_subject=expected_subject,
+            provider_slug=provider_slug,
+            issuer=issuer,
+            subject=subject,
+            reason=reason,
+            actor_id=cli_operator_actor_id(),
+        )
+    except IdentityRecoveryError as exc:
+        typer.echo(f"identity recovery failed: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(
+        f"rebound identity {result['identity_id']} for user {result['user_id']}; "
+        "sessions and credentials revoked"
+    )
 
 
 @workspace_members_app.command(name="list")
@@ -575,7 +653,10 @@ def workspace_members_list(
 
 @workspace_members_app.command(name="add")
 def workspace_members_add(
-    email: Annotated[str, typer.Argument(help="User email.")],
+    email: Annotated[str | None, typer.Argument(help="Native user email.")] = None,
+    user_id: Annotated[
+        UUID | None, typer.Option("--user-id", help="Exact user UUID.")
+    ] = None,
     workspace: str = typer.Option(..., "--workspace", help="Workspace slug."),
     role: str = typer.Option("editor", "--role", help="owner|editor|viewer"),
     db: str | None = typer.Option(None, help="Override database URL."),
@@ -584,12 +665,15 @@ def workspace_members_add(
     """Add or update a user's workspace membership."""
     if role not in USER_ROLES:
         raise typer.BadParameter("--role must be one of: owner, editor, viewer")
-    email = _cli_normalize_email(email)
+    if (email is None) == (user_id is None):
+        raise typer.BadParameter("Supply exactly one native email or --user-id.")
+    email = _cli_normalize_email(email) if email is not None else None
     service = make_workspace_membership_service(db)
     try:
         member = service.add_member(
             workspace_slug=workspace,
             email=email,
+            user_id=user_id,
             role=role,
         )
     except (
@@ -602,21 +686,28 @@ def workspace_members_add(
     if json_output:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
-    typer.echo(f"added {payload['email']} role={payload['role']}")
+    typer.echo(f"added {payload['email'] or payload['user_id']} role={payload['role']}")
 
 
 @workspace_members_app.command(name="remove")
 def workspace_members_remove(
-    email: Annotated[str, typer.Argument(help="User email.")],
+    email: Annotated[str | None, typer.Argument(help="Native user email.")] = None,
+    user_id: Annotated[
+        UUID | None, typer.Option("--user-id", help="Exact user UUID.")
+    ] = None,
     workspace: str = typer.Option(..., "--workspace", help="Workspace slug."),
     db: str | None = typer.Option(None, help="Override database URL."),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Remove a user's workspace membership."""
-    email = _cli_normalize_email(email)
+    if (email is None) == (user_id is None):
+        raise typer.BadParameter("Supply exactly one native email or --user-id.")
+    email = _cli_normalize_email(email) if email is not None else None
     service = make_workspace_membership_service(db)
     try:
-        removed = service.remove_member(workspace_slug=workspace, email=email)
+        removed = service.remove_member(
+            workspace_slug=workspace, email=email, user_id=user_id
+        )
     except (
         InvalidCredentialsError,
         WorkspaceMembershipNotFoundError,
@@ -624,10 +715,12 @@ def workspace_members_remove(
         typer.echo(f"workspace members remove failed: {exc}", err=True)
         raise typer.Exit(2) from exc
     payload = {"email": email, "workspace": workspace, "removed": removed}
+    if user_id is not None:
+        payload["user_id"] = str(user_id)
     if json_output:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
-    typer.echo(f"removed {email} from {workspace}: {str(removed).lower()}")
+    typer.echo(f"removed {email or user_id} from {workspace}: {str(removed).lower()}")
 
 
 def make_workspace_membership_service(db: str | None) -> WorkspaceMembershipService:

@@ -1,5 +1,9 @@
 """Plugins compose under core namespaces and retain independent schema stamps."""
 
+# Budget exception: two existing traversals cover application/queue lifecycle
+# and an independent plugin Alembic chain. Real queue outcomes count separately;
+# direct callback checks that duplicated queue success/failure paths were removed.
+
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -23,12 +27,24 @@ from backend.app.bootstrap import (
     ensure_data_dirs,
 )
 from backend.app.settings import Settings
-from backend.spi.plugins import DtxwikiPlugin, PluginMigrations, PluginMount
-from backend.worker.registry import JobHandler
+from backend.scripts.seed_dev import seed_default_workspace
+from backend.spi.plugins import (
+    DtxwikiPlugin,
+    JobHandler,
+    JobInput,
+    JobResult,
+    PermanentJobError,
+    PluginMigrations,
+    PluginMount,
+    RetryableJobError,
+    WorkerContext,
+)
 from backend.worker.runtime import OneShotWorker
 
 
-def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(monkeypatch):
+def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(
+    monkeypatch, session_factory
+):
     events = []
     configured = []
     router = APIRouter()
@@ -49,8 +65,23 @@ def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(monkeypatc
     def probe_cli():
         typer.echo("example command")
 
+    def business(context, job):
+        assert isinstance(context, WorkerContext)
+        assert isinstance(job, JobInput)
+        with pytest.raises(TypeError):
+            job.payload["nested"]["secret"] = "mutated"
+        if job.payload.get("failure") == "permanent":
+            raise PermanentJobError("example_permanent")
+        if job.payload.get("failure") == "retryable":
+            raise RetryableJobError("example_retryable")
+        if job.payload.get("failure") == "unexpected":
+            raise RuntimeError("secret-from-plugin")
+        return JobResult({"plugin": "example", "nested": ["json"]})
+
+    failures = []
     handler = JobHandler(
-        business=lambda *_: {"plugin": "example"}, completes_in_service=False
+        business=business,
+        on_failure=lambda context, job, error: failures.append((context, job, error)),
     )
     plugin = DtxwikiPlugin(
         name="example",
@@ -91,6 +122,43 @@ def test_plugin_routes_lifespan_cli_and_worker_share_enabled_instance(monkeypatc
     worker = OneShotWorker(settings=settings)
     assert worker._handler_for(SimpleNamespace(job_type="example_job")) is handler
     assert worker._handler_for(SimpleNamespace(job_type="extraction")) is not None
+    # Execute each distinct outcome through the real core-owned queue. The
+    # callback also verifies immutable nested input on these same invocations.
+    with session_factory.begin() as session:
+        workspace = seed_default_workspace(session)
+        workspace_id = workspace.id
+    for failure, expected, error in (
+        (None, "completed", None),
+        ("permanent", "failed", "example_permanent"),
+        ("retryable", "queued", "example_retryable"),
+        ("unexpected", "queued", "plugin_job_failed"),
+    ):
+        with session_factory.begin() as session:
+            queued = worker.job_queue.enqueue(
+                session=session,
+                workspace_id=workspace_id,
+                job_type="example_job",
+                trigger_type="manual",
+                target_ref={
+                    "nested": {"secret": "original"},
+                    "failure": failure,
+                },
+            )
+            queued_id = queued.id
+        dispatched = worker.dispatch_once_with_session_factory(
+            session_factory,
+            workspace_id=workspace_id,
+            job_types={"example_job"},
+        )
+        assert dispatched.job_id == queued_id
+        assert dispatched.status == expected
+        if error is None:
+            assert dispatched.detail == {"plugin": "example", "nested": ["json"]}
+        else:
+            assert dispatched.detail["error"] == error
+    assert len(failures) == 1
+    assert failures[0][2].code == "example_permanent"
+    assert failures[0][2].retryable is False
     collision = replace(plugin, worker_handlers=lambda: {"extraction": handler})
     with pytest.raises(plugins.PluginConfigurationError, match="worker handler"):
         plugins.PluginRegistry((collision,)).worker_handlers()
