@@ -66,13 +66,13 @@
     },
     {
       "name": "wikilink",
-      "input": "[[decision-log|Decision]]",
+      "input": "[[decision-log#Breaking Changes|Decision]]",
       "kind": "wikilink",
       "workspace_id": null,
       "page_id": null,
-      "fragment": null,
+      "fragment": "breaking-changes",
       "stable_url": null,
-      "reason": "Legacy labels and pin keys must survive formatting changes."
+      "reason": "Legacy labels, pin keys, and renderer-normalized wiki heading text must survive formatting changes."
     },
     {
       "name": "self_origin",

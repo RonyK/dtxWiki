@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import type { components } from "./types.gen";
+import type { ContextLinkTarget } from "../lib/contextLinks";
 import type { ContextHistoryStatus } from "../lib/contextHistory";
 
 export type VersionInfo = {
@@ -52,6 +53,7 @@ export type ContextPageDetail = ContextPageSummary & {
     target_page_id: string | null;
     current_slug: string | null;
   }>;
+  link_targets: ContextLinkTarget[];
   warnings: string[];
   // F1: an open review awaiting a decision for this page's draft, surfaced for
   // inline approval on the Context page. pending_draft_warnings lints the draft
@@ -225,6 +227,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
       target_page_id: target.target_page_id ?? null,
       current_slug: target.current_slug ?? null,
     })),
+    link_targets: (raw as BackendContextPageDetail & { link_targets?: ContextLinkTarget[] }).link_targets ?? [],
     warnings: raw.warnings ?? [],
     pending_draft_version_id: raw.pending_draft_version_id ?? null,
     pending_draft_warnings: raw.pending_draft_warnings ?? [],

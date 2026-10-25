@@ -2919,6 +2919,7 @@ function ContextReader({
               stripLeadingHeading={detail.title}
               deletedSources={deletedSources}
               wikilinkTargets={detail.wikilink_targets}
+              linkTargets={detail.link_targets}
               workspaceId={workspaceId}
             />
           ) : (

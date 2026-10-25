@@ -50,7 +50,8 @@
     "visibilityOpenLiveSnapshot": "Open live public page",
     "scrollableCode": "Scrollable {{language}} code",
     "taskComplete": "Completed task",
-    "taskIncomplete": "Incomplete task"
+    "taskIncomplete": "Incomplete task",
+    "unavailableLink": "Unavailable page"
   },
   "publicReader": {
     "ariaLabel": "Published page",

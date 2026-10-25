@@ -14,9 +14,9 @@ import { MarkdownView } from "./MarkdownView";
 // Unauthenticated public reader for a published page (T16 27-b). Renders ONLY
 // the page title + body markdown — no sidebar, context rail, or inspector. The
 // public read endpoint guarantees this is the published head version and that
-// the page is explicitly public; drafts/private pages return 404. Wikilinks in
-// the body render as plain text (wikilinkMode="plain") so this anonymous view
-// never emits in-app links nor enumerates private targets.
+// the page is explicitly public; drafts/private pages return 404. Internal
+// links use only public destinations confirmed in this anonymous response;
+// unavailable targets remain text and never cause authenticated lookups.
 export function PublishedPageReader() {
   const { t, i18n } = useTranslation("pages");
   const { workspaceSlug = "", slug = "" } = useParams();
@@ -137,6 +137,7 @@ export function PublishedPageReader() {
           resolveContextMediaAsset={resolveContextMediaAsset}
           stripLeadingHeading={page.title}
           wikilinkMode="plain"
+          linkTargets={(page as PublicPagePayload & { link_targets?: import("../../shared/lib/contextLinks").ContextLinkTarget[] }).link_targets ?? []}
         />
       </article>
     </main>

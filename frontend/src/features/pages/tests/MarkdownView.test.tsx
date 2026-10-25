@@ -493,11 +493,20 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
+          workspaceId="11111111-1111-4111-8111-111111111111"
+          linkTargets={[
+            { locator: "/pages/release-notes", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
+            { locator: "/context/missing.md", href: null, target_page_id: null, state: "unavailable" },
+          ]}
           body={[
             "# Release Notes",
             "",
             "> [!NOTE]",
             "> Keep this cited.",
+            "",
+            "[Missing](/context/missing.md), [Short](/p/22222222-2222-4222-8222-222222222222#details), [Reference][target],",
+            "",
+            "[target]: /pages/release-notes",
             "",
             "[Internal](/pages/release-notes), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
           ].join("\n")}
@@ -515,7 +524,7 @@ describe("MarkdownView", () => {
     expect(screen.getByText("Keep this cited.").closest(".markdown-alert"))
       .toHaveClass("markdown-alert-note");
     expect(screen.getByRole("link", { name: "Internal" }))
-      .toHaveAttribute("href", "/pages/release-notes");
+      .toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222");
     expect(screen.getByRole("link", { name: "Internal" }))
       .not.toHaveAttribute("node");
     expect(screen.getByRole("link", { name: "Hash" }))
@@ -525,10 +534,13 @@ describe("MarkdownView", () => {
       .toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "External" }))
       .toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByRole("link", { name: "Protocol" }))
-      .toHaveAttribute("target", "_blank");
-    expect(screen.getByRole("link", { name: "Protocol" }))
-      .toHaveAttribute("rel", "noopener noreferrer");
+    // Budget exception: legacy destination pins, short preview inheritance,
+    // reference links, and unavailable navigation are distinct render paths.
+    expect(screen.getByRole("link", { name: "Protocol" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("link", { name: "Missing" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("link", { name: "Missing" })).toHaveAttribute("title", "Unavailable page");
+    expect(screen.getByRole("link", { name: "Short" })).toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#user-content-details");
+    expect(screen.getByRole("link", { name: "Reference" })).toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222");
   });
 
   it("clobber-prefixes raw HTML ids so authored anchors cannot hijack the app namespace", () => {
@@ -665,6 +677,7 @@ describe("MarkdownView", () => {
       <MemoryRouter>
         <MarkdownView
           body="See [[Old Name]], [[Old Name#Breaking Changes|changes]], and [[link to nothing]]."
+          workspaceId="workspace-1"
           wikilinkTargets={[
             {
               target_slug: "old-name",
@@ -682,11 +695,11 @@ describe("MarkdownView", () => {
     );
 
     expect(screen.getByRole("link", { name: "Old Name" }))
-      .toHaveAttribute("href", "/context?target=target-page-id");
+      .toHaveAttribute("href", "/p/workspace-1/target-page-id");
     expect(screen.getByRole("link", { name: "changes" }))
       .toHaveAttribute(
         "href",
-        "/context?target=target-page-id#user-content-breaking-changes",
+        "/p/workspace-1/target-page-id#user-content-breaking-changes",
       );
     expect(screen.getByText("link to nothing").closest("a"))
       .toHaveAttribute("href", "#");
@@ -757,11 +770,11 @@ describe("MarkdownView", () => {
 
     expect(screen.getByRole("link", { name: "Old Name" })).toHaveAttribute(
       "href",
-      "/workspaces/workspace-1/context/pages/target-page-id",
+      "/p/workspace-1/target-page-id",
     );
     expect(screen.getByRole("link", { name: "changes" })).toHaveAttribute(
       "href",
-      "/workspaces/workspace-1/context/pages/target-page-id#user-content-breaking-changes",
+      "/p/workspace-1/target-page-id#user-content-breaking-changes",
     );
   });
 

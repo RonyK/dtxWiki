@@ -4623,7 +4623,8 @@ export function PageEditor({
                   }
                   publishedVersionId={page.current_published_version_id ?? null}
                   publishedVersionNo={page.published_version_no ?? null}
-                    slug={page.slug}
+                  workspaceId={workspaceId}
+                  slug={page.slug}
                   workspaceSlug={workspaceSlug}
                   workspaceVisibility={workspaceVisibility}
                 />
@@ -5344,6 +5345,7 @@ export function PageEditor({
                 sourceLineNumbers
                 stripLeadingHeading={title}
                 wikilinkPages={pages}
+                workspaceId={workspaceId}
               />
             </div>
           ) : null}

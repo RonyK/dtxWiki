@@ -33,6 +33,14 @@ export function escapeContextLinkLabel(title: string): string {
   return title.replace(/[\\`*_[\]<>!&~]/g, "\\$&");
 }
 
+export function normalizeContextHeading(value: string): string {
+  return value.trim().toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
 function fragmentSuffix(fragment?: string | null): string {
   return fragment ? `#${fragment.replace(/^#/, "")}` : "";
 }
@@ -61,7 +69,7 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
     return result("wikilink", {
       lookup: lookup.normalize("NFKC").trim().toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 80),
-      fragment: heading || null,
+      fragment: normalizeContextHeading(heading) || null,
     });
   }
   if (!value || value !== value.trim() ||
