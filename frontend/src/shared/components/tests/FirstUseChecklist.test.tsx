@@ -12,7 +12,7 @@ import {
 
 function renderChecklist(props: Parameters<typeof FirstUseChecklist>[0] = {}) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/workspaces/workspace-1/dashboard"]}>
       <FirstUseChecklist {...props} />
     </MemoryRouter>,
   );
@@ -84,11 +84,11 @@ describe("FirstUseChecklist", () => {
   });
 
   it.each([
-    { completed: {}, action: "Add first source", href: "/setup" },
+    { completed: {}, action: "Add first source", href: "/workspaces/workspace-1/library/items/new" },
     {
       completed: { library: true, context: true },
       action: "Open Review queue",
-      href: "/review",
+      href: "/workspaces/workspace-1/review",
     },
   ])("renders the available next action $action", ({ completed, action, href }) => {
     renderChecklist({ completed, showPrimaryAction: true });
@@ -125,6 +125,6 @@ describe("FirstUseChecklist", () => {
     expect(screen.getAllByText("나중에")).toHaveLength(1);
     expect(
       screen.getByRole("link", { name: "첫 컨텍스트 페이지 작성" }),
-    ).toHaveAttribute("href", "/context/new?from=context");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/context/pages/new");
   });
 });

@@ -58,6 +58,7 @@ function EditDuringCommit({
 
 const noEdit = () => {};
 
+const WORKSPACE_ID = "workspace-1";
 const TYPED_SLUG = "research-space-v2";
 
 function dangerZone(
@@ -65,7 +66,7 @@ function dangerZone(
   edit: (host: HTMLElement) => void = noEdit,
 ) {
   return (
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
       <EditDuringCommit edit={edit}>
         <WorkspaceDangerZone
           currentSlug={currentSlug}

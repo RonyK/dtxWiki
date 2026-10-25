@@ -382,6 +382,17 @@ codex mcp add dtxwiki --url $env:DTXWIKI_MCP_URL --bearer-token-env-var DTXWIKI_
 
 #### 워크스페이스 접근 확인하기
 
+워크스페이스 범위의 모든 MCP 도구와 프롬프트에는 명시적인 `workspace_id`가
+필요합니다. `list_my_workspaces`로 접근 가능한 ID를 확인하세요. 키에 허용된
+워크스페이스, 계정 기본값, 브라우저 선택값은 누락된 ID를 대신하지 않습니다.
+리소스 조회도 `dtxwiki://workspaces/<workspace_id>/...`에 ID를 포함합니다.
+
+워크스페이스 콘텐츠의 브라우저 주소는 `/workspaces/<workspace_id>/...`이며,
+Context 문서 링크는 `/p/<workspace_id>/<page_id>`입니다. 대상 없는 진입 화면은
+마지막 워크스페이스로 이동할 수 있지만, `/context?target=<id>`와 `/p/<page_id>`
+같은 구형 대상 주소는 워크스페이스를 추정하지 않습니다. 출처 워크스페이스에서
+명시적인 링크를 여세요. 공개 문서는 `/w/<workspace_slug>/pages/<slug>`를 유지합니다.
+
 클라이언트의 연결 완료 표시만으로 워크스페이스나 쓰기 접근까지 확인되지는 않습니다.
 클라이언트에 다음과 같이 요청하세요.
 

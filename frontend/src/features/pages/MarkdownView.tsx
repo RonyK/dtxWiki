@@ -55,6 +55,7 @@ import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
 import { classifyContextLink, formatContextPageUrl, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { workspacePath } from "../../shared/lib/workspaceRoutes";
 
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
@@ -106,7 +107,7 @@ type MarkdownViewProps = {
   // Uploaded and converted documents are not authored Page content. This mode
   // drops raw HTML and ambient resource URLs, and keeps every link as text so
   // untrusted content cannot create a navigation control.
-  renderPolicy?: "page" | "untrusted-preview";
+  renderPolicy?: "page" | "untrusted-preview" | "confirmed-links";
   // The source document/editor workspace supplies authority for short links.
   // Never infer it from whichever workspace the reader most recently selected.
   workspaceId?: string | null;
@@ -215,8 +216,9 @@ export function MarkdownView({
     targets: linkTargets,
     workspaceId,
     publicReader: wikilinkMode === "plain",
+    confirmedOnly: renderPolicy === "confirmed-links",
     unavailableTitle: t("reader.unavailableLink", { defaultValue: "Unavailable page" }),
-  }), [linkTargets, workspaceId, wikilinkMode, t]);
+  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, t]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -249,7 +251,7 @@ export function MarkdownView({
                 video: MarkdownVideo,
               }
             : {
-                a: UntrustedPreviewLink,
+                a: renderPolicy === "confirmed-links" ? MarkdownLink : UntrustedPreviewLink,
                 img: UntrustedPreviewImage,
                 input: MarkdownTaskState,
                 pre: UntrustedPreviewCodeBlock,
@@ -299,16 +301,20 @@ export function MarkdownView({
                 ],
                 ...(pageSourceLineNumbers ? [rehypeSourceLines] : []),
               ]
-            : [
+            : renderPolicy === "confirmed-links"
+              ? [[rehypeResolveContextLinks, contextLinkPluginOptions], [rehypeSanitize, markdownSanitizeSchema]]
+              : [
                 rehypeTableAlignment,
                 [rehypeSanitize, markdownSanitizeSchema],
               ]
         }
         remarkRehypeOptions={REMARK_REHYPE_OPTIONS}
-        skipHtml={renderPolicy === "untrusted-preview"}
+        skipHtml={renderPolicy !== "page"}
         urlTransform={
           renderPolicy === "untrusted-preview"
             ? untrustedPreviewUrlTransform
+            : renderPolicy === "confirmed-links"
+              ? confirmedPreviewUrlTransform
             : pageUrlTransform
         }
       >
@@ -332,6 +338,12 @@ function untrustedPreviewUrlTransform(
   _node: Readonly<HastElement>,
 ) {
   return undefined;
+}
+
+function confirmedPreviewUrlTransform(value: string, key: string, node: Readonly<HastElement>) {
+  return node.tagName === "a" && key === "href" && value.startsWith("/") && !value.startsWith("//")
+    ? value
+    : undefined;
 }
 
 function pageUrlTransform(
@@ -369,6 +381,7 @@ type ContextLinkResolverOptions = {
   workspaceId?: string | null;
   publicReader: boolean;
   unavailableTitle: string;
+  confirmedOnly?: boolean;
 };
 
 function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
@@ -389,6 +402,11 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       const rawLocator = props.dataContextLinkLocator ?? props["data-context-link-locator"];
       const locator = typeof rawLocator === "string" ? rawLocator : href;
       const target = targets.get(locator);
+      if (options.confirmedOnly) {
+        if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return child.children;
+        props.href = target.href;
+        return [child];
+      }
       const classification = classifyContextLink(locator, { workspaceId: options.workspaceId });
       const wikilink = typeof rawLocator === "string";
       const internal = target || wikilink || !["external", "public_reader", "local", "media"].includes(classification.kind);
@@ -758,7 +776,7 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
     } else if (match[4]) {
       nodes.push(highlightNode(match[4]));
     } else if (match[6]) {
-      nodes.push(inlineTagNode(match[6]));
+      nodes.push(inlineTagNode(match[6], options.workspaceId));
     }
     cursor = match.index + match[0].length;
     match = pattern.exec(node.value);
@@ -933,14 +951,14 @@ function highlightNode(value: string): DtxInline {
   };
 }
 
-function inlineTagNode(rawTag: string): DtxInline {
+function inlineTagNode(rawTag: string, workspaceId?: string | null): DtxInline {
   const safeTag = sanitizeInlineTag(rawTag);
   return {
     type: "dtxInlineTag",
     data: {
-      hName: "a",
+      hName: workspaceId ? "a" : "mark",
       hProperties: {
-        href: `/search?q=${encodeURIComponent(`#${safeTag}`)}`,
+        ...(workspaceId ? { href: `${workspacePath(workspaceId, "search")}?q=${encodeURIComponent(`#${safeTag}`)}` } : {}),
         className: ["inline-tag"],
         "data-tag": safeTag,
       },

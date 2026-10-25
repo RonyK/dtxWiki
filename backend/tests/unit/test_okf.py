@@ -186,7 +186,7 @@ def test_render_context_concept_has_frontmatter_and_body(session_factory):
     assert "The body." in doc
     fm = project_context_frontmatter(page, version, workspace_slug="default")
     assert fm["type"] == "concept"
-    assert fm["resource"] == "/w/default/context/api"
+    assert fm["resource"] == f"/p/{page.workspace_id}/{page.id}"
 
 
 # --- index per-actor visibility ---------------------------------------------

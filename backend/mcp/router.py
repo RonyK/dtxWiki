@@ -16,6 +16,10 @@ from backend.mcp import (
     upload_tools,
 )
 from backend.mcp.envelope import MCPErrorResponse, error_envelope
+from backend.mcp.protocol.workspace_target import (
+    WorkspaceTargetValidationError,
+    require_workspace_target,
+)
 from backend.mcp.scopes import (
     TOOL_REQUIRED_ROLES,
     TOOL_REQUIRED_SCOPES,
@@ -70,9 +74,8 @@ TOOL_HANDLERS = {
 }
 
 
-# Tools whose payload may name a page_id without an explicit workspace_id
-# (or name both, which must then agree) -- see resolve_workspace_id_for_tool's
-# identifier consistency matrix docstring.
+# Tools whose page locator, when present, must agree with the explicitly
+# supplied workspace_id. Entity ownership is checked within that workspace.
 _PAGE_ID_CONSISTENCY_TOOLS = frozenset(
     {
         "upload_image",
@@ -142,6 +145,12 @@ def dispatch(
         directory=tool_context.services.workspace_directory,
     )
     if isinstance(scoped_actor, PolicyRejection):
+        if scoped_actor.error_code == "validation_failed":
+            # Every workspace-bound input model requires workspace_id. Let
+            # that model report the complete field errors (including unknown
+            # fields), without binding a default target or normalizing page
+            # locators. The handler must reject before any domain access.
+            return handler(payload, replace(tool_context, workspace_id=None))
         return MCPErrorResponse(envelope=error_envelope(actor, scoped_actor.error_code))
     if not has_required_scope(scoped_actor, TOOL_REQUIRED_SCOPES[tool_name]):
         return MCPErrorResponse(envelope=error_envelope(scoped_actor, "scope_denied"))
@@ -226,6 +235,10 @@ def resolve_target_actor(
     required_role = TOOL_REQUIRED_ROLES[tool_name]
     if required_role is None:
         return actor
+    # Preserve scope-denial precedence and avoid parsing or probing target
+    # identifiers for a credential that cannot invoke this tool.
+    if not has_required_scope(actor, TOOL_REQUIRED_SCOPES[tool_name]):
+        return PolicyRejection("scope_denied")
     resolved = resolve_workspace_id_for_tool(
         tool_name=tool_name,
         payload=payload,
@@ -281,36 +294,22 @@ def resolve_workspace_id_for_tool(
 ) -> UUID | PolicyRejection | None:
     """Resolve the target workspace_id for the given MCP tool payload.
 
-    Fix-6 Task 1.1 (B-F5-CODEX-1): when the payload mixes identifiers
-    pointing to different workspaces, this function returns a
-    PolicyRejection("inconsistent_identifier") so the dispatcher can
-    deny the call before any handler reads cross-workspace data.
-
-    Identifier consistency matrix (upload_image, and the P8.6 page_id-bearing
-    Context-editing tools: begin_context_edit, update_context_edit,
-    submit_context_edit_for_review, discard_context_edit, patch_context_edit):
-    - workspace_id only          -> use workspace_id
-    - workspace_id + page_id     -> page must belong to workspace_id, else reject
-    - workspace_slug only        -> resolve by slug
-    - page_id only               -> resolve from page's owning workspace
-    - workspace_slug + page_id   -> both must resolve to same workspace, else reject
+    Every workspace-bound tool must supply a valid workspace_id before this
+    function examines any page locator. Entity existence is then resolved
+    only inside the target workspace by the handler.
     """
 
-    explicit_workspace_id: UUID | None = None
-    if "workspace_id" in payload:
-        try:
-            explicit_workspace_id = UUID(str(payload["workspace_id"]))
-        except ValueError:
-            return None
+    try:
+        explicit_workspace_id = require_workspace_target(payload)
+    except WorkspaceTargetValidationError:
+        return PolicyRejection("validation_failed")
 
-    page_id: UUID | None = None
     if tool_name in _PAGE_ID_CONSISTENCY_TOOLS and "page_id" in payload:
         raw_page_id = payload.get("page_id")
         if raw_page_id is not None:
             try:
                 from backend.services.context_links import parse_page_input
                 locator = parse_page_input(raw_page_id)
-                page_id = locator.page_id
                 if (
                     locator.workspace_id is not None
                     and explicit_workspace_id is not None
@@ -320,45 +319,6 @@ def resolve_workspace_id_for_tool(
             except ValueError:
                 return None
 
-    workspace_slug = (
-        payload.get("workspace_slug")
-        if isinstance(payload.get("workspace_slug"), str)
-        else None
-    )
-
-    resolved_directory = directory or WorkspaceDirectory()
-    with session_factory() as session:
-        slug_workspace_id: UUID | None = None
-        if workspace_slug is not None:
-            slug_workspace_id = resolved_directory.workspace_id_by_slug(
-                session, workspace_slug
-            )
-
-        page_workspace_id: UUID | None = None
-        if page_id is not None:
-            page_workspace_id = resolved_directory.workspace_id_by_context_page(
-                session, page_id
-            )
-
-    # A page mismatch is indistinguishable from a missing page. Only two
-    # conflicting workspace locators remain a malformed identifier pair.
-    if (
-        explicit_workspace_id is not None and slug_workspace_id is not None
-        and explicit_workspace_id != slug_workspace_id
-    ):
-        return PolicyRejection("inconsistent_identifier")
-    target_workspace_id = explicit_workspace_id or slug_workspace_id
-    if (
-        target_workspace_id is not None and page_workspace_id is not None
-        and target_workspace_id != page_workspace_id
-    ):
-        return PolicyRejection("not_found")
-
-    # Priority: explicit workspace_id > page_id > workspace_slug
-    if explicit_workspace_id is not None:
-        return explicit_workspace_id
-    if page_workspace_id is not None:
-        return page_workspace_id
-    if slug_workspace_id is not None:
-        return slug_workspace_id
-    return None
+    # Entity ownership is checked later inside the explicit workspace shard.
+    # Never discover a workspace by querying a page UUID or slug globally.
+    return explicit_workspace_id

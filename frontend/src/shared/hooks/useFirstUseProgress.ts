@@ -3,20 +3,18 @@ import { useEffect, useState } from "react";
 import { listContextPages } from "../api/context";
 import { listLibraryItems } from "../api/library";
 import { listRecentReviewDecisions } from "../api/operations";
-import { getCurrentWorkspaceId } from "../api/workspace";
+import { useWorkspaceRoute } from "../lib/workspaceRoutes";
 import type { FirstUseProgress } from "../components/FirstUseChecklist";
-import { useOptionalWorkspaceContext } from "../workspace/WorkspaceContext";
 
 export function useFirstUseProgress(): FirstUseProgress {
-  const workspaceContext = useOptionalWorkspaceContext();
-  const selectedWorkspaceId = workspaceContext?.selectedWorkspace?.id;
+  const selectedWorkspaceId = useWorkspaceRoute()?.workspaceId;
   const [progress, setProgress] = useState<FirstUseProgress>({});
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const workspaceId = selectedWorkspaceId ?? await getCurrentWorkspaceId();
+        const workspaceId = selectedWorkspaceId;
         if (!workspaceId) return;
         const [library, context, review] = await Promise.all([
           listLibraryItems(workspaceId, { limit: 1 }),

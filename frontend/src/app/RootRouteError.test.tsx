@@ -16,13 +16,13 @@ describe("root route error boundary", () => {
       locale: "en",
       title: "This page couldn't be loaded",
       reload: "Load the latest version",
-      dashboard: "Go to Dashboard",
+      dashboard: "Find workspaces",
     },
     {
       locale: "ko",
       title: "페이지를 불러올 수 없습니다",
       reload: "최신 버전 불러오기",
-      dashboard: "대시보드로 이동",
+      dashboard: "워크스페이스 찾기",
     },
   ])(
     "renders localized recovery UI without the raw error in $locale",
@@ -60,7 +60,7 @@ describe("root route error boundary", () => {
       expect(screen.getByRole("button", { name: reload })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: dashboard })).toHaveAttribute(
         "href",
-        "/dashboard",
+        "/workspaces/find",
       );
       expect(
         screen.queryByText("RAW_CHUNK_STACK_MUST_STAY_HIDDEN"),

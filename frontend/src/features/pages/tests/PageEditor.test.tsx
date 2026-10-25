@@ -116,11 +116,13 @@ function renderWithRouter(initialEntry: string, routes: ReactNode) {
   const router = createMemoryRouter(createRoutesFromElements(
     <>
       {routes}
-      <Route path="/context" element={<PublishedContextDestination />} />
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
+      <Route path="/workspaces/:workspaceId/context" element={<PublishedContextDestination />} />
       <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<PublishedContextDestination />} />
     </>,
   ), {
-    initialEntries: [initialEntry],
+    initialEntries: [canonicalEditorEntry(initialEntry)],
   });
   render(
     <RouterProvider
@@ -128,6 +130,24 @@ function renderWithRouter(initialEntry: string, routes: ReactNode) {
     />,
   );
   return router;
+}
+
+function canonicalEditorEntry(entry: string) {
+  const match = /^\/(?:pages|context)\/([^/?]+)\/edit(\?.*)?$/.exec(entry);
+  if (match) {
+    const id = ({ hello: "p1", "release-notes": "p1", "media-brief": "p1", other: "p2", missing: "missing" } as Record<string, string>)[match[1]] ?? match[1];
+    return `/workspaces/workspace-1/context/pages/${id}/edit${match[2] ?? ""}`;
+  }
+  const create = /^\/(?:pages|context)\/new(\?.*)?$/.exec(entry);
+  if (create) {
+    const query = new URLSearchParams(create[1]?.slice(1) ?? "");
+    if (query.has("parentNodeId")) {
+      query.set("parent", query.get("parentNodeId") ?? "");
+      query.delete("parentNodeId");
+    }
+    return `/workspaces/workspace-1/context/pages/new${query.size ? `?${query}` : ""}`;
+  }
+  return entry;
 }
 
 function PublishedContextDestination() {
@@ -321,7 +341,7 @@ describe("PageEditor", () => {
 
   it("rejects a save when managed frontmatter puts the final body over its limit", async () => {
     const fetchMock = mockEditorPage("x".repeat(999_990));
-    renderWithRouter("/pages/hello/edit", <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />);
+    renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />);
     await screen.findByLabelText("Markdown body");
     await setEditorTitle(await findTitleEditor(), "Changed title");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
@@ -351,7 +371,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/new",
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />,
       );
 
       const titleInput = await findTitleEditor();
@@ -428,7 +448,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -498,9 +518,8 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -568,7 +587,7 @@ describe("PageEditor", () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/publish"))).toBe(false);
     await waitFor(() =>
       expect(router.state.location.pathname).toBe(
-        "/context/release-notes/edit",
+        "/workspaces/workspace-1/context/pages/p1/edit",
       ),
     );
     expect(screen.getByLabelText("Context tree")).toBeInTheDocument();
@@ -633,7 +652,7 @@ describe("PageEditor", () => {
       }
       return jsonResponse({
         data:
-          url.includes("/by-slug/")
+          url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1`
             ? {
                 ...page,
                 version_id: "v2",
@@ -649,7 +668,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/release-notes/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -664,7 +683,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -694,7 +713,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -743,7 +762,7 @@ describe("PageEditor", () => {
     });
     const router = renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -800,7 +819,7 @@ describe("PageEditor", () => {
       });
       const router = renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
       );
 
       await findTitleEditor();
@@ -834,7 +853,7 @@ describe("PageEditor", () => {
     });
     const router = renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -859,7 +878,7 @@ describe("PageEditor", () => {
     mockPublicationFlow({ rejectPublishWithoutOverride: true });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Server-only finding");
@@ -891,7 +910,7 @@ describe("PageEditor", () => {
       mockPublicationFlow({ rejectPublishWithoutOverride: true });
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
       );
 
       await setEditorTitle(await findTitleEditor(), "Server-only finding");
@@ -924,7 +943,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Server-only finding");
@@ -943,8 +962,8 @@ describe("PageEditor", () => {
   it("separates Save draft from exact-version Publish", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/workspace-1/context/pages/p1/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Published title");
@@ -954,7 +973,7 @@ describe("PageEditor", () => {
     });
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish"))).toBe(false);
     expect(router.state.location).toMatchObject({
-      pathname: "/context/hello/edit",
+      pathname: "/workspaces/workspace-1/context/pages/p1/edit",
       search: "",
     });
     // Publish stays disabled while the draft is in flight and then publishes
@@ -997,8 +1016,8 @@ describe("PageEditor", () => {
   it("enables Save draft and Publish together and publishes a dirty edit directly", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/workspace-1/context/pages/p1/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Published directly");
@@ -1046,7 +1065,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
       "/context/new",
-      <Route path="/context/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Publish without draft");
@@ -1077,8 +1096,8 @@ describe("PageEditor", () => {
   it("does not claim a saved draft when direct publish fails before staging", async () => {
     const fetchMock = mockPublicationFlow({ rejectAutosave: true });
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/workspace-1/context/pages/p1/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Cannot stage this edit");
@@ -1094,7 +1113,7 @@ describe("PageEditor", () => {
       fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/publish")),
     ).toHaveLength(0);
     expect(router.state.location).toMatchObject({
-      pathname: "/context/hello/edit",
+      pathname: "/workspaces/workspace-1/context/pages/p1/edit",
       search: "",
     });
   });
@@ -1106,8 +1125,8 @@ describe("PageEditor", () => {
     });
     const fetchMock = mockPublicationFlow({ publishResponse: pendingPublish });
     const router = renderWithRouter(
-      "/context/hello/edit",
-      <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/workspace-1/context/pages/p1/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Version being published");
@@ -1135,7 +1154,7 @@ describe("PageEditor", () => {
       ),
     ).toBeInTheDocument();
     expect(router.state.location).toMatchObject({
-      pathname: "/context/hello/edit",
+      pathname: "/workspaces/workspace-1/context/pages/p1/edit",
       search: "",
     });
     expect(getTitleEditor()).toHaveValue("Newer editor change");
@@ -1145,7 +1164,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Honest label");
@@ -1198,7 +1217,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
       );
 
       await findTitleEditor();
@@ -1226,7 +1245,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await findTitleEditor();
@@ -1259,7 +1278,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/new?title=Release%20plan",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />,
     );
 
     expect(screen.getByRole("heading", { name: "Loading page" })).toBeInTheDocument();
@@ -1275,7 +1294,7 @@ describe("PageEditor", () => {
 
   it("does not touch default-slug preferences before the selected workspace resolves", async () => {
     const defaultPreferenceKey = "dtxwiki:editor:default:hello";
-    const personalPreferenceKey = "dtxwiki:editor:personal-space:hello";
+    const personalPreferenceKey = "dtxwiki:editor:workspace-personal:p1";
     const defaultPreference = JSON.stringify({
       mode: "reading",
       splitPercent: 17,
@@ -1322,8 +1341,8 @@ describe("PageEditor", () => {
     });
 
     renderWithRouter(
-      "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      "/workspaces/workspace-personal/context/pages/p1/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     expect(screen.getByRole("heading", { name: "Loading page" })).toBeInTheDocument();
@@ -1401,9 +1420,8 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new?from=context&parentNodeId=context-inbox&title=Nested%20Brief",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -1442,7 +1460,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Release notes");
@@ -1461,7 +1479,7 @@ describe("PageEditor", () => {
     const fetchMock = mockEditorPage("# Hello");
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -1527,7 +1545,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
       </>,
     );
 
@@ -1561,7 +1579,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -1599,7 +1617,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/by-slug/hello`) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1` && init?.method !== "PATCH") {
         return jsonResponse({ data: page });
       }
       if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/autosave` && init?.method === "POST") {
@@ -1641,7 +1659,7 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/hello/edit?from=review&reviewItemId=review-1",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -1693,7 +1711,7 @@ describe("PageEditor", () => {
       const router = renderWithRouter(
         "/pages/hello/edit?from=review&reviewItemId=review-1",
         <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
           <Route path="/settings" element={<div>Settings destination</div>} />
         </>,
       );
@@ -1779,7 +1797,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/by-slug/missing`) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/missing`) {
         return jsonResponse(
           {
             error_code: "not_found",
@@ -1796,7 +1814,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/missing/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -1838,7 +1856,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -1864,7 +1882,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/by-slug/hello`) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1`) {
         return jsonResponse(
           {
             error_code: "internal_error",
@@ -1881,7 +1899,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -1931,7 +1949,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -1979,7 +1997,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -2029,7 +2047,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit?from=context",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -2082,7 +2100,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new?from=context",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
       </>,
     );
 
@@ -2140,7 +2158,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -2282,7 +2300,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1` && init?.method !== "PATCH") {
         // First read is the editor's initial load; the reload triggered by
         // preserveAlternative's rebase is the one that must see the head
         // that made the earlier autosave stale.
@@ -2336,7 +2354,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -2364,7 +2382,7 @@ describe("PageEditor", () => {
     // Rebased onto the server head, not left on the preserved branch: the
     // buffer now shows "Server head", not "My alternative".
     expect(
-      fetchMock.mock.calls.some((call) => String(call[0]).includes("/by-slug/hello")),
+      fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/context/pages/p1")),
     ).toBe(true);
     await expectEditorTitle("Server head");
 
@@ -2414,7 +2432,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1`) {
         pageReadCount += 1;
         return jsonResponse({ data: pageReadCount === 1 ? page : serverLatest });
       }
@@ -2458,7 +2476,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -2530,7 +2548,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "My stale edit");
@@ -2584,7 +2602,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -2651,7 +2669,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     // An unedited page in "published" state short-circuits save() entirely
@@ -2736,8 +2754,8 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
-          <Route path="/pages/:slug" element={<div>reader page</div>} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<div>reader page</div>} />
       </>,
     );
 
@@ -2825,7 +2843,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -2895,7 +2913,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -2959,7 +2977,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await expectEditorTitle("Hello");
@@ -3020,7 +3038,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -3090,7 +3108,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -3168,7 +3186,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -3222,7 +3240,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     await setEditorTitle(await findTitleEditor(), `Flush ${_label}`);
     trigger();
@@ -3246,7 +3264,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     await setEditorTitle(await findTitleEditor(), "Dismissal fingerprint");
 
@@ -3272,7 +3290,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     const titleEditor = await findTitleEditor();
     await setEditorTitle(titleEditor, "First dismissal");
@@ -3335,7 +3353,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/new",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />,
     );
 
     const titleInput = await findTitleEditor();
@@ -3397,7 +3415,7 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
         <Route
-          path="/pages/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={(
             <>
               <PageEditor mode="edit" />
@@ -3405,7 +3423,7 @@ describe("PageEditor", () => {
             </>
           )}
         />
-        <Route path="/dashboard" element={<div>dashboard route</div>} />
+        <Route path="/workspaces/:workspaceId/dashboard" element={<div>dashboard route</div>} />
       </>,
     );
     await setEditorTitle(await findTitleEditor(), "Leaving now");
@@ -3425,7 +3443,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     const titleEditor = await findTitleEditor();
     await setEditorTitle(titleEditor, "Changed then restored");
@@ -3440,7 +3458,7 @@ describe("PageEditor", () => {
     const fetchMock = mockPublicationFlow();
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     const titleEditor = await findTitleEditor();
     fireEvent.compositionStart(titleEditor);
@@ -3488,7 +3506,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     const titleEditor = await findTitleEditor();
@@ -3552,7 +3570,7 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
         <Route
-          path="/pages/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={(
             <>
               <PageEditor mode="edit" />
@@ -3560,7 +3578,7 @@ describe("PageEditor", () => {
             </>
           )}
         />
-        <Route path="/dashboard" element={<div>dashboard</div>} />
+        <Route path="/workspaces/:workspaceId/dashboard" element={<div>dashboard</div>} />
       </>,
     );
 
@@ -3617,7 +3635,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "One in-flight save");
@@ -3681,7 +3699,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -3718,7 +3736,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
       </>,
     );
 
@@ -3756,7 +3774,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
       </>,
     );
 
@@ -3812,7 +3830,7 @@ describe("PageEditor", () => {
       if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/workspace-1/context/pages`) {
         return createPromise;
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/first-title")) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1`) {
         return jsonResponse({
           data: {
             ...savedDraft,
@@ -3846,9 +3864,9 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/new",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
-        <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-        <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -3972,7 +3990,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await setEditorTitle(await findTitleEditor(), "Save without leakage");
@@ -4034,9 +4052,8 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -4079,7 +4096,7 @@ describe("PageEditor", () => {
       base_content_hash: "a".repeat(64),
       session_version_id: "v1",
     });
-    expect(await screen.findByLabelText("Context tree")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Context tree")).toBeInTheDocument());
   });
 
   it("serializes overlapping saves and still publishes the second request", async () => {
@@ -4127,7 +4144,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -4194,8 +4211,8 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages" element={<div>pages landing</div>} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context" element={<div>pages landing</div>} />
       </>,
     );
 
@@ -4237,7 +4254,7 @@ describe("PageEditor", () => {
       renderWithRouter(
         "/pages/new",
         <>
-            <Route path="/pages/new" element={<PageEditor mode="create" />} />
+            <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
         </>,
       );
 
@@ -4269,8 +4286,8 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug" element={<div>reader page</div>} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<div>reader page</div>} />
       </>,
     );
 
@@ -4300,7 +4317,7 @@ describe("PageEditor", () => {
       "/pages/new",
       <>
         <Route
-          path="/pages/new"
+          path="/workspaces/:workspaceId/context/pages/new"
           element={(
             <>
               <PageEditor mode="create" />
@@ -4308,7 +4325,7 @@ describe("PageEditor", () => {
             </>
           )}
         />
-        <Route path="/dashboard" element={<div>dashboard</div>} />
+        <Route path="/workspaces/:workspaceId/dashboard" element={<div>dashboard</div>} />
       </>,
     );
 
@@ -4341,7 +4358,7 @@ describe("PageEditor", () => {
       "/pages/new",
       <>
         <Route
-          path="/pages/new"
+          path="/workspaces/:workspaceId/context/pages/new"
           element={(
             <>
               <PageEditor mode="create" />
@@ -4349,7 +4366,7 @@ describe("PageEditor", () => {
             </>
           )}
         />
-        <Route path="/dashboard" element={<div>dashboard</div>} />
+        <Route path="/workspaces/:workspaceId/dashboard" element={<div>dashboard</div>} />
       </>,
     );
 
@@ -4382,7 +4399,7 @@ describe("PageEditor", () => {
       createRoutesFromElements(
         <>
           <Route
-            path="/pages/new"
+            path="/workspaces/:workspaceId/context/pages/new"
             element={(
               <>
                 <PageEditor mode="create" />
@@ -4390,10 +4407,10 @@ describe("PageEditor", () => {
               </>
             )}
           />
-          <Route path="/dashboard" element={<div>dashboard</div>} />
+          <Route path="/workspaces/:workspaceId/dashboard" element={<div>dashboard</div>} />
         </>,
       ),
-      { initialEntries: ["/pages/new"] },
+      { initialEntries: ["/workspaces/workspace-1/context/pages/new"] },
     );
 
     render(
@@ -4414,7 +4431,7 @@ describe("PageEditor", () => {
     expect(screen.queryByText("dashboard")).not.toBeInTheDocument();
   });
 
-  it("clears stale edit content while another slug is loading", async () => {
+  it("clears stale edit content while another page ID is loading", async () => {
     let resolveOtherRead!: (response: Response) => void;
     const otherRead = new Promise<Response>((resolve) => {
       resolveOtherRead = resolve;
@@ -4430,7 +4447,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [page, { ...page, id: "p2", slug: "other", title: "Other" }], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/other")) {
+      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/p2")) {
         return otherRead;
       }
       return jsonResponse({ data: page });
@@ -4440,7 +4457,7 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
           <Route
-            path="/pages/:slug/edit"
+            path="/workspaces/:workspaceId/context/pages/:pageId/edit"
             element={(
               <>
                 <PageEditor mode="edit" />
@@ -4456,7 +4473,7 @@ describe("PageEditor", () => {
 
     await typist().click(screen.getByRole("button", { name: "Edit other page" }));
     await within(screen.getByRole("navigation", { name: "Page location" }))
-      .findByText("other");
+      .findByText("Other");
     expect(document.querySelector(".cm-content")?.textContent ?? "").not.toContain("# Hello");
 
     resolveOtherRead(jsonResponse({ data: { ...page, id: "p2", slug: "other", title: "Other", body_md: "# Other" } }));
@@ -4488,10 +4505,10 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
         return jsonResponse({ data: [page, otherPage], next_cursor: null });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+      if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1`) {
         return jsonResponse({ data: page });
       }
-      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/other")) {
+      if (url.includes("/api/v1/workspaces/workspace-1/context/pages/p2")) {
         return jsonResponse({ data: otherPage });
       }
       if (init?.method === "POST" && url.endsWith("/api/v1/workspaces/workspace-1/context/pages/p1/autosave")) {
@@ -4521,7 +4538,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <Route
-        path="/pages/:slug/edit"
+        path="/workspaces/:workspaceId/context/pages/:pageId/edit"
         element={(
           <>
             <RoutedPageEditor mode="edit" />
@@ -4743,7 +4760,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
 
@@ -5176,14 +5193,14 @@ describe("PageEditor", () => {
   it("uses an inert, focus-trapped Context drawer at 768px without collapsing editor modes", async () => {
     vi.stubGlobal("innerWidth", 768);
     window.localStorage.setItem(
-      "dtxwiki:editor:default:hello",
+      "dtxwiki:editor:workspace-1:p1",
       JSON.stringify({ mode: "split" }),
     );
     mockEditorPage("# Hello\n\nBody");
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
@@ -5241,7 +5258,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
@@ -5259,7 +5276,7 @@ describe("PageEditor", () => {
     mockEditorPage("# Hello\n\nBody");
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -5281,7 +5298,7 @@ describe("PageEditor", () => {
     mockEditorPage("alpha");
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -5330,7 +5347,7 @@ describe("PageEditor", () => {
     });
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -5363,7 +5380,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5414,7 +5431,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5460,7 +5477,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5496,7 +5513,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5532,7 +5549,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5583,7 +5600,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5657,7 +5674,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5721,7 +5738,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5793,7 +5810,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
       );
 
       await waitFor(() => {
@@ -5834,7 +5851,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -5913,7 +5930,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
     const view = codeMirrorView();
@@ -5957,7 +5974,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -6028,7 +6045,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -6135,7 +6152,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
       );
 
       await screen.findByLabelText(bodyLabel);
@@ -6217,7 +6234,7 @@ describe("PageEditor", () => {
 
       renderWithRouter(
         "/pages/hello/edit",
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
       );
 
       await screen.findByLabelText(bodyLabel);
@@ -6280,7 +6297,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-          <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -6368,7 +6385,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6477,7 +6494,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     expect(document.querySelector(
@@ -6533,7 +6550,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6582,7 +6599,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6666,7 +6683,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
     const editor = document.querySelector(".cm-content") as HTMLElement;
@@ -6758,7 +6775,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
     await screen.findByLabelText("Markdown body");
     const editor = document.querySelector(".cm-content") as HTMLElement;
@@ -6848,7 +6865,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -6939,10 +6956,10 @@ describe("PageEditor", () => {
         if (url.includes("/api/v1/workspaces/workspace-1/context/pages?")) {
           return jsonResponse({ data: [page, otherPage], next_cursor: null });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/hello")) {
+        if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1`) {
           return jsonResponse({ data: page });
         }
-        if (url.includes("/api/v1/workspaces/workspace-1/context/pages/by-slug/other")) {
+        if (url.includes("/api/v1/workspaces/workspace-1/context/pages/p2")) {
           return jsonResponse({ data: otherPage });
         }
         if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/media` && init?.method === "POST") {
@@ -6957,7 +6974,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <Route
-        path="/pages/:slug/edit"
+        path="/workspaces/:workspaceId/context/pages/:pageId/edit"
         element={(
           <>
             <PageEditor mode="edit" />
@@ -7047,7 +7064,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/new",
-      <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -7168,9 +7185,9 @@ describe("PageEditor", () => {
     const router = renderWithRouter(
       "/pages/new?title=Media%20Brief",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
         <Route
-          path="/context/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={<div>editing persisted page</div>}
         />
       </>,
@@ -7243,7 +7260,7 @@ describe("PageEditor", () => {
       ),
     ).toHaveLength(1);
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/context/media-brief/edit");
+      expect(router.state.location.pathname).toBe("/workspaces/workspace-1/context/pages/new-page-1/edit");
     });
     expect(await screen.findByText("editing persisted page")).toBeInTheDocument();
   });
@@ -7274,7 +7291,7 @@ describe("PageEditor", () => {
 
     renderWithRouter(
       "/pages/hello/edit",
-      <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
     );
 
     await screen.findByLabelText("Markdown body");
@@ -7311,7 +7328,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
       </>,
     );
 
@@ -7320,7 +7337,7 @@ describe("PageEditor", () => {
   });
 
   it("migrates legacy split preview preference into split mode", async () => {
-    const preferenceKey = "dtxwiki:editor:default:hello";
+    const preferenceKey = "dtxwiki:editor:workspace-1:p1";
     window.localStorage.setItem(
       preferenceKey,
       JSON.stringify({ mode: "source", split: true }),
@@ -7345,7 +7362,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/hello/edit",
       <>
-        <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />
       </>,
     );
 
@@ -7395,9 +7412,8 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-          <Route path="/pages/new" element={<PageEditor mode="create" />} />
-          <Route path="/pages/:slug/edit" element={<div>editing created page</div>} />
-          <Route path="/context/:slug/edit" element={<PageEditor mode="edit" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
       </>,
     );
 
@@ -7454,7 +7470,7 @@ describe("PageEditor", () => {
     renderWithRouter(
       "/pages/new",
       <>
-        <Route path="/pages/new" element={<PageEditor mode="create" />} />
+        <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />
       </>,
     );
 
@@ -7575,7 +7591,7 @@ describe("PageEditor", () => {
       "/pages/hello/edit",
       <>
         <Route
-          path="/pages/:slug/edit"
+          path="/workspaces/:workspaceId/context/pages/:pageId/edit"
           element={(
             <>
               <PageEditor mode="edit" />
@@ -7583,7 +7599,7 @@ describe("PageEditor", () => {
             </>
           )}
         />
-        <Route path="/dashboard" element={<div>dashboard</div>} />
+        <Route path="/workspaces/:workspaceId/dashboard" element={<div>dashboard</div>} />
       </>,
     );
 
@@ -7684,7 +7700,7 @@ describe("PageEditor", () => {
 function ProgrammaticNavigationButton() {
   const navigate = useNavigate();
   return (
-    <button type="button" onClick={() => navigate("/dashboard")}>
+    <button type="button" onClick={() => navigate("/workspaces/workspace-1/dashboard")}>
       Programmatic nav
     </button>
   );
@@ -7693,7 +7709,7 @@ function ProgrammaticNavigationButton() {
 function EditOtherButton() {
   const navigate = useNavigate();
   return (
-    <button type="button" onClick={() => navigate("/pages/other/edit")}>
+    <button type="button" onClick={() => navigate("/workspaces/workspace-1/context/pages/p2/edit")}>
       Edit other page
     </button>
   );
@@ -7802,7 +7818,7 @@ async function renderDestinationPickerEditor() {
 
   renderWithRouter(
     "/pages/new?from=context",
-    <Route path="/pages/new" element={<PageEditor mode="create" />} />,
+    <Route path="/workspaces/:workspaceId/context/pages/new" element={<PageEditor mode="create" />} />,
   );
 
   await screen.findByLabelText("Markdown body");
@@ -7821,7 +7837,7 @@ async function renderMobileEditor() {
 
   renderWithRouter(
     "/pages/hello/edit",
-    <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+    <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
   );
 
   expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
@@ -7832,7 +7848,7 @@ async function renderEditorOnHello() {
   mockEditorPage("# Hello");
   renderWithRouter(
     "/pages/hello/edit",
-    <Route path="/pages/:slug/edit" element={<PageEditor mode="edit" />} />,
+    <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<PageEditor mode="edit" />} />,
   );
   await screen.findByLabelText("Markdown body");
 }

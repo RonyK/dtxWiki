@@ -2689,6 +2689,13 @@
             "title": "Id",
             "type": "string"
           },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
           "placement_confidence": {
             "anyOf": [
               {

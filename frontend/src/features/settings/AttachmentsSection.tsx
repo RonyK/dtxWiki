@@ -15,7 +15,7 @@ import {
   type ContextMediaAttachment,
   type AttachmentRetentionPolicy,
 } from "../../shared/api/contextMediaAttachments";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { contextPageHref } from "../../shared/lib/workspaceRoutes";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
@@ -144,7 +144,7 @@ export function AttachmentsSection({
         // The prop is authoritative when the host knows the selection; the
         // global stays the fallback for hosts that render this with no
         // workspace context at all, where there is no selection to go stale.
-        const resolved = workspaceId ?? (await getCurrentWorkspaceId());
+        const resolved = workspaceId;
         if (!resolved) {
           throw new Error("no current workspace");
         }
@@ -245,7 +245,7 @@ export function AttachmentsSection({
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      const resolved = workspaceId ?? (await getCurrentWorkspaceId());
+      const resolved = workspaceId;
       if (!resolved) throw new Error("No current workspace");
       if (
         workspaceRef.current !== originWorkspace ||
@@ -325,7 +325,7 @@ export function AttachmentsSection({
     let succeeded = 0;
     const failures: Record<string, number> = {};
     try {
-      const resolved = workspaceId ?? (await getCurrentWorkspaceId());
+      const resolved = workspaceId;
       if (!resolved || !current()) return;
       for (const item of snapshot) {
         if (!current()) return;
@@ -801,7 +801,7 @@ export function AttachmentsSection({
                           ) : (
                             <a
                               className="attachments-page-link"
-                              href={`/context?target=${encodeURIComponent(item.page_id)}`}
+                              href={contextPageHref(item.workspace_id, item.page_id)}
                               title={item.page_id}
                             >
                               {item.page_title ?? item.page_id}

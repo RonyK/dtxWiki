@@ -525,12 +525,11 @@ def get_workspace(
     # two different things depending on which one you ask.
     try:
         with control_session_factory() as session:
-            return {
-                "data": svc.workspace_read.get_workspace(
-                    session=session,
-                    workspace_id=workspace_id,
-                )
-            }
+            detail = svc.workspace_read.get_workspace(
+                session=session,
+                workspace_id=workspace_id,
+            )
+            return {"data": detail.model_copy(update={"role": _access.role})}
     except ReadServiceError as exc:
         return read_service_error_response(exc)
 
@@ -1329,7 +1328,6 @@ def check_rest_restricted_library_access(
         )
 
 
-LIBRARY_UPLOAD_SETTINGS_LINK = "/settings?section=library"
 LIBRARY_UPLOAD_OPERATION_HEADER = "X-DTX-Library-Upload-Operation-Id"
 # Multipart framing around the file: boundaries, part headers (the filename
 # included) and the optional parent_node_id field.
@@ -1384,7 +1382,9 @@ def library_upload_body_limit(settings: Settings) -> BodyLimit:
         message=(
             f"Library uploads must be {format_library_upload_limit(cap)} or smaller."
         ),
-        extra={"limit_bytes": cap, "settings_link": LIBRARY_UPLOAD_SETTINGS_LINK},
+        # This limit is enforced before route parsing, so the target workspace
+        # is not yet trustworthy and no workspace-specific link is emitted.
+        extra={"limit_bytes": cap},
     )
 
 
@@ -1799,7 +1799,9 @@ async def _register_library_upload(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 extra={
                     "limit_bytes": exc.limit_bytes,
-                    "settings_link": LIBRARY_UPLOAD_SETTINGS_LINK,
+                    "settings_link": (
+                        f"/workspaces/{workspace_id}/settings?section=library"
+                    ),
                 },
             ),
             operation_id,

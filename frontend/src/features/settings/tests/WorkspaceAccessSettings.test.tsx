@@ -44,7 +44,11 @@ vi.mock("../../../shared/auth/AuthContext", () => ({
 }));
 
 function render(element: ReactElement) {
-  return testingLibraryRender(<MemoryRouter>{element}</MemoryRouter>);
+  return testingLibraryRender(
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=access-sharing`]}>
+      {element}
+    </MemoryRouter>,
+  );
 }
 
 describe("Workspace Settings membership and access", () => {
@@ -1216,7 +1220,7 @@ describe("Workspace Settings membership and access", () => {
     });
 
     testingLibraryRender(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/access-sharing`]}>
         <WorkspaceProvider>
           <WorkspaceContextProbe />
           <WorkspaceAccessSharingSection />
@@ -1630,7 +1634,7 @@ describe("Workspace Settings membership and access", () => {
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     });
 
-    renderWithWorkspaceProvider("/settings/access/");
+    renderWithWorkspaceProvider(`/workspaces/${WORKSPACE_ID}/settings/access/`);
     const ownerRow = (await screen.findByText("You")).closest(
       '[role="listitem"]',
     );
@@ -1714,7 +1718,7 @@ describe("Workspace Settings membership and access", () => {
   });
 });
 
-function renderWithWorkspaceProvider(initialEntry = "/settings") {
+function renderWithWorkspaceProvider(initialEntry = `/workspaces/${WORKSPACE_ID}/settings`) {
   return testingLibraryRender(
     <MemoryRouter initialEntries={[initialEntry]}>
       <WorkspaceProvider>
@@ -1731,7 +1735,8 @@ function WorkspaceHarness() {
   }, [refreshWorkspaces]);
   return (
     <Routes>
-      <Route path="/settings/*" element={<WorkspaceMembersSection />} />
+      <Route path="/workspaces/:workspaceId/settings/*" element={<WorkspaceMembersSection />} />
+      <Route path="/workspaces/:workspaceId/dashboard" element={<FallbackRoute />} />
       <Route path="/" element={<FallbackRoute />} />
       <Route path="/workspaces/find" element={<WorkspaceDiscoveryRoute />} />
     </Routes>

@@ -46,6 +46,12 @@ from backend.services.activity_service import (
 )
 from backend.services.job_queue import HIDDEN_JOB_TYPES
 from backend.services.job_read_service import public_job_failure_code
+from backend.services.workspace_urls import (
+    agent_page_url,
+    context_page_url,
+    library_item_url,
+    review_item_url,
+)
 from backend.utils.actor_display import DeferredIdentityLabels
 
 _BATCH_SIZE = 50
@@ -281,7 +287,13 @@ class ActivityFeedService:
                 actor_role=actor_role,
             )
             reserved = [
-                _Entry([_VisibleEvent(self._event(item, "review"), "review")])
+                _Entry(
+                    [
+                        _VisibleEvent(
+                            self._event(item, "review", workspace_id), "review"
+                        )
+                    ]
+                )
                 for item in reviews
             ]
             reserved.sort(key=lambda entry: entry.last_key, reverse=True)
@@ -588,7 +600,7 @@ class ActivityFeedService:
                 )
             job_rows = loaded if source == "job" else {}
             for item in items:
-                event = self._event(item, source)
+                event = self._event(item, source, workspace_id)
                 if source == "job":
                     job = job_rows[item.id]
                     event = event.model_copy(
@@ -634,7 +646,7 @@ class ActivityFeedService:
         return result
 
     @staticmethod
-    def _event(item, source):
+    def _event(item, source, workspace_id):
         navigation = None
         target = item.target
         if item.review_item_id:
@@ -642,7 +654,7 @@ class ActivityFeedService:
                 target_kind="review",
                 target_id=item.review_item_id,
                 title=item.target_title,
-                href=f"/review?review={item.review_item_id}",
+                href=review_item_url(workspace_id, item.review_item_id),
             )
         elif target and target.target_id:
             path = {
@@ -656,7 +668,13 @@ class ActivityFeedService:
                     target_kind=target.target_kind,
                     target_id=target.target_id,
                     title=item.target_title,
-                    href=f"/{path}?target={target.target_id}",
+                    href=(
+                        context_page_url(workspace_id, target.target_id)
+                        if target.target_kind == "context_page"
+                        else agent_page_url(workspace_id, target.target_id)
+                        if target.target_kind == "agent_page"
+                        else library_item_url(workspace_id, target.target_id)
+                    ),
                 )
         operation = "log"
         status = None

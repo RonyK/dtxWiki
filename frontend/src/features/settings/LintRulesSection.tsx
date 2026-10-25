@@ -9,7 +9,7 @@ import {
   updateSettingsPolicy,
   type LintRuleInfo,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
@@ -34,6 +34,7 @@ function isEditable(rule: LintRuleInfo): boolean {
 // (GET /lint/rules) carries every rule's effective enabled state; flipping a
 // toggle writes the `lint` policy ({rule_id: bool}) via updateSettingsPolicy.
 export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("settings");
   const { t: lintT } = useTranslation("lint");
   const [rules, setRules] = useState<LintRuleInfo[] | null>(null);
@@ -54,7 +55,7 @@ export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
     let cancelled = false;
     (async () => {
       try {
-        const wid = await getCurrentWorkspaceId();
+        const wid = routeWorkspaceId;
         if (!wid) {
           throw new Error("no workspace");
         }
@@ -256,7 +257,7 @@ export function LintRulesSection({ readOnly }: { readOnly: boolean }) {
           <span aria-live="polite" className="policy-card-saved">
             {savedNotice}
           </span>
-          <Link className="icon-button text-button" to="/lint">
+          <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "lint")}>
             {t("lint.openQueue", { defaultValue: "Open lint queue" })}
           </Link>
         </div>

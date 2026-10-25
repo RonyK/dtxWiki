@@ -29,7 +29,7 @@ describe("targetBreadcrumbs", () => {
       ],
     });
     expect(
-      targetBreadcrumbs({
+      targetBreadcrumbs({ workspaceId: "workspace-1",
         basePath: "/context",
         rootLabel: "Localized Context",
         nodes: [root, folder, page],
@@ -38,7 +38,7 @@ describe("targetBreadcrumbs", () => {
     ).toEqual(["Localized Context", "Context", "Child"]);
   });
   it("links root and ancestor path segments to their tree targets", () => {
-    const items = targetBreadcrumbs({
+    const items = targetBreadcrumbs({ workspaceId: "workspace-1",
       basePath: "/context",
       rootLabel: "Context",
       nodes: [
@@ -62,8 +62,8 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(items).toEqual([
-      { label: "Context", href: "/context" },
-      { label: "Operations", href: "/context?target=folder-node" },
+      { label: "Context", href: "/workspaces/workspace-1/context" },
+      { label: "Operations", href: "/workspaces/workspace-1/context/folders/folder-node" },
       { label: "Runbook" },
     ]);
   });
@@ -78,21 +78,21 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(
-      targetBreadcrumbs({
+      targetBreadcrumbs({ workspaceId: "workspace-1",
         basePath: "/context",
         rootLabel: "Context",
         nodes: [page],
         targetNodeId: page.id,
       }),
     ).toEqual([
-      { label: "Context", href: "/context" },
-      { label: "Operations", href: "/context?target=folder-node" },
+      { label: "Context", href: "/workspaces/workspace-1/context" },
+      { label: "Operations", href: "/workspaces/workspace-1/context/folders/folder-node" },
       { label: "Runbook" },
     ]);
   });
 
   it("can build breadcrumbs for selected folder nodes", () => {
-    const items = targetBreadcrumbs({
+    const items = targetBreadcrumbs({ workspaceId: "workspace-1",
       basePath: "/agent",
       rootLabel: "Agent",
       nodes: [
@@ -117,7 +117,7 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(items).toEqual([
-      { label: "Agent", href: "/agent" },
+      { label: "Agent", href: "/workspaces/workspace-1/agent" },
       { label: "Persona" },
     ]);
   });
@@ -152,8 +152,8 @@ describe("targetBreadcrumbs", () => {
         targetNodeId: page.id,
       }),
     ).toEqual([
-      { label: "Context", href: "/context" },
-      { label: "Operations", href: "/context?target=folder-node" },
+      { label: "Context", href: "/workspaces/workspace-1/context" },
+      { label: "Operations", href: "/workspaces/workspace-1/context/folders/folder-node" },
       {
         label: "Runbook Index",
         href: "/workspaces/workspace-1/context/pages/ancestor-page-id",
@@ -177,7 +177,7 @@ describe("targetBreadcrumbs", () => {
     });
 
     expect(
-      targetBreadcrumbs({
+      targetBreadcrumbs({ workspaceId: "workspace-1",
         basePath: "/context",
         rootLabel: "컨텍스트",
         nodes: [root, page],

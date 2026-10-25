@@ -122,6 +122,12 @@ from backend.services.read_errors import (
 )
 from backend.services.tree_read import TreeReadService
 from backend.services.workspace_read import AGENT_PAGE_TAXONOMY
+from backend.services.workspace_urls import (
+    agent_page_url,
+    context_page_url,
+    library_artifact_url,
+    library_item_url,
+)
 from backend.utils.actor_display import (
     resolve_actor_display_name,
     resolve_actor_display_names,
@@ -1275,7 +1281,7 @@ class DomainReadService:
                 "id": page.id,
                 "title": page.title,
                 "text": version.body_md,
-                "url": f"/context?target={page.id}",
+                "url": context_page_url(workspace_id, page.id),
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id),
@@ -1323,7 +1329,7 @@ class DomainReadService:
                 "id": claim.id,
                 "title": f"Claim in {page.title}",
                 "text": claim.claim_text,
-                "url": f"/context?target={page.id}#claim-{claim.id}",
+                "url": context_page_url(workspace_id, page.id),
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id),
@@ -1360,7 +1366,7 @@ class DomainReadService:
                 "id": item.id,
                 "title": item.title or item.uri,
                 "text": served_text,
-                "url": f"/library?target={item.id}",
+                "url": library_item_url(workspace_id, item.id),
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id) if version is not None else None,
@@ -1420,7 +1426,7 @@ class DomainReadService:
                 "id": artifact.id,
                 "title": item.title or artifact.kind.replace("_", " ").title(),
                 "text": artifact.conversion_detail.index_text or "",
-                "url": f"/library?target={item.id}#artifact-{artifact.id}",
+                "url": library_artifact_url(workspace_id, artifact.id),
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id),
@@ -1469,7 +1475,7 @@ class DomainReadService:
                 "id": page.id,
                 "title": page.title,
                 "text": version.body_markdown,
-                "url": f"/agent?target={page.id}",
+                "url": agent_page_url(workspace_id, page.id),
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id),

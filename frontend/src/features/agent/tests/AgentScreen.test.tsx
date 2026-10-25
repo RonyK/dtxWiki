@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -180,7 +180,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -198,7 +198,7 @@ describe("AgentScreen", () => {
       screen.getByText(/not injected into prompts automatically/),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Injection settings" }))
-      .toHaveAttribute("href", "/settings?section=agent-injection");
+      .toHaveAttribute("href", "/workspaces/workspace-1/settings?section=agent-injection");
     expect(screen.getAllByText("Default Persona").length).toBeGreaterThan(1);
     expect(screen.getAllByText("Default System Prompt")).toHaveLength(2);
     // UI-10: enum tokens are mapped through i18n labels, not shown raw.
@@ -261,9 +261,9 @@ describe("AgentScreen", () => {
     ).toHaveAttribute("aria-selected", "true");
     const breadcrumb = within(screen.getByLabelText("Breadcrumb"));
     expect(breadcrumb.getByRole("link", { name: "Agent" }))
-      .toHaveAttribute("href", "/agent");
+      .toHaveAttribute("href", "/workspaces/workspace-1/agent");
     expect(breadcrumb.getByRole("link", { name: "Advanced" }))
-      .toHaveAttribute("href", "/agent?target=ancestor-0");
+      .toHaveAttribute("href", "/workspaces/workspace-1/agent/folders/ancestor-0");
 
     await userEvent.click(breadcrumb.getByRole("link", { name: "Advanced" }));
 
@@ -272,6 +272,34 @@ describe("AgentScreen", () => {
     expect(screen.queryByText("# System")).not.toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: "Advanced" }))
       .toHaveAttribute("aria-selected", "true");
+  });
+
+  it("derives the Agent folder actions from the current folder URL", async () => {
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/categories`]: { data: [] },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`]: { data: [] },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`]: {
+        data: treeResponse("agent", [
+          folderNode("folder-a", "Folder A", "folder-a", null, [], false, 1),
+          folderNode("folder-b", "Folder B", "folder-b", null, [], false, 0),
+        ]),
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/folders/folder-a"]}>
+        <AgentScreen />
+        <AgentFolderRouteSwitch />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Folder A" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Navigate to folder B" }));
+    expect(await screen.findByRole("heading", { name: "Folder B" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Folder A" })).toBeNull();
   });
 
   it("does not repeat the empty state a sixth time when no pages exist (M-20)", async () => {
@@ -291,7 +319,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -325,7 +353,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -343,7 +371,7 @@ describe("AgentScreen", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("removes a recently deleted Agent page when detail returns 404", async () => {
+  it("keeps a selected Agent deep link explicit when detail returns 404", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
@@ -418,8 +446,9 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
+        <RoutePathProbe />
       </MemoryRouter>,
     );
 
@@ -432,12 +461,9 @@ describe("AgentScreen", () => {
         name: /Deleted elsewhere/,
       }),
     );
-
-    expect(
-      await screen.findByText(
-        "That Agent page is no longer available. It was removed from the list.",
-      ),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("route-path")).toHaveTextContent("/workspaces/workspace-1/agent/pages/agent-1"));
+    expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(screen.getByTestId("route-path")).toHaveTextContent("/workspaces/workspace-1/agent/pages/agent-1");
     expect(screen.queryByText("Deleted elsewhere")).not.toBeInTheDocument();
   });
 
@@ -478,7 +504,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -530,7 +556,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=node-60"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-60"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -602,7 +628,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=node-60"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-60"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -643,7 +669,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -724,7 +750,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -781,7 +807,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -873,7 +899,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=node-2"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-2"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -971,7 +997,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1022,7 +1048,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1113,7 +1139,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1208,14 +1234,14 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-1"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
 
     await screen.findByRole("heading", { name: "Default Persona" });
     const editLink = screen.getByRole("link", { name: "Create draft" });
-    expect(editLink).toHaveAttribute("href", "/agent?target=agent-1&edit=agent-1");
+    expect(editLink).toHaveAttribute("href", "/workspaces/workspace-1/agent/pages/agent-1/edit");
     expect(editLink.closest(".detail-heading-actions")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Show Explorer" })).toBeNull();
     expect(screen.getByRole("treeitem", { name: "Default Persona" })).toBeVisible();
@@ -1318,7 +1344,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-1"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1419,7 +1445,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-1"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1534,7 +1560,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1699,7 +1725,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1835,7 +1861,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-1"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -1919,7 +1945,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-1"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -2003,7 +2029,7 @@ describe("AgentScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/agent?target=agent-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/agent/pages/agent-1"]}>
         <AgentScreen />
       </MemoryRouter>,
     );
@@ -2050,6 +2076,15 @@ describe("AgentScreen", () => {
     });
   });
 });
+
+function RoutePathProbe() {
+  return <span data-testid="route-path">{useLocation().pathname}</span>;
+}
+
+function AgentFolderRouteSwitch() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate("/workspaces/workspace-1/agent/folders/folder-b")}>Navigate to folder B</button>;
+}
 
 function mockFetch(responses: Record<string, unknown>) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -2290,7 +2325,7 @@ test("renders the shared folder card for a selected agent category (C-6)", async
   });
 
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
       <AgentScreen />
     </MemoryRouter>,
   );
@@ -2338,7 +2373,7 @@ test("relabels the seeded category folders with the shared category label", asyn
   });
 
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/workspaces/workspace-1/agent"]}>
       <AgentScreen />
     </MemoryRouter>,
   );

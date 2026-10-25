@@ -136,6 +136,6 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   if (match && UUID.test(match[1])) return result("resource_uri", {
     workspaceId: match[1].toLowerCase(), lookup: match[2].normalize("NFKC").trim(), fragment,
   });
-  return result(absolute || /^\/(?:p|context|workspaces|pages)(?:\/|$)/.test(pathname) || input.startsWith("dtxwiki:")
+  return result(absolute || /^\/(?:p|context|workspaces|pages|library|agent|review|chats|ask|lint|dashboard|search|activity|settings|setup)(?:\/|$)/.test(pathname) || input.startsWith("dtxwiki:")
     ? "unknown" : "external", { fragment });
 }

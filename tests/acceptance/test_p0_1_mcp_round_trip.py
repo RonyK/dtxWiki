@@ -393,7 +393,9 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "conversation_token": token,
         },
     )
-    assert foreign_workspace["envelope"]["error_code"] == "inconsistent_identifier"
+    # A bare page UUID is read only inside the explicit Workspace. A foreign
+    # page is indistinguishable from a missing page; no global locator probe.
+    assert foreign_workspace["envelope"]["error_code"] == "not_found"
     token = foreign_workspace["envelope"]["conversation_token"]
 
     reopened = _mcp_structured(

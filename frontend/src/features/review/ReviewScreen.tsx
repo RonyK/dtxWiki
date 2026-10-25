@@ -9,7 +9,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -36,7 +36,8 @@ import type {
   ReviewReconciliationBulkDiscardResult,
   ReviewScope,
 } from "../../shared/api/operations";
-import { getCurrentWorkspaceId, listWorkspaces } from "../../shared/api/workspace";
+import { listWorkspaces } from "../../shared/api/workspace";
+import { contextEditHref, useRouteWorkspaceId, useWorkspaceRoute, workspacePath, withWorkspaceQuery } from "../../shared/lib/workspaceRoutes";
 import { ApiError } from "../../shared/api/client";
 import { CountChip } from "../../shared/components/CountChip";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
@@ -55,6 +56,7 @@ import {
   formatVersionTimestamp,
 } from "../../shared/lib/datetime";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 
 type ReviewState = {
   workspaceId: string;
@@ -147,9 +149,11 @@ const DEFAULT_REVIEW_POLICY_SUMMARY: ReviewRiskPolicySummary = {
 const EDITOR_ROLES = new Set(["editor", "admin", "owner", "maintainer"]);
 
 export function ReviewScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
   const { i18n, t } = useTranslation("review");
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [decisionReason, setDecisionReason] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -174,6 +178,11 @@ export function ReviewScreen() {
   const [scopeFilter, setScopeFilter] = useState<ReviewScope>("all");
   const [includeDeferredReconciliations, setIncludeDeferredReconciliations] =
     useState(false);
+  const [reviewTargetRetryToken, setReviewTargetRetryToken] = useState(0);
+  const [reviewNotFoundKey, setReviewNotFoundKey] = useState<string | null>(null);
+  useEffect(() => {
+    setReviewNotFoundKey(null);
+  }, [routeWorkspaceId, route?.suffix, route?.targetId]);
   const [railFiltersOpen, setRailFiltersOpen] = useState(false);
   const railFiltersBodyId = useId();
   const activeScopeFilter =
@@ -201,9 +210,11 @@ export function ReviewScreen() {
   const {
     data: state,
     error,
+    reload: reloadReviews,
     setData: setState,
     setError,
   } = useAsyncLoad<ReviewState>(loadReviews, [
+    routeWorkspaceId,
     activeReviewStatus,
     riskFilter,
     activeScopeFilter,
@@ -231,7 +242,7 @@ export function ReviewScreen() {
   // per-handler reset that missed the reload paths).
   useEffect(() => {
     setDecisionReason("");
-  }, [state?.selectedReviewId]);
+  }, [route?.targetId, state?.selectedReviewId]);
 
   useEffect(() => {
     if (lifecycleTab !== "changes_requested" && scopeFilter !== "all") {
@@ -242,6 +253,7 @@ export function ReviewScreen() {
   useEffect(() => {
     setSelectedBulkIds(new Set());
   }, [
+    routeWorkspaceId,
     lifecycleTab,
     riskFilter,
     activeScopeFilter,
@@ -252,7 +264,15 @@ export function ReviewScreen() {
   // a fresh generation and aborts the request it superseded, so an older slow
   // detail response cannot overwrite a newer click.
   const reviewSelectionGenerationRef = useRef(0);
-  const reviewParam = searchParams.get("review");
+  const reviewParam = route?.targetId ?? null;
+  const reviewRouteIdentity = `${routeWorkspaceId}:${reviewParam ?? ""}`;
+  const reviewRouteIdentityRef = useRef(reviewRouteIdentity);
+  useLayoutEffect(() => {
+    reviewRouteIdentityRef.current = reviewRouteIdentity;
+    return () => {
+      reviewRouteIdentityRef.current = "";
+    };
+  }, [reviewRouteIdentity]);
   useEffect(() => {
     if (!state?.workspaceId) {
       return;
@@ -325,16 +345,10 @@ export function ReviewScreen() {
         ) {
           return;
         }
-        setSearchParams(
-          (current) => {
-            const next = new URLSearchParams(current);
-            if (next.get("review") === reviewParam) {
-              next.delete("review");
-            }
-            return next;
-          },
-          { replace: true },
-        );
+        if (exc instanceof ApiError && exc.status === 404) {
+          setReviewNotFoundKey(`${routeWorkspaceId}:${route?.suffix ?? "review"}`);
+          return;
+        }
         setError(
           reviewErrorMessage(exc, t("errors.restore")),
         );
@@ -342,10 +356,12 @@ export function ReviewScreen() {
 
     return () => controller.abort();
   }, [
+    routeWorkspaceId,
     lifecycleTab,
     reviewParam,
+    reviewTargetRetryToken,
+    route?.suffix,
     setError,
-    setSearchParams,
     setState,
     state?.reviews,
     state?.workspaceId,
@@ -354,18 +370,7 @@ export function ReviewScreen() {
 
   // All selection commands update the parameter; the effect above owns state.
   function setReviewParam(reviewId: string | null) {
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        if (reviewId) {
-          next.set("review", reviewId);
-        } else {
-          next.delete("review");
-        }
-        return next;
-      },
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(reviewId ? workspacePath(routeWorkspaceId, `review/${encodeURIComponent(reviewId)}`) : workspacePath(routeWorkspaceId, "review"), searchParams), { replace: true });
   }
 
   // R7: auto-load the next page when the rail list is scrolled near its end,
@@ -408,10 +413,7 @@ export function ReviewScreen() {
   ]);
 
   async function loadReviews(): Promise<ReviewState> {
-    const currentWorkspaceId = await getCurrentWorkspaceId();
-    if (!currentWorkspaceId) {
-      throw new Error("Workspace not found");
-    }
+    const currentWorkspaceId = routeWorkspaceId;
     const [
       reviewPage,
       counts,
@@ -487,9 +489,9 @@ export function ReviewScreen() {
     audienceKind?: ReviewAudienceKind,
     reasonOverride?: string,
   ) {
-    const selectedReview = state?.reviews.find(
-      (review) => review.id === state.selectedReviewId,
-    );
+    const selectedReview = reviewParam
+      ? state?.reviews.find((review) => review.id === reviewParam)
+      : null;
     // The routing dialog manages its own reason field and passes it explicitly;
     // the inline Approve/Reject buttons fall back to the shared decisionReason.
     const reason = (reasonOverride ?? decisionReason).trim();
@@ -503,6 +505,7 @@ export function ReviewScreen() {
       return;
     }
     setBusyId(selectedReview.id);
+    const operationRouteIdentity = reviewRouteIdentity;
     try {
       await decideReview(
         state.workspaceId,
@@ -511,11 +514,13 @@ export function ReviewScreen() {
         reason || null,
         audienceKind ? { audience_kind: audienceKind } : {},
       );
+      if (reviewRouteIdentityRef.current !== operationRouteIdentity) return;
       const [reviewPage, counts, recentDecisionsPage] = await Promise.all([
         listReviews(state.workspaceId, reviewListFilters(activeScopeFilter)),
         getReviewCounts(state.workspaceId, reviewCountFilters()),
         listRecentReviewDecisions(state.workspaceId, { limit: 5 }),
       ]);
+      if (reviewRouteIdentityRef.current !== operationRouteIdentity) return;
       setReviewParam(null);
       setState((current) =>
         current
@@ -533,7 +538,7 @@ export function ReviewScreen() {
       );
       setDecisionReason("");
     } finally {
-      setBusyId(null);
+      if (reviewRouteIdentityRef.current === operationRouteIdentity) setBusyId(null);
     }
   }
 
@@ -621,11 +626,13 @@ export function ReviewScreen() {
     if (!state?.workspaceId) {
       return;
     }
+    const operationRouteIdentity = reviewRouteIdentity;
     const [reviewPage, counts, recentDecisionsPage] = await Promise.all([
       listReviews(state.workspaceId, reviewListFilters(activeScopeFilter)),
       getReviewCounts(state.workspaceId, reviewCountFilters()),
       listRecentReviewDecisions(state.workspaceId, { limit: 5 }),
     ]);
+    if (reviewRouteIdentityRef.current !== operationRouteIdentity) return;
     setReviewParam(null);
     setState((current) =>
       current
@@ -807,8 +814,11 @@ export function ReviewScreen() {
     if (!state?.workspaceId) {
       return;
     }
-    const slug = editableTargetSlug(review);
-    if (!slug) {
+    const primaryOperation = reviewPrimaryOperation(review);
+    const targetPageId = primaryOperation?.target_type === "context_page"
+      ? primaryOperation.target_id
+      : null;
+    if (!targetPageId) {
       setError(
         t("editDirectly.noTarget", {
           defaultValue: "This change has no editable page target.",
@@ -817,21 +827,44 @@ export function ReviewScreen() {
       return;
     }
     setBusyId(review.id);
+    const operationRouteIdentity = reviewRouteIdentity;
     try {
       await claimReview(state.workspaceId, review.id);
-      navigate(`/context/${slug}/edit?from=review&reviewItemId=${review.id}`);
+      if (reviewRouteIdentityRef.current !== operationRouteIdentity) return;
+      navigate(`${contextEditHref(state.workspaceId, targetPageId)}?from=review&reviewItemId=${encodeURIComponent(review.id)}`);
     } catch (exc) {
-      setError(reviewErrorMessage(exc, t("errors.claim")));
-      setBusyId(null);
+      if (reviewRouteIdentityRef.current === operationRouteIdentity) {
+        setError(reviewErrorMessage(exc, t("errors.claim")));
+        setBusyId(null);
+      }
+    } finally {
+      if (reviewRouteIdentityRef.current === operationRouteIdentity) setBusyId(null);
     }
   }
 
+  if (reviewNotFoundKey === `${routeWorkspaceId}:${route?.suffix ?? "review"}`) {
+    return <NotFoundScreen />;
+  }
+
+  if (!state && error) {
+    return (
+      <section className="feature-main">
+        <StatusBanner
+          tone="warning"
+          action={<button className="icon-button" onClick={() => { setError(null); void reloadReviews(); setReviewTargetRetryToken((token) => token + 1); }} type="button">{t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}</button>}
+        >
+          {error}
+        </StatusBanner>
+      </section>
+    );
+  }
   if (!state) {
     return <RouteLoading />;
   }
 
-  const selectedReview =
-    state.reviews.find((review) => review.id === state.selectedReviewId) ?? null;
+  const selectedReview = reviewParam
+    ? state.reviews.find((review) => review.id === reviewParam) ?? null
+    : null;
   const groupedReviews = lifecycleTab === "pending"
     ? groupPendingReviewsByPage(state.reviews, t)
     : groupReviewsByDate(state.reviews);
@@ -1287,7 +1320,7 @@ export function ReviewScreen() {
                   : [{ label: t("breadcrumb", { defaultValue: "Review" }) }]
               }
             />
-            {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+            {error ? <StatusBanner tone="warning" action={<button className="icon-button" onClick={() => { setError(null); void reloadReviews(); setReviewTargetRetryToken((token) => token + 1); }} type="button">{t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}</button>}>{error}</StatusBanner> : null}
             {bulkResult ? (
               <StatusBanner tone="info">
                 <span>
@@ -1332,7 +1365,16 @@ export function ReviewScreen() {
                 ) : null}
               </StatusBanner>
             ) : null}
-            {selectedReview ? (
+            {reviewParam && !selectedReview ? (
+              error ? (
+                <StatusBanner
+                  tone="warning"
+                  action={<button className="icon-button" onClick={() => { setError(null); void reloadReviews(); setReviewTargetRetryToken((token) => token + 1); }} type="button">{t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}</button>}
+                >
+                  {error}
+                </StatusBanner>
+              ) : <RouteLoading />
+            ) : selectedReview ? (
               <>
                 <ReviewDetail
                   busy={busyId === selectedReview.id}
@@ -1351,7 +1393,7 @@ export function ReviewScreen() {
               <ReviewOverview
                 counts={state.counts}
                 onOpenRiskPolicy={(risk) =>
-                  navigate(`/settings?section=review#auto-approve-${risk}`)
+                  navigate(`${workspacePath(routeWorkspaceId, "settings")}?section=review#auto-approve-${risk}`)
                 }
                 onSelectLifecycle={(status) => setLifecycleTab(status)}
                 onSelectLifecycleRisk={(status, risk) => {
@@ -1638,6 +1680,7 @@ function ReviewOverview({
   reviewPolicy: ReviewRiskPolicySummary;
 }) {
   const { i18n, t } = useTranslation("review");
+  const routeWorkspaceId = useRouteWorkspaceId();
   return (
     <section className="review-overview" aria-labelledby="review-overview-title">
       <div className="feature-header">
@@ -1686,7 +1729,7 @@ function ReviewOverview({
       <div className="feature-section review-policy-card">
         <div className="panel-header review-recent-header">
           <span>{t("policy.title", { defaultValue: "Review risk policy" })}</span>
-          <Link className="inline-action" to="/settings?section=review">
+          <Link className="inline-action" to={`${workspacePath(routeWorkspaceId, "settings")}?section=review`}>
             {t("policy.settingsLink", { defaultValue: "Open Settings" })}
           </Link>
         </div>
@@ -1789,7 +1832,7 @@ function ReviewOverview({
           </span>
           <Link
             className="inline-action"
-            to="/activity?kind=workspace&subtype=review"
+            to={`${workspacePath(routeWorkspaceId, "activity")}?kind=workspace&subtype=review`}
           >
             {t("actions.moreActivities", { defaultValue: "View all activity" })}
           </Link>
@@ -1814,7 +1857,7 @@ function ReviewOverview({
               <Link
                 className="history-row review-recent-decision-link"
                 key={decision.decision_id}
-                to={`/review?review=${encodeURIComponent(decision.review_item_id)}`}
+                to={workspacePath(routeWorkspaceId, `review/${encodeURIComponent(decision.review_item_id)}`)}
               >
                 <div>
                   <strong>
@@ -1867,6 +1910,7 @@ function ReviewRow({
   onToggleBulkSelected: (reviewItemId: string, selected: boolean) => void;
   showStatusPill: boolean;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("review");
   // The rail sorts and groups by activity (resolution date for resolved
   // items), so the visible timestamp must follow the same axis or rows look
@@ -1885,7 +1929,7 @@ function ReviewRow({
   const isReconciliation = review.review_type === "context_reconciliation";
   const reconciliationChatHref =
     isReconciliation && review.reconciliation_chat_session_id
-      ? `/chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`
+      ? workspacePath(routeWorkspaceId, `chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`)
       : null;
   return (
     <div
@@ -2058,21 +2102,21 @@ function ReviewDetail({
     reason: string,
   ) => Promise<void>;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const isResolved = lifecycleTabForStatus(review.status) === "resolved";
   const isReconciliation = review.review_type === "context_reconciliation";
   const reconciliationHref =
     review.reconciliation_available === true
     && review.reconciliation_page_id
     && review.reconciliation_version_id
-      ? `/context?${new URLSearchParams({
-          target: review.reconciliation_page_id,
+      ? `${workspacePath(routeWorkspaceId, `context/pages/${encodeURIComponent(review.reconciliation_page_id)}`)}?${new URLSearchParams({
           tab: "history",
           reconcile: review.reconciliation_version_id,
         }).toString()}`
       : null;
   const reconciliationChatHref =
     isReconciliation && review.reconciliation_chat_session_id
-      ? `/chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`
+      ? workspacePath(routeWorkspaceId, `chats/${encodeURIComponent(review.reconciliation_chat_session_id)}`)
       : null;
   const hasReconciliationProvenance =
     review.reconciliation_base_version_no != null
@@ -2890,15 +2934,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value ? value : null;
-}
-
-// First page-targeted operation's slug, used to route the editor. Section/claim
-// operations carry the parent page slug on target_slug as well.
-function editableTargetSlug(review: ReviewItem): string | null {
-  const operation = review.evidence?.operations.find(
-    (candidate) => candidate.target_slug,
-  );
-  return operation?.target_slug ?? null;
 }
 
 function audienceChipLabel(

@@ -1,7 +1,6 @@
-import { formatCanonicalContextUrl } from "../lib/contextLinks";
+import { treeNodeHref, workspacePath, workspaceTargetHref } from "../lib/workspaceRoutes";
 import type { TreeNodePayload } from "../api/workspace";
 import type { BreadcrumbItem } from "./Breadcrumbs";
-import { TREE_TARGET_PARAM } from "./treeRouteState";
 import { isSemanticSectionRoot } from "./treeSectionRoot";
 
 export function targetBreadcrumbs({
@@ -14,18 +13,14 @@ export function targetBreadcrumbs({
   fallbackLabel,
 }: {
   basePath?: string;
-  // P10.1: opt-in only — when a caller supplies it, an ancestor that is
-  // itself a Context page links to the canonical permalink instead of the
-  // query-param tree-target form. A folder ancestor has no page id to
-  // canonicalize and always keeps the query-param link.
-  workspaceId?: string | null;
+  workspaceId: string;
   rootLabel: string;
   nodes: TreeNodePayload[];
   targetId?: string | null;
   targetNodeId?: string | null;
   fallbackLabel?: string | null;
 }): BreadcrumbItem[] {
-  const items: BreadcrumbItem[] = [{ label: rootLabel, href: basePath }];
+  const items: BreadcrumbItem[] = [{ label: rootLabel, href: basePath && workspaceId ? (basePath.startsWith("/workspaces/") ? basePath : workspacePath(workspaceId, basePath)) : undefined }];
   const targetNode = targetNodeId
     ? nodes.find((node) => node.id === targetNodeId)
     : targetId
@@ -45,7 +40,10 @@ export function targetBreadcrumbs({
     }
     items.push({
       label: ancestor.title,
-      href: treeNodeHref(basePath, workspaceId, ancestorNode, ancestor.id),
+      href: ancestorNode ? treeNodeHref(workspaceId, ancestorNode) ?? undefined
+        : ancestor.node_kind === "folder" && ["context", "library", "agent"].includes(ancestor.section)
+          ? workspaceTargetHref(workspaceId, ancestor.section as "context" | "library" | "agent", ancestor.id, "folder")
+          : undefined,
     });
   }
   const currentLabel = targetNode?.title ?? fallbackLabel;
@@ -53,20 +51,4 @@ export function targetBreadcrumbs({
     items.push({ label: currentLabel });
   }
   return items;
-}
-
-function treeNodeHref(
-  basePath: string | undefined,
-  workspaceId: string | null | undefined,
-  node: TreeNodePayload | undefined,
-  nodeId: string,
-) {
-  if (workspaceId && node?.target_kind === "context_page" && node.target_id) {
-    return formatCanonicalContextUrl(workspaceId, node.target_id);
-  }
-  if (!basePath) {
-    return undefined;
-  }
-  const params = new URLSearchParams({ [TREE_TARGET_PARAM]: nodeId });
-  return `${basePath}?${params.toString()}`;
 }

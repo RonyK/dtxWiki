@@ -7,7 +7,7 @@
 import { expect, test } from "./fixtures";
 import fs from "node:fs";
 
-import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, workspaceUrl } from "./auth";
 import { evidenceEnabled } from "./evidence";
 
 // English chrome that MUST be Korean in ko after the i18n round. Proper nouns
@@ -95,14 +95,14 @@ test("ko sweep: no English chrome leaks across screens", async ({ page }, testIn
   }
 
   // Desktop sweep across every screen.
-  await visit("01-lint", "Lint (ko) — Severity/필터/액션/빈상태", "/lint");
-  await visit("02-library", "Library (ko) — 인스펙터/탭/업로드", "/library");
-  await visit("03-context", "Context (ko)", "/context");
-  await visit("04-agent", "Agent (ko)", "/agent");
-  await visit("05-chats", "Chats (ko)", "/chats");
-  await visit("06-search", "Search (ko)", "/search");
-  await visit("07-review", "Review (ko)", "/review");
-  await visit("08-ask-unavailable", "질문 직접 접근 — 찾을 수 없음 (ko)", "/ask");
+  await visit("01-lint", "Lint (ko) — Severity/필터/액션/빈상태", workspaceUrl(workspace.id, "lint"));
+  await visit("02-library", "Library (ko) — 인스펙터/탭/업로드", workspaceUrl(workspace.id, "library"));
+  await visit("03-context", "Context (ko)", workspaceUrl(workspace.id, "context"));
+  await visit("04-agent", "Agent (ko)", workspaceUrl(workspace.id, "agent"));
+  await visit("05-chats", "Chats (ko)", workspaceUrl(workspace.id, "chats"));
+  await visit("06-search", "Search (ko)", workspaceUrl(workspace.id, "search"));
+  await visit("07-review", "Review (ko)", workspaceUrl(workspace.id, "review"));
+  await visit("08-ask-unavailable", "질문 직접 접근 — 찾을 수 없음 (ko)", workspaceUrl(workspace.id, "ask"));
   await expect(page.getByRole("heading", { name: "해당 페이지를 찾을 수 없습니다" }))
     .toBeVisible();
   await expect(page.locator(".ask-composer")).toHaveCount(0);
@@ -112,19 +112,19 @@ test("ko sweep: no English chrome leaks across screens", async ({ page }, testIn
   await visit(
     "14-settings-mcp",
     "Settings·MCP (ko) — OAuth 앱/액세스 키/클라이언트",
-    "/settings/integrations",
+    "/account/integrations",
   );
   await visit(
     "15-context-reader",
     "Context reader (ko)",
-    `/context?target=${encodeURIComponent(readerId)}`,
+    workspaceUrl(workspace.id, `context/pages/${readerId}`),
   );
   // Mobile: the unavailable Ask route and Library floating actions.
-  await visit("09-ask-unavailable-mobile", "질문 직접 접근 390px — 찾을 수 없음 (ko)", "/ask?new=1", { width: 390, height: 780 });
+  await visit("09-ask-unavailable-mobile", "질문 직접 접근 390px — 찾을 수 없음 (ko)", `${workspaceUrl(workspace.id, "ask")}?new=1`, { width: 390, height: 780 });
   await expect(page.getByRole("heading", { name: "해당 페이지를 찾을 수 없습니다" }))
     .toBeVisible();
   await expect(page.locator(".ask-composer")).toHaveCount(0);
-  await visit("10-library-mobile", "Library 390px (A7)", "/library", { width: 390, height: 780 });
+  await visit("10-library-mobile", "Library 390px (A7)", workspaceUrl(workspace.id, "library"), { width: 390, height: 780 });
 
   // ---- composite ----
   // A labelled contact sheet of every screen, for a person to review. It is

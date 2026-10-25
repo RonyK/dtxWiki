@@ -25,7 +25,7 @@ import type {
 } from "../../shared/api/operations";
 import { listContextPages } from "../../shared/api/context";
 import { listLibraryItems } from "../../shared/api/library";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { ActivityEntryRow } from "../../shared/components/ActivityEntryRow";
 import { ActivityGroupingControl } from "../../shared/components/ActivityGroupingControl";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
@@ -69,6 +69,7 @@ type DashboardState = {
 };
 
 export function DashboardScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("dashboard");
   const { preferences: labsPreferences } = useLabsPreferences();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -89,10 +90,7 @@ export function DashboardScreen() {
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const { data: state, error, loading, reload, setData } = useAsyncLoad<DashboardState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
-      }
+      const workspaceId = routeWorkspaceId;
       const [
         activity,
         systemActivity,
@@ -136,7 +134,7 @@ export function DashboardScreen() {
         },
       };
     },
-    [period, groupReads],
+    [routeWorkspaceId, period, groupReads],
     {
       errorMessage: t("errors.load", { defaultValue: "Failed to load Dashboard" }),
     },
@@ -149,7 +147,7 @@ export function DashboardScreen() {
     );
   }
 
-  const systemActivityHref = activityHref({ ...query, kind: "system" });
+  const systemActivityHref = activityHref({ ...query, kind: "system" }, undefined, routeWorkspaceId);
   const workspaceActivity = state?.activity ?? [];
   const preview = workspaceActivity.slice(0, DASHBOARD_RECENT_DISPLAY_LIMIT);
   const previewCounts = activityEntryCounts(preview);
@@ -197,7 +195,7 @@ export function DashboardScreen() {
         // The pending review count is capped at the limit:20 fetch; show "+"
         // when more pending reviews exist so the lane reads as a lower bound (C19).
         countSuffix: state?.reviewsHasMore ? "+" : undefined,
-        href: "/review",
+        href: workspacePath(routeWorkspaceId, "review"),
         icon: iconForActivityLane("pending"),
       },
       {
@@ -206,7 +204,7 @@ export function DashboardScreen() {
         description: t("lanes.advisoryHint", { defaultValue: "Needs attention" }),
         count: activityEntryCounts(advisory).represented_event_count,
         countSuffix: laneMoreSuffix("advisory"),
-        href: activityHref(query, "advisory"),
+        href: activityHref(query, "advisory", routeWorkspaceId),
         icon: iconForActivityLane("advisory"),
       },
       {
@@ -215,7 +213,7 @@ export function DashboardScreen() {
         description: t("lanes.historyHint", { defaultValue: "Completed changes" }),
         count: activityEntryCounts(history).represented_event_count,
         countSuffix: laneMoreSuffix("history"),
-        href: activityHref(query, "history"),
+        href: activityHref(query, "history", routeWorkspaceId),
         icon: iconForActivityLane("history"),
       },
     ];
@@ -293,14 +291,14 @@ export function DashboardScreen() {
             <span>{t("spaces.title", { defaultValue: "Spaces" })}</span>
           </div>
           <div className="metric-grid">
-            <Link className="metric-card linked" data-kind="source" to="/library">
+            <Link className="metric-card linked" data-kind="source" to={workspacePath(routeWorkspaceId, "library")}>
               <div className="metric-card-title">
                 <Library size={16} aria-hidden="true" />
                 <span>{t("spaces.library", { defaultValue: "Library" })}</span>
               </div>
               <p>{t("spaces.libraryPurpose", { defaultValue: "Source material to cite" })}</p>
             </Link>
-            <Link className="metric-card linked" data-kind="context" to="/context">
+            <Link className="metric-card linked" data-kind="context" to={workspacePath(routeWorkspaceId, "context")}>
               <div className="metric-card-title">
                 <FileText size={16} aria-hidden="true" />
                 <span>{t("spaces.context", { defaultValue: "Context" })}</span>
@@ -311,7 +309,7 @@ export function DashboardScreen() {
               <Link
                 className="metric-card linked"
                 data-kind="agent"
-                to="/agent"
+                to={workspacePath(routeWorkspaceId, "agent")}
               >
                 <div className="metric-card-title">
                   <Bot size={16} aria-hidden="true" />
@@ -327,7 +325,7 @@ export function DashboardScreen() {
             title={t("recent.title", { defaultValue: "Recent activity" })}
             count={preview.length}
             unit={t("activity:feed.entryUnit", { count: preview.length, defaultValue: "entries" })}
-            action={<Link className="activity-feed-see-all" to={activityHref(query)}>
+            action={<Link className="activity-feed-see-all" to={activityHref(query, undefined, routeWorkspaceId)}>
               {t("recent.viewAll", { defaultValue: "View all activity" })}
               <ChevronRight size={14} aria-hidden="true" />
             </Link>}
@@ -395,6 +393,7 @@ function DashboardWelcome({
   showWorkspaceDiscovery: boolean;
   setupProgress: FirstUseProgress;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("dashboard");
   const nextStepKey = firstIncompleteStep(setupProgress) ?? "review";
   const nextStep = firstUseStepByKey(nextStepKey);
@@ -442,7 +441,7 @@ function DashboardWelcome({
         </div>
         {compact && canEdit ? (
           <div className="detail-heading-actions">
-            <Link className="icon-button primary" to={nextStep.href}>
+            <Link className="icon-button primary" to={workspacePath(routeWorkspaceId, nextStep.href)}>
               {t(`firstUse.steps.${nextStepKey}.action`, {
                 defaultValue: nextStep.actionLabel,
               })}
@@ -492,7 +491,7 @@ function DashboardWelcome({
             </div>
             <Link
               className="icon-button text-button"
-              to="/settings?section=workspace"
+              to={`${workspacePath(routeWorkspaceId, "settings")}?section=workspace`}
             >
               {t("setup.renamePersonalAction", {
                 defaultValue: "Rename Personal",
@@ -527,7 +526,7 @@ function DashboardWelcome({
             className={`metric-card linked ${
               nextStep.key === "library" ? "recommended" : ""
             }`}
-            to="/library"
+            to={workspacePath(routeWorkspaceId, "library")}
           >
             <div className="metric-card-title">
               <Library size={16} aria-hidden="true" />
@@ -543,7 +542,7 @@ function DashboardWelcome({
             className={`metric-card linked ${
               nextStep.key === "context" ? "recommended" : ""
             }`}
-            to="/context"
+            to={workspacePath(routeWorkspaceId, "context")}
           >
             <div className="metric-card-title">
               <FileText size={16} aria-hidden="true" />
@@ -559,7 +558,7 @@ function DashboardWelcome({
             className={`metric-card linked ${
               nextStep.key === "review" ? "recommended" : ""
             }`}
-            to="/review"
+            to={workspacePath(routeWorkspaceId, "review")}
           >
             <div className="metric-card-title">
               <CheckSquare size={16} aria-hidden="true" />

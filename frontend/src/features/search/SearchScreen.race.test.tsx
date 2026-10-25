@@ -34,7 +34,7 @@ describe("SearchScreen race handling", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );

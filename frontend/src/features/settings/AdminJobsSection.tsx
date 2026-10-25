@@ -12,7 +12,6 @@ import {
 } from "../../shared/api/adminJobs";
 import { listWorkspaceJobs } from "../../shared/api/operations";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
@@ -109,7 +108,7 @@ export function AdminJobsSection({
               // the global stays the fallback for a host with no workspace
               // context at all, where there is no selection to go stale.
               const resolvedWorkspaceId =
-                workspaceId ?? (await getCurrentWorkspaceId());
+                workspaceId;
               if (!resolvedWorkspaceId) {
                 throw new Error("no current workspace");
               }
@@ -202,7 +201,7 @@ export function AdminJobsSection({
           })
         : await (async () => {
             const resolvedWorkspaceId =
-              workspaceId ?? (await getCurrentWorkspaceId());
+              workspaceId;
             if (!resolvedWorkspaceId) {
               throw new Error("no current workspace");
             }

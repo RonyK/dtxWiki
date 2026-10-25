@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useLayoutEffect,
   type ComponentProps,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,11 +25,10 @@ import {
   Link,
   useLocation,
   useNavigate,
-  useParams,
   useSearchParams,
 } from "react-router-dom";
 
-import { formatCanonicalContextUrl, formatContextPageUrl } from "../../shared/lib/contextLinks";
+import { formatContextPageUrl } from "../../shared/lib/contextLinks";
 
 import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { MarkdownView } from "../pages/MarkdownView";
@@ -75,9 +75,9 @@ import {
   createTreeFolder,
   deleteTreeNode,
   fetchTreeNodeIndexPreview,
-  getCurrentWorkspaceId,
   listTreeData,
   moveTreeNode,
+  readTreeNode,
   reorderTreeNodeAt,
   updateTreeNode,
 } from "../../shared/api/workspace";
@@ -129,11 +129,10 @@ import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import { isSemanticSectionRoot } from "../../shared/components/treeSectionRoot";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import { readContextPublishNotice } from "../../shared/lib/contextPublishNavigation";
+import { contextNewHref, contextPageHref, contextEditHref, workspacePath, workspaceTargetHref, useRouteWorkspaceId, useWorkspaceRoute } from "../../shared/lib/workspaceRoutes";
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
-  TREE_NEW_FOLDER_PARAM,
-  TREE_TARGET_PARAM,
   updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
@@ -186,6 +185,7 @@ type ActivityActorPresentation = {
 
 type ContextState = {
   workspaceId: string;
+  routeTargetId: string | null;
   pages: ContextPageSummary[];
   pagesCursor: string | null;
   pagesTotal: number | null;
@@ -205,7 +205,12 @@ export function ContextScreen() {
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
   const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
-  const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const routeWorkspace = (workspaceContext?.workspaces ?? []).find((workspace) => workspace.id === routeWorkspaceId) ??
+    (workspaceContext?.selectedWorkspace?.id === routeWorkspaceId ? workspaceContext.selectedWorkspace : null);
+  const routeWorkspaceSlug = routeWorkspace?.slug ??
+    (workspaceContext?.selectedWorkspace?.id === routeWorkspaceId ? workspaceContext.workspaceSlug : null);
+  const canEdit = isEditorRole(routeWorkspace?.role);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
   const [newItemDialog, setNewItemDialog] = useState<{
     initialItemType: NewItemType;
@@ -235,23 +240,33 @@ export function ContextScreen() {
   const hasDraft = draftFilter === "all" ? undefined : draftFilter === "with";
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  // Direct links use the page identity; legacy ?target entries also accept
-  // tree nodes so existing folder and page links remain readable.
-  const { pageId: routedPageId, workspaceId: routedWorkspaceId } = useParams();
+  const [searchParams] = useSearchParams();
+  // Route identity is always explicit in the typed path.
+  const workspaceRoute = useWorkspaceRoute();
+  const routedPageId = workspaceRoute?.targetKind === "page" ? workspaceRoute.targetId : null;
+  const routedWorkspaceId = routeWorkspaceId;
   const [contextPublishNotice] = useState(() =>
     readContextPublishNotice(location.state),
   );
   const [publishArrivalPath] = useState(
     () => `${location.pathname}${location.search}`,
   );
-  const [publishArrivalPageId] = useState(() => routedPageId ?? searchParams.get(TREE_TARGET_PARAM));
+  const [publishArrivalPageId] = useState(() => routedPageId);
   const publishNoticeConsumedRef = useRef(false);
   const requestedTargetId =
-    routedPageId ?? searchParams.get(TREE_TARGET_PARAM) ?? null;
+    routedPageId ?? workspaceRoute?.targetId ?? null;
+  const routeIdentityRef = useRef("");
+  const routeIdentity = `${routeWorkspaceId ?? ""}:${location.pathname}`;
+  useLayoutEffect(() => {
+    routeIdentityRef.current = routeIdentity;
+    return () => {
+      if (routeIdentityRef.current === routeIdentity) {
+        routeIdentityRef.current = "";
+      }
+    };
+  }, [routeIdentity]);
   const committedSearchRef = useRef(location.search);
   const committedPathRef = useRef(location.pathname);
-  const syncedWorkspaceRouteRef = useRef<string | null>(null);
   const [routeUnavailable, setRouteUnavailable] = useState(false);
   const searchChangedRef = useRef(false);
   const expansionWorkspaceRef = useRef<string | null>(null);
@@ -262,48 +277,22 @@ export function ContextScreen() {
   // just-deleted target for an invalid deep link.
   const unavailableTargetIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (routedPageId && searchParams.has(TREE_TARGET_PARAM)) {
-      const next = new URLSearchParams(searchParams);
-      next.delete(TREE_TARGET_PARAM);
-      setSearchParams(next, { replace: true });
-    }
-  }, [routedPageId, searchParams, setSearchParams]);
-  useEffect(() => {
     if (!contextPublishNotice || publishNoticeConsumedRef.current) {
       return;
     }
     publishNoticeConsumedRef.current = true;
     void navigate(publishArrivalPath, { replace: true, state: null });
   }, [contextPublishNotice, navigate, publishArrivalPath]);
-  // A canonical entry selects its known workspace once. Repeating this when
-  // ambient selection changes would undo an explicit workspace switch. Reads
-  // still use the route's workspace and keep authorization on the scoped API.
-  const ambientSelectedId = workspaceContext?.selectedId ?? null;
-  const ambientWorkspaces = workspaceContext?.workspaces;
-  const selectAmbientWorkspaceId = workspaceContext?.selectWorkspaceId;
-  useEffect(() => {
-    const routeKey = routedWorkspaceId && routedPageId
-      ? `${routedWorkspaceId}:${routedPageId}` : null;
-    if (!routeKey) {
-      syncedWorkspaceRouteRef.current = null;
-      return;
-    }
-    if (syncedWorkspaceRouteRef.current === routeKey || !selectAmbientWorkspaceId) return;
-    if (!ambientWorkspaces?.length) return;
-    syncedWorkspaceRouteRef.current = routeKey;
-    if (ambientSelectedId !== routedWorkspaceId && ambientWorkspaces.some(
-      (workspace) => workspace.id === routedWorkspaceId,
-    )) selectAmbientWorkspaceId(routedWorkspaceId!);
-  }, [routedWorkspaceId, routedPageId, ambientSelectedId, ambientWorkspaces, selectAmbientWorkspaceId]);
-  useEffect(() => { setRouteUnavailable(false); }, [routedWorkspaceId, routedPageId]);
+  useEffect(() => { setRouteUnavailable(false); }, [routeWorkspaceId, requestedTargetId]);
   const {
     data: state,
     error,
+    reload,
     setData: setState,
     setError,
   } = useAsyncLoad<ContextState>(
     async () => {
-      const workspaceId = routedWorkspaceId ?? await getCurrentWorkspaceId();
+      const workspaceId = routeWorkspaceId;
       if (!workspaceId) {
         throw new Error(
           t("errors.workspaceNotFound", {
@@ -321,12 +310,18 @@ export function ContextScreen() {
       ]);
       const pages = pageData.data;
       const tree = treeData.nodes;
-      const selectedNodeId = resolveRequestedNodeId(
+      if (workspaceRoute?.targetKind === "folder" && workspaceRoute.targetId) {
+        const folder = await readTreeNode(workspaceId, workspaceRoute.targetId);
+        if (folder.section !== "context" || folder.node_kind !== "folder") {
+          throw new ApiError(404, { error_code: "not_found", message: "Folder not found.", request_id: "", warnings: [] });
+        }
+      }
+      const selectedNodeId = routedPageId ? (nodeIdForPage(tree, routedPageId) ?? routedPageId) : resolveRequestedNodeId(
         tree,
         pages,
         requestedTargetId,
       );
-      const selectedPageId = selectedPageIdForNode(tree, pages, selectedNodeId);
+      const selectedPageId = routedPageId ?? selectedPageIdForNode(tree, pages, selectedNodeId);
       let detail: ContextPageDetail | null = null;
       let history: ContextChangeHistory | null = null;
       let neighbors: GraphNeighborsPayload | null = null;
@@ -337,7 +332,7 @@ export function ContextScreen() {
           listContextChanges(workspaceId, selectedPageId),
           loadGraphNeighbors(workspaceId, selectedPageId),
         ]);
-        if (routedWorkspaceId && nextDetail.workspace_id !== routedWorkspaceId) {
+        if (nextDetail.workspace_id !== routeWorkspaceId || nextDetail.id !== selectedPageId) {
           throw new ApiError(404, { error_code: "not_found", message: "Page not found.", request_id: "", warnings: [] });
         }
         detail = nextDetail;
@@ -347,6 +342,7 @@ export function ContextScreen() {
       }
       return {
         workspaceId,
+        routeTargetId: requestedTargetId,
         pages,
         pagesCursor: pageData.next_cursor,
         pagesTotal: pageData.total,
@@ -361,15 +357,14 @@ export function ContextScreen() {
         tombstones,
       };
     },
-    // A known foreign-workspace entry updates ambient selection once above;
-    // that selection change reloads this workspace-scoped state.
-    [pageSize, draftFilter, ambientSelectedId],
+    // Route identity changes reload the exact Workspace and target together.
+    [pageSize, draftFilter, routeWorkspaceId, routedPageId, requestedTargetId, workspaceRoute?.targetKind],
     {
       errorMessage: t("errors.load", {
         defaultValue: "Failed to load Context",
       }),
       formatError: (caught, fallback) => {
-        if (routedPageId && caught instanceof ApiError && [403, 404, 422].includes(caught.status)) {
+        if ((routedPageId || workspaceRoute?.targetKind === "folder") && caught instanceof ApiError && [403, 404, 422].includes(caught.status)) {
           setRouteUnavailable(true);
         }
         const workspaceNotFound = t("errors.workspaceNotFound", {
@@ -381,6 +376,7 @@ export function ContextScreen() {
       },
       fallbackData: {
         workspaceId: "",
+        routeTargetId: null,
         pages: [],
         pagesCursor: null,
         pagesTotal: null,
@@ -410,9 +406,9 @@ export function ContextScreen() {
             workspaceChanged
               ? (nextState.selectedNodeId ?? nextState.detail?.id ?? null)
               : null,
-            { defaultMode: "none", storageKey: "context" },
+            { defaultMode: "none", storageKey: "context", workspaceId: nextState.workspaceId },
           );
-          writeExpandedNodeIdsToStorage("context", next);
+          writeExpandedNodeIdsToStorage("context", next, nextState.workspaceId);
           return next;
         });
       },
@@ -425,7 +421,7 @@ export function ContextScreen() {
       const pageId = selectedPageIdForNode(nodes, [], targetId);
       const nextParams = updateTreeSearchParams(
         new URLSearchParams(committedSearchRef.current),
-        { targetId: pageId ? null : targetId },
+        { versionId: null },
       );
       nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
       nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
@@ -433,8 +429,8 @@ export function ContextScreen() {
       void navigate(
         {
           pathname: pageId
-            ? formatCanonicalContextUrl(workspaceId, pageId)
-            : "/context",
+            ? contextPageHref(workspaceId, pageId)
+            : targetId ? workspaceTargetHref(workspaceId, "context", targetId, "folder") : workspacePath(workspaceId, "context"),
           search: query ? `?${query}` : "",
         },
         { replace: true },
@@ -549,10 +545,9 @@ export function ContextScreen() {
       return;
     }
     setError(null);
-    const nextParams = updateTreeSearchParams(searchParams, {
-      targetId: null,
-    });
+    const nextParams = updateTreeSearchParams(searchParams, { versionId: null });
     nextParams.delete("tab");
+    nextParams.delete("reconcile");
     nextParams.delete("compareFrom");
     nextParams.delete("compareTo");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
@@ -560,7 +555,7 @@ export function ContextScreen() {
     const query = nextParams.toString();
     void navigate(
       {
-        pathname: formatCanonicalContextUrl(workspaceId, pageId),
+        pathname: contextPageHref(workspaceId, pageId),
         search: query ? `?${query}` : "",
       },
       { replace: true },
@@ -572,17 +567,16 @@ export function ContextScreen() {
       selectPage(node.target_id);
       return;
     }
-    const nextParams = updateTreeSearchParams(searchParams, {
-      targetId: node.id,
-    });
+    const nextParams = updateTreeSearchParams(searchParams, { versionId: null });
     nextParams.delete("tab");
+    nextParams.delete("reconcile");
     nextParams.delete("compareFrom");
     nextParams.delete("compareTo");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
     const query = nextParams.toString();
     void navigate(
-      { pathname: "/context", search: query ? `?${query}` : "" },
+      { pathname: workspaceTargetHref(workspaceId, "context", node.id, "folder"), search: query ? `?${query}` : "" },
       { replace: true },
     );
   }
@@ -595,6 +589,8 @@ export function ContextScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     setError(null);
     const folder = await createTreeFolder(state.workspaceId, {
       parent_id: input.parentNodeId,
@@ -602,22 +598,22 @@ export function ContextScreen() {
       slug: input.slug,
       title: input.title,
     });
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const nextExpandedNodeIds = expandNodeIds(
       expandedNodeIds,
       folder.parent_id,
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    const nextParams = updateTreeSearchParams(searchParams, {
-      targetId: folder.id,
-    });
+    const nextParams = updateTreeSearchParams(searchParams, { versionId: null });
     nextParams.delete("tab");
+    nextParams.delete("reconcile");
     nextParams.delete("compareFrom");
     nextParams.delete("compareTo");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
     const query = nextParams.toString();
     void navigate(
-      { pathname: "/context", search: query ? `?${query}` : "" },
+      { pathname: workspaceTargetHref(state.workspaceId, "context", folder.id, "folder"), search: query ? `?${query}` : "" },
       { replace: true },
     );
     setState((current) =>
@@ -637,13 +633,11 @@ export function ContextScreen() {
 
   function createPage(input: { parentNodeId: string | null; title: string }) {
     const params = new URLSearchParams({ from: "context" });
-    if (input.parentNodeId) {
-      params.set("parentNodeId", input.parentNodeId);
-    }
     if (input.title.trim()) {
       params.set("title", input.title.trim());
     }
-    navigate(`/context/new?${params.toString()}`);
+    const href = contextNewHref(workspaceId, input.parentNodeId);
+    navigate(`${href}${href.includes("?") ? "&" : "?"}${params}`);
   }
 
   async function refreshTree(
@@ -657,6 +651,8 @@ export function ContextScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const [treeData, pageData] = await Promise.all([
       listTreeData(state.workspaceId, "context"),
       options.refreshOverview
@@ -666,6 +662,7 @@ export function ContextScreen() {
           })
         : Promise.resolve(null),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     if (pageData) {
       const pages = pageData.data;
       setAppended({
@@ -680,7 +677,7 @@ export function ContextScreen() {
     const nextExpandedNodeIds =
       options.expandedNodeIds ??
       resolveExpandedNodeIds(treeData.nodes, expandedNodeIds.join(","), null, {
-        defaultMode: "none",
+        defaultMode: "none", workspaceId: state.workspaceId,
       });
     setStoredExpandedNodeIds(nextExpandedNodeIds);
     setState((current) =>
@@ -880,6 +877,8 @@ export function ContextScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     setError(null);
     const [pageData, treeData, detail, history, neighborResult] =
       await Promise.all([
@@ -892,13 +891,17 @@ export function ContextScreen() {
         listContextChanges(state.workspaceId, pageId),
         loadGraphNeighbors(state.workspaceId, pageId),
       ]);
+    if (
+      routeIdentityRef.current !== originRouteIdentity ||
+      requestedTargetId !== pageId
+    ) return;
     const pages = pageData.data;
     const targetNodeId = nodeIdForPage(treeData.nodes, pageId) ?? pageId;
     const nextExpandedNodeIds = resolveExpandedNodeIds(
       treeData.nodes,
       expandedNodeIds.join(","),
       null,
-      { defaultMode: "none", storageKey: "context" },
+      { defaultMode: "none", storageKey: "context", workspaceId: state.workspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
     setState((current) =>
@@ -927,7 +930,7 @@ export function ContextScreen() {
     // and the reload cannot disagree about which URL is current.
     const nextParams = updateTreeSearchParams(
       new URLSearchParams(committedSearchRef.current),
-      { targetId: null },
+      { versionId: null },
     );
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
@@ -935,7 +938,7 @@ export function ContextScreen() {
     const query = nextParams.toString();
     void navigate(
       {
-        pathname: formatCanonicalContextUrl(workspaceId, pageId),
+        pathname: contextPageHref(workspaceId, pageId),
         search: query ? `?${query}` : "",
       },
       { replace: true },
@@ -943,13 +946,10 @@ export function ContextScreen() {
   }
 
   async function copyTreeNodeLink(node: TreeNodePayload) {
-    const params = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: node.id,
-    });
     const path =
       node.target_kind === "context_page" && node.target_id
         ? formatContextPageUrl(workspaceId, node.target_id)
-        : `/context?${params.toString()}`;
+        : workspaceTargetHref(workspaceId, "context", node.id, "folder");
     const href =
       typeof window === "undefined" ? path : `${window.location.origin}${path}`;
     return copyTextWithReason(href);
@@ -957,7 +957,7 @@ export function ContextScreen() {
 
   function setStoredExpandedNodeIds(nodeIds: string[]) {
     setExpandedNodeIds(nodeIds);
-    writeExpandedNodeIdsToStorage("context", nodeIds);
+    writeExpandedNodeIdsToStorage("context", nodeIds, workspaceId);
   }
 
   useEffect(() => {
@@ -979,6 +979,10 @@ export function ContextScreen() {
     if (!state?.workspaceId) {
       return;
     }
+    // Canonical page routes are loaded atomically by the workspace+page
+    // loader. This query-target synchronizer owns tree-only legacy selection
+    // and must not issue a second page/history/neighbor read.
+    if (routedPageId) return;
     const targetNodeId = resolveRequestedNodeId(
       state.tree,
       state.pages,
@@ -1017,7 +1021,7 @@ export function ContextScreen() {
           state.tree,
           searchParams.get(TREE_EXPANDED_PARAM) ?? current.join(","),
           targetNodeId,
-          { defaultMode: "none" },
+          { defaultMode: "none", workspaceId: state.workspaceId },
         );
         if (
           next.length === current.length &&
@@ -1025,7 +1029,7 @@ export function ContextScreen() {
         ) {
           return current;
         }
-        writeExpandedNodeIdsToStorage("context", next);
+        writeExpandedNodeIdsToStorage("context", next, state.workspaceId);
         return next;
       });
     }
@@ -1155,34 +1159,41 @@ export function ContextScreen() {
   ]);
 
   useEffect(() => {
-    // Codex #25: only auto-open the create-folder dialog for editors; a viewer
-    // arriving via ?newFolder=1 (deep link / stale URL) must not be dropped into
-    // a create flow the backend would reject.
-    if (!state || !canEdit || searchParams.get(TREE_NEW_FOLDER_PARAM) !== "1") {
+    if (!state || !canEdit || !workspaceRoute?.create || workspaceRoute.targetKind !== "folder") {
       return;
     }
-    setNewItemDialog({ initialItemType: "folder", parentNodeId: null });
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete(TREE_NEW_FOLDER_PARAM);
-    setSearchParams(nextParams, { replace: true });
-  }, [canEdit, searchParams, setSearchParams, state]);
+    const requestedParent = searchParams.get("parent");
+    const requestedParentNode = requestedParent ? state.tree.find((node) => node.id === requestedParent) : null;
+    if (requestedParent && (!requestedParentNode || requestedParentNode.section !== "context" || !requestedParentNode.can_have_children)) {
+      setRouteUnavailable(true);
+      return;
+    }
+    const parent = requestedParentNode?.id ?? null;
+    setNewItemDialog({ initialItemType: "folder", parentNodeId: parent });
+  }, [canEdit, searchParams, state, workspaceRoute?.create, workspaceRoute?.targetKind]);
 
   useDocumentTitle(state?.detail?.title ?? null, " - ");
 
   if (routeUnavailable) return <NotFoundScreen />;
+  const routeIdentityMatches = Boolean(
+    state &&
+      state.workspaceId === routedWorkspaceId &&
+      (state.routeTargetId === requestedTargetId ||
+        (routedPageId && state.detail?.id === routedPageId)),
+  );
+  if (error && !routeIdentityMatches) {
+    return <section className="feature-main"><StatusBanner tone="warning" action={<button className="icon-button" onClick={reload} type="button">{t("shell:workspaceResolution.retry")}</button>}>{error}</StatusBanner></section>;
+  }
   if (!state) {
     return (
       <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />
     );
   }
-  if (routedWorkspaceId && state.workspaceId && routedWorkspaceId !== state.workspaceId) {
-    // A route transition must never show a previous workspace's cached page.
-    // Known memberships will settle through the scoped loader after selection.
-    return ambientWorkspaces?.some((workspace) => workspace.id === routedWorkspaceId)
-      ? <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />
-      : <NotFoundScreen />;
+  if (!routeIdentityMatches) {
+    return <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />;
   }
   if (
+    !routedPageId &&
     requestedTargetId &&
     requestedTargetId !== unavailableTargetIdRef.current &&
     state.workspaceId &&
@@ -1190,6 +1201,10 @@ export function ContextScreen() {
     !resolveRequestedNodeId(state.tree, state.pages, requestedTargetId)
   ) {
     return <NotFoundScreen />;
+  }
+  if (workspaceRoute?.targetKind === "folder" && !workspaceRoute.create && state.workspaceId && !error) {
+    const folder = state.tree.find((node) => node.id === workspaceRoute.targetId);
+    if (!folder || folder.section !== "context" || folder.node_kind !== "folder") return <NotFoundScreen />;
   }
   const selectedNode = state.selectedNodeId
     ? (state.tree.find((node) => node.id === state.selectedNodeId) ?? null)
@@ -1299,7 +1314,7 @@ export function ContextScreen() {
           <section className="feature-main feature-main--reader context-main">
             <Breadcrumbs
               items={targetBreadcrumbs({
-                basePath: "/context",
+                basePath: workspacePath(routeWorkspaceId, "context"),
                 workspaceId: state.workspaceId,
                 rootLabel: t("breadcrumb.root", { defaultValue: "Context" }),
                 nodes: state.tree,
@@ -1327,7 +1342,7 @@ export function ContextScreen() {
                 the tree rail's small +. Editors only — viewers cannot create. */}
                 {canEdit ? (
                   <div className="feature-header-actions">
-                    <Link className="icon-button primary" to="/context/new">
+                    <Link className="icon-button primary" to={contextNewHref(routeWorkspaceId, newItemParentNodeId)}>
                       <Plus size={16} aria-hidden="true" />
                       <span>
                         {t("header.newPage", {
@@ -1381,6 +1396,7 @@ export function ContextScreen() {
                 nodes={state.tree}
                 tombstones={state.tombstones}
                 workspaceId={state.workspaceId || null}
+                workspaceSlug={routeWorkspaceSlug ?? null}
                 onCopyNodeLink={copyTreeNodeLink}
                 onDeleteNode={setDeleteNode}
                 onMoveNode={setMoveNode}
@@ -1484,6 +1500,7 @@ export function ContextScreen() {
                   activeId={null}
                   onSelect={selectPage}
                   pages={[]}
+                  workspaceId={routeWorkspaceId}
                 />
               </>
             ) : (
@@ -1594,7 +1611,10 @@ export function ContextScreen() {
           }
           parentNodes={contextFolderNodes}
           rootLabel={t("rail.title", { defaultValue: "Context" })}
-          onClose={() => setNewItemDialog(null)}
+          onClose={() => {
+            setNewItemDialog(null);
+            if (workspaceRoute?.create && workspaceRoute.targetKind === "folder") void navigate(workspacePath(workspaceId, "context"), { replace: true });
+          }}
           onSubmit={(input) => {
             if (input.itemType === "page") {
               createPage({
@@ -1651,10 +1671,12 @@ function ContextPageList({
   pages,
   activeId,
   onSelect,
+  workspaceId,
 }: {
   pages: ContextPageSummary[];
   activeId: string | null;
   onSelect: (pageId: string) => void;
+  workspaceId: string;
 }) {
   const { t } = useTranslation("context");
   if (pages.length === 0) {
@@ -1670,12 +1692,12 @@ function ContextPageList({
         </p>
         <WorkspaceFirstUseChecklist nextStep="context" />
         <div className="empty-state-actions">
-          <Link className="icon-button primary" to="/context/new">
+            <Link className="icon-button primary" to={contextNewHref(workspaceId)}>
             {t("empty.writeFirst", {
               defaultValue: "Write first Context page",
             })}
           </Link>
-          <Link className="icon-button text-button" to="/library">
+          <Link className="icon-button text-button" to={workspacePath(workspaceId, "library")}>
             {t("empty.openLibrary", { defaultValue: "Open Library" })}
           </Link>
         </div>
@@ -1900,7 +1922,7 @@ function PendingDraftReview({
           {pagePendingReviewCount != null && pagePendingReviewCount > 1 ? (
             <Link
               className="icon-button text-button"
-              to={`/review?review=${review.review_item_id}`}
+              to={workspaceId ? workspacePath(workspaceId, `review/${encodeURIComponent(review.review_item_id)}`) : "#"}
             >
               {t("pendingReview.viewPageReviews", {
                 count: pagePendingReviewCount,
@@ -1908,7 +1930,7 @@ function PendingDraftReview({
               })}
             </Link>
           ) : impactLoadFailed || review.status === "changes_requested" ? (
-            <Link className="icon-button text-button" to="/review">
+            <Link className="icon-button text-button" to={workspaceId ? workspacePath(workspaceId, "review") : "#"}>
               {t("pendingReview.openQueue", {
                 defaultValue: "Open Review queue",
               })}
@@ -2132,6 +2154,7 @@ function ContextReader({
   nodes,
   tombstones,
   workspaceId,
+  workspaceSlug,
   onCopyNodeLink,
   onDeleteNode,
   onMoveNode,
@@ -2149,6 +2172,7 @@ function ContextReader({
   nodes: TreeNodePayload[];
   tombstones: LibraryItemTombstone[];
   workspaceId: string | null;
+  workspaceSlug: string | null;
   onCopyNodeLink: (node: TreeNodePayload) => Promise<CopyTextDetailedResult>;
   onDeleteNode: (node: TreeNodePayload) => void;
   onMoveNode: (node: TreeNodePayload) => void;
@@ -2160,6 +2184,8 @@ function ContextReader({
   const { t } = useTranslation("context");
   const { t: tShell } = useTranslation("shell");
   const workspaceContext = useOptionalWorkspaceContext();
+  const routeWorkspace = workspaceContext?.workspaces?.find((workspace) => workspace.id === workspaceId) ??
+    (workspaceContext?.selectedWorkspace?.id === workspaceId ? workspaceContext.selectedWorkspace : null);
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const compareFromParam = searchParams.get("compareFrom");
@@ -2692,7 +2718,7 @@ function ContextReader({
           {canEdit ? (
             <Link
               className="context-reader-header-action context-reader-edit-action icon-button text-button"
-              to={`${formatCanonicalContextUrl(workspaceId ?? detail.workspace_id, detail.id)}/edit`}
+              to={contextEditHref(workspaceId ?? detail.workspace_id, detail.id)}
             >
               <Edit size={16} aria-hidden="true" />
               <span>{t("actions.edit", { defaultValue: "Edit" })}</span>
@@ -3000,8 +3026,7 @@ function ContextReader({
         <ContextShareDialog
           canPublish={
             canEdit &&
-            (workspaceContext?.selectedWorkspace?.visibility === "public" ||
-              workspaceContext?.selectedWorkspace?.role === "owner")
+            (routeWorkspace?.visibility === "public" || routeWorkspace?.role === "owner")
           }
           canUnpublish={canEdit}
           detail={detail}
@@ -3009,9 +3034,9 @@ function ContextReader({
           onClose={() => setShareOpen(false)}
           onPublicChange={setIsPublic}
           workspaceId={workspaceId}
-          workspaceSlug={workspaceContext?.workspaceSlug ?? null}
+            workspaceSlug={workspaceSlug ?? routeWorkspace?.slug ?? null}
           workspaceVisibility={
-            workspaceContext?.selectedWorkspace?.visibility ?? null
+            routeWorkspace?.visibility ?? null
           }
         />
       ) : null}
@@ -4758,7 +4783,7 @@ function graphNeighborItem(
 ) {
   return {
     id: `${entry.kind}:${entry.id}:${entry.edge_kind}:${entry.direction}`,
-    href:
+    href: workspaceId ?
       searchResultHref(
         {
           id: entry.id,
@@ -4767,7 +4792,7 @@ function graphNeighborItem(
           source_ref: { kind: entry.kind, id: entry.id },
         },
         workspaceId,
-      ) ?? undefined,
+      ) ?? undefined : undefined,
     title: entry.title,
     meta: entry.path ? displayConceptPath(entry.path) : humanizeEnum(entry.edge_kind),
   };

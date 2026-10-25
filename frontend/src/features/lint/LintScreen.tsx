@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiErrorMessage } from "../../shared/api/client";
 import {
@@ -25,7 +25,8 @@ import {
   listLintFindings,
 } from "../../shared/api/operations";
 import type { CoverageGap, LintFinding } from "../../shared/api/operations";
-import { getCurrentWorkspaceId } from "../../shared/api/workspace";
+import { readTreeNode } from "../../shared/api/workspace";
+import type { TreeNodePayload } from "../../shared/api/workspace";
 import { ActionMenu } from "../../shared/components/ActionMenu";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
@@ -38,8 +39,10 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
+import { treeNodeHref, useRouteWorkspaceId, useWorkspaceRoute, withWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { isEditorRole } from "../../shared/workspace/permissions";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import {
   lintFindingMessage,
   lintMessageIsSpecific,
@@ -60,7 +63,9 @@ type ViewFilter = (typeof VIEWS)[number];
 
 type LintState = {
   workspaceId: string;
+  loadedFindingId: string | null;
   findings: LintFinding[];
+  treeTargets: Record<string, TreeNodePayload>;
   findingsTotal: number;
   gaps: CoverageGap[];
   gapsHasMore: boolean;
@@ -70,6 +75,8 @@ type LintState = {
   hasPrevious: boolean;
   hasNext: boolean;
 };
+
+class LintFindingNotFoundError extends Error {}
 
 function enumParam<T extends string>(
   params: URLSearchParams,
@@ -88,11 +95,14 @@ function positiveIntegerParam(value: string | null, fallback: number) {
 }
 
 export function LintScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  const navigate = useNavigate();
   const { t } = useTranslation("lint");
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
   const findingsHeadingRef = useRef<HTMLSpanElement>(null);
   const workspaceContext = useOptionalWorkspaceContext();
-  const selectedWorkspaceId = workspaceContext?.selectedWorkspace?.id;
+  const selectedWorkspaceId = routeWorkspaceId;
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const roleKnown = Boolean(workspaceContext?.selectedWorkspace);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -100,7 +110,7 @@ export function LintScreen() {
   // to tabs: four bordered filter boxes used to push the findings themselves
   // 170px below the fold.
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const linkedFindingId = searchParams.get("finding");
+  const linkedFindingId = route?.targetId ?? null;
   const view = linkedFindingId
     ? "findings"
     : enumParam(searchParams, "view", VIEWS, "findings");
@@ -126,6 +136,10 @@ export function LintScreen() {
     new Set(),
   );
   const [busyFindingIds, setBusyFindingIds] = useState<Set<string>>(new Set());
+  const [findingNotFoundKey, setFindingNotFoundKey] = useState<string | null>(null);
+  useEffect(() => {
+    setFindingNotFoundKey(null);
+  }, [routeWorkspaceId, linkedFindingId]);
   const {
     data: state,
     error,
@@ -151,9 +165,18 @@ export function LintScreen() {
     ],
     {
       errorMessage: t("errors.load"),
+      formatError: (exc, fallback) => {
+        if (exc instanceof LintFindingNotFoundError && linkedFindingId) {
+          setFindingNotFoundKey(`${routeWorkspaceId}:${linkedFindingId}`);
+          return t("errors.findingNotFound", { defaultValue: "Lint finding not found" });
+        }
+        return apiErrorMessage(exc, fallback);
+      },
       fallbackData: {
         workspaceId: "",
+        loadedFindingId: null,
         findings: [],
+        treeTargets: {},
         findingsTotal: 0,
         gaps: [],
         gapsHasMore: false,
@@ -184,6 +207,9 @@ export function LintScreen() {
   const stateWorkspaceIsCurrent = Boolean(
     state?.workspaceId &&
       (!selectedWorkspaceId || state.workspaceId === selectedWorkspaceId),
+  );
+  const linkedFindingMatchesState = !linkedFindingId || Boolean(
+    state?.loadedFindingId === linkedFindingId,
   );
   const mutationContextReady =
     stateWorkspaceIsCurrent && selectionContextIsCurrent;
@@ -277,7 +303,7 @@ export function LintScreen() {
     workspaceIdHint?: string,
     findingId?: string | null,
   ): Promise<LintState> {
-    const workspaceId = workspaceIdHint ?? (await getCurrentWorkspaceId());
+    const workspaceId = workspaceIdHint ?? routeWorkspaceId;
     if (!workspaceId) throw new Error(t("errors.workspaceNotFound"));
     if (filters.view === "coverage" && !findingId) {
       const data = await listCoverageGaps(workspaceId, {
@@ -285,7 +311,9 @@ export function LintScreen() {
       });
       return {
         workspaceId,
+        loadedFindingId: null,
         findings: [],
+        treeTargets: {},
         findingsTotal: 0,
         gaps: data.items,
         gapsHasMore: data.has_more,
@@ -315,6 +343,23 @@ export function LintScreen() {
             page_size: filters.pageSize,
           },
     );
+    if (findingId && result.findings.length === 0) {
+      throw new LintFindingNotFoundError();
+    }
+    const treeTargets: Record<string, TreeNodePayload> = {};
+    await Promise.all(
+      [...new Set(result.findings.flatMap((finding) =>
+        finding.target_type === "workspace_tree_node" && finding.target_id
+          ? [finding.target_id]
+          : [],
+      ))].map(async (nodeId) => {
+        try {
+          treeTargets[nodeId] = await readTreeNode(workspaceId, nodeId);
+        } catch {
+          // An inaccessible or deleted node has no safe section to link to.
+        }
+      }),
+    );
     const resultPageSize = result.page_size ?? filters.pageSize;
     const total = result.total ?? result.findings.length;
     const pageCount =
@@ -322,7 +367,9 @@ export function LintScreen() {
       (total === 0 ? 0 : Math.ceil(total / resultPageSize));
     return {
       workspaceId,
+      loadedFindingId: findingId ?? null,
       findings: result.findings,
+      treeTargets,
       findingsTotal: total,
       gaps: [],
       gapsHasMore: false,
@@ -479,10 +526,8 @@ export function LintScreen() {
   function clearLinkedFinding() {
     if (!linkedFindingId) return;
     const next = new URLSearchParams(searchParams);
-    next.delete("finding");
-    next.delete("view");
     setSelectedFindingIds(new Set());
-    setSearchParams(next);
+    navigate(withWorkspaceQuery(workspacePath(routeWorkspaceId, "lint"), next));
   }
 
   function resetFilters() {
@@ -698,7 +743,37 @@ export function LintScreen() {
     !mutationContextReady ||
     Boolean(fixFindingId && busyFindingIds.has(fixFindingId));
 
-  if (!state) return <RouteLoading label={t("loading")} />;
+  if (findingNotFoundKey === `${routeWorkspaceId}:${linkedFindingId}` && linkedFindingId) {
+    return <NotFoundScreen />;
+  }
+  if (linkedFindingId && !linkedFindingMatchesState) {
+    if (error) {
+      return (
+        <section className="feature-main">
+          <StatusBanner
+            tone="warning"
+            action={<button className="icon-button" onClick={reloadLatest} type="button">{t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}</button>}
+          >
+            {error}
+          </StatusBanner>
+        </section>
+      );
+    }
+    return <RouteLoading label={t("loading")} />;
+  }
+  if (error && (!state || !stateWorkspaceIsCurrent)) {
+    return (
+      <section className="feature-main">
+        <StatusBanner
+          tone="warning"
+          action={<button className="icon-button" onClick={reloadLatest} type="button">{t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}</button>}
+        >
+          {error}
+        </StatusBanner>
+      </section>
+    );
+  }
+  if (!state || !stateWorkspaceIsCurrent) return <RouteLoading label={t("loading")} />;
 
   return (
     <div className="workspace-screen single-column">
@@ -894,6 +969,7 @@ export function LintScreen() {
         ) : (
           <FindingList
             findings={state.findings}
+            treeTargets={state.treeTargets}
             total={state.findingsTotal}
             canEdit={canEdit}
             mutationContextReady={mutationContextReady}
@@ -1043,6 +1119,7 @@ function SeverityIcon({
 
 function FindingList({
   findings,
+  treeTargets,
   total,
   canEdit,
   mutationContextReady,
@@ -1062,6 +1139,7 @@ function FindingList({
   findingsHeadingRef,
 }: {
   findings: LintFinding[];
+  treeTargets: Record<string, TreeNodePayload>;
   total: number;
   canEdit: boolean;
   mutationContextReady: boolean;
@@ -1086,6 +1164,7 @@ function FindingList({
   selectAllCheckboxRef: React.MutableRefObject<HTMLInputElement | null>;
   findingsHeadingRef: React.MutableRefObject<HTMLSpanElement | null>;
 }) {
+  const routeWorkspaceId = useRouteWorkspaceId();
   const { t } = useTranslation("lint");
   const actionableFindings = findings.filter(
     (f) => f.status === "open" || f.status === "acknowledged",
@@ -1239,11 +1318,16 @@ function FindingList({
             </div>
           )}
           {findings.map((finding) => {
-            const href = finding.target_id
+            const treeTarget = finding.target_id
+              ? treeTargets[finding.target_id]
+              : undefined;
+            const href = treeTarget
+              ? treeNodeHref(routeWorkspaceId, treeTarget)
+              : finding.target_id && finding.target_type !== "workspace_tree_node"
               ? searchResultHref({
                   id: finding.target_id,
                   type: finding.target_type,
-                })
+                }, routeWorkspaceId)
               : null;
             const actionable =
               finding.status === "open" || finding.status === "acknowledged";
@@ -1403,6 +1487,7 @@ function CoverageGapList({
   hasMore: boolean;
 }) {
   const { t } = useTranslation("lint");
+  const routeWorkspaceId = useRouteWorkspaceId();
   return (
     <section className="feature-section">
       <div className="panel-header">
@@ -1444,7 +1529,7 @@ function CoverageGapList({
                       {gap.finding_id ? (
                         <Link
                           className="lint-target-chip"
-                          to={`/lint?finding=${gap.finding_id}`}
+                          to={workspacePath(routeWorkspaceId, `lint/findings/${encodeURIComponent(gap.finding_id)}`)}
                         >
                           <ExternalLink size={13} aria-hidden="true" />
                           <span>{t("coverage.openFinding")}</span>

@@ -19,7 +19,7 @@ for (const viewport of viewportCases) {
     const tokenRoute = /\/api\/v1\/auth\/tokens(?:\?|$)/;
     let release = await holdResponses(page, tokenRoute);
     try {
-      await page.goto("/settings/integrations");
+      await page.goto("/account/integrations");
       const section = page.locator(".mcp-keys-section");
       const loading = section.locator(".loading-indicator");
       await expect(loading).toBeVisible();

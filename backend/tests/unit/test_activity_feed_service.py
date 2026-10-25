@@ -179,7 +179,7 @@ def test_cursor_binds_scope_filter_and_expiry(service, monkeypatch):
 
 def test_deferred_actor_is_not_copied_and_count_is_not_affected_by_expansion(service):
     original = row(0).event
-    event = service._event(original, "audit")
+    event = service._event(original, "audit", uuid4())
     assert event.actor is original.actor
     original.actor.display_name = "Resolved identity"
     assert event.actor.display_name == "Resolved identity"
@@ -316,5 +316,5 @@ def test_real_audit_vocabulary_preserves_operations_and_failure_results(
     original = row(0).event
     values = {name: getattr(original, name) for name in ActivityItemRead.model_fields}
     values["body"] = action
-    event = service._event(ActivityItemRead(**values), "audit")
+    event = service._event(ActivityItemRead(**values), "audit", uuid4())
     assert (event.operation, event.result_status) == (operation, result)

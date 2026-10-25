@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures";
-import { backendBaseUrl, currentWorkspace, e2ePassword } from "./auth";
+import { backendBaseUrl, currentWorkspace, e2ePassword, workspaceUrl } from "./auth";
 import { evidenceLocatorScreenshot } from "./evidence";
 
 // The seeded group spans local midnight without crossing its UTC date.
@@ -119,12 +119,13 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   const seed = await setup(page, info);
   await page.addInitScript(() => localStorage.setItem("dtxwiki.uiLanguage", "en"));
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/dashboard?period=all&group_reads=1");
+  await page.goto(`${workspaceUrl(seed.workspaceId, "dashboard")}?period=all&group_reads=1`);
   const recent = page.locator(".activity-feed-panel");
   await expect(recent.locator('[data-entry-type="read_group"]')).toHaveCount(1);
   const review = recent.locator(".activity-entry__layout--review");
-  await expect(review.locator(".activity-entry__title-link")).toHaveAttribute("href", `/review?review=${seed.review_id}`);
-  await expect(review.locator(".activity-entry__review-link")).toHaveAttribute("href", `/review?review=${seed.review_id}`);
+  const reviewHref = workspaceUrl(seed.workspaceId, `review/${seed.review_id}`);
+  await expect(review.locator(".activity-entry__title-link")).toHaveAttribute("href", reviewHref);
+  await expect(review.locator(".activity-entry__review-link")).toHaveAttribute("href", reviewHref);
   await expect(review.getByRole("button")).toHaveCount(0);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
   await page.getByRole("checkbox", { name: "Group repeated reads" }).uncheck();
@@ -134,7 +135,7 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   await expect(recent.locator('[data-entry-type="read_group"]')).toHaveCount(1);
   await expect(recent.locator(".activity-feed-counts")).toHaveText("5 entries · 8 original events");
   await review.locator(".activity-entry__review-link").click();
-  await expect(page).toHaveURL(new RegExp(`/review\\?review=${seed.review_id}$`));
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/review/${seed.review_id}$`));
   await expect(page.locator("#review-detail-title")).toBeVisible();
   await page.goBack();
   const group = recent.locator('[data-entry-type="read_group"]');
@@ -169,34 +170,34 @@ test("real grouped feed, names, review links and filter navigation @cross-browse
   await group.locator(".activity-read-group__collapse").click();
   await expect(group.locator(".activity-read-group__toggle")).toBeFocused();
   await recent.locator(".activity-feed-see-all").click();
-  await expect(page).toHaveURL(/\/activity\?period=all&kind=workspace&subtype=all&group_reads=1$/);
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/activity\\?period=all&kind=workspace&subtype=all&group_reads=1$`));
   await page.locator('.activity-feed-see-all[href*="/activity/history?"]').click();
-  await expect(page).toHaveURL(/\/activity\/history\?period=all&kind=workspace&subtype=all&group_reads=1$/);
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/activity/history\\?period=all&kind=workspace&subtype=all&group_reads=1$`));
   await expect(page.locator('[data-entry-type="read_group"]')).toHaveCount(1);
   await page.getByRole("checkbox", { name: "Group repeated reads" }).uncheck();
   await expect(page).toHaveURL(/group_reads=0/);
   await expect(page.locator('[data-entry-type="read_group"]')).toHaveCount(0);
   await expect(page.locator(".activity-feed-entry")).toHaveCount(6);
   const crumb = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Activity" });
-  await expect(crumb).toHaveAttribute("href", "/activity?period=all&kind=workspace&subtype=all&group_reads=0");
+  await expect(crumb).toHaveAttribute("href", `${workspaceUrl(seed.workspaceId, "activity")}?period=all&kind=workspace&subtype=all&group_reads=0`);
   await crumb.click();
   await expect(page.getByRole("checkbox", { name: "Group repeated reads" })).not.toBeChecked();
   await page.goBack();
-  await expect(page).toHaveURL(/\/activity\/history\?.*group_reads=0/);
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/activity/history\\?.*group_reads=0`));
   await page.goForward();
-  await expect(page).toHaveURL(/\/activity\?.*group_reads=0/);
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/activity\\?.*group_reads=0`));
   await expect(page.locator("body")).not.toContainText("secret-sentinel");
-  await page.locator('.activity-entry__title-link[href="/context?target=' + seed.page_id + '"]').first().click();
+  await page.locator(`.activity-entry__title-link[href="${workspaceUrl(seed.workspaceId, `context/pages/${seed.page_id}`)}"]`).first().click();
   await expect(page.getByRole("main").getByRole("heading", { name: seed.page_title })).toBeVisible();
 });
 
 for (const [language, width] of [["en", 1440], ["ko", 1100], ["en", 320], ["ko", 320]] as const) {
   test(`activity proportions and component dark theme (${language}, ${width}) @cross-browser`, async ({ page }, info) => {
-    await setup(page, info);
+    const seed = await setup(page, info);
     await page.addInitScript(locale => localStorage.setItem("dtxwiki.uiLanguage", locale), language);
     const evidence: unknown[] = [];
       await page.setViewportSize({ width, height: 1000 });
-      for (const route of ["/dashboard?period=all", "/activity?period=all&kind=workspace", "/activity/history?period=all&kind=workspace"]) {
+      for (const route of [`${workspaceUrl(seed.workspaceId, "dashboard")}?period=all`, `${workspaceUrl(seed.workspaceId, "activity")}?period=all&kind=workspace`, `${workspaceUrl(seed.workspaceId, "activity/history")}?period=all&kind=workspace`]) {
         await page.goto(route);
         await expect(page.locator('[data-entry-type="read_group"]')).toHaveCount(1);
         const range = page.locator('[data-entry-type="read_group"] .activity-entry__time-range');
@@ -262,7 +263,7 @@ test.describe("touch activity disclosures", () => {
   test("full names and group members stay accessible to touch", async ({ page }, info) => {
     const seed = await setup(page, info);
     await page.addInitScript(() => localStorage.setItem("dtxwiki.uiLanguage", "ko"));
-    await page.goto("/dashboard?period=all");
+    await page.goto(`${workspaceUrl(seed.workspaceId, "dashboard")}?period=all`);
     const group = page.locator('[data-entry-type="read_group"]');
     await expect(group).toBeVisible();
     const targets = await metrics(page);
@@ -289,7 +290,7 @@ test.describe("touch activity disclosures", () => {
     await group.locator(".activity-read-group__collapse").tap();
     await expect(group.locator(".activity-read-group__members")).toBeHidden();
     await page.locator(".activity-entry__review-link").tap();
-    await expect(page).toHaveURL(new RegExp(`/review\\?review=${seed.review_id}$`));
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${seed.workspaceId}/review/${seed.review_id}$`));
     await expect(page.locator("#review-detail-title")).toBeVisible();
   });
 });

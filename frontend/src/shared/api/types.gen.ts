@@ -3794,6 +3794,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
             /** Placement Confidence */
             placement_confidence: string | null;
             /** Promoted Context Page Id */

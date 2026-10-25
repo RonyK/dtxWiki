@@ -2,8 +2,10 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
+from backend.services.context_link_targets import _server_navigation_target
 from backend.services.context_links import (
     LinkContext,
     Resolution,
@@ -15,6 +17,7 @@ from backend.services.context_links import (
     resolve,
     rewrite_links_with_report,
 )
+from backend.spi.types import ActorContext
 
 
 def test_context_link_contract_and_source_decisions(monkeypatch):
@@ -145,3 +148,83 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
     )
     assert rewritten == f"[{literal}]({href})"
     assert len(fixes) == 1
+
+
+def test_foreign_workspace_navigation_is_unavailable_without_database_access():
+    # A stored explicit workspace mismatch is rejected before any target lookup;
+    # this prevents links from turning the source reader into a cross-workspace
+    # existence probe.
+    source_workspace = UUID("11111111-1111-4111-8111-111111111111")
+    foreign_workspace = UUID("22222222-2222-4222-8222-222222222222")
+    target = UUID("33333333-3333-4333-8333-333333333333")
+    assert _server_navigation_target(
+        object(),
+        f"/workspaces/{foreign_workspace}/library/items/{target}",
+        workspace_id=source_workspace,
+        actor=None,
+    ) == (True, None)
+    # Additional logical unit input: the foreign-workspace rejection above
+    # cannot exercise dispatcher collisions with valid Context routes sharing
+    # /workspaces/. Keep this separate failure path off the DB/transport lane;
+    # publication and foreign-link semantics still belong to Context's resolver.
+    assert _server_navigation_target(
+        object(),
+        f"/workspaces/{source_workspace}/context/pages/{target}",
+        workspace_id=source_workspace,
+        actor=None,
+    ) == (False, None)
+    # Additional logical unit input: public legacy links take a different
+    # dispatch branch from canonical routes. Delegate to the public-exposure
+    # resolver rather than suppressing public links along with SPA navigation;
+    # existing public-read DB cases already cover that resolver's visibility.
+    assert _server_navigation_target(
+        object(),
+        f"/context?target={target}",
+        workspace_id=source_workspace,
+        actor=None,
+        public=True,
+    ) == (False, None)
+
+
+def test_preview_artifact_link_can_precede_ready_head(monkeypatch):
+    # The selected preview pointer is independent of the ready-source head.
+    # Existing foreign-workspace tests never reach artifact visibility and
+    # cannot catch a false negative caused only by the newer ready pointer.
+    # Canonical lineage is covered by the Library integration suite; stub
+    # that boundary so this projection case needs no extra database traversal.
+    workspace_id = UUID("11111111-1111-4111-8111-111111111111")
+    item_id = UUID("22222222-2222-4222-8222-222222222222")
+    ready_version_id = UUID("33333333-3333-4333-8333-333333333333")
+    preview_version_id = UUID("44444444-4444-4444-8444-444444444444")
+    artifact_id = UUID("55555555-5555-4555-8555-555555555555")
+    item = SimpleNamespace(
+        id=item_id,
+        workspace_id=workspace_id,
+        lifecycle_status="active",
+        trust_level="public",
+        current_ready_version_id=ready_version_id,
+        current_version_id=ready_version_id,
+        current_preview_version_id=preview_version_id,
+    )
+    preview_version = SimpleNamespace(id=preview_version_id)
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.canonical_library_artifact_lookup",
+        lambda *_args, **_kwargs: (item, preview_version, object()),
+    )
+    actor = ActorContext(
+        actor_kind="user",
+        actor_id="user-1",
+        workspace_id=workspace_id,
+        workspace_role="viewer",
+        role="viewer",
+    )
+
+    assert _server_navigation_target(
+        object(),
+        f"/workspaces/{workspace_id}/library/artifacts/{artifact_id}",
+        workspace_id=workspace_id,
+        actor=actor,
+    ) == (
+        True,
+        f"/workspaces/{workspace_id}/library/artifacts/{artifact_id}",
+    )

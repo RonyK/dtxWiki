@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -211,7 +211,7 @@ describe("SettingsScreen", () => {
     const { fetchMock } = mockPolicyNavigationAndMcpClients();
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -306,7 +306,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     const { fetchMock, setMcpStatus } = mockPolicyNavigationAndMcpClients();
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -372,7 +372,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     mockPolicyNavigationAndMcpClients();
     render(
-      <MemoryRouter initialEntries={["/settings?section=mcp"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=mcp`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -426,7 +426,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -504,7 +504,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -646,7 +646,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -771,7 +771,7 @@ describe("SettingsScreen", () => {
       });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -854,7 +854,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -931,7 +931,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -982,7 +982,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -1048,7 +1048,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=mcp"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=mcp`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -1140,7 +1140,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${deleteWorkspaceId}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -1263,10 +1263,15 @@ describe("SettingsScreen", () => {
       });
 
       render(
-        <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+        <MemoryRouter initialEntries={[`/workspaces/${personalWorkspaceId}/settings?section=workspace`]}>
           <WorkspaceProvider>
             <WorkspaceRefreshGate>
-              <SettingsScreen />
+              <Routes>
+                <Route
+                  path="/workspaces/:workspaceId/settings/*"
+                  element={<SettingsScreen />}
+                />
+              </Routes>
               <WorkspaceDeletionProbe />
             </WorkspaceRefreshGate>
           </WorkspaceProvider>
@@ -1422,10 +1427,15 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${deleteWorkspaceId}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
-            <SettingsScreen />
+            <Routes>
+              <Route
+                path="/workspaces/:workspaceId/settings/*"
+                element={<SettingsScreen />}
+              />
+            </Routes>
           </WorkspaceRefreshGate>
         </WorkspaceProvider>
       </MemoryRouter>,
@@ -1624,7 +1634,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${deleteWorkspaceId}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -1762,7 +1772,7 @@ describe("SettingsScreen", () => {
       });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${currentWorkspaceId}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -1837,7 +1847,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${currentWorkspaceId}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -1911,7 +1921,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${workspaceId}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -1988,7 +1998,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -2057,7 +2067,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SelfDemoteButton />
@@ -2180,7 +2190,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2196,7 +2206,7 @@ describe("SettingsScreen", () => {
     cleanup();
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=answer"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=answer`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2215,7 +2225,7 @@ describe("SettingsScreen", () => {
     cleanup();
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2230,7 +2240,7 @@ describe("SettingsScreen", () => {
 
     cleanup();
     render(
-      <MemoryRouter initialEntries={["/settings?section=members"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=members`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2291,7 +2301,7 @@ describe("SettingsScreen", () => {
     // to whatever the default section is.
     cleanup();
     render(
-      <MemoryRouter initialEntries={["/settings?section=access-sharing"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=access-sharing`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2321,7 +2331,7 @@ describe("SettingsScreen", () => {
     ]) {
       cleanup();
       render(
-        <MemoryRouter initialEntries={[`/settings?section=${section}`]}>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=${section}`]}>
           <SettingsScreen />
         </MemoryRouter>,
       );
@@ -2386,7 +2396,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2430,7 +2440,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2474,7 +2484,7 @@ describe("SettingsScreen", () => {
   it("gives every rail destination a leading icon (260912)", async () => {
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2509,7 +2519,7 @@ describe("SettingsScreen", () => {
         rules.promise,
     });
     render(
-      <MemoryRouter initialEntries={["/settings?section=policies&tab=lint"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=policies&tab=lint`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2542,7 +2552,7 @@ describe("SettingsScreen", () => {
     });
     render(
       <MemoryRouter
-        initialEntries={["/settings?section=policies&tab=citation-write"]}
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=policies&tab=citation-write`]}
       >
         <SettingsScreen />
       </MemoryRouter>,
@@ -2596,7 +2606,7 @@ describe("SettingsScreen", () => {
       },
     });
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2620,7 +2630,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2674,7 +2684,7 @@ describe("SettingsScreen", () => {
     matchMediaMatches = true;
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=attachments"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=attachments`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -2848,7 +2858,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -2958,7 +2968,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3087,7 +3097,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3210,7 +3220,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3352,7 +3362,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3428,7 +3438,7 @@ describe("SettingsScreen", () => {
       [`${BASE}/oauth/consents`]: { data: [] },
     });
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate><SettingsScreen /></WorkspaceRefreshGate>
         </WorkspaceProvider>
@@ -3493,7 +3503,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3796,7 +3806,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3892,7 +3902,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -3973,7 +3983,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4067,7 +4077,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4147,7 +4157,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=library"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=library`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -4215,7 +4225,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4334,7 +4344,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4404,7 +4414,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4475,7 +4485,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4524,7 +4534,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4580,7 +4590,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4650,7 +4660,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -4694,7 +4704,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -4775,7 +4785,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=review"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=review`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -4815,7 +4825,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4881,7 +4891,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -4976,7 +4986,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -5126,7 +5136,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -5212,7 +5222,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent-injection"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=agent-injection`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5278,7 +5288,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SettingsScreen />
@@ -5404,7 +5414,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5588,7 +5598,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5753,7 +5763,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5807,7 +5817,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5868,7 +5878,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5920,7 +5930,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -5984,7 +5994,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6078,7 +6088,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6211,7 +6221,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6309,7 +6319,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6384,7 +6394,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6456,7 +6466,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6572,7 +6582,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <WorkspaceProvider>
           <WorkspaceRefreshGate>
             <SwitchWorkspaceButton workspaceId={nextWorkspaceId} />
@@ -6643,7 +6653,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6683,7 +6693,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6772,7 +6782,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6835,7 +6845,7 @@ describe("SettingsScreen", () => {
       [`POST ${BASE}/api/v1/auth/tokens`]: () => issueResponse.promise,
     });
     const view = render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -6967,7 +6977,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7070,7 +7080,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7142,7 +7152,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7213,7 +7223,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7317,7 +7327,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7401,7 +7411,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7492,7 +7502,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7600,7 +7610,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7679,7 +7689,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7745,7 +7755,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7824,7 +7834,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -7955,7 +7965,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8003,7 +8013,7 @@ describe("SettingsScreen", () => {
         return {data:{eligible_consent_count:1,affected_mcp_client_count:0,cleaned_consent_count:0}};
       },
     });
-    render(<MemoryRouter initialEntries={["/settings/integrations"]}><SettingsScreen /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}><SettingsScreen /></MemoryRouter>);
     const trigger = await screen.findByRole("button",{name:"Review cleanup candidates"});
     await user.click(trigger);
     expect(await screen.findByText("The Settings request failed. Please try again.")).toBeInTheDocument();
@@ -8042,7 +8052,7 @@ describe("SettingsScreen", () => {
         },
       });
       render(
-        <MemoryRouter initialEntries={["/settings/integrations"]}>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
           <SettingsScreen />
         </MemoryRouter>,
       );
@@ -8110,7 +8120,7 @@ describe("SettingsScreen", () => {
       },
     });
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8222,7 +8232,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8379,7 +8389,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8468,7 +8478,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8537,7 +8547,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8582,7 +8592,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8634,7 +8644,7 @@ describe("SettingsScreen", () => {
     });
 
     const { container } = render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8739,7 +8749,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8803,7 +8813,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8853,7 +8863,7 @@ describe("SettingsScreen", () => {
     const user = userEvent.setup();
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=labs"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8881,7 +8891,7 @@ describe("SettingsScreen", () => {
   it("groups Settings sections and marks the server-wide ones for an admin", async () => {
     mockFetch(navFixture(true));
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8920,7 +8930,7 @@ describe("SettingsScreen", () => {
   it("hides the System administration group entirely from a non-admin", async () => {
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8967,7 +8977,7 @@ describe("SettingsScreen", () => {
       },
     });
     render(
-      <MemoryRouter initialEntries={["/settings?section=attachments"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=attachments`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -8996,7 +9006,7 @@ describe("SettingsScreen", () => {
     // request. One rule for both.
     mockFetch(navFixture(false));
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9033,7 +9043,7 @@ describe("SettingsScreen", () => {
     }
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=not-a-section"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=not-a-section`]}>
         <SettingsScreen />
         <LocationSpy />
       </MemoryRouter>,
@@ -9043,7 +9053,7 @@ describe("SettingsScreen", () => {
 
     cleanup();
     render(
-      <MemoryRouter initialEntries={["/settings?section=access-sharing#top"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=access-sharing#top`]}>
         <SettingsScreen />
         <LocationSpy />
       </MemoryRouter>,
@@ -9102,7 +9112,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9161,7 +9171,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9227,7 +9237,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9284,7 +9294,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9362,7 +9372,7 @@ describe("SettingsScreen", () => {
       });
 
       render(
-        <MemoryRouter initialEntries={["/settings/integrations"]}>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
           <SettingsScreen />
         </MemoryRouter>,
       );
@@ -9434,7 +9444,7 @@ describe("SettingsScreen", () => {
       });
 
       render(
-        <MemoryRouter initialEntries={["/settings/integrations"]}>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
           <SettingsScreen />
         </MemoryRouter>,
       );
@@ -9490,7 +9500,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9577,7 +9587,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9654,7 +9664,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9788,7 +9798,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings/integrations"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings/integrations`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9860,7 +9870,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -9898,7 +9908,7 @@ describe("SettingsScreen", () => {
         });
 
         render(
-          <MemoryRouter>
+          <MemoryRouter initialEntries={["/settings"]}>
             <SettingsScreen />
           </MemoryRouter>,
         );
@@ -9938,7 +9948,7 @@ describe("SettingsScreen", () => {
         });
 
         render(
-          <MemoryRouter>
+          <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings`]}>
             <SettingsScreen />
           </MemoryRouter>,
         );
@@ -10032,7 +10042,7 @@ describe("SettingsScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -10115,9 +10125,12 @@ function SelfDemoteButton() {
 }
 
 function SwitchWorkspaceButton({ workspaceId }: { workspaceId: string }) {
-  const { selectWorkspaceId } = useWorkspaceContext();
+  const navigate = useNavigate();
   return (
-    <button onClick={() => selectWorkspaceId(workspaceId)} type="button">
+    <button
+      onClick={() => navigate(`/workspaces/${workspaceId}/settings/integrations`)}
+      type="button"
+    >
       Switch to {workspaceId}
     </button>
   );

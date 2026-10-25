@@ -285,18 +285,11 @@ def _seed_page(page_service: PageService, workspace_slug: str, slug: str) -> dic
     return page
 
 
-def test_resolve_workspace_id_for_tool_rejects_page_id_slug_mismatch(
+def test_resolve_workspace_id_for_tool_requires_explicit_workspace_with_page_and_slug(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1 (B-F5-CODEX-1): page_id + workspace_slug pointing to
-    different workspaces must reject with `not_found`.
-
-    Codex's reproduction: caller knows workspace B's page_id but provides
-    workspace A's slug. Previously the slug branch decided the auth check
-    workspace while the service read used page_id workspace -> cross-workspace
-    read bypass. Now both identifiers are compared before any role check.
-    """
+    """Page and slug identifiers cannot replace a required workspace_id."""
     with session_factory.begin() as session:
         workspace_a = _seed_workspace(session, "fix6-ws-a", "Fix-6 Workspace A")
         workspace_b = _seed_workspace(session, "fix6-ws-b", "Fix-6 Workspace B")
@@ -315,17 +308,16 @@ def test_resolve_workspace_id_for_tool_rejects_page_id_slug_mismatch(
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "not_found"
+    assert result.error_code == "validation_failed"
 
 
-def test_resolve_workspace_id_for_tool_allows_page_id_slug_match(
+def test_resolve_workspace_id_for_tool_requires_workspace_with_matching_identifiers(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1: page_id + workspace_slug agreeing on workspace proceed."""
+    """A page id and matching slug do not replace explicit workspace_id."""
     with session_factory.begin() as session:
-        workspace_a = _seed_workspace(session, "fix6-match-a", "Fix-6 Match A")
-        workspace_id = workspace_a.id
+        _seed_workspace(session, "fix6-match-a", "Fix-6 Match A")
 
     _seed_page(page_service, "fix6-match-a", "page-on-a")
     page_a = page_service.read_page(workspace_slug="fix6-match-a", slug="page-on-a")
@@ -339,17 +331,17 @@ def test_resolve_workspace_id_for_tool_allows_page_id_slug_match(
         session_factory=session_factory,
     )
 
-    assert result == workspace_id
+    assert isinstance(result, PolicyRejection)
+    assert result.error_code == "validation_failed"
 
 
-def test_resolve_workspace_id_for_tool_uses_page_id_alone(
+def test_resolve_workspace_id_for_tool_rejects_page_id_without_workspace_id(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1: page_id alone resolves to page's owning workspace."""
+    """A page id alone cannot trigger implicit workspace discovery."""
     with session_factory.begin() as session:
-        workspace = _seed_workspace(session, "fix6-page-only", "Fix-6 Page Only")
-        workspace_id = workspace.id
+        _seed_workspace(session, "fix6-page-only", "Fix-6 Page Only")
 
     _seed_page(page_service, "fix6-page-only", "lonely-page")
     page = page_service.read_page(workspace_slug="fix6-page-only", slug="lonely-page")
@@ -360,17 +352,17 @@ def test_resolve_workspace_id_for_tool_uses_page_id_alone(
         session_factory=session_factory,
     )
 
-    assert result == workspace_id
+    assert isinstance(result, PolicyRejection)
+    assert result.error_code == "validation_failed"
 
 
-def test_resolve_workspace_id_for_tool_uses_slug_alone(
+def test_resolve_workspace_id_for_tool_rejects_slug_without_workspace_id(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1: workspace_slug alone resolves to slug's workspace."""
+    """A slug alone cannot trigger implicit workspace discovery."""
     with session_factory.begin() as session:
-        workspace = _seed_workspace(session, "fix6-slug-only", "Fix-6 Slug Only")
-        workspace_id = workspace.id
+        _seed_workspace(session, "fix6-slug-only", "Fix-6 Slug Only")
 
     result = resolve_workspace_id_for_tool(
         tool_name="upload_image",
@@ -378,14 +370,15 @@ def test_resolve_workspace_id_for_tool_uses_slug_alone(
         session_factory=session_factory,
     )
 
-    assert result == workspace_id
+    assert isinstance(result, PolicyRejection)
+    assert result.error_code == "validation_failed"
 
 
-def test_resolve_workspace_id_for_tool_rejects_workspace_id_page_id_mismatch(
+def test_resolve_workspace_id_for_tool_keeps_explicit_workspace_without_page_probe(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1: explicit workspace_id + page_id mismatch also rejects."""
+    """An explicit workspace remains authoritative without probing page ownership."""
     with session_factory.begin() as session:
         workspace_a = _seed_workspace(session, "fix6-explicit-a", "Fix-6 Explicit A")
         workspace_b = _seed_workspace(session, "fix6-explicit-b", "Fix-6 Explicit B")
@@ -406,11 +399,9 @@ def test_resolve_workspace_id_for_tool_rejects_workspace_id_page_id_mismatch(
         session_factory=session_factory,
     )
 
-    assert isinstance(result, PolicyRejection)
-    assert result.error_code == "not_found"
-    # A page ownership mismatch must not be conflated with two explicit
-    # workspace locators disagreeing. Reuse the same two-workspace fixture;
-    # syntax-only parser tests cannot observe this router error boundary.
+    assert result == workspace_a_id
+    # A second explicit-workspace locator does not override the workspace_id;
+    # this guards the same authority rule across the alias-bearing payload.
     workspace_conflict = resolve_workspace_id_for_tool(
         tool_name="upload_image",
         payload={
@@ -420,17 +411,14 @@ def test_resolve_workspace_id_for_tool_rejects_workspace_id_page_id_mismatch(
         },
         session_factory=session_factory,
     )
-    assert workspace_conflict.error_code == "inconsistent_identifier"
+    assert workspace_conflict == workspace_a_id
 
 
-def test_resolve_workspace_id_for_tool_rejects_page_id_mismatch_for_begin_context_edit(
+def test_resolve_workspace_id_for_tool_begin_context_edit_requires_explicit_workspace(
     session_factory,
     page_service,
 ):
-    """P8.6: the new page_id-bearing Context-editing tools get the same
-    workspace_id/page_id consistency guard as upload_image (router.py's
-    ``_PAGE_ID_CONSISTENCY_TOOLS``) -- a mismatch must reject before dispatch
-    ever reaches the handler, not rely on the handler to notice."""
+    """Context edit routing uses its explicit workspace without page probing."""
 
     with session_factory.begin() as session:
         workspace_a = _seed_workspace(session, "p86-router-a", "P8.6 Router A")
@@ -450,20 +438,17 @@ def test_resolve_workspace_id_for_tool_rejects_page_id_mismatch_for_begin_contex
         session_factory=session_factory,
     )
 
-    assert isinstance(result, PolicyRejection)
-    assert result.error_code == "not_found"
+    assert result == workspace_a_id
 
 
-def test_resolve_workspace_id_for_tool_uses_page_id_alone_for_discard_context_edit(
+def test_resolve_workspace_id_for_tool_discard_context_edit_requires_explicit_workspace(
     session_factory,
     page_service,
 ):
-    """P8.6: page_id alone (no explicit workspace_id) also resolves for the
-    new tools, matching upload_image's existing contract."""
+    """A Context edit tool cannot infer workspace from page_id alone."""
 
     with session_factory.begin() as session:
-        workspace = _seed_workspace(session, "p86-page-only", "P8.6 Page Only")
-        workspace_id = workspace.id
+        _seed_workspace(session, "p86-page-only", "P8.6 Page Only")
 
     _seed_page(page_service, "p86-page-only", "lonely-p86-page")
     page = page_service.read_page(
@@ -476,15 +461,15 @@ def test_resolve_workspace_id_for_tool_uses_page_id_alone_for_discard_context_ed
         session_factory=session_factory,
     )
 
-    assert result == workspace_id
+    assert isinstance(result, PolicyRejection)
+    assert result.error_code == "validation_failed"
 
 
-def test_resolve_target_actor_propagates_inconsistent_identifier(
+def test_resolve_target_actor_preserves_scope_denial_before_page_lookup(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1: dispatcher must surface `not_found`
-    rather than silently treating the call as actor-only."""
+    """An out-of-scope explicit workspace denies before any page lookup."""
     user_id = uuid4()
     with session_factory.begin() as session:
         workspace_a = _seed_workspace(session, "fix6-dispatch-a", "Fix-6 Dispatch A")
@@ -533,10 +518,10 @@ def test_resolve_target_actor_propagates_inconsistent_identifier(
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "not_found"
+    assert result.error_code == "scope_denied"
 
 
-def test_upload_image_rejects_workspace_page_mismatch_before_handler(
+def test_upload_image_keeps_explicit_workspace_without_page_ownership_probe(
     session_factory,
     page_service,
 ):
@@ -565,7 +550,7 @@ def test_upload_image_rejects_workspace_page_mismatch_before_handler(
         role="editor",
         workspace_role="editor",
         workspace_id=workspace_a_id,
-        token_kind="oauth_jwt",
+        token_kind="session",
         token_workspace_ids=(workspace_a_id, workspace_b_id),
         scopes=("draft-write",),
     )
@@ -581,8 +566,8 @@ def test_upload_image_rejects_workspace_page_mismatch_before_handler(
         db=_test_db(session_factory),
     )
 
-    assert isinstance(result, PolicyRejection)
-    assert result.error_code == "not_found"
+    assert not isinstance(result, PolicyRejection)
+    assert result.workspace_id == workspace_a_id
 
 
 def test_dispatch_unknown_tool_returns_unknown_tool_envelope(page_service):

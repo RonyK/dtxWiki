@@ -1,3 +1,4 @@
+import { useRouteWorkspaceId } from "../lib/workspaceRoutes";
 import { Bot, ChevronRight, ClipboardCheck, FileText, Library, ListChecks, MessagesSquare, Unlink, type LucideIcon } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
@@ -46,7 +47,8 @@ function ActivityEventContent({ event, query, count, firstOccurredAt, lastOccurr
   const { t, i18n } = useTranslation("activity");
   const descriptionId = useId();
   const presentation = presentActivityFeedEvent(event, count);
-  const navigation = activityNavigation(event, query);
+  const workspaceId = useRouteWorkspaceId();
+  const navigation = activityNavigation(event, query, workspaceId);
   const { from: rangeFrom, to: rangeTo, spansDays } = rangeEnds(firstOccurredAt, lastOccurredAt);
   const TypeIcon = TYPE_ICONS[presentation.typeKey];
   const times = <div className="activity-entry__times" data-range-spans-days={count > 1 && spansDays ? true : undefined}>

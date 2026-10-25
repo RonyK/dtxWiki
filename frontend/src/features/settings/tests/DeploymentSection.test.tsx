@@ -158,7 +158,7 @@ describe("Settings > Deployment tab", () => {
   it("shows deployment status and a copyable reconfigure command for owners", async () => {
     mockFetch("owner");
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -213,7 +213,7 @@ describe("Settings > Deployment tab", () => {
   it("keeps URL-client-id OAuth distinct when deployment DCR is disabled", async () => {
     mockFetch("owner", { ...DEPLOYMENT, oauth_dcr_enabled: false });
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -234,7 +234,7 @@ describe("Settings > Deployment tab", () => {
     // failing component and its status, not just a bare "Degraded" pill.
     mockFetch("owner");
     const { container } = render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -307,7 +307,7 @@ describe("Settings > Deployment tab", () => {
     });
 
     const { container } = render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -361,7 +361,7 @@ describe("Settings > Deployment tab", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -418,7 +418,7 @@ describe("Settings > Deployment tab", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -437,7 +437,7 @@ describe("Settings > Deployment tab", () => {
   it("hides the Deployment tab from non-admins", async () => {
     mockFetch("editor");
     render(
-      <MemoryRouter initialEntries={["/settings?section=workspace"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=workspace`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -463,7 +463,7 @@ describe("Settings > Deployment tab", () => {
     });
     mockFetch("owner");
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -490,7 +490,7 @@ describe("Settings > Deployment tab", () => {
     });
     mockFetch("owner");
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -515,7 +515,7 @@ describe("Settings > Deployment tab", () => {
     // (the API would 403 regardless) — otherwise a confusing empty pane appears.
     mockFetch("editor");
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );

@@ -2,7 +2,7 @@ import { readAppStyles } from "../../../test-support/appStyles";
 
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -51,7 +51,7 @@ describe("ReviewScreen", () => {
   it("keeps the Preview badge out of the Review rail header", async () => {
     mockReviewQueue([reviewItem()]);
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -68,7 +68,7 @@ describe("ReviewScreen", () => {
       new Error("raw request req-private-review-load"),
     );
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -107,7 +107,7 @@ describe("ReviewScreen", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -183,7 +183,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -272,7 +272,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -318,7 +318,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -340,7 +340,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -388,7 +388,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -432,7 +432,7 @@ describe("ReviewScreen", () => {
     );
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -469,7 +469,7 @@ describe("ReviewScreen", () => {
       ]);
 
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
           <ReviewScreen />
         </MemoryRouter>,
       );
@@ -490,7 +490,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -554,7 +554,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -613,7 +613,7 @@ describe("ReviewScreen", () => {
       ]);
 
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
           <ReviewScreen />
         </MemoryRouter>,
       );
@@ -672,7 +672,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -708,7 +708,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -767,7 +767,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -834,7 +834,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -875,7 +875,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -918,7 +918,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -966,7 +966,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1052,7 +1052,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1119,7 +1119,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1187,7 +1187,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1236,7 +1236,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1291,7 +1291,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1339,7 +1339,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1381,7 +1381,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1430,7 +1430,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1495,7 +1495,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1507,7 +1507,7 @@ describe("ReviewScreen", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("No decisions yet")).not.toBeInTheDocument();
     const recentDecision = screen.getByRole("link", { name: /Pricing page/ });
-    expect(recentDecision).toHaveAttribute("href", "/review?review=rev-1");
+    expect(recentDecision).toHaveAttribute("href", "/workspaces/workspace-1/review/rev-1");
     expect(recentDecision.tabIndex).toBe(0);
     recentDecision.focus();
     expect(recentDecision).toHaveFocus();
@@ -1519,7 +1519,7 @@ describe("ReviewScreen", () => {
     });
     expect(moreActivities).toHaveAttribute(
       "href",
-      "/activity?kind=workspace&subtype=review",
+      "/workspaces/workspace-1/activity?kind=workspace&subtype=review",
     );
   });
 
@@ -1563,14 +1563,14 @@ describe("ReviewScreen", () => {
       });
 
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
           <ReviewScreen />
         </MemoryRouter>,
       );
 
       const localized = "Context 초안을 리뷰해야 합니다";
       expect(await screen.findByRole("link", { name: new RegExp(localized) }))
-        .toHaveAttribute("href", "/review?review=rev-coded");
+        .toHaveAttribute("href", "/workspaces/workspace-1/review/rev-coded");
       expect(screen.queryByText("context draft requires review")).toBeNull();
     } finally {
       await act(async () => {
@@ -1643,21 +1643,22 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
         <LocationDisplay />
+        <ReviewSecondRouteSwitch />
       </MemoryRouter>,
     );
 
     await user.click(await screen.findByRole("link", { name: /First target/ }));
     await waitFor(() => expect(firstRequested).toBe(true));
-    await user.click(screen.getByRole("link", { name: /Second target/ }));
+    await user.click(screen.getByRole("button", { name: "Navigate to review-second" }));
 
     expect(
       await screen.findByRole("heading", { name: "Second target" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("location-search")).toHaveTextContent(
-      "?review=review-second",
+      "/workspaces/workspace-1/review/review-second",
     );
 
     releaseFirst();
@@ -1714,7 +1715,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1775,7 +1776,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1848,7 +1849,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-99"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review/review-99"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1882,7 +1883,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-1"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review/review-1"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1890,6 +1891,39 @@ describe("ReviewScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Feedback Target" }),
     ).toBeInTheDocument();
+  });
+
+  it("does not keep the previous review actionable while a new route target loads", async () => {
+    let resolveReviewTwo!: (response: Response) => void;
+    const reviewTwoResponse = new Promise<Response>((resolve) => { resolveReviewTwo = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) return jsonResponse(workspaceResponse("editor"));
+      if (isReviewCountsUrl(url)) return jsonResponse({ data: reviewCounts({ pending: 1 }) });
+      if (isRecentDecisionsUrl(url)) return jsonResponse(emptyReviewPage());
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`) {
+        return jsonResponse({ data: { items: [reviewItem({ id: "review-1", targetTitle: "First review target" })], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-2`) return reviewTwoResponse;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review/review-1"]}>
+        <ReviewScreen />
+        <ReviewRouteSwitch />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "First review target" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Navigate to review-2" }));
+    expect(screen.queryByRole("heading", { name: "First review target" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+
+    await act(async () => {
+      resolveReviewTwo(jsonResponse({ data: reviewItem({ id: "review-2", targetTitle: "Second review target" }) }));
+    });
+    expect(await screen.findByRole("heading", { name: "Second review target" })).toBeInTheDocument();
   });
 
   it("switches the lifecycle tab when restoring a resolved review deep link", async () => {
@@ -1928,7 +1962,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-9"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review/review-9"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -1970,7 +2004,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2012,7 +2046,7 @@ describe("ReviewScreen", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2027,7 +2061,7 @@ describe("ReviewScreen", () => {
       screen.getByRole("link", {
         name: "Open conversation for Feedback Target",
       }),
-    ).toHaveAttribute("href", "/chats/chat-42");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/chats/chat-42");
 
     await userEvent.click(
       screen.getByText("Resolve the diverged Context branch"),
@@ -2037,12 +2071,12 @@ describe("ReviewScreen", () => {
       screen.getByRole("link", { name: "Open reconciliation" }),
     ).toHaveAttribute(
       "href",
-      "/context?target=context-1&tab=history&reconcile=version-alt",
+      "/workspaces/workspace-1/context/pages/context-1?tab=history&reconcile=version-alt",
     );
     expect(screen.getByText("Reconciliation provenance")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open source conversation" }),
-    ).toHaveAttribute("href", "/chats/chat-42");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/chats/chat-42");
   });
 
   it("bulk-discards only explicitly eligible reconciliation reviews with a reason", async () => {
@@ -2104,7 +2138,7 @@ describe("ReviewScreen", () => {
     );
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2145,7 +2179,7 @@ describe("ReviewScreen", () => {
     expect(screen.getByText(/review_state_changed/)).toBeInTheDocument();
   });
 
-  it("clears the review param when a deep-linked review fails to load", async () => {
+  it("keeps a missing review deep link explicit and shows Not Found", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -2175,23 +2209,15 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review?review=review-404"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review/review-404"]}>
         <ReviewScreen />
         <LocationDisplay />
       </MemoryRouter>,
     );
 
-    expect(
-      await screen.findByText(
-        "The requested item could not be found.",
-      ),
-    ).toBeInTheDocument();
-    // The stale ?review param is dropped so a refresh does not retry the dead
-    // deep link forever.
-    await waitFor(() =>
-      expect(screen.getByTestId("location-search")).not.toHaveTextContent(
-        "review=",
-      ),
+    expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      "/workspaces/workspace-1/review/review-404",
     );
   });
 
@@ -2231,7 +2257,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2275,7 +2301,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2341,10 +2367,11 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/review"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <Routes>
-          <Route path="/review" element={<ReviewScreen />} />
-          <Route path="/context/:slug/edit" element={<PageEditorDestination />} />
+          <Route path="/workspaces/workspace-1/review" element={<ReviewScreen />} />
+          <Route path="/workspaces/workspace-1/review/:reviewItemId" element={<ReviewScreen />} />
+          <Route path="/workspaces/workspace-1/context/pages/:pageId/edit" element={<PageEditorDestination />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -2425,7 +2452,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2533,7 +2560,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2610,7 +2637,7 @@ describe("ReviewScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/review"]}>
         <ReviewScreen />
       </MemoryRouter>,
     );
@@ -2646,7 +2673,17 @@ function PageEditorDestination() {
 
 function LocationDisplay() {
   const location = useLocation();
-  return <p data-testid="location-search">{location.search}</p>;
+  return <p data-testid="location-search">{location.pathname}{location.search}</p>;
+}
+
+function ReviewRouteSwitch() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate("/workspaces/workspace-1/review/review-2")}>Navigate to review-2</button>;
+}
+
+function ReviewSecondRouteSwitch() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate("/workspaces/workspace-1/review/review-second")}>Navigate to review-second</button>;
 }
 
 function jsonResponse(body: unknown) {

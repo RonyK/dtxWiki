@@ -11,7 +11,7 @@ import {
   type Page,
   type TestInfo,
 } from "./fixtures";
-import { authenticatePage, backendBaseUrl, currentWorkspace, signUp } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, signUp, workspaceUrl } from "./auth";
 import { evidenceLocatorScreenshot, evidenceScreenshot } from "./evidence";
 
 type Section = "context" | "library" | "agent";
@@ -65,7 +65,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
           `Tooltip review fixture ${String(index).padStart(2, "0")} — a long document title with readable status details${". Extended title content must remain readable in a short viewport".repeat(2)}`));
       }
       const nodes = await treeNodes(page.request, workspace.id, "context");
-      await page.goto("/context");
+      await page.goto(workspaceUrl(workspace.id, "context"));
       const rail = await openRail(page, viewport.width);
       await expandAncestors(rail, nodes, published[0].id);
       const row = rail.locator(".tree-row").filter({ hasText: "Tooltip review fixture" }).first();
@@ -180,7 +180,9 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       const document = await publishContext(page.request, workspace.id, "Editor document with a favorite action");
       const nodes = await treeNodes(page.request, workspace.id, "context");
       await page.goto(`/workspaces/${workspace.id}/context/pages/${document.id}/edit`);
+      await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Editor document with a favorite action");
       const rail = await openRail(page, viewport.width);
+      await expect(treeRow(rail, document.id)).toHaveAttribute("aria-selected", "true");
       await expandAncestors(rail, nodes, document.id);
       const folderRow = rail.locator(`.tree-row[data-node-id="${folder.id}"]`);
       await expect(folderRow).toBeVisible();
@@ -234,7 +236,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
           .toBeGreaterThan(normalExpiry);
       }
       await page.clock.setFixedTime(normalExpiry);
-      await page.goto("/context");
+      await page.goto(workspaceUrl(workspace.id, "context"));
       const rail = await openRail(page, viewport.width);
       await expandAncestors(rail, nodes, fixtures[0].id);
       await rail.locator(".tree-filter input").focus();
@@ -335,6 +337,8 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       await page.keyboard.press("Escape");
 
       await focusedRow.click();
+      await page.waitForURL(workspaceUrl(workspace.id, `context/pages/${reviewFavorite.id}`));
+      await expect(page.getByRole("heading", { name: "Proposed update", exact: true })).toBeVisible();
       await openRail(page, viewport.width);
       await expect(focusedRow).toHaveClass(/\bactive\b/);
       await expect(focusedRow.locator(".tree-row-favorite")).toBeVisible();
@@ -394,7 +398,12 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
       expect(beforeNode, `${target.section} must expose its real tree target`).toBeTruthy();
       expect(beforeNode.content_changed_at).toBeTruthy();
       expect(beforeNode.review_status).toBeNull();
-      await page.goto(`/${target.section}?target=${target.id}`);
+      const targetPath = target.section === "context"
+        ? `context/pages/${target.id}`
+        : target.section === "library"
+          ? `library/items/${target.id}`
+          : `agent/pages/${target.id}`;
+      await page.goto(workspaceUrl(workspace.id, targetPath));
       const rail = await openRail(page, 1280);
       const row = treeRow(rail, target.id);
       await expect(row).toBeVisible();
@@ -445,7 +454,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
     await page.clock.install({ time: expiry - 60_000 });
     let navigations = 0;
     page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
-    await page.goto("/context");
+    await page.goto(workspaceUrl(workspace.id, "context"));
     const rail = await openRail(page, 1280);
     await expandAncestors(rail, nodes, recent.id);
     const recentRow = treeRow(rail, recent.id);
@@ -504,7 +513,7 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
         localStorage.setItem("dtxwiki.selectedWorkspaceId", id);
         localStorage.setItem("dtxwiki.selectedWorkspaceSlug", slug);
       }, { id: workspace.id, slug: workspace.slug });
-      await viewerPage.goto(`/context?target=${published.id}`);
+      await viewerPage.goto(workspaceUrl(workspace.id, `context/pages/${published.id}`));
       const viewerRow = treeRow(await openRail(viewerPage, 1280), published.id);
       await expect(viewerRow).toBeVisible();
       await expect(viewerRow.locator(".tree-row-favorite")).toHaveCount(0);
@@ -594,6 +603,13 @@ async function openRail(page: Page, width: number) {
       await toggle.click();
     }
     await expect(rail).toHaveAttribute("data-mobile-open", "true");
+    await expect.poll(() => rail.evaluate((element) => {
+      const transform = getComputedStyle(element).transform;
+      return {
+        transform,
+        identity: transform === "none" || new DOMMatrixReadOnly(transform).isIdentity,
+      };
+    }), { message: "the mobile workspace panel transform has settled" }).toMatchObject({ identity: true });
   }
   await expect(rail).toBeVisible();
   return rail;

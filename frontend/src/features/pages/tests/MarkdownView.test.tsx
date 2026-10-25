@@ -782,6 +782,7 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
+          workspaceId="11111111-1111-4111-8111-111111111111"
           body={[
             "Mark ==important claim== and tag #release-note.",
             "",
@@ -796,7 +797,7 @@ describe("MarkdownView", () => {
     expect(highlight).toHaveClass("markdown-highlight");
 
     const tag = screen.getByRole("link", { name: "#release-note" });
-    expect(tag).toHaveAttribute("href", "/search?q=%23release-note");
+    expect(tag).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/search?q=%23release-note");
     expect(tag).toHaveAttribute("data-tag", "release-note");
     expect(tag).toHaveClass("inline-tag");
 
@@ -913,6 +914,33 @@ describe("MarkdownView", () => {
     expect(mermaidMock.initialize).not.toHaveBeenCalled();
     expect(mermaidMock.parse).not.toHaveBeenCalled();
     expect(mermaidMock.render).not.toHaveBeenCalled();
+  });
+
+  it("activates only server-confirmed internal links in untrusted answers", () => {
+    render(
+      <MemoryRouter>
+        <MarkdownView
+          body={'[Confirmed](/pages/known) [External](https://example.test) ![Image](/x.png) <a href="/raw">Raw</a>'}
+          linkTargets={[{
+            locator: "/pages/known",
+            href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+            target_page_id: "22222222-2222-4222-8222-222222222222",
+            state: "ok",
+          }]}
+          renderPolicy="confirmed-links"
+          workspaceId="11111111-1111-4111-8111-111111111111"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Confirmed" })).toHaveAttribute(
+      "href",
+      "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+    );
+    expect(document.querySelector('a[href="https://example.test"]')).not.toBeInTheDocument();
+    expect(document.querySelector(".markdown-body")?.textContent).toContain("Image");
+    expect(document.querySelector("img")).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/raw"]')).not.toBeInTheDocument();
   });
 
   it("keeps untrusted semantic payloads on the closed passive pipeline", () => {

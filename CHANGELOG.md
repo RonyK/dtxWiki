@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Address workspace screens and targets under `/workspaces/<workspace_id>/...`.
+  Direct reads, edits, role checks, links, and workspace switching use the URL's
+  workspace. Old target-bearing URLs cannot fall back to browser or account
+  defaults. MCP tools and dynamic prompts require an explicit workspace before
+  target lookup; connection management is available at `/account/integrations`.
+  Stored links are projected from their source workspace without rewriting
+  historical bytes. Ask activates only server-confirmed internal links.
 - Advance the MCP tool contract to revision 16. Context results use
   `/p/<workspace_id>/<page_id>` links and no longer expose `concept_path` or
   `resource_uri`; Library lookup paths remain available. Clients using an older

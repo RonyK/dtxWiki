@@ -48,8 +48,8 @@ import {
   createTreeFolder,
   deleteTreeNode,
   fetchTreeNodeIndexPreview,
-  getCurrentWorkspaceId,
   listTreeData,
+  readTreeNode,
   moveTreeNode,
   reorderTreeNodeAt,
   updateTreeNode,
@@ -109,13 +109,12 @@ import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
-  TREE_NEW_FOLDER_PARAM,
-  TREE_TARGET_PARAM,
   TREE_VERSION_PARAM,
   updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
@@ -126,6 +125,7 @@ import {
   BLANK_TEMPLATE_ID,
   findAgentTemplate,
 } from "./agentTemplates";
+import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath, workspaceTargetHref, withWorkspaceQuery } from "../../shared/lib/workspaceRoutes";
 
 const VISIBLE_CATEGORIES = ["agent_guide", "persona", "skill", "memory"];
 const ADVANCED_CATEGORIES: string[] = [];
@@ -137,6 +137,8 @@ const SENSITIVITY_OPTIONS: AgentPageDraftPayload["sensitivity"][] = [
   "public",
   "secret_candidate",
 ];
+
+class AgentRouteTargetNotFoundError extends Error {}
 
 async function readAgentPageForDisplay(
   workspaceId: string,
@@ -172,9 +174,10 @@ type AgentState = {
 
 export function AgentScreen() {
   const { t } = useTranslation("agent");
-  // Viewer write-gate: the shared /agent route is RequireAuth-only (only
-  // /agent/new is RequireEditor), so gate every write affordance here (incl.
-  // the ?edit= modal) so a viewer is never dropped into an editor that only
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  // Viewer write-gate: the Agent read routes remain available to viewers, so
+  // gate every write affordance here (including the typed edit route) so a viewer is never dropped into an editor that only
   // fails on save (mirrors ContextScreen). This hook MUST run before the early
   // `if (!state) return` below (Rules of Hooks). Backend RBAC still re-enforces.
   const auth = useOptionalAuth();
@@ -194,7 +197,7 @@ export function AgentScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTargetId = searchParams.get(TREE_TARGET_PARAM);
+  const requestedTargetId = route?.targetId ?? null;
   const selectedVersionId = searchParams.get(TREE_VERSION_PARAM);
   const previousSearchRef = useRef(location.search);
   const searchChangedRef = useRef(false);
@@ -202,6 +205,10 @@ export function AgentScreen() {
   // Reveal a deep-linked target once. After that, the user's expansion state
   // is authoritative, including an intentional collapse of the active path.
   const revealedRouteTargetRef = useRef<string | null>(null);
+  const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
+  useEffect(() => {
+    setRouteNotFoundKey(null);
+  }, [routeWorkspaceId, route?.suffix, route?.targetId]);
   // After a detail load failure the route params and `state` are unchanged, so
   // re-clicking the same tree node would never re-run the route-sync effect.
   // Record the failed target and bump a retry token from selectPage instead.
@@ -218,10 +225,7 @@ export function AgentScreen() {
     setError,
   } = useAsyncLoad<AgentState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
-      }
+      const workspaceId = routeWorkspaceId;
       const [categories, pagesResult, treeData] = await Promise.all([
         listAgentCategories(workspaceId),
         listAgentPages(workspaceId),
@@ -229,12 +233,27 @@ export function AgentScreen() {
       ]);
       const pages = pagesResult.data;
       const tree = treeData.nodes;
-      const selectedNodeId = resolveRequestedNodeId(
-        tree,
-        pages,
-        requestedTargetId,
-      );
-      const selectedPageId = selectedPageIdForNode(tree, pages, selectedNodeId);
+      if (route?.targetKind === "folder" && route.targetId) {
+        let folder = tree.find((node) => node.id === route.targetId);
+        if (!folder) {
+          try {
+            folder = await readTreeNode(workspaceId, route.targetId);
+          } catch (exc) {
+            if (exc instanceof ApiError && exc.status === 404) {
+              throw new AgentRouteTargetNotFoundError();
+            }
+            throw exc;
+          }
+        }
+        if (folder.section !== "agent" || folder.node_kind !== "folder") {
+          throw new AgentRouteTargetNotFoundError();
+        }
+      }
+      const routePageId = route?.targetKind === "page" ? route.targetId : null;
+      const selectedNodeId = routePageId
+        ? nodeIdForPage(tree, routePageId) ?? routePageId
+        : resolveRequestedNodeId(tree, pages, requestedTargetId);
+      const selectedPageId = routePageId ?? selectedPageIdForNode(tree, pages, selectedNodeId);
       let detail: AgentPageDetail | null = null;
       let history: AgentChangeHistory | null = null;
       let detailRestricted = false;
@@ -275,9 +294,16 @@ export function AgentScreen() {
         detailRestricted,
       };
     },
-    [],
+    [routeWorkspaceId],
     {
       errorMessage: "Failed to load Agent",
+      formatError: (exc, fallback) => {
+        if (exc instanceof AgentRouteTargetNotFoundError) {
+          setRouteNotFoundKey(`${routeWorkspaceId}:${route?.suffix ?? "agent"}`);
+          return "Agent target not found";
+        }
+        return apiErrorMessage(exc, fallback);
+      },
       fallbackData: {
         workspaceId: "",
         pages: [],
@@ -300,7 +326,7 @@ export function AgentScreen() {
             nextState.tree,
             searchParams.get(TREE_EXPANDED_PARAM),
             nextState.selectedNodeId ?? nextState.detail?.id ?? null,
-            { defaultMode: "none", storageKey: "agent" },
+            { defaultMode: "none", storageKey: "agent", workspaceId: routeWorkspaceId },
           ),
         );
       },
@@ -342,7 +368,7 @@ export function AgentScreen() {
     }
   }
 
-  function selectPage(pageId: string, nodeId?: string | null) {
+  function selectPage(pageId: string) {
     if (!state) {
       return;
     }
@@ -351,23 +377,15 @@ export function AgentScreen() {
       failedDetailTargetRef.current = null;
       setDetailRetryToken((token) => token + 1);
     }
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: nodeId ?? nodeIdForPage(state.tree, pageId) ?? pageId,
-      }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", pageId, "page"), searchParams));
   }
 
   function selectNode(node: TreeNodePayload) {
     if (node.target_kind === "agent_page" && node.target_id) {
-      selectPage(node.target_id, node.id);
+      selectPage(node.target_id);
       return;
     }
-    setSearchParams(
-      updateTreeSearchParams(searchParams, { targetId: node.id }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", node.id, "folder"), searchParams));
   }
 
   async function createFolder(input: {
@@ -376,6 +394,10 @@ export function AgentScreen() {
     title: string;
   }) {
     if (!state) {
+      return;
+    }
+    if (input.parentNodeId && !state.tree.some((node) => node.id === input.parentNodeId && node.section === "agent" && node.can_have_children)) {
+      setError(t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" }));
       return;
     }
     setError(null);
@@ -390,12 +412,7 @@ export function AgentScreen() {
       folder.parent_id,
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: folder.id,
-      }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", folder.id, "folder"), searchParams), { replace: true });
     setState((current) =>
       current
         ? {
@@ -457,12 +474,10 @@ export function AgentScreen() {
           }
         : current,
     );
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: selectedNodeId,
-      }),
-      { replace: true },
-    );
+    const selectedNode = treeData.nodes.find((node) => node.id === selectedNodeId);
+    navigate(selectedNode
+      ? withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "agent", selectedNode.target_id ?? selectedNode.id, selectedNode.node_kind === "folder" ? "folder" : "page"), searchParams)
+      : withWorkspaceQuery(workspacePath(routeWorkspaceId, "agent"), searchParams), { replace: true });
   }
 
   async function refreshTreeFromRail() {
@@ -603,10 +618,7 @@ export function AgentScreen() {
   }
 
   function copyTreeNodeLink(node: TreeNodePayload) {
-    const params = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: node.id,
-    });
-    const path = `/agent?${params.toString()}`;
+    const path = workspaceTargetHref(routeWorkspaceId, "agent", node.target_id ?? node.id, node.node_kind === "folder" ? "folder" : "page");
     const href =
       typeof window === "undefined" ? path : `${window.location.origin}${path}`;
     void navigator.clipboard?.writeText(href);
@@ -614,7 +626,7 @@ export function AgentScreen() {
 
   function setStoredExpandedNodeIds(nodeIds: string[]) {
     setExpandedNodeIds(nodeIds);
-    writeExpandedNodeIdsToStorage("agent", nodeIds);
+    writeExpandedNodeIdsToStorage("agent", nodeIds, routeWorkspaceId);
   }
 
   useEffect(() => {
@@ -623,14 +635,40 @@ export function AgentScreen() {
   }, [location.search]);
 
   useEffect(() => {
+    if (route?.targetKind !== "folder" || !route.targetId || !state?.workspaceId) return;
+    const existing = state.tree.find((node) => node.id === route.targetId);
+    if (existing) {
+      if (existing.section !== "agent" || existing.node_kind !== "folder") {
+        setRouteNotFoundKey(`${routeWorkspaceId}:${route.suffix}`);
+        setError("Agent folder not found");
+      }
+      return;
+    }
+    let cancelled = false;
+    void readTreeNode(routeWorkspaceId, route.targetId).then((node) => {
+      if (!cancelled && (node.section !== "agent" || node.node_kind !== "folder")) {
+        setRouteNotFoundKey(`${routeWorkspaceId}:${route.suffix}`);
+        setError("Agent folder not found");
+      }
+    }).catch((exc) => {
+      if (!cancelled && exc instanceof ApiError && exc.status === 404) {
+        setRouteNotFoundKey(`${routeWorkspaceId}:${route.suffix}`);
+        setError("Agent folder not found");
+      } else if (!cancelled) {
+        setError(apiErrorMessage(exc, t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" })));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [route?.suffix, route?.targetId, route?.targetKind, routeWorkspaceId, setError, state?.tree, state?.workspaceId, t]);
+
+  useEffect(() => {
     if (!state?.workspaceId) {
       return;
     }
-    const targetNodeId = resolveRequestedNodeId(
-      state.tree,
-      state.pages,
-      requestedTargetId,
-    );
+    const routePageId = route?.targetKind === "page" ? route.targetId : null;
+    const targetNodeId = routePageId
+      ? nodeIdForPage(state.tree, routePageId) ?? routePageId
+      : resolveRequestedNodeId(state.tree, state.pages, requestedTargetId);
     if (!targetNodeId) {
       revealedRouteTargetRef.current = null;
       if (suppressRouteSyncRef.current) {
@@ -672,16 +710,12 @@ export function AgentScreen() {
         ) {
           return current;
         }
-        writeExpandedNodeIdsToStorage("agent", next);
+        writeExpandedNodeIdsToStorage("agent", next, routeWorkspaceId);
         return next;
       });
     }
 
-    const selectedPageId = selectedPageIdForNode(
-      state.tree,
-      state.pages,
-      targetNodeId,
-    );
+    const selectedPageId = routePageId ?? selectedPageIdForNode(state.tree, state.pages, targetNodeId);
     if (!selectedPageId) {
       if (
         state.selectedNodeId !== targetNodeId ||
@@ -795,17 +829,7 @@ export function AgentScreen() {
                 }
               : current,
           );
-          setSearchParams(
-            (current) =>
-              updateTreeSearchParams(current, { targetId: null }),
-            { replace: true },
-          );
-          setError(
-            t("errors.itemUnavailable", {
-              defaultValue:
-                "That Agent page is no longer available. It was removed from the list.",
-            }),
-          );
+          setRouteNotFoundKey(`${routeWorkspaceId}:${route?.suffix ?? "agent"}`);
           return;
         }
         failedDetailTargetRef.current = targetNodeId;
@@ -823,7 +847,14 @@ export function AgentScreen() {
     };
   }, [
     detailRetryToken,
+    location.pathname,
+    navigate,
     requestedTargetId,
+    route?.suffix,
+    route?.targetId,
+    route?.targetKind,
+    routeWorkspaceId,
+    searchParams,
     selectedVersionId,
     setError,
     setSearchParams,
@@ -832,20 +863,7 @@ export function AgentScreen() {
     t,
   ]);
 
-  useEffect(() => {
-    // Only auto-open the create-folder dialog for editors; a viewer arriving via
-    // ?newFolder=1 (deep link / stale URL) must not be dropped into a create
-    // flow the backend would reject (mirrors ContextScreen).
-    if (!state || !canEdit || searchParams.get(TREE_NEW_FOLDER_PARAM) !== "1") {
-      return;
-    }
-    setNewItemDialog({ initialItemType: "folder", parentNodeId: null });
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete(TREE_NEW_FOLDER_PARAM);
-    setSearchParams(nextParams, { replace: true });
-  }, [canEdit, searchParams, setSearchParams, state]);
-
-  const editAgentPageId = canEdit ? searchParams.get("edit") : null;
+  const editAgentPageId = canEdit && route?.edit ? route.targetId : null;
   const readerEditDetail =
     state?.detail?.id === editAgentPageId ? state.detail : null;
   // The reader loads the ACTIVE body when an active version exists, but the
@@ -917,6 +935,9 @@ export function AgentScreen() {
     [loadedTree, t],
   );
 
+  if (routeNotFoundKey === `${routeWorkspaceId}:${route?.suffix ?? "agent"}`) {
+    return <NotFoundScreen />;
+  }
   if (!state) {
     return (
       <RouteLoading label={t("loading", { defaultValue: "Loading Agent" })} />
@@ -926,8 +947,13 @@ export function AgentScreen() {
   const categoryMap = new Map(
     state.categories.map((category) => [category.category, category]),
   );
-  const selectedNode = state.selectedNodeId
-    ? (treeNodes.find((node) => node.id === state.selectedNodeId) ?? null)
+  const routePageId = route?.targetKind === "page" ? route.targetId : null;
+  const routeFolderNodeId = route?.targetKind === "folder" ? route.targetId : null;
+  const routeNodeId = routePageId
+    ? nodeIdForPage(state.tree, routePageId) ?? routePageId
+    : routeFolderNodeId;
+  const selectedNode = routeNodeId
+    ? (treeNodes.find((node) => node.id === routeNodeId) ?? null)
     : null;
   const visiblePages = state.pages.filter((page) =>
     VISIBLE_CATEGORIES.includes(page.category),
@@ -936,8 +962,16 @@ export function AgentScreen() {
     ADVANCED_CATEGORIES.includes(page.category),
   );
   const agentPolicy = state.treePolicies.agent;
-  const itemParent = newItemDialog?.parentNodeId
-    ? (treeNodes.find((node) => node.id === newItemDialog.parentNodeId) ?? null)
+  const folderCreateRoute = Boolean(route?.create && route.suffix === "agent/folders/new");
+  const routeFolderParentId = folderCreateRoute ? searchParams.get("parent") : null;
+  const routeFolderParent = routeFolderParentId
+    ? treeNodes.find((node) => node.id === routeFolderParentId && node.section === "agent" && node.can_have_children)
+    : null;
+  const activeNewItemDialog = newItemDialog ?? (folderCreateRoute && (!routeFolderParentId || routeFolderParent)
+    ? { initialItemType: "folder" as const, parentNodeId: routeFolderParentId }
+    : null);
+  const itemParent = activeNewItemDialog?.parentNodeId
+    ? (treeNodes.find((node) => node.id === activeNewItemDialog.parentNodeId) ?? null)
     : null;
   // F-5: folder destinations the new-folder dialog can target.
   const agentFolderNodes = treeNodes.filter((node) => node.can_have_children);
@@ -947,29 +981,23 @@ export function AgentScreen() {
   const moveTargetNodes = moveNode
     ? selectableMoveTargets(treeNodes, moveNode)
     : [];
-  const routeNodeId = resolveRequestedNodeId(
-    state.tree,
-    state.pages,
-    requestedTargetId,
-  );
-  const routePageId = selectedPageIdForNode(
-    state.tree,
-    state.pages,
-    routeNodeId,
-  );
+  const resolvedRoutePageId = routePageId ?? selectedPageIdForNode(state.tree, state.pages, routeNodeId);
+  const visibleDetailRestricted = state.detailRestricted &&
+    !routeFolderNodeId && state.selectedNodeId === routeNodeId;
   const visibleDetail =
     state.selectedNodeId === routeNodeId &&
-    state.detail?.id === routePageId &&
+    state.detail?.id === resolvedRoutePageId &&
     (!selectedVersionId ||
       state.detail.version_info?.version_id === selectedVersionId)
       ? state.detail
       : null;
   const detailRouteLoading = Boolean(
-    routePageId && !visibleDetail && !state.detailRestricted && !error,
+    resolvedRoutePageId && !visibleDetail && !state.detailRestricted && !error,
   );
-  const creationOpen = location.pathname === "/agent/new";
   const creationCategory = normalizeAgentCategory(searchParams.get("category"));
-  const creationParentNodeId = searchParams.get("parentId");
+  const creationParentNodeId = searchParams.get("parent");
+  const creationParentValid = !creationParentNodeId || treeNodes.some((node) => node.id === creationParentNodeId && node.section === "agent" && node.can_have_children);
+  const creationOpen = Boolean(route?.create && route.suffix === "agent/pages/new" && creationParentValid);
   const editDetail = editNeedsDraftDetail
     ? editDraftDetail?.id === editAgentPageId
       ? editDraftDetail
@@ -983,21 +1011,31 @@ export function AgentScreen() {
   }
 
   function openCreateAgentPage(category: string, parentNodeId?: string | null) {
-    const params = new URLSearchParams({ category });
-    if (parentNodeId) {
-      params.set("parentId", parentNodeId);
-    }
-    navigate(`/agent/new?${params.toString()}`);
+    const query = new URLSearchParams({ category });
+    if (parentNodeId) query.set("parent", parentNodeId);
+    navigate(`${workspacePath(routeWorkspaceId, "agent/pages/new")}?${query.toString()}`);
+  }
+
+  function openCreateFolder(parentNodeId?: string | null) {
+    const query = parentNodeId ? `?parent=${encodeURIComponent(parentNodeId)}` : "";
+    navigate(`${workspacePath(routeWorkspaceId, "agent/folders/new")}${query}`);
+  }
+
+  function closeCreateFolder() {
+    if (folderCreateRoute) {
+      navigate(routeFolderParentId
+        ? workspaceTargetHref(routeWorkspaceId, "agent", routeFolderParentId, "folder")
+        : workspacePath(routeWorkspaceId, "agent"), { replace: true });
+    } else setNewItemDialog(null);
   }
 
   function closeCreateAgentPage() {
-    navigate("/agent", { replace: true });
+    navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
   }
 
   function closeEditAgentPage() {
-    const params = new URLSearchParams(searchParams);
-    params.delete("edit");
-    setSearchParams(params, { replace: true });
+    if (editAgentPageId) navigate(workspaceTargetHref(routeWorkspaceId, "agent", editAgentPageId, "page"), { replace: true });
+    else navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
   }
 
   async function createAgentPage(input: AgentPageDraftPayload) {
@@ -1021,14 +1059,11 @@ export function AgentScreen() {
       treeData.nodes,
       searchParams.get(TREE_EXPANDED_PARAM),
       result.agent_page_id,
-      { defaultMode: "active-path", storageKey: "agent" },
+      { defaultMode: "active-path", storageKey: "agent", workspaceId: routeWorkspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    const nextParams = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: targetNodeId,
-    });
     suppressRouteSyncRef.current = true;
-    navigate(`/agent?${nextParams.toString()}`, { replace: true });
+    navigate(workspaceTargetHref(routeWorkspaceId, "agent", result.agent_page_id, "page"), { replace: true });
     setState((current) =>
       current
         ? {
@@ -1072,15 +1107,11 @@ export function AgentScreen() {
       treeData.nodes,
       searchParams.get(TREE_EXPANDED_PARAM),
       result.agent_page_id,
-      { defaultMode: "active-path", storageKey: "agent" },
+      { defaultMode: "active-path", storageKey: "agent", workspaceId: routeWorkspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    const nextParams = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: targetNodeId,
-      versionId: result.draft_version_id,
-    });
     suppressRouteSyncRef.current = true;
-    navigate(`/agent?${nextParams.toString()}`, { replace: true });
+    navigate(`${workspaceTargetHref(routeWorkspaceId, "agent", result.agent_page_id, "page")}?version=${encodeURIComponent(result.draft_version_id)}`, { replace: true });
     setState((current) =>
       current
         ? {
@@ -1120,7 +1151,7 @@ export function AgentScreen() {
       treeData.nodes,
       searchParams.get(TREE_EXPANDED_PARAM),
       agentPageId,
-      { defaultMode: "none", storageKey: "agent" },
+      { defaultMode: "none", storageKey: "agent", workspaceId: routeWorkspaceId },
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
     setState((current) =>
@@ -1139,10 +1170,7 @@ export function AgentScreen() {
         : current,
     );
     setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: targetNodeId,
-        versionId: draftVersionId,
-      }),
+      updateTreeSearchParams(searchParams, { versionId: draftVersionId }),
       { replace: false },
     );
   }
@@ -1196,13 +1224,7 @@ export function AgentScreen() {
             }
           : current,
       );
-      setSearchParams(
-        updateTreeSearchParams(searchParams, {
-          targetId: targetNodeId,
-          versionId: null,
-        }),
-        { replace: true },
-      );
+      navigate(workspaceTargetHref(routeWorkspaceId, "agent", detail.id, "page"), { replace: true });
       setNotice(
         t("notice.activated", {
           title: activeDetail.title,
@@ -1239,10 +1261,7 @@ export function AgentScreen() {
                 }),
                 label: t("layout.newFolder", { defaultValue: "New folder" }),
                 onClick: () => {
-                  setNewItemDialog({
-                    initialItemType: "folder",
-                    parentNodeId: newItemParentNodeId,
-                  });
+                  openCreateFolder(newItemParentNodeId);
                 },
                 title: t("layout.createFolder", {
                   defaultValue: "Create Agent folder",
@@ -1261,8 +1280,8 @@ export function AgentScreen() {
             title={t("title", { defaultValue: "Agent" })}
             accent="agent"
             nodes={treeNodes}
-            activeTargetId={routePageId ?? state.detail?.id}
-            activeNodeId={state.selectedNodeId}
+            activeTargetId={routePageId ?? (!route?.targetKind ? state.detail?.id : null)}
+            activeNodeId={routeNodeId}
             expandedNodeIds={expandedNodeIds}
             forceActivePathExpanded={false}
             emptyLabel={t("empty.noTreeNodes", {
@@ -1292,10 +1311,7 @@ export function AgentScreen() {
                       );
                       return;
                     }
-                    setNewItemDialog({
-                      initialItemType: "folder",
-                      parentNodeId,
-                    });
+                    openCreateFolder(parentNodeId);
                   }
                 : undefined
             }
@@ -1321,7 +1337,8 @@ export function AgentScreen() {
           <section className="feature-main feature-main--reader agent-main">
             <Breadcrumbs
               items={targetBreadcrumbs({
-                basePath: "/agent",
+                workspaceId: routeWorkspaceId,
+                basePath: workspacePath(routeWorkspaceId, "agent"),
                 rootLabel: t("title", { defaultValue: "Agent" }),
                 nodes: treeNodes,
                 targetId: visibleDetail?.id,
@@ -1329,6 +1346,12 @@ export function AgentScreen() {
                 fallbackLabel: visibleDetail?.title,
               })}
             />
+            {route?.create && route.suffix === "agent/pages/new" && !creationParentValid ? (
+              <StatusBanner tone="warning">{t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" })}</StatusBanner>
+            ) : null}
+            {folderCreateRoute && routeFolderParentId && !routeFolderParent ? (
+              <StatusBanner tone="warning">{t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" })}</StatusBanner>
+            ) : null}
             {!visibleDetail &&
             !detailRouteLoading &&
             !state.detailRestricted ? (
@@ -1358,7 +1381,7 @@ export function AgentScreen() {
                   ) : null}
                   <Link
                     className="icon-button text-button"
-                    to="/settings?section=agent-injection"
+                    to={`${workspacePath(routeWorkspaceId, "settings")}?section=agent-injection`}
                   >
                     <Settings2 size={16} aria-hidden="true" />
                     <span>
@@ -1396,7 +1419,7 @@ export function AgentScreen() {
                 selectedVersionId={selectedVersionId}
                 workspaceId={state.workspaceId}
               />
-            ) : state.detailRestricted ? (
+            ) : visibleDetailRestricted ? (
               <section className="feature-section detail-section">
                 <div className="empty-state">
                   <ShieldAlert size={18} aria-hidden="true" />
@@ -1507,18 +1530,18 @@ export function AgentScreen() {
           ) : undefined
         }
       />
-      {canEdit && newItemDialog ? (
+      {canEdit && activeNewItemDialog ? (
         <NewItemDialog
           canCreateFolder={agentPolicy?.allow_user_folder_create === true}
           canCreatePage={false}
           initialItemType="folder"
-          initialParentId={newItemDialog.parentNodeId ?? ""}
+          initialParentId={activeNewItemDialog.parentNodeId ?? ""}
           parentLabel={
             itemParent?.title ?? t("title", { defaultValue: "Agent" })
           }
           parentNodes={agentFolderNodes}
           rootLabel={t("title", { defaultValue: "Agent" })}
-          onClose={() => setNewItemDialog(null)}
+          onClose={closeCreateFolder}
           onSubmit={(input) =>
             createFolder({
               parentNodeId: input.parentNodeId,
@@ -2383,7 +2406,7 @@ function AgentReader({
           {canEdit ? (
             <Link
               className="icon-button text-button"
-              to={`/agent?target=${encodeURIComponent(detail.id)}&edit=${encodeURIComponent(detail.id)}`}
+              to={`${workspaceTargetHref(workspaceId, "agent", detail.id, "page")}/edit`}
             >
               <FileText size={16} aria-hidden="true" />
               <span>
@@ -2397,7 +2420,7 @@ function AgentReader({
           ) : null}
           <Link
             className="icon-button text-button"
-            to="/settings?section=agent-injection"
+            to={`${workspacePath(workspaceId, "settings")}?section=agent-injection`}
           >
             <Settings2 size={16} aria-hidden="true" />
             <span>
@@ -2933,6 +2956,7 @@ function AgentDetail({
   history: AgentChangeHistory | null;
 }) {
   const { t } = useTranslation("agent");
+  const routeWorkspaceId = useRouteWorkspaceId();
   if (!detail) {
     return (
       <div className="inspector-empty">
@@ -3017,7 +3041,7 @@ function AgentDetail({
         <div className="inspector-actions">
           <Link
             className="icon-button text-button"
-            to="/settings?section=agent-injection"
+            to={`${workspacePath(routeWorkspaceId, "settings")}?section=agent-injection`}
           >
             {t("detail.openPolicySettings", {
               defaultValue: "Open policy settings",

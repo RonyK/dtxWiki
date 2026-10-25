@@ -60,7 +60,7 @@ describe("SearchScreen", () => {
     });
 
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -77,10 +77,10 @@ describe("SearchScreen", () => {
     await screen.findByRole("link", { name: "Open Library Source" });
     const rows = Array.from(container.querySelectorAll(".operations-list > .search-result-row"));
     expect(rows.map((row) => row.getAttribute("href"))).toEqual([
-      "/context?target=context-1",
-      "/library?target=source-1",
-      "/context?target=context-2",
-      "/review?review=review-1",
+      "/workspaces/workspace-1/context/pages/context-1",
+      "/workspaces/workspace-1/library/items/source-1",
+      "/workspaces/workspace-1/context/pages/context-2",
+      "/workspaces/workspace-1/review/review-1",
     ]);
     for (const row of screen.getAllByRole("link", { name: "Open Decision Log" })) {
       expect(row.querySelector(".search-result-location")).toHaveTextContent(/Team.*Decisions/);
@@ -140,7 +140,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -185,7 +185,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -233,7 +233,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -270,7 +270,7 @@ describe("SearchScreen", () => {
                 source_ref: { kind: "review_item", id: "review-1" },
               }),
               result("artifact-1", "library_artifact", "Artifact Hit", "Artifact hit", 0.7, {
-                concept_path: "/library/item-1.md",
+                concept_path: "/workspaces/workspace-1/library/item-1.md",
                 source_ref: { kind: "library_artifact", id: "artifact-1" },
               }),
             ],
@@ -283,7 +283,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -292,13 +292,13 @@ describe("SearchScreen", () => {
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     expect(await screen.findByRole("link", { name: "Open Claim Hit" }))
-      .toHaveAttribute("href", "/context?target=page-1");
+      .toHaveAttribute("href", "/workspaces/workspace-1/context/pages/page-1");
     expect(screen.getByRole("link", { name: "Open Feedback Hit" }))
-      .toHaveAttribute("href", "/library?target=item-1");
+      .toHaveAttribute("href", "/workspaces/workspace-1/library/items/item-1");
     expect(screen.getByRole("link", { name: "Open Change Hit" }))
-      .toHaveAttribute("href", "/review?review=review-1");
+      .toHaveAttribute("href", "/workspaces/workspace-1/review/review-1");
     expect(screen.getByRole("link", { name: "Open Artifact Hit" }))
-      .toHaveAttribute("href", "/library?target=item-1");
+      .toHaveAttribute("href", "/workspaces/workspace-1/library/artifacts/artifact-1");
     for (const [title, destination] of [
       ["Claim Hit", "context"],
       ["Feedback Hit", "library"],
@@ -333,7 +333,7 @@ describe("SearchScreen", () => {
           ranked_results: [
             result(pageId, "context_page", "Embedding policy", "", 1, {
               source_ref: { kind: "context_page", id: pageId },
-              concept_path: `/context/p-${pageId}.md`,
+              concept_path: `/workspaces/workspace-1/context/p-${pageId}.md`,
               matched_name: "Embedding policy", match_reason: "exact_title",
               summary: "**Embedding** policy explains [retrieval](https://example.com).",
               location: ["Product", "Research", "Very long document title kept in the accessible description", "Search", "Policies"],
@@ -355,7 +355,7 @@ describe("SearchScreen", () => {
     });
 
     const { container } = render(
-      <MemoryRouter initialEntries={["/search?q=Embedding%20policy"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?q=Embedding%20policy"]}>
         <WorkspaceProvider>
           <WorkspaceSearchHarness />
         </WorkspaceProvider>
@@ -383,7 +383,7 @@ describe("SearchScreen", () => {
       "Product › Research › Very long document title kept in the accessible description › Search › Policies. Title match",
     );
     expect(row.querySelector("nav, a, button")).toBeNull();
-    expect(container.textContent).not.toContain(`/context/p-${pageId}`);
+    expect(container.textContent).not.toContain(`/workspaces/workspace-1/context/p-${pageId}`);
     const handbook = screen.getByRole("link", { name: "Open Search handbook" });
     expect(handbook).toHaveTextContent("/context/search-handbook");
     expect(handbook).toHaveTextContent("A clean snippet.");
@@ -391,12 +391,12 @@ describe("SearchScreen", () => {
     expect(handbook.querySelector(".search-result-snippet strong")).toHaveTextContent("Storage");
     expect(within(handbook).queryByText("Keyword", { exact: true })).not.toBeInTheDocument();
     const unavailable = container.querySelectorAll(".search-result-row.is-disabled");
-    expect(unavailable).toHaveLength(2);
+    expect(unavailable).toHaveLength(1);
     expect(unavailable[0].tagName).toBe("DIV");
     expect(unavailable[0]).toHaveTextContent(/Cannot open directly from search.*review/i);
-    expect(unavailable[1]).toHaveTextContent(/Cannot open directly from search.*link/i);
     expect(unavailable[0].querySelector(".search-result-chevron")).toBeNull();
     expect(screen.queryByRole("link", { name: "Open Unmapped change" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Unmapped artifact" })).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/unmapped-artifact`);
     expect(container.querySelector(".search-source-chip")).toBeNull();
     expect(screen.queryByText("No citation")).not.toBeInTheDocument();
     expect(screen.queryByText("stale", { exact: true })).not.toBeInTheDocument();
@@ -427,7 +427,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -472,7 +472,7 @@ describe("SearchScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter initialEntries={["/search?q=review&scope=change"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?q=review&scope=change"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -482,12 +482,12 @@ describe("SearchScreen", () => {
     );
     expect(screen.getByLabelText("Scope")).toHaveValue("all");
     expect(screen.queryByRole("option", { name: "Changes" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/activity");
-    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "/review");
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/workspaces/workspace-1/activity");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "/workspaces/workspace-1/review");
     view.unmount();
     searchBody = null;
     render(
-      <MemoryRouter initialEntries={["/search?scope=change"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?scope=change"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -525,7 +525,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -561,7 +561,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -601,7 +601,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle&scope=agent_page"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?q=needle&scope=agent_page"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -630,7 +630,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle&scope=library_item"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?q=needle&scope=library_item"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -665,7 +665,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search?q=needle"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -700,7 +700,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
@@ -740,7 +740,7 @@ describe("SearchScreen", () => {
 
     try {
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
           <SearchScreen />
         </MemoryRouter>,
       );
@@ -779,7 +779,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -833,7 +833,7 @@ describe("SearchScreen", () => {
 
     const user = userEvent.setup();
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -916,7 +916,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -974,7 +974,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -1038,7 +1038,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -1114,7 +1114,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/search"]}>
         <SearchScreen />
       </MemoryRouter>,
     );

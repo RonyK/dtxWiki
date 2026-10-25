@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 
-import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
+import { authenticatePage, backendBaseUrl, currentWorkspace, workspaceUrl } from "./auth";
 
 test("reviews a retained Ask API proposal and records activity", async ({ page }, testInfo) => {
   await authenticatePage(page, testInfo, "cross-screen");
@@ -90,7 +90,7 @@ test("reviews a retained Ask API proposal and records activity", async ({ page }
   expect(accepted.proposal_id).toBe(proposal.id);
   expect(accepted.review_item_id).toBeTruthy();
 
-  await page.goto(`/review?review=${encodeURIComponent(accepted.review_item_id!)}`);
+  await page.goto(workspaceUrl(workspace.id, `review/${encodeURIComponent(accepted.review_item_id!)}`));
 
   await expect(
     page.getByRole("complementary", { name: "Review queue" }),
@@ -131,7 +131,7 @@ test("reviews a retained Ask API proposal and records activity", async ({ page }
       new URL(response.url()).pathname ===
         `/api/v1/workspaces/${workspace.id}/activity/feed`,
   );
-  await page.goto("/activity");
+  await page.goto(workspaceUrl(workspace.id, "activity"));
   const feedResponse = await feedResponsePromise;
   expect(feedResponse.ok()).toBeTruthy();
   const feed = (await feedResponse.json()).data;
@@ -161,7 +161,7 @@ test("reviews a retained Ask API proposal and records activity", async ({ page }
   });
   await historyLink.click();
   await expect(page).toHaveURL((url) =>
-    url.pathname === "/activity/history" &&
+    url.pathname === `/workspaces/${workspace.id}/activity/history` &&
     url.searchParams.get("period") === "all" &&
     url.searchParams.get("kind") === "all" &&
     url.searchParams.get("subtype") === "all" &&

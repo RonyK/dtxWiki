@@ -11,12 +11,12 @@ const owner = "A very long user name with no role suffix";
 const client = "Codex CLI — a very long registered client name";
 function entry(overrides: Partial<ActivityFeedEvent> = {}): ActivityFeedEntry {
   const event: ActivityFeedEvent = {
-    id: "event-1", lane: "history", title: "MCP read succeeded", body: "Raw input=secret must not be visible", actor: { actor_kind: "mcp_client", display_name: client, credential_owner_display_name: owner, actor_id: "actor-1", is_current_user: false }, target: { target_kind: "mcp_tool_call", target_id: "call-1" }, review_item_id: null, affordances: [], created_at: "2026-10-20T04:56:00Z", event_key: null, event_args: {}, operation: "read", result_status: "succeeded", navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/context?target=page-1" }, ...overrides,
+    id: "event-1", lane: "history", title: "MCP read succeeded", body: "Raw input=secret must not be visible", actor: { actor_kind: "mcp_client", display_name: client, credential_owner_display_name: owner, actor_id: "actor-1", is_current_user: false }, target: { target_kind: "mcp_tool_call", target_id: "call-1" }, review_item_id: null, affordances: [], created_at: "2026-10-20T04:56:00Z", event_key: null, event_args: {}, operation: "read", result_status: "succeeded", navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/workspaces/workspace-1/context/pages/page-1" }, ...overrides,
   };
   return { entry_type: "event", id: event.id, event, event_count: 1, first_occurred_at: event.created_at, last_occurred_at: event.created_at };
 }
 function show(value: ActivityFeedEntry, loadGroup?: (token: string) => Promise<ActivityFeedEvent[]>) {
-  return render(<MemoryRouter><ActivityEntryRow entry={value} loadGroup={loadGroup} /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={["/workspaces/workspace-1/activity"]}><ActivityEntryRow entry={value} loadGroup={loadGroup} /></MemoryRouter>);
 }
 afterEach(async () => { await i18n.changeLanguage("en"); });
 
@@ -28,7 +28,7 @@ describe("shared activity entry", () => {
     expect(identity.firstElementChild).toHaveAttribute("data-kind", "context");
     expect(identity.firstElementChild?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(identity.lastElementChild?.tagName).toBe("BUTTON");
-    expect(screen.getByRole("link", { name: "Read Guide" })).toHaveAttribute("href", "/context?target=page-1");
+    expect(screen.getByRole("link", { name: "Read Guide" })).toHaveAttribute("href", "/workspaces/workspace-1/context/pages/page-1");
     expect(container.querySelectorAll("a a, a button, button a, button button")).toHaveLength(0);
     expect(screen.queryByText(/Raw input/)).not.toBeInTheDocument();
   });
@@ -153,7 +153,7 @@ describe("shared activity entry", () => {
     const { container } = show(entry({ actor: null, lane: "pending", review_item_id: "review-1", operation: "review" }));
     const title = screen.getByRole("link", { name: /^검토 열기:/ });
     const chip = screen.getByRole("link", { name: /^검토필요:/ });
-    expect(title).toHaveAttribute("href", "/review?review=review-1");
+    expect(title).toHaveAttribute("href", "/workspaces/workspace-1/review/review-1");
     expect(chip).toHaveAttribute("href", title.getAttribute("href"));
     expect(within(chip).getByText("검토필요")).toBeVisible();
     expect(chip.querySelector("[data-action=pending]")).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe("shared activity entry", () => {
     show(entry({ navigation: null, operation: "tool", result_status: "unknown" }));
     expect(screen.getByText("MCP tool execution record")).toBeVisible();
     expect(screen.queryByRole("link", { name: "MCP tool execution record" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View MCP activity" })).toHaveAttribute("href", "/activity/history?period=all&kind=mcp&subtype=all&group_reads=1");
+    expect(screen.getByRole("link", { name: "View MCP activity" })).toHaveAttribute("href", "/workspaces/workspace-1/activity/history?period=all&kind=mcp&subtype=all&group_reads=1");
     expect(screen.getByText("No target link")).toBeVisible();
   });
   it("keeps only permitted technical metadata in an independent disclosure", async () => {

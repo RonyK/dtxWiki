@@ -1,3 +1,4 @@
+import { workspacePath } from "./workspaceRoutes";
 import type { ActivityFeedEntry, ActivityFeedEvent, ActivityLane, ActivityPeriod } from "../api/operations";
 export type { ActivityFeedEntry, ActivityFeedEvent } from "../api/operations";
 import { i18n } from "../i18n";
@@ -36,8 +37,8 @@ export function parseActivityQuery(params: URLSearchParams, defaults: Partial<Ac
 export function activityQueryParams(query: ActivityQuery): URLSearchParams {
   return new URLSearchParams({ period: query.period, kind: query.kind, subtype: query.subtype, group_reads: query.group_reads ? "1" : "0" });
 }
-export function activityHref(query: ActivityQuery, lane?: ActivityLane): string {
-  return `/activity${lane ? `/${lane}` : ""}?${activityQueryParams(query)}`;
+export function activityHref(query: ActivityQuery, lane: ActivityLane | undefined, workspaceId: string): string {
+  return `${workspacePath(workspaceId, `activity${lane ? `/${lane}` : ""}`)}?${activityQueryParams(query)}`;
 }
 export function activityEntryCounts(entries: readonly ActivityFeedEntry[]) {
   return { returned_entry_count: entries.length, represented_event_count: entries.reduce((sum, entry) => sum + entry.event_count, 0) };
@@ -117,22 +118,22 @@ export function presentActivityFeedEvent(event: ActivityFeedEvent, count = 1) {
 }
 
 /** Accept only exact, same-app resource routes from the permission-filtered projection. */
-export function activityNavigation(event: ActivityFeedEvent, query: ActivityQuery = DEFAULT_ACTIVITY_QUERY) {
+export function activityNavigation(event: ActivityFeedEvent, query: ActivityQuery, workspaceId: string) {
   const pendingReview = event.lane === "pending" && Boolean(event.review_item_id);
   if (event.review_item_id) {
-    return { href: `/review?review=${encodeURIComponent(event.review_item_id)}`, fallbackHref: null, pendingReview };
+    return { href: workspacePath(workspaceId, `review/${encodeURIComponent(event.review_item_id)}`), fallbackHref: null, pendingReview };
   }
   const navigation = event.navigation;
   if (navigation) {
-    const route = activityTargetHref({ ...event, target: { target_kind: navigation.target_kind, target_id: navigation.target_id } });
+    const route = activityTargetHref({ ...event, target: { target_kind: navigation.target_kind, target_id: navigation.target_id } }, workspaceId);
     if (route && route === navigation.href) return { href: route, fallbackHref: null, pendingReview };
   }
   // Legacy resource targets have already passed server visibility checks. Tool-call IDs never route to Chats.
-  const href = activityTargetHref(event);
+  const href = activityTargetHref(event, workspaceId);
   if (href) return { href, fallbackHref: null, pendingReview };
   const fallbackQuery = isMcpActivityItem(event)
     ? parseActivityQuery(activityQueryParams({ ...query, kind: "mcp" })) : query;
-  return { href: null, fallbackHref: activityHref(fallbackQuery, event.lane), pendingReview };
+  return { href: null, fallbackHref: activityHref(fallbackQuery, event.lane, workspaceId), pendingReview };
 }
 
 /** A group lookup rechecks visibility. Replace the cached representative and

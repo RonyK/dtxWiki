@@ -1,5 +1,5 @@
 import { Check, Copy } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 type CodeBlockWrapperProps = {
   children: ReactNode;
@@ -19,6 +19,15 @@ export function CodeBlockWrapper({
   sourceAnchorAttributes,
 }: CodeBlockWrapperProps) {
   const [copied, setCopied] = useState(false);
+  const mountedRef = useRef(true);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current);
+    };
+  }, []);
 
   async function handleCopy() {
     if (!code || !navigator.clipboard?.writeText) {
@@ -26,10 +35,15 @@ export function CodeBlockWrapper({
     }
     try {
       await navigator.clipboard.writeText(code);
+      if (!mountedRef.current) return;
+      if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
+      resetTimerRef.current = setTimeout(() => {
+        resetTimerRef.current = null;
+        setCopied(false);
+      }, 1600);
     } catch {
-      setCopied(false);
+      if (mountedRef.current) setCopied(false);
     }
   }
 

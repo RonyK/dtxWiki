@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import RESTResponseBase
 from backend.schemas.input_policy import InputRequest
-from backend.schemas.read import GraphNeighborEntry, TreePathEntry
+from backend.schemas.read import ContextLinkTarget, GraphNeighborEntry, TreePathEntry
 
 
 class AskSessionCreate(InputRequest):
@@ -62,6 +62,7 @@ class AskTurnDetail(BaseModel):
     fallback_disclosure: bool
     warning_codes: list[str] = Field(default_factory=list)
     graph_context: list[GraphNeighborEntry] = Field(default_factory=list)
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 

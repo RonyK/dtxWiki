@@ -28,7 +28,7 @@ describe("ArtifactChatsSection", () => {
     const link = await screen.findByRole("link", {
       name: /Codex Research Session/,
     });
-    expect(link).toHaveAttribute("href", "/chats/chat-1");
+    expect(link).toHaveAttribute("href", "/workspaces/workspace-1/chats/chat-1");
     expect(
       screen.queryByText("Not yet referenced in any external chat."),
     ).toBeNull();
@@ -188,7 +188,7 @@ describe("ArtifactChatsSection", () => {
 
 function renderSection() {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/workspaces/workspace-1/chats"]}>
       <ArtifactChatsSection resourceKind="context_page" resourceId="page-1" />
     </MemoryRouter>,
   );

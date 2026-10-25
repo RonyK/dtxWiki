@@ -66,6 +66,11 @@ export async function currentWorkspace(request: APIRequestContext) {
   return workspace!;
 }
 
+/** Build a product URL whose workspace scope is explicit in its path. */
+export function workspaceUrl(workspaceId: string, suffix: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/${suffix.replace(/^\/+/, "")}`;
+}
+
 export function seededAdminEmail(viewportKey: string, projectName: string) {
   return `e2e-admin-${projectName}-${viewportKey}@example.com`;
 }

@@ -388,6 +388,17 @@ in a new session before starting Codex.
 
 #### Verify workspace access
 
+Every workspace-scoped MCP tool and prompt requires an explicit `workspace_id`.
+Use `list_my_workspaces` to find an accessible ID; a key's allowed workspace,
+the account default, and the browser selection do not supply a missing ID.
+Resource reads include it in `dtxwiki://workspaces/<workspace_id>/...`.
+
+Browser links to workspace content use `/workspaces/<workspace_id>/...`.
+Context document links use `/p/<workspace_id>/<page_id>`. Target-free entry
+pages can redirect to your last workspace, but old links such as
+`/context?target=<id>` and `/p/<page_id>` cannot infer one. Open the explicit
+link from the source workspace. Public pages keep `/w/<workspace_slug>/pages/<slug>`.
+
 A client reporting a connected server does not prove workspace or write access.
 Ask the client:
 

@@ -2,6 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const WORKSPACE_ID = "ws-1";
+
 vi.mock("../../../shared/api/contextMediaAttachments", () => ({
   listWorkspaceContextMediaAttachments: vi.fn(),
   listAdminContextMediaAttachments: vi.fn(),
@@ -208,7 +210,7 @@ describe("AttachmentsSection", () => {
     const pageLink = screen.getByRole("link", { name: "Release Notes Draft" });
     expect(pageLink).toHaveAttribute(
       "href",
-      `/context?target=${ATTACHMENT.page_id}`,
+      `/workspaces/${WORKSPACE_ID}/context/pages/${ATTACHMENT.page_id}`,
     );
   });
 

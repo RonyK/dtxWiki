@@ -74,7 +74,6 @@ import {
   Link,
   useBlocker,
   useNavigate,
-  useParams,
   useSearchParams,
 } from "react-router-dom";
 import type { TFunction } from "i18next";
@@ -95,7 +94,7 @@ import {
   listPages,
   newIdempotencyKey,
   publishPageVersion,
-  readPageBySlug,
+  readPage,
   sendPageAutosave,
   updatePage,
 } from "../../shared/api/pages";
@@ -115,7 +114,6 @@ import { uploadImage as uploadEditorImage } from "../../shared/api/uploads";
 import {
   listTree,
   listWorkspaces,
-  resolveSelectedWorkspaceId,
 } from "../../shared/api/workspace";
 import type { TreeNodePayload } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
@@ -141,6 +139,7 @@ import {
   uploadFileRejection,
 } from "../../shared/media/formatCapabilities";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
+import { contextEditHref, useWorkspaceRoute } from "../../shared/lib/workspaceRoutes";
 import { ContextMediaManagerDialog } from "./ContextMediaManagerDialog";
 import { EditorActionBar } from "./EditorActionBar";
 import {
@@ -166,7 +165,7 @@ import {
   filterBlockEntries,
 } from "./editorBlocks";
 import type { BlockMenuEntry } from "./editorBlocks";
-import { formatCanonicalContextUrl } from "../../shared/lib/contextLinks";
+import { contextPageHref, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { createEditorCompletionSource } from "./editorCompletions";
 import {
   EDITOR_COMMANDS,
@@ -431,8 +430,9 @@ function sourceLineToOffset(
 }
 
 export function RoutedPageEditor(props: PageEditorProps) {
-  const { slug = "" } = useParams();
-  return <PageEditor key={`${props.mode}:${slug}`} {...props} />;
+  const route = useWorkspaceRoute();
+  const pageId = route?.targetKind === "page" ? route.targetId ?? "" : "";
+  return <PageEditor key={`${route?.workspaceId ?? ""}:${props.mode}:${pageId}`} {...props} />;
 }
 
 export function PageEditor({
@@ -454,7 +454,9 @@ export function PageEditor({
     defaultValue:
       "Leave this editor? Unresolved uploads and unsaved edits cannot be recovered and will be lost.",
   });
-  const { slug = "" } = useParams();
+  const workspaceRoute = useWorkspaceRoute();
+  const pageId = workspaceRoute?.targetKind === "page" ? workspaceRoute.targetId ?? "" : "";
+  const slug = pageId;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [pages, setPages] = useState<PageSummary[]>([]);
@@ -672,7 +674,7 @@ export function PageEditor({
     mode === "edit"
       ? searchParams.get("reviewItemId") ?? searchParams.get("review_item_id")
       : null;
-  const createParentNodeId = mode === "create" ? searchParams.get("parentNodeId") : null;
+  const createParentNodeId = mode === "create" ? searchParams.get("parent") : null;
   const createInitialTitle = mode === "create" ? normalizeInitialTitle(searchParams.get("title")) : "";
   const isLinkDialogOpen = Boolean(linkDialog);
   const isCommentPreviewOpen = Boolean(commentPreview);
@@ -1037,15 +1039,18 @@ export function PageEditor({
   );
   const editorBreadcrumbItems = useMemo<BreadcrumbItem[]>(() => {
     const contextLabel = t("editor.rail.context", { defaultValue: "Context" });
+    if (!workspaceId) return [{ label: contextLabel }];
+    const contextRootHref = workspacePath(workspaceId, "context");
     if (mode === "create") {
       const parentItems = createParentNodeId
         ? targetBreadcrumbs({
-            basePath: "/context",
+            basePath: contextRootHref,
+            workspaceId,
             rootLabel: contextLabel,
             nodes: contextTree,
             targetNodeId: createParentNodeId,
           })
-        : [{ label: contextLabel, href: "/context" }];
+        : [{ label: contextLabel, href: contextRootHref }];
       const currentLabel =
         title.trim() || createInitialTitle || t("editor.breadcrumbNewPage", { defaultValue: "New page" });
       if (sameBreadcrumbLabel(parentItems.at(-1)?.label, currentLabel)) {
@@ -1053,14 +1058,16 @@ export function PageEditor({
       }
       return [...parentItems, { label: currentLabel }];
     }
+    const routedSummary = pages.find((candidate) => candidate.id === pageId);
     return targetBreadcrumbs({
-      basePath: "/context",
+      basePath: contextRootHref,
+      workspaceId,
       rootLabel: contextLabel,
       nodes: contextTree,
       targetId: page?.id ?? null,
       targetNodeId: contextActiveNodeId,
       fallbackLabel:
-        title.trim() || slug || t("editor.breadcrumbPageFallback", { defaultValue: "Page" }),
+        title.trim() || (page?.id === pageId ? pageSlug : routedSummary?.title ?? routedSummary?.slug) || t("editor.breadcrumbPageFallback", { defaultValue: "Page" }),
     });
   }, [
     contextActiveNodeId,
@@ -1069,7 +1076,10 @@ export function PageEditor({
     createParentNodeId,
     mode,
     page?.id,
-    slug,
+    pageId,
+    pageSlug,
+    pages,
+    workspaceId,
     t,
     title,
   ]);
@@ -1580,7 +1590,7 @@ export function PageEditor({
       reviewEditCompletedRef.current = false;
       lastSavedRef.current = emptyDraft(mode, slug);
       const workspaceResponse = await listWorkspaces();
-      const selectedWorkspaceId = resolveSelectedWorkspaceId(workspaceResponse.data);
+      const selectedWorkspaceId = workspaceRoute?.workspaceId ?? null;
       const selectedWorkspace =
         workspaceResponse.data.workspaces.find(
           (workspace) => workspace.id === selectedWorkspaceId,
@@ -1617,8 +1627,16 @@ export function PageEditor({
       const contextNodes = Array.isArray(treeResult) ? treeResult : [];
       const sources = sourceResult.sources;
       const mediaCapabilities = mediaCapabilitiesResult.capabilities;
-      if (mode === "edit" && selectedWorkspaceSlug) {
-        const preferenceKey = `dtxwiki:editor:${selectedWorkspaceSlug}:${slug}`;
+      if (mode === "create" && createParentNodeId && !contextNodes.some(
+        (node) => node.id === createParentNodeId && node.section === "context" && node.can_have_children,
+      )) {
+        setPageLoadState("not_found");
+        setStatus(translationRef.current("editor.notFound"));
+        setIsEditorReady(true);
+        return;
+      }
+      if (mode === "edit" && selectedWorkspaceId) {
+        const preferenceKey = `dtxwiki:editor:${selectedWorkspaceId}:${pageId}`;
         const preference = readEditorPreference(preferenceKey);
         setEditorMode(preference.mode);
         setSplitPercent(preference.splitPercent);
@@ -1673,10 +1691,11 @@ export function PageEditor({
         };
       }
       if (mode === "edit") {
-        const loaded = selectedWorkspaceId
-          ? await readPageBySlug(selectedWorkspaceId, slug)
+        const loadedResponse = selectedWorkspaceId
+          ? await readPage(selectedWorkspaceId, pageId)
           : null;
         if (cancelled) return;
+        const loaded = loadedResponse?.id === pageId ? loadedResponse : null;
         if (!loaded) {
           setPageLoadState("not_found");
           setStatus(translationRef.current("editor.notFound"));
@@ -1731,8 +1750,14 @@ export function PageEditor({
       setPageLoadState("ready");
       setIsEditorReady(true);
     }
-    load().catch(() => {
+    load().catch((exc: unknown) => {
       if (!cancelled) {
+        if (exc instanceof ApiError && [403, 404, 422].includes(exc.status)) {
+          setPageLoadState("not_found");
+          setStatus(translationRef.current("editor.notFound"));
+          setIsEditorReady(true);
+          return;
+        }
         setPageLoadState("error");
         // Never expose a cleared editor after a failed page read: it looks like
         // a valid empty page and lets a user overwrite content they never saw.
@@ -1745,7 +1770,7 @@ export function PageEditor({
     return () => {
       cancelled = true;
     };
-  }, [createInitialTitle, createParentNodeId, mode, slug]);
+  }, [createInitialTitle, createParentNodeId, mode, pageId, slug, workspaceRoute?.workspaceId]);
 
   useEffect(() => {
     if (mode === "create") {
@@ -2697,7 +2722,7 @@ export function PageEditor({
       return;
     }
     navigationConfirmedRef.current = true;
-    navigate(formatCanonicalContextUrl(workspaceIdRef.current ?? workspaceId ?? "", pageId), {
+    navigate(contextPageHref(workspaceIdRef.current ?? workspaceId ?? "", pageId), {
       replace: true,
       state: { contextPublishNotice: notice },
     });
@@ -2893,7 +2918,7 @@ export function PageEditor({
         }
         if (!options.publish) {
           navigationConfirmedRef.current = true;
-          navigate(`/context/${savedPage.slug}/edit`, { replace: true });
+          navigate(contextEditHref(workspaceId, savedPage.id), { replace: true });
           return;
         }
         publishRequestStarted = true;
@@ -2954,7 +2979,7 @@ export function PageEditor({
             if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
             if (!isEditorMountedRef.current) return;
             reviewEditCompletedRef.current = true;
-            const reloaded = await readPageBySlug(workspaceId, page.slug);
+            const reloaded = await readPage(workspaceId, page.id);
             if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
             if (!isEditorMountedRef.current) return;
             if (reloaded) {
@@ -3090,12 +3115,12 @@ export function PageEditor({
       if (!options.publish) {
         // A media attach can create the page before the author's first manual
         // save. In that page-first shape `page` is already populated even
-        // though this component is still mounted at /context/new. Once the
+        // though this component is still mounted at the typed new-page route. Once the
         // explicit save has persisted the editor buffer, move to the durable
         // edit URL just as the ordinary create path above does.
         if (mode === "create") {
           navigationConfirmedRef.current = true;
-          navigate(`/context/${updated.slug}/edit`, { replace: true });
+          navigate(contextEditHref(workspaceId, updated.id), { replace: true });
         }
         return;
       }
@@ -3421,9 +3446,9 @@ export function PageEditor({
     }
   }
 
-  async function reloadLatest(slugOverride?: string): Promise<boolean> {
+  async function reloadLatest(): Promise<boolean> {
     if (!workspaceId) return false;
-    const latest = await readPageBySlug(workspaceId, slugOverride ?? normalizedSlug);
+    const latest = await readPage(workspaceId, pageIdRef.current ?? page?.id ?? "");
     if (!latest) return false;
     const restoredPublication = readPagePublicationState(latest);
     const parsed = parsePageDocument(latest.body_md, {
@@ -3512,7 +3537,7 @@ export function PageEditor({
       // page.current_version_id), so this session cannot keep autosaving onto
       // it. Rebase the editor onto the server head instead of adopting the
       // branch, and name the parked alternative in the status line.
-      await reloadLatest(preserved.slug);
+      await reloadLatest();
       setStatus(
         t("editor.alternativePreserved", {
           id: preserved.alternative_draft_id?.slice(0, 8) ?? "",
@@ -3656,21 +3681,20 @@ export function PageEditor({
       saveRef.current({ source: "auto" });
     }
     navigationConfirmedRef.current = true;
-    if (fromReview) {
-      navigate(-1);
+    if (fromReview && reviewItemId && workspaceId) {
+      navigate(workspacePath(workspaceId, `review/${encodeURIComponent(reviewItemId)}`));
       return;
     }
-    navigate(page?.id && workspaceId
-      ? formatCanonicalContextUrl(workspaceId, page.id)
-      : "/context");
+    if (!workspaceId) return;
+    navigate(page?.id ? contextPageHref(workspaceId, page.id) : workspacePath(workspaceId, "context"));
   }
 
   function selectContextTreeNode(node: TreeNodePayload) {
-    if (node.target_kind !== "context_page" || !node.slug) {
+    if (node.target_kind !== "context_page" || !node.target_id || !workspaceId) {
       return;
     }
     setContextRailOpen(false);
-    navigate(`/context/${node.slug}/edit`);
+    navigate(contextEditHref(workspaceId, node.target_id));
   }
 
   async function refreshContextTree() {
@@ -4494,13 +4518,13 @@ export function PageEditor({
               })}
             </p>
             <div className="empty-state-actions">
-              <Link className="icon-button text-button primary" to="/dashboard">
+              <Link className="icon-button text-button primary" to={workspacePath(workspaceRoute?.workspaceId ?? "", "dashboard")}>
                 {t("notFound.backToDashboard", {
                   ns: "shell",
                   defaultValue: "Back to dashboard",
                 })}
               </Link>
-              <Link className="icon-button text-button" to="/context">
+              <Link className="icon-button text-button" to={workspacePath(workspaceRoute?.workspaceId ?? "", "context")}>
                 {t("notFound.openContext", {
                   ns: "shell",
                   defaultValue: "Open Context",
@@ -4548,7 +4572,7 @@ export function PageEditor({
               })}
             </p>
             <div className="empty-state-actions">
-              <Link className="icon-button text-button primary" to="/context">
+              <Link className="icon-button text-button primary" to={workspacePath(workspaceRoute?.workspaceId ?? "", "context")}>
                 {t("editor.returnToContext", { defaultValue: "Return to Context" })}
               </Link>
             </div>

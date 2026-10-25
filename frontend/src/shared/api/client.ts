@@ -255,7 +255,7 @@ function handleAuthExpired(path: string) {
   if (window.location.pathname.startsWith(LOGIN_PATH)) {
     return;
   }
-  const next = `${window.location.pathname}${window.location.search}`;
+  const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   window.location.assign(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
 }
 

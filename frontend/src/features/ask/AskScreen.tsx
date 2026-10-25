@@ -1,3 +1,5 @@
+import { useRouteWorkspaceId, useWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import {
   Check,
   FileText,
@@ -11,9 +13,9 @@ import {
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { MarkdownView } from "../pages/MarkdownView";
 import { apiErrorMessage } from "../../shared/api/client";
@@ -37,7 +39,6 @@ import type {
 import {
   listTree,
   listWorkspaces,
-  resolveSelectedWorkspaceId,
 } from "../../shared/api/workspace";
 import type { TreeNodePayload } from "../../shared/api/workspace";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
@@ -50,7 +51,6 @@ import { RelativeTime } from "../../shared/components/RelativeTime";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { WorkspacePanelChrome } from "../../shared/components/WorkspacePanelChrome";
-import { TREE_TARGET_PARAM } from "../../shared/components/treeRouteState";
 import { resolveInitialLocale } from "../../shared/i18n";
 import { displayConceptPath } from "../../shared/lib/conceptPath";
 import type { TimeBucketKey } from "../../shared/lib/datetime";
@@ -563,8 +563,12 @@ function resolveAskWarningLabel(
 }
 
 export function AskScreen() {
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  const requestedSessionId = route?.targetKind === "session" ? route.targetId : null;
+  const routeIdentity = `${routeWorkspaceId ?? ""}\u0000${requestedSessionId ?? ""}`;
+  const [notFound, setNotFound] = useState(false);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { t } = useTranslation("search");
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
@@ -579,17 +583,21 @@ export function AskScreen() {
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
   const [lastTurnWarnings, setLastTurnWarnings] = useState<EnvelopeWarning[]>([]);
   const [startingSession, setStartingSession] = useState(false);
+  const [routeRetryKey, setRouteRetryKey] = useState(0);
   const [selectingSessionId, setSelectingSessionId] = useState<string | null>(null);
   const [sendingTurn, setSendingTurn] = useState(false);
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
-  const consumedNewRequestRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
-  // The `target` this screen has already loaded (or is loading). Held in a ref
-  // rather than state so the URL effect cannot start a second load for it from
-  // a render that has not caught up yet.
-  const loadedTargetRef = useRef<string | null>(null);
+  // Mutation completions may arrive after browser navigation changes the
+  // route without unmounting AskScreen. The URL remains authoritative even
+  // while the old request is settling.
+  const routeIdentityRef = useRef(routeIdentity);
+  useLayoutEffect(() => {
+    routeIdentityRef.current = routeIdentity;
+    return () => { routeIdentityRef.current = ""; };
+  }, [routeIdentity]);
   // Tracks whether the component is still mounted. Async handlers below
-  // (`startSession`, `loadSelectedSession`, `sendTurn`, `acceptPlacement`,
+  // (`startSession`, `load`, `sendTurn`, `acceptPlacement`,
   // `rejectPlacement`) chain multiple awaits and would otherwise race
   // against unmount, attempting `setState` on a torn-down tree if the user
   // navigates away mid-flight.
@@ -598,13 +606,14 @@ export function AskScreen() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      routeIdentityRef.current = "";
     };
   }, []);
 
   async function load(preferredSessionId?: string): Promise<boolean> {
     const generation = ++loadGenerationRef.current;
     const workspaceResponse = await listWorkspaces();
-    const workspaceId = resolveSelectedWorkspaceId(workspaceResponse.data);
+    const workspaceId = routeWorkspaceId;
     if (!workspaceId) {
       throw new Error("Workspace not found");
     }
@@ -616,13 +625,7 @@ export function AskScreen() {
       listTree(workspaceId, "context"),
     ]);
     const sessions = sortSessionsByActivity(sessionsData.items);
-    const requestedSessionId =
-      preferredSessionId ?? searchParams.get(TREE_TARGET_PARAM);
-    const sessionId = sessions.some(
-      (session) => session.id === requestedSessionId,
-    )
-      ? requestedSessionId
-      : sessions[0]?.id;
+    const sessionId = preferredSessionId ?? requestedSessionId;
     const detail = sessionId
       ? await readAskSession(workspaceId, sessionId)
       : null;
@@ -695,12 +698,17 @@ export function AskScreen() {
   useEffect(() => {
     let cancelled = false;
     async function initialLoad() {
-      await load();
+      setNotFound(false);
+      setError(null);
+      setLastTurnWarnings([]);
+      setSelectingSessionId(requestedSessionId);
+      try { await load(); } finally { if (!cancelled) setSelectingSessionId(null); }
     }
     initialLoad().catch((exc) => {
       if (cancelled || !mountedRef.current) {
         return;
       }
+      setNotFound(Boolean(requestedSessionId) && typeof exc === "object" && exc !== null && "status" in exc && exc.status === 404);
       setError(errorMessage(exc, ASK_COPY.en.errors.load));
       setState({
         workspaceId: null,
@@ -715,79 +723,10 @@ export function AskScreen() {
     return () => {
       cancelled = true;
     };
-    // The initial fetch is mount-only; `load` closes over the initial URL and
-    // subsequent URL changes are handled by the dedicated effects below.
+    // Path identity is authoritative across same-mounted session navigation.
+    // The load generation prevents an older response replacing this target.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const newRequestKey = searchParams.get("new");
-    if (!newRequestKey) {
-      consumedNewRequestRef.current = null;
-      return;
-    }
-    if (
-      !state ||
-      // Without a workspace there is nothing to create the session in. Leave
-      // the `new` param unconsumed so the intent survives a later successful
-      // load instead of being silently dropped.
-      !state.workspaceId ||
-      !canEdit ||
-      startingSession ||
-      consumedNewRequestRef.current === newRequestKey
-    ) {
-      return;
-    }
-    consumedNewRequestRef.current = newRequestKey;
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete("new");
-    replaceAskParams(nextParams);
-    void startSession();
-    // The guards make this a URL/state transition effect. Depending on the
-    // inline command functions would restart it after each state update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canEdit, searchParams, startingSession, state]);
-
-  // `target` in the URL is the only source of truth for which session is
-  // shown: this effect is the sole place that loads one, and it never writes
-  // the URL back. Loading first and then updating the URL -- which is what a
-  // rail click used to do -- leaves a window where the loaded session and the
-  // URL disagree, and this effect read that window as "navigate back", so
-  // a -> b -> a ping-ponged between the two forever.
-  //
-  // The ref, not `state`, is what stops re-entry. It is written before the
-  // await, so a render that lands mid-load cannot start a competing one; the
-  // state check alone was read from whichever render the effect closed over.
-  useEffect(() => {
-    const target = searchParams.get(TREE_TARGET_PARAM);
-    if (!state || !target || loadedTargetRef.current === target) {
-      return;
-    }
-    if (state.detail?.id === target) {
-      loadedTargetRef.current = target;
-      return;
-    }
-    if (!state.sessions.some((session) => session.id === target)) {
-      return;
-    }
-    loadedTargetRef.current = target;
-    void loadSelectedSession(target);
-    // `loadSelectedSession` is intentionally read at the transition point; its
-    // inline identity changes with the session state this effect updates.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, state]);
-
-  // Give the session the initial load resolved a URL of its own, so the rail,
-  // the address bar and a reload all agree from the first paint.
-  useEffect(() => {
-    const detailId = state?.detail?.id;
-    if (!detailId || searchParams.get(TREE_TARGET_PARAM)) {
-      return;
-    }
-    loadedTargetRef.current = detailId;
-    setSelectedSessionParams(detailId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, state?.detail?.id]);
+  }, [routeWorkspaceId, requestedSessionId, routeRetryKey]);
 
   async function startSession() {
     if (
@@ -802,19 +741,29 @@ export function AskScreen() {
     setError(null);
     setLastTurnWarnings([]);
     setStartingSession(true);
+    const mutationRouteIdentity = routeIdentity;
     try {
       const detail = await createAskSession(state.workspaceId, {});
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== mutationRouteIdentity
+      ) {
         return;
       }
       const applied = await load(detail.id);
-      if (!mountedRef.current || !applied) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== mutationRouteIdentity ||
+        !applied
+      ) {
         return;
       }
-      loadedTargetRef.current = detail.id;
       setSelectedSessionParams(detail.id);
     } catch (e) {
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== mutationRouteIdentity
+      ) {
         return;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.createSession));
@@ -832,36 +781,13 @@ export function AskScreen() {
       startingSession ||
       selectingSessionId ||
       sendingTurn ||
-      searchParams.get(TREE_TARGET_PARAM) === sessionId
+      requestedSessionId === sessionId
     ) {
       return;
     }
     setSelectedSessionParams(sessionId);
   }
 
-  async function loadSelectedSession(sessionId: string) {
-    if (!state) {
-      return;
-    }
-    setError(null);
-    setLastTurnWarnings([]);
-    setSelectingSessionId(sessionId);
-    try {
-      await load(sessionId);
-    } catch (e) {
-      // Clear the ref so the same target can be retried; leaving it set would
-      // make a failed load look loaded and freeze the rail on the old session.
-      loadedTargetRef.current = null;
-      if (!mountedRef.current) {
-        return;
-      }
-      setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.selectSession));
-    } finally {
-      if (mountedRef.current) {
-        setSelectingSessionId(null);
-      }
-    }
-  }
 
   async function sendTurn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -878,11 +804,15 @@ export function AskScreen() {
     setError(null);
     setLastTurnWarnings([]);
     setSendingTurn(true);
+    const mutationRouteIdentity = routeIdentity;
     try {
       let detail = state.detail;
       if (!detail) {
         detail = await createAskSession(state.workspaceId, {});
-        if (!mountedRef.current) {
+        if (
+          !mountedRef.current ||
+          routeIdentityRef.current !== mutationRouteIdentity
+        ) {
           return;
         }
       }
@@ -891,19 +821,28 @@ export function AskScreen() {
         detail.id,
         message.trim(),
       );
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== mutationRouteIdentity
+      ) {
         return;
       }
       setLastTurnWarnings(created.warnings);
       setMessage("");
       const applied = await load(detail.id);
-      if (!mountedRef.current || !applied) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== mutationRouteIdentity ||
+        !applied
+      ) {
         return;
       }
-      loadedTargetRef.current = detail.id;
       setSelectedSessionParams(detail.id);
     } catch (e) {
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== mutationRouteIdentity
+      ) {
         return;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
@@ -915,21 +854,7 @@ export function AskScreen() {
   }
 
   function setSelectedSessionParams(sessionId: string) {
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set(TREE_TARGET_PARAM, sessionId);
-    nextParams.delete("new");
-    replaceAskParams(nextParams);
-  }
-
-  function replaceAskParams(nextParams: URLSearchParams) {
-    const search = nextParams.toString();
-    navigate(
-      {
-        pathname: "/ask",
-        search: search ? `?${search}` : "",
-      },
-      { replace: true },
-    );
+    navigate(workspacePath(routeWorkspaceId, "ask/" + encodeURIComponent(sessionId)), { replace: true });
   }
 
   async function proposePlacement(draft: PlacementDraft) {
@@ -953,6 +878,7 @@ export function AskScreen() {
       return;
     }
     setError(null);
+    const mutationRouteIdentity = routeIdentity;
     const result = await acceptContextIngressProposal(
       state.workspaceId,
       proposal.id,
@@ -965,7 +891,10 @@ export function AskScreen() {
         review_required: draft.reviewRequired,
       },
     );
-    if (!mountedRef.current) {
+    if (
+      !mountedRef.current ||
+      routeIdentityRef.current !== mutationRouteIdentity
+    ) {
       return;
     }
     const completedLabel = result.review_item_id
@@ -976,7 +905,7 @@ export function AskScreen() {
     // Keep the panel mounted until the refresh settles: closing it first would
     // send a failed load() rejection into the just-unmounted panel's catch,
     // where it is silently dropped. Surface it on the screen banner instead.
-    await reloadAfterPlacement(completedLabel);
+    await reloadAfterPlacement(completedLabel, mutationRouteIdentity);
   }
 
   async function rejectPlacement(
@@ -987,32 +916,94 @@ export function AskScreen() {
       return;
     }
     setError(null);
+    const mutationRouteIdentity = routeIdentity;
     await rejectContextIngressProposal(state.workspaceId, proposal.id, reason);
-    if (!mountedRef.current) {
+    if (
+      !mountedRef.current ||
+      routeIdentityRef.current !== mutationRouteIdentity
+    ) {
       return;
     }
-    await reloadAfterPlacement(ASK_COPY[state.workspaceLanguage].placementRejected);
+    await reloadAfterPlacement(
+      ASK_COPY[state.workspaceLanguage].placementRejected,
+      mutationRouteIdentity,
+    );
   }
 
-  async function reloadAfterPlacement(completedLabel: string) {
-    if (!state) {
+  async function reloadAfterPlacement(
+    completedLabel: string,
+    expectedRouteIdentity: string,
+  ) {
+    if (
+      !state ||
+      routeIdentityRef.current !== expectedRouteIdentity
+    ) {
       return;
     }
     try {
-      await load(state.detail?.id);
+      const applied = await load();
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== expectedRouteIdentity ||
+        !applied
+      ) {
+        return;
+      }
     } catch (e) {
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current ||
+        routeIdentityRef.current !== expectedRouteIdentity
+      ) {
         return;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.load));
     }
-    if (!mountedRef.current) {
+    if (
+      !mountedRef.current ||
+      routeIdentityRef.current !== expectedRouteIdentity
+    ) {
       return;
     }
     setSavingTurn(null);
     setSavedLabel(completedLabel);
   }
 
+  const detailMatchesRoute = Boolean(
+    state &&
+      state.workspaceId === routeWorkspaceId &&
+      (requestedSessionId
+        ? state.detail?.id === requestedSessionId
+        : state.detail === null),
+  );
+  if (notFound) return <NotFoundScreen />;
+  if (requestedSessionId && !detailMatchesRoute) {
+    if (error) {
+      return (
+        <StatusBanner
+          tone="warning"
+          action={
+            <button
+              className="icon-button"
+              onClick={() => {
+                setError(null);
+                setRouteRetryKey((value) => value + 1);
+              }}
+              type="button"
+            >
+              {t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}
+            </button>
+          }
+        >
+          {error}
+        </StatusBanner>
+      );
+    }
+    return (
+      <RouteLoading
+        label={t("ask.loading", { defaultValue: "Loading Ask" })}
+      />
+    );
+  }
   if (!state) {
     return (
       <RouteLoading
@@ -1021,19 +1012,25 @@ export function AskScreen() {
     );
   }
 
-  const latestTurn = state.detail?.turns.at(-1) ?? null;
+  const visibleDetail = detailMatchesRoute ? state.detail : null;
+  const visibleSavingTurn = visibleDetail?.turns.some(
+    (turn) => turn.id === savingTurn?.id,
+  )
+    ? savingTurn
+    : null;
+  const latestTurn = visibleDetail?.turns.at(-1) ?? null;
   const uiLanguage = normalizeAskLocale(resolveInitialLocale(state.workspaceLanguage));
   const copy = ASK_COPY[uiLanguage];
   // A7: on the empty state the composer is rendered non-sticky (it would
   // otherwise overlap the first-use checklist on mobile) and the redundant
   // create FAB is dropped — the header "+ New" and "Start first Ask session"
   // CTA already cover it.
-  const isEmptyAsk = state.sessions.length === 0 && !state.detail;
+  const isEmptyAsk = state.sessions.length === 0 && !visibleDetail;
 
   return (
     <WorkspaceLayout
       defaultInspectorOpen={false}
-      inspectorAutoOpenKey={savingTurn?.id ?? null}
+      inspectorAutoOpenKey={visibleSavingTurn?.id ?? null}
       inspectorHideLabel={copy.inspectorHideLabel}
       inspectorLabel={copy.inspectorLabel}
       inspectorRestoreLabel={copy.inspectorRestoreLabel}
@@ -1043,7 +1040,7 @@ export function AskScreen() {
       variant="ask"
       left={({ onClose, onExpandWidth, expandWidthAtMax }) => (
         <AskSessionRail
-          activeId={state.detail?.id ?? null}
+          activeId={visibleDetail?.id ?? null}
           busyId={selectingSessionId}
           copy={copy}
           creating={startingSession}
@@ -1074,7 +1071,7 @@ export function AskScreen() {
                 h1 is the live session title, so a fixed sentence under it would
                 describe the screen while the heading names one conversation. */}
             <h1>
-              {state.detail ? askDisplayTitle(state.detail, copy) : copy.title}
+              {visibleDetail ? askDisplayTitle(visibleDetail, copy) : copy.title}
             </h1>
           </div>
           {canCompose ? (
@@ -1102,7 +1099,7 @@ export function AskScreen() {
           </StatusBanner>
         ) : null}
         <div className="ask-content-region">
-          {state.sessions.length === 0 && !state.detail ? (
+          {state.sessions.length === 0 && !visibleDetail ? (
             <NoAskSessions
               copy={copy}
               creating={startingSession}
@@ -1114,7 +1111,7 @@ export function AskScreen() {
               latestTurnId={latestTurn?.id ?? null}
               locale={uiLanguage}
               onSave={canCompose ? setSavingTurn : undefined}
-              turns={state.detail?.turns ?? []}
+              turns={visibleDetail?.turns ?? []}
             />
           )}
         </div>
@@ -1146,16 +1143,16 @@ export function AskScreen() {
       </section>
       )}
       inspector={
-        state.detail ? (
+        visibleDetail ? (
           <AskInspector
             contextTree={state.contextTree}
             copy={copy}
-            detail={state.detail}
+            detail={visibleDetail}
             onAccept={acceptPlacement}
             onCancel={() => setSavingTurn(null)}
             onPropose={proposePlacement}
             onReject={rejectPlacement}
-            savingTurn={savingTurn}
+            savingTurn={visibleSavingTurn}
           />
         ) : undefined
       }
@@ -1405,6 +1402,7 @@ function TurnCard({
 }) {
   const { t } = useTranslation("search");
   const noEvidence = isNoEvidenceTurn(turn);
+  const workspaceId = useRouteWorkspaceId();
   const recoveryDescriptionId = `no-evidence-recovery-${turn.id}`;
   return (
     <article className={`turn-card ${noEvidence ? "no-evidence-turn" : ""}`}>
@@ -1425,7 +1423,13 @@ function TurnCard({
             already treats other AI/externally-derived markdown previews. */}
         <MarkdownView
           body={turn.assistant_message ?? copy.turns.noAnswer}
-          renderPolicy="untrusted-preview"
+          renderPolicy="confirmed-links"
+          workspaceId={workspaceId}
+          linkTargets={(turn.link_targets ?? []).map(target => ({
+            ...target,
+            href: target.href ?? null,
+            target_page_id: target.target_page_id ?? null,
+          }))}
           wikilinkMode="plain"
         />
       </div>
@@ -1467,6 +1471,7 @@ function TurnCard({
 }
 
 function EvidencePack({ copy, turn }: { copy: AskCopy; turn: AskTurnDetail }) {
+  const workspaceId = useRouteWorkspaceId();
   const citationIds = new Set([
     ...turn.cited_context_page_ids,
     ...turn.cited_library_artifact_ids,
@@ -1481,7 +1486,7 @@ function EvidencePack({ copy, turn }: { copy: AskCopy; turn: AskTurnDetail }) {
             id: item.id,
             type: item.type,
             concept_path: item.concept_path || null,
-          });
+          }, workspaceId);
           const title =
             item.title ||
             (item.concept_path ? displayConceptPath(item.concept_path) : null) ||
@@ -1597,6 +1602,7 @@ function AskInspector({
   onPropose: (draft: PlacementDraft) => Promise<ContextIngressProposal>;
   onReject: (proposal: ContextIngressProposal, reason: string) => Promise<void>;
 }) {
+  const workspaceId = useRouteWorkspaceId();
   const parentOptions = useMemo(
     () => contextTree.filter((node) => node.can_have_children),
     [contextTree],
@@ -1691,7 +1697,7 @@ function AskInspector({
                 type: entry.kind,
                 concept_path: entry.path,
                 source_ref: { kind: entry.kind, id: entry.id },
-              });
+              }, workspaceId);
               const content = (
                 <>
                   <span className="page-backlink-title">{entry.title}</span>
@@ -2031,22 +2037,23 @@ function AskWorkflowActions({
   libraryLabel?: string;
   searchQuery?: string | null;
 }) {
+  const workspaceId = useRouteWorkspaceId();
   const trimmedSearch = searchQuery?.trim();
   const searchHref = trimmedSearch
-    ? `/search?q=${encodeURIComponent(trimmedSearch)}`
-    : "/search";
+    ? `${workspacePath(workspaceId, "search")}?q=${encodeURIComponent(trimmedSearch)}`
+    : workspacePath(workspaceId, "search");
   // Writing a page leads everywhere except the no-evidence recovery panel,
   // which relabels the Library link because adding a source is the first step
   // there.
   const libraryFirst = libraryLabel !== undefined;
   const libraryLink = (
-    <Link className="icon-button text-button" to="/library">
+    <Link className="icon-button text-button" to={workspacePath(workspaceId, "library")}>
       <Library size={15} aria-hidden="true" />
       <span>{libraryLabel ?? copy.workflow.openLibrary}</span>
     </Link>
   );
   const writeLink = (
-    <Link className="icon-button text-button" to="/context/new?from=context">
+    <Link className="icon-button text-button" to={workspacePath(workspaceId, "context/pages/new")}>
       <FileText size={15} aria-hidden="true" />
       <span>{copy.workflow.writeContextPage}</span>
     </Link>

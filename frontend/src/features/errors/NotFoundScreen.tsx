@@ -1,7 +1,9 @@
 import { Compass } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
+import { parseWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { isContextId } from "../../shared/lib/contextLinks";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 
 /**
@@ -12,6 +14,8 @@ import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
  */
 export function NotFoundScreen() {
   const { t } = useTranslation("shell");
+  const routeWorkspaceId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId;
+  const workspaceId = routeWorkspaceId && isContextId(routeWorkspaceId) ? routeWorkspaceId : null;
   return (
     <div className="workspace-screen single-column">
       <section className="feature-main">
@@ -32,11 +36,11 @@ export function NotFoundScreen() {
             })}
           </p>
           <div className="empty-state-actions">
-            <Link className="icon-button text-button primary" to="/dashboard">
-              {t("notFound.backToDashboard", { defaultValue: "Back to dashboard" })}
+            <Link className="icon-button text-button primary" to={workspaceId ? workspacePath(workspaceId, "dashboard") : "/workspaces/find"}>
+              {workspaceId ? t("notFound.backToDashboard", { defaultValue: "Back to dashboard" }) : t("workspaceResolution.find")}
             </Link>
-            <Link className="icon-button text-button" to="/context">
-              {t("notFound.openContext", { defaultValue: "Open Context" })}
+            <Link className="icon-button text-button" to={workspaceId ? workspacePath(workspaceId, "context") : "/account"}>
+              {workspaceId ? t("notFound.openContext", { defaultValue: "Open Context" }) : t("topbar.myPage")}
             </Link>
           </div>
         </div>

@@ -22,8 +22,14 @@ import { getCurrentWorkspaceId } from "../../../shared/api/workspace";
 import { LintRulesSection } from "../LintRulesSection";
 
 // The card links out to the lint queue, so it needs a router context.
+const WORKSPACE_ID = "ws-1";
+
 function renderRouted(ui: ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>);
+  return render(
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=lint`]}>
+      {ui}
+    </MemoryRouter>,
+  );
 }
 
 const RULES = {

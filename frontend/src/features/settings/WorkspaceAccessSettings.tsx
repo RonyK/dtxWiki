@@ -1,3 +1,4 @@
+import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { normalizeAccountEmail } from "../../shared/auth/identityPolicy";
 import { Globe, Inbox, Users } from "lucide-react";
@@ -24,7 +25,6 @@ import {
 } from "../../shared/api/workspaceAccess";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import {
-  getCurrentWorkspaceId,
   listWorkspaces,
   type WorkspaceSummary,
 } from "../../shared/api/workspace";
@@ -82,7 +82,7 @@ async function reconcileWorkspaceContextAfterSelfRemoval({
     destination:
       (refreshed?.workspaces.length ?? (fallbackWorkspaceId ? 1 : 0)) === 0
         ? "/workspaces/find"
-        : "/",
+        : fallbackWorkspaceId ? workspacePath(fallbackWorkspaceId, "dashboard") : refreshed?.selectedWorkspace?.id ? workspacePath(refreshed.selectedWorkspace.id, "dashboard") : "/workspaces/find",
     refreshFailed: !refreshed,
   } as const;
 }
@@ -1553,7 +1553,7 @@ function AccessChangeDialog({
 
 function useWorkspaceSettingsTarget() {
   const context = useOptionalWorkspaceContext();
-  const selectedContextId = context?.selectedWorkspace?.id ?? "";
+  const selectedContextId = useRouteWorkspaceId();
   const selectedContextWorkspace = context?.selectedWorkspace ?? null;
   const personalWorkspaceId = context?.personalWorkspaceId ?? null;
   const [target, setTarget] = useState<WorkspaceSettingsTarget | null>(null);
@@ -1575,7 +1575,7 @@ function useWorkspaceSettingsTarget() {
     }
     void listWorkspaces()
       .then(async (response) => {
-        const workspaceId = selectedContextId || (await getCurrentWorkspaceId());
+        const workspaceId = selectedContextId;
         const workspace = response.data.workspaces.find(
           (candidate) => candidate.id === workspaceId,
         );

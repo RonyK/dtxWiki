@@ -23,6 +23,8 @@ import { i18n } from "../../i18n";
 import { useLabsPreferences } from "../../hooks/useLabsPreferences";
 import { WorkspaceProvider } from "../../workspace/WorkspaceContext";
 import { Shell } from "../Shell";
+import { parseWorkspaceRoute } from "../../lib/workspaceRoutes";
+import { RequireAuth } from "../../../app/App";
 
 const BASE = "http://127.0.0.1:21080";
 
@@ -35,24 +37,24 @@ const EXPECTED_SIDEBAR_NAV: Array<{
   {
     group: "Knowledge",
     links: [
-      ["Dashboard", "/dashboard"],
-      ["Library", "/library"],
-      ["Context", "/context"],
-      ["Chats", "/chats"],
+      ["Dashboard", "/workspaces/11111111-1111-4111-8111-111111111111/dashboard"],
+      ["Library", "/workspaces/11111111-1111-4111-8111-111111111111/library"],
+      ["Context", "/workspaces/11111111-1111-4111-8111-111111111111/context"],
+      ["Chats", "/workspaces/11111111-1111-4111-8111-111111111111/chats"],
     ],
   },
   {
     group: "Workflow",
     links: [
-      ["Review queue", "/review"],
-      ["Lint queue", "/lint"],
-      ["Activity", "/activity"],
-      ["Search", "/search"],
+      ["Review queue", "/workspaces/11111111-1111-4111-8111-111111111111/review"],
+      ["Lint queue", "/workspaces/11111111-1111-4111-8111-111111111111/lint"],
+      ["Activity", "/workspaces/11111111-1111-4111-8111-111111111111/activity"],
+      ["Search", "/workspaces/11111111-1111-4111-8111-111111111111/search"],
     ],
   },
   {
     group: "Workspace",
-    links: [["Settings", "/settings"]],
+    links: [["Settings", "/workspaces/11111111-1111-4111-8111-111111111111/settings"]],
   },
 ];
 
@@ -113,7 +115,7 @@ describe("Shell", () => {
     ).toBeVisible();
     expect(
       screen.getAllByRole("link", { name: "Settings" })[0],
-    ).toHaveAttribute("href", "/settings");
+    ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/settings");
     expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
       "href",
       "/account",
@@ -123,27 +125,27 @@ describe("Shell", () => {
     );
     expect(
       screen.getByRole("menuitem", { name: "New Context page" }),
-    ).toHaveAttribute("href", "/context/new?from=context");
+    ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/new");
     expect(
       screen.queryByRole("menuitem", { name: "New Ask session" }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("menuitem", { name: "New folder" }),
-    ).toHaveAttribute("href", "/context?newFolder=1");
+    ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/new");
     expect(
       screen.getByRole("menuitem", { name: "Open Setup" }),
-    ).toHaveAttribute("href", "/setup");
+    ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/setup");
     expect(screen.getByRole("link", { name: "Open Search" })).toHaveAttribute(
       "href",
-      "/search",
+      "/workspaces/11111111-1111-4111-8111-111111111111/search",
     );
-    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/dashboard");
   });
 
   it("hides write-only Shell controls for viewer-role members", async () => {
     window.localStorage.setItem("dtxwiki:labs:user-1", JSON.stringify({ agent: true, chats: true }));
     mockSession(true, [
-      { ...workspace("workspace-1", "Default", "en"), role: "viewer" },
+      { ...workspace("11111111-1111-4111-8111-111111111111", "Default", "en"), role: "viewer" },
     ]);
     renderShell();
 
@@ -161,10 +163,10 @@ describe("Shell", () => {
   it("updates navigation and route commands when Labs menus are toggled independently", async () => {
     const user = userEvent.setup();
     mockSession(true);
-    renderShell(["/dashboard"], <LabsControlsProbe />);
+    renderShell(["/workspaces/11111111-1111-4111-8111-111111111111/dashboard"], <LabsControlsProbe />);
 
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-    expect((await within(sidebar).findByText("Chats")).closest("a")).toHaveAttribute("href", "/chats");
+    expect((await within(sidebar).findByText("Chats")).closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/chats");
     expect(within(sidebar).getByText("Chats").closest("a")?.querySelector(".nav-preview-badge")).toBeNull();
     const agentToggle = await screen.findByRole("button", { name: "Toggle Agent menu" });
     const askToggle = screen.getByRole("button", { name: "Toggle Ask menu" });
@@ -173,11 +175,11 @@ describe("Shell", () => {
     expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
 
     await user.click(agentToggle);
-    expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/agent");
+    expect(within(sidebar).getByText("Agent").closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/agent");
     expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
 
     await user.click(askToggle);
-    expect(within(sidebar).getByText("Ask").closest("a")).toHaveAttribute("href", "/ask");
+    expect(within(sidebar).getByText("Ask").closest("a")).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/ask");
     const searchbox = screen.getByRole("combobox", { name: "Search workspace" });
     await user.click(searchbox);
     expect(screen.getByRole("option", { name: "AgentKnowledge" })).toBeInTheDocument();
@@ -228,7 +230,7 @@ describe("Shell", () => {
     await user.type(searchbox, "needle{Enter}");
 
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/search?q=needle",
+      "/workspaces/11111111-1111-4111-8111-111111111111/search?q=needle",
     );
   });
 
@@ -236,10 +238,10 @@ describe("Shell", () => {
     const user = userEvent.setup();
     mockSession(
       true,
-      [workspace("workspace-1", "Default", "en")],
+      [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")],
       [
         {
-          id: "page-1",
+          id: "33333333-3333-4333-8333-333333333333",
           type: "context_page",
           title: "Citation policy",
           snippet: "Requires trusted sources.",
@@ -271,7 +273,7 @@ describe("Shell", () => {
     await user.click(result);
 
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/context?target=page-1",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
     );
   });
 
@@ -279,10 +281,10 @@ describe("Shell", () => {
     const user = userEvent.setup();
     mockSession(
       true,
-      [workspace("workspace-1", "Default", "en")],
+      [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")],
       [
         {
-          id: "page-1",
+          id: "33333333-3333-4333-8333-333333333333",
           type: "context_page",
           title: "AI policy",
           snippet: "Two character preview.",
@@ -309,10 +311,10 @@ describe("Shell", () => {
     const user = userEvent.setup();
     mockSession(
       true,
-      [workspace("workspace-1", "Default", "en")],
+      [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")],
       [
         {
-          id: "page-1",
+          id: "33333333-3333-4333-8333-333333333333",
           type: "context_page",
           title: "AI policy",
           snippet: "Two character preview.",
@@ -335,7 +337,7 @@ describe("Shell", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 250));
 
     expect(
-      fetchMock.mock.calls.some(([input]) => String(input).includes("/search")),
+      fetchMock.mock.calls.some(([input]) => String(input).includes("/workspaces/11111111-1111-4111-8111-111111111111/search")),
     ).toBe(false);
     expect(
       screen.queryByRole("option", { name: /AI policy/ }),
@@ -350,7 +352,7 @@ describe("Shell", () => {
 
   it("shows the translated empty state when a query returns no previews", async () => {
     const user = userEvent.setup();
-    mockSession(true, [workspace("workspace-1", "Default", "en")], []);
+    mockSession(true, [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")], []);
     renderShell();
 
     const searchbox = await screen.findByRole("combobox", {
@@ -365,10 +367,10 @@ describe("Shell", () => {
     const user = userEvent.setup();
     mockSession(
       true,
-      [workspace("workspace-1", "Default", "en")],
+      [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")],
       [
         {
-          id: "page-1",
+          id: "33333333-3333-4333-8333-333333333333",
           type: "context_page",
           title: "Citation policy",
           snippet: "Requires trusted sources.",
@@ -396,7 +398,7 @@ describe("Shell", () => {
     await user.keyboard("{Enter}");
 
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/context?target=page-1",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
     );
   });
 
@@ -419,7 +421,7 @@ describe("Shell", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/search");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/search");
   });
 
   it("closes topbar search suggestions when clicking outside", async () => {
@@ -590,7 +592,7 @@ describe("Shell", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/library"),
+      expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/library"),
     );
     expect(
       screen.queryByRole("navigation", { name: "Mobile" }),
@@ -671,11 +673,11 @@ describe("Shell", () => {
       true,
       [
         {
-          ...workspace("workspace-personal", "Personal Workspace", "en"),
+          ...workspace("22222222-2222-4222-8222-000000000005", "Personal Workspace", "en"),
           member_count: 1,
         },
         {
-          ...workspace("workspace-team", "Research Guild", "en"),
+          ...workspace("22222222-2222-4222-8222-000000000007", "Research Guild", "en"),
           member_count: 4,
           role: "editor",
           visibility: "public",
@@ -683,8 +685,8 @@ describe("Shell", () => {
       ],
       [],
       {
-        default_workspace_id: "workspace-personal",
-        personal_workspace_id: "workspace-personal",
+        default_workspace_id: "22222222-2222-4222-8222-000000000005",
+        personal_workspace_id: "22222222-2222-4222-8222-000000000005",
       },
     );
     renderShell();
@@ -734,11 +736,11 @@ describe("Shell", () => {
       true,
       [
         {
-          ...workspace("workspace-mine", "Personal Workspace", "en"),
+          ...workspace("22222222-2222-4222-8222-000000000010", "Personal Workspace", "en"),
           member_count: 1,
         },
         {
-          ...workspace("workspace-shared-personal", "Personal Workspace", "en"),
+          ...workspace("22222222-2222-4222-8222-000000000006", "Personal Workspace", "en"),
           member_count: 2,
           role: "viewer",
           owner_display_name: "Alex Rivera",
@@ -746,8 +748,8 @@ describe("Shell", () => {
       ],
       [],
       {
-        default_workspace_id: "workspace-mine",
-        personal_workspace_id: "workspace-mine",
+        default_workspace_id: "22222222-2222-4222-8222-000000000010",
+        personal_workspace_id: "22222222-2222-4222-8222-000000000010",
       },
     );
     renderShell();
@@ -777,9 +779,9 @@ describe("Shell", () => {
     mockSession(
       true,
       [
-        { ...workspace("workspace-owner", "Owned", "en"), member_count: 2 },
+        { ...workspace("22222222-2222-4222-8222-000000000009", "Owned", "en"), member_count: 2 },
         {
-          ...workspace("workspace-viewer", "Viewed", "en"),
+          ...workspace("22222222-2222-4222-8222-000000000008", "Viewed", "en"),
           role: "viewer",
           member_count: 1,
         },
@@ -816,13 +818,13 @@ describe("Shell", () => {
     });
     expect(
       within(ownedActions).getByRole("link", { name: "Settings" }),
-    ).toHaveAttribute("href", "/settings?section=workspace");
+    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=workspace");
     expect(
       within(ownedActions).getByRole("link", { name: "Share" }),
-    ).toHaveAttribute("href", "/settings?section=access-sharing");
+    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=access-sharing");
     expect(
       within(ownedActions).getByRole("link", { name: "Members" }),
-    ).toHaveAttribute("href", "/settings?section=members");
+    ).toHaveAttribute("href", "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=members");
 
     const viewedActions = screen.getByRole("group", {
       name: "Actions for Viewed",
@@ -839,21 +841,21 @@ describe("Shell", () => {
       within(ownedActions).getByRole("link", { name: "Members" }),
     );
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/settings?section=members",
+      "/workspaces/22222222-2222-4222-8222-000000000009/settings?section=members",
     );
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "workspace-owner",
+      "22222222-2222-4222-8222-000000000009",
     );
   });
 
-  it("requires an explicit choice when multiple memberships have no resolution anchor", async () => {
+  it("never substitutes another membership for an unavailable explicit workspace", async () => {
     await i18n.changeLanguage("en");
     const user = userEvent.setup();
     mockSession(
       true,
       [
-        workspace("workspace-alpha", "Alpha", "en"),
-        workspace("workspace-beta", "Beta", "ko"),
+        workspace("22222222-2222-4222-8222-000000000003", "Alpha", "en"),
+        workspace("22222222-2222-4222-8222-000000000004", "Beta", "ko"),
       ],
       [],
       {
@@ -865,7 +867,7 @@ describe("Shell", () => {
     const { container } = renderShell();
 
     expect(
-      await screen.findByRole("heading", { name: "Choose a workspace" }),
+      await screen.findByRole("heading", { name: "We couldn't find that page" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("content")).not.toBeInTheDocument();
     expect(
@@ -873,12 +875,27 @@ describe("Shell", () => {
     ).toBeNull();
     expect((await axe(container)).violations).toEqual([]);
 
+    await user.click(screen.getByRole("button", { name: /Switch workspace/ }));
     await user.click(screen.getByRole("button", { name: /Beta/ }));
 
     expect(await screen.findByText("content")).toBeInTheDocument();
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "workspace-beta",
+      "22222222-2222-4222-8222-000000000004",
     );
+  });
+
+  it("rejects a legacy target query before mounting the scoped resource screen", async () => {
+    await i18n.changeLanguage("en");
+    mockSession(true);
+    const loadResource = vi.fn();
+    function ResourceScreen() {
+      useEffect(loadResource, []);
+      return <div>Scoped resource</div>;
+    }
+    renderShell(["/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222?target=33333333-3333-4333-8333-333333333333"], <RequireAuth><ResourceScreen /></RequireAuth>);
+    expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
+    expect(loadResource).not.toHaveBeenCalled();
+    expect(screen.queryByText("Scoped resource")).not.toBeInTheDocument();
   });
 
   it("offers find and create paths when the account has no workspace membership", async () => {
@@ -889,23 +906,9 @@ describe("Shell", () => {
       default_workspace_id: null,
       personal_workspace_id: null,
     });
-    renderShell();
-
-    expect(
-      await screen.findByRole("heading", {
-        name: "Find or create a workspace",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "This account has no workspace membership. Find a workspace to join, or create one from the workspace switcher.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Find workspaces" }),
-    ).toHaveAttribute("href", "/workspaces/find");
-    expect(screen.queryByText("content")).not.toBeInTheDocument();
+    renderShell(["/workspaces/find"]);
+    await waitFor(() => expect(screen.getByText("content")).toBeInTheDocument());
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Switch workspace/ }));
     expect(
@@ -933,7 +936,7 @@ describe("Shell", () => {
 
   it("does not infer a Personal anchor when the list omits its identity", async () => {
     const user = userEvent.setup();
-    mockSession(true, [workspace("workspace-1", "Personal Workspace", "en")]);
+    mockSession(true, [workspace("11111111-1111-4111-8111-111111111111", "Personal Workspace", "en")]);
     renderShell();
 
     await user.click(
@@ -951,16 +954,16 @@ describe("Shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("switches workspace to the dashboard without a full-page reload", async () => {
+  it("switches workspace to the same section overview without a full-page reload", async () => {
     const user = userEvent.setup();
     let mountCount = 0;
     mockSession(true, [
-      workspace("workspace-1", "Default", "en"),
-      workspace("workspace-2", "Second", "ko"),
+      workspace("11111111-1111-4111-8111-111111111111", "Default", "en"),
+      workspace("22222222-2222-4222-8222-000000000001", "Second", "ko"),
     ]);
 
     renderShell(
-      ["/context/page-from-previous-workspace"],
+      ["/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333"],
       <MountProbe
         onMount={() => {
           mountCount += 1;
@@ -977,9 +980,9 @@ describe("Shell", () => {
 
     await waitFor(() => expect(mountCount).toBeGreaterThan(1));
     expect(document.documentElement).toBe(documentElement);
-    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/22222222-2222-4222-8222-000000000001/context");
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "workspace-2",
+      "22222222-2222-4222-8222-000000000001",
     );
   });
 
@@ -989,12 +992,12 @@ describe("Shell", () => {
     const shouldProceed = vi.fn(() => allowNavigation);
     let mountCount = 0;
     mockSession(true, [
-      workspace("workspace-1", "Default", "en"),
-      workspace("workspace-2", "Second", "ko"),
+      workspace("11111111-1111-4111-8111-111111111111", "Default", "en"),
+      workspace("22222222-2222-4222-8222-000000000001", "Second", "ko"),
     ]);
 
     renderBlockedShell(
-      "/context/page-from-previous-workspace",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
       shouldProceed,
       <MountProbe
         onMount={() => {
@@ -1007,7 +1010,7 @@ describe("Shell", () => {
     await waitFor(() =>
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
-      ).toBe("workspace-1"),
+      ).toBe("11111111-1111-4111-8111-111111111111"),
     );
     const selectedBefore = window.localStorage.getItem(
       "dtxwiki.selectedWorkspaceId",
@@ -1023,7 +1026,7 @@ describe("Shell", () => {
 
     await waitFor(() => expect(shouldProceed).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/context/page-from-previous-workspace",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
     );
     expect(
       window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
@@ -1044,7 +1047,7 @@ describe("Shell", () => {
 
     await waitFor(() => expect(shouldProceed).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/context/page-from-previous-workspace",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
     );
     expect(
       window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
@@ -1059,15 +1062,15 @@ describe("Shell", () => {
     await user.click(screen.getByRole("button", { name: /Second/ }));
 
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/dashboard"),
+      expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/22222222-2222-4222-8222-000000000001/context"),
     );
     await waitFor(() =>
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
-      ).toBe("workspace-2"),
+      ).toBe("22222222-2222-4222-8222-000000000001"),
     );
     expect(JSON.parse(window.localStorage.getItem("dtxwiki.workspaceRecents")!))
-      .toContain("workspace-2");
+      .toContain("22222222-2222-4222-8222-000000000001");
     await waitFor(() => expect(i18n.language).toBe("ko"));
     expect(mountCount).toBeGreaterThan(1);
   });
@@ -1077,10 +1080,10 @@ describe("Shell", () => {
     let allowNavigation = false;
     const shouldProceed = vi.fn(() => allowNavigation);
     const fetchMock = mockSession(true, [
-      workspace("workspace-1", "Default", "en"),
+      workspace("11111111-1111-4111-8111-111111111111", "Default", "en"),
     ]);
     const view = renderBlockedShell(
-      "/context/page-from-previous-workspace",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
       shouldProceed,
     );
     const baseFetch = fetchMock.getMockImplementation();
@@ -1126,7 +1129,7 @@ describe("Shell", () => {
     await waitFor(() =>
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
-      ).toBe("workspace-1"),
+      ).toBe("11111111-1111-4111-8111-111111111111"),
     );
     const selectedBefore = window.localStorage.getItem(
       "dtxwiki.selectedWorkspaceId",
@@ -1137,7 +1140,7 @@ describe("Shell", () => {
     await waitFor(() => expect(shouldProceed).toHaveBeenCalledTimes(1));
     expect(createRequestCount).toBe(0);
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/context/page-from-previous-workspace",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
     );
     expect(titleInput).toHaveValue("Committed workspace");
     expect(
@@ -1148,7 +1151,7 @@ describe("Shell", () => {
     await user.click(createSubmit);
 
     await waitFor(() => expect(createRequestCount).toBe(1));
-    expect(createRequestPath).toBe("/dashboard");
+    expect(createRequestPath).toBe("/workspaces/find");
     expect(
       window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
     ).toBe(selectedBefore);
@@ -1156,7 +1159,7 @@ describe("Shell", () => {
     resolveCreate(
       jsonResponse({
         data: workspace(
-          "workspace-created",
+          "22222222-2222-4222-8222-000000000002",
           "Committed workspace",
           "ko",
         ),
@@ -1172,17 +1175,17 @@ describe("Shell", () => {
     );
     expect(createRequestCount).toBe(1);
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "workspace-created",
+      "22222222-2222-4222-8222-000000000002",
     );
   });
 
   it("does not let a late create response overwrite a later workspace selection", async () => {
     const user = userEvent.setup();
     const fetchMock = mockSession(true, [
-      workspace("workspace-1", "Default", "en"),
-      workspace("workspace-2", "Second", "ko"),
+      workspace("11111111-1111-4111-8111-111111111111", "Default", "en"),
+      workspace("22222222-2222-4222-8222-000000000001", "Second", "ko"),
     ]);
-    renderBlockedShell("/dashboard", () => true);
+    renderBlockedShell("/workspaces/11111111-1111-4111-8111-111111111111/dashboard", () => true);
     const baseFetch = fetchMock.getMockImplementation();
     expect(baseFetch).toBeDefined();
     let resolveCreate!: (response: Response) => void;
@@ -1225,20 +1228,20 @@ describe("Shell", () => {
     await user.click(screen.getByRole("button", { name: /Second/ }));
     await waitFor(() =>
       expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-        "workspace-2",
+        "22222222-2222-4222-8222-000000000001",
       ),
     );
 
     resolveCreate(
       jsonResponse({
-        data: workspace("workspace-created", "Late workspace", "en"),
+        data: workspace("22222222-2222-4222-8222-000000000002", "Late workspace", "en"),
       }),
     );
     await pendingCreate;
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      "workspace-2",
+      "22222222-2222-4222-8222-000000000001",
     );
     expect(
       screen.getByRole("button", {
@@ -1249,8 +1252,8 @@ describe("Shell", () => {
 
   it("waits for workspace hydration before consuming a select intent", async () => {
     const workspaces = [
-      workspace("workspace-1", "Default", "en"),
-      workspace("workspace-2", "Second", "ko"),
+      workspace("11111111-1111-4111-8111-111111111111", "Default", "en"),
+      workspace("22222222-2222-4222-8222-000000000001", "Second", "ko"),
     ];
     const fetchMock = mockSession(true, workspaces);
     const baseFetch = fetchMock.getMockImplementation();
@@ -1271,12 +1274,12 @@ describe("Shell", () => {
     const storageSpy = vi.spyOn(Storage.prototype, "setItem");
     const view = renderBlockedShell(
       {
-        pathname: "/dashboard",
+        pathname: "/workspaces/22222222-2222-4222-8222-000000000001/dashboard",
         state: {
           dtxwikiWorkspaceNavigationIntent: {
             kind: "select",
             nonce: "hydrated-select-1",
-            workspaceId: "workspace-2",
+            workspaceId: "22222222-2222-4222-8222-000000000001",
           },
           preserved: "route-state",
         },
@@ -1297,14 +1300,14 @@ describe("Shell", () => {
     );
     expect(view.router.state.location.state).toMatchObject({
       dtxwikiWorkspaceNavigationIntent: {
-        workspaceId: "workspace-2",
+        workspaceId: "22222222-2222-4222-8222-000000000001",
       },
       preserved: "route-state",
     });
     expect(
       storageSpy.mock.calls.filter(
         ([key, value]) =>
-          key === "dtxwiki.selectedWorkspaceId" && value === "workspace-2",
+          key === "dtxwiki.selectedWorkspaceId" && value === "22222222-2222-4222-8222-000000000001",
       ),
     ).toHaveLength(0);
     expect(window.localStorage.getItem("dtxwiki.workspaceRecents")).toBeNull();
@@ -1312,7 +1315,7 @@ describe("Shell", () => {
     resolveWorkspaceList(
       jsonResponse({
         data: {
-          current_workspace_id: "workspace-1",
+          current_workspace_id: "11111111-1111-4111-8111-111111111111",
           workspaces,
         },
       }),
@@ -1320,36 +1323,36 @@ describe("Shell", () => {
 
     await waitFor(() =>
       expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-        "workspace-2",
+        "22222222-2222-4222-8222-000000000001",
       ),
     );
     expect(
       storageSpy.mock.calls.filter(
         ([key, value]) =>
-          key === "dtxwiki.selectedWorkspaceId" && value === "workspace-2",
+          key === "dtxwiki.selectedWorkspaceId" && value === "22222222-2222-4222-8222-000000000001",
       ),
     ).toHaveLength(1);
     expect(view.router.state.location.state).toEqual({
       preserved: "route-state",
     });
     expect(JSON.parse(window.localStorage.getItem("dtxwiki.workspaceRecents")!))
-      .toEqual(["workspace-2"]);
+      .toEqual(["22222222-2222-4222-8222-000000000001"]);
     await waitFor(() => expect(i18n.language).toBe("ko"));
   });
 
   it("strips a malformed private intent without workspace side effects", async () => {
     const fetchMock = mockSession(true, [
-      workspace("workspace-1", "Default", "en"),
-      workspace("workspace-2", "Second", "ko"),
+      workspace("11111111-1111-4111-8111-111111111111", "Default", "en"),
+      workspace("22222222-2222-4222-8222-000000000001", "Second", "ko"),
     ]);
     const storageSpy = vi.spyOn(Storage.prototype, "setItem");
     const view = renderBlockedShell(
       {
-        pathname: "/dashboard",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/dashboard",
         state: {
           dtxwikiWorkspaceNavigationIntent: {
             kind: "select",
-            workspaceId: "workspace-2",
+            workspaceId: "22222222-2222-4222-8222-000000000001",
           },
           preserved: "route-state",
         },
@@ -1366,7 +1369,7 @@ describe("Shell", () => {
     );
     await waitFor(() =>
       expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-        "workspace-1",
+        "11111111-1111-4111-8111-111111111111",
       ),
     );
     expect(window.localStorage.getItem("dtxwiki.workspaceRecents")).toBeNull();
@@ -1380,14 +1383,14 @@ describe("Shell", () => {
     expect(
       storageSpy.mock.calls.filter(
         ([key, value]) =>
-          key === "dtxwiki.selectedWorkspaceId" && value === "workspace-2",
+          key === "dtxwiki.selectedWorkspaceId" && value === "22222222-2222-4222-8222-000000000001",
       ),
     ).toHaveLength(0);
     await waitFor(() => expect(i18n.language).toBe("en"));
   });
 
   it("hydrates before consuming a create intent once under StrictMode", async () => {
-    const initialWorkspaces = [workspace("workspace-1", "Default", "en")];
+    const initialWorkspaces = [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")];
     const fetchMock = mockSession(true, initialWorkspaces);
     const baseFetch = fetchMock.getMockImplementation();
     expect(baseFetch).toBeDefined();
@@ -1406,7 +1409,7 @@ describe("Shell", () => {
     });
     const view = renderBlockedShell(
       {
-        pathname: "/dashboard",
+        pathname: "/workspaces/11111111-1111-4111-8111-111111111111/dashboard",
         state: {
           dtxwikiWorkspaceNavigationIntent: {
             goal: "Capture strict-mode knowledge.",
@@ -1447,7 +1450,7 @@ describe("Shell", () => {
     resolveWorkspaceList(
       jsonResponse({
         data: {
-          current_workspace_id: "workspace-1",
+          current_workspace_id: "11111111-1111-4111-8111-111111111111",
           workspaces: initialWorkspaces,
         },
       }),
@@ -1464,7 +1467,7 @@ describe("Shell", () => {
     });
     await waitFor(() =>
       expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-        "workspace-created",
+        "22222222-2222-4222-8222-000000000002",
       ),
     );
     expect(view.router.state.location.state).toBeNull();
@@ -1479,7 +1482,7 @@ describe("Shell", () => {
   });
 
   it("keeps the workspace switcher label discoverable", async () => {
-    mockSession(true, [workspace("workspace-1", "Default Workspace", "en")]);
+    mockSession(true, [workspace("11111111-1111-4111-8111-111111111111", "Default Workspace", "en")]);
     renderShell();
 
     const switcher = await screen.findByRole("button", {
@@ -1550,14 +1553,14 @@ describe("Shell", () => {
     mockSession(true);
     // Start somewhere other than /dashboard so a click is an observable
     // navigation, not a no-op landing back where it started.
-    renderShell(["/settings"]);
+    renderShell(["/workspaces/11111111-1111-4111-8111-111111111111/settings"]);
     expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/settings",
+      "/workspaces/11111111-1111-4111-8111-111111111111/settings",
     );
 
     await user.click(screen.getByRole("link", { name: "dtxWiki" }));
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/dashboard");
   });
 
   it("wires the shell's scrollLeft guard onto .app-shell, and keeps .feature-main's scroll-driven offset", async () => {
@@ -1571,7 +1574,7 @@ describe("Shell", () => {
     // did not quietly get dropped, or moved back down onto <main> where it
     // cannot see the root's own scroll events.
     mockSession(true);
-    const { container } = renderShell(["/dashboard"], <div>content</div>);
+    const { container } = renderShell(["/workspaces/11111111-1111-4111-8111-111111111111/dashboard"], <div>content</div>);
     await screen.findByRole("navigation", { name: "Sidebar" });
 
     const shell = container.querySelector(".app-shell");
@@ -1629,7 +1632,7 @@ describe("Shell", () => {
     // they are asserted here in Korean to keep them from drifting back to
     // hardcoded English.
     const user = userEvent.setup();
-    mockSession(true, [workspace("workspace-1", "Default Workspace", "en")]);
+    mockSession(true, [workspace("11111111-1111-4111-8111-111111111111", "Default Workspace", "en")]);
     renderShell();
 
     await screen.findByRole("navigation", { name: "Sidebar" });
@@ -1675,7 +1678,7 @@ describe("Shell", () => {
     await user.type(searchbox, "review");
     await user.click(screen.getByRole("option", { name: "Review queueWorkflow" }));
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/review");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/review");
   });
 
   it("activates highlighted topbar route commands with Enter", async () => {
@@ -1695,14 +1698,14 @@ describe("Shell", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/review");
+    expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/review");
   });
 
   it("leaves the command shortcut to editable surfaces", async () => {
     const user = userEvent.setup();
     mockSession(true);
     const view = renderShell(
-      ["/dashboard"],
+      ["/workspaces/11111111-1111-4111-8111-111111111111/dashboard"],
       <div>
         <textarea aria-label="Draft body" />
         <div
@@ -1736,7 +1739,7 @@ describe("Shell", () => {
   it("yields the command shortcut when another handler already claimed it", async () => {
     mockSession(true);
     renderShell(
-      ["/dashboard"],
+      ["/workspaces/11111111-1111-4111-8111-111111111111/dashboard"],
       <button
         onKeyDown={(event) => {
           if (
@@ -1919,19 +1922,24 @@ function rejectFocusWhileInert(trigger: HTMLElement) {
   });
 }
 
+function RouteWorkspaceProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  return <WorkspaceProvider routeWorkspaceId={parseWorkspaceRoute(location.pathname)?.workspaceId ?? null}>{children}</WorkspaceProvider>;
+}
+
 function renderShell(
-  initialEntries = ["/dashboard"],
+  initialEntries = ["/workspaces/11111111-1111-4111-8111-111111111111/dashboard"],
   children: ReactNode = <div>content</div>,
 ) {
   return render(
     <MemoryRouter initialEntries={initialEntries}>
       <AuthProvider>
-        <WorkspaceProvider>
+        <RouteWorkspaceProvider>
           <Shell>
             {children}
             <LocationProbe />
           </Shell>
-        </WorkspaceProvider>
+        </RouteWorkspaceProvider>
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -1951,13 +1959,13 @@ function renderBlockedShell(
         path: "*",
         element: (
           <AuthProvider>
-            <WorkspaceProvider>
+            <RouteWorkspaceProvider>
               <Shell>
                 <DirtyRouteProbe shouldProceed={shouldProceed} />
                 {children}
                 <LocationProbe />
               </Shell>
-            </WorkspaceProvider>
+            </RouteWorkspaceProvider>
           </AuthProvider>
         ),
       },
@@ -1975,7 +1983,7 @@ function DirtyRouteProbe({
 }) {
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      currentLocation.pathname.startsWith("/context/") &&
+      currentLocation.pathname.includes("/context/pages/") &&
       (currentLocation.pathname !== nextLocation.pathname ||
         currentLocation.search !== nextLocation.search ||
         currentLocation.state !== nextLocation.state),
@@ -2041,7 +2049,7 @@ function MountProbe({ onMount }: { onMount: () => void }) {
 
 function mockSession(
   authenticated: boolean,
-  workspaces: WorkspaceSummary[] = [workspace("workspace-1", "Default", "en")],
+  workspaces: WorkspaceSummary[] = [workspace("11111111-1111-4111-8111-111111111111", "Default", "en")],
   searchResults: Array<Record<string, unknown>> = [],
   workspaceListOverrides: Record<string, unknown> = {},
   directoryItems: Array<Record<string, unknown>> = [],
@@ -2084,7 +2092,7 @@ function mockSession(
       return jsonResponse({
         data: {
           ...workspace(
-            "workspace-created",
+            "22222222-2222-4222-8222-000000000002",
             typeof inputBody.title === "string"
               ? inputBody.title
               : "Created workspace",
@@ -2111,7 +2119,7 @@ function mockSession(
         data: { items: directoryItems, next_cursor: null },
       });
     }
-    if (url === `${BASE}/api/v1/workspaces/workspace-1/search`) {
+    if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/search`) {
       return jsonResponse({
         data: {
           ranked_results: searchResults,

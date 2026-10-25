@@ -274,7 +274,9 @@ def test_projection_uses_single_call_edge_and_hides_private_version(session_fact
         result = project_mcp_activity(session, call, actor)
         assert result.visible and result.grouping_key is not None
         assert result.resource_id == page.id
-        assert result.navigation_path == f"/context?target={page.id}"
+        assert result.navigation_path == (
+            f"/workspaces/{workspace.id}/context/pages/{page.id}"
+        )
         assert result.operation == "read" and result.result == "succeeded"
         assert result.duration_ms == 12 and result.public_error_code is None
         assert "SECRET" not in repr(result)

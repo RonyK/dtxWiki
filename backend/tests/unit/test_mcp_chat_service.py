@@ -176,7 +176,9 @@ def test_mcp_chat_service_upserts_and_rolls_up_artifact_links(session_factory):
     assert detail.tool_call_count == 2
     assert detail.write_count == 2
     assert detail.linked_artifacts[0].artifact_title == "MCP Linked Page"
-    assert detail.linked_artifacts[0].navigation_path == f"/context?target={page.id}"
+    assert detail.linked_artifacts[0].navigation_path == (
+        f"/workspaces/{workspace.id}/context/pages/{page.id}"
+    )
     assert detail.linked_artifacts[0].occurrence_count == 2
     assert detail.title_source == "artifact"
     assert detail.action == "create"
@@ -1003,10 +1005,13 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
     assert sql_visible_ids == expected
     assert python_visible_ids == expected
     assert listed_titles[page_visible_asset.id] == "diagram.png"
-    assert listed_paths[page_visible_asset.id] == f"/context?target={visible_page.id}"
+    assert listed_paths[page_visible_asset.id] == (
+        f"/workspaces/{workspace.id}/context/pages/{visible_page.id}"
+    )
     assert listed_titles[owned_editing_asset.id] == "diagram.png"
     assert (
-        listed_paths[owned_editing_asset.id] == f"/context?target={visible_page.id}"
+        listed_paths[owned_editing_asset.id]
+        == f"/workspaces/{workspace.id}/context/pages/{visible_page.id}"
     )
 
 
@@ -1173,7 +1178,9 @@ def test_media_asset_title_lookup_is_workspace_scoped_for_colliding_ids(
 
     assert payload is not None
     assert payload.artifact_title == "a.png"
-    assert payload.navigation_path == f"/context?target={page_a.id}"
+    assert payload.navigation_path == (
+        f"/workspaces/{workspace_a.id}/context/pages/{page_a.id}"
+    )
 
 
 def test_timeline_attaches_artifact_to_every_call_that_touched_it(session_factory):

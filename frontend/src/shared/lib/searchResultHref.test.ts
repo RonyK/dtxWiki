@@ -10,12 +10,12 @@ describe("searchResultHref", () => {
         result("chunk-1", "context_page", {
           kind: "content_chunk",
           document_id: "page-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBe("/context?target=page-1");
+    ).toBe("/workspaces/workspace-1/context/pages/page-1");
   });
 
-  it("opens library artifacts on their parent library item", () => {
+  it("opens library artifacts by their own identity", () => {
     expect(
       searchResultHref(
         result(
@@ -23,23 +23,23 @@ describe("searchResultHref", () => {
           "library_artifact",
           { kind: "library_artifact", id: "artifact-1" },
           "/library/item-1.md",
-        ),
+        ), "workspace-1"
       ),
-    ).toBe("/library?target=item-1");
+    ).toBe("/workspaces/workspace-1/library/artifacts/artifact-1");
   });
 
-  it("does not expose a broken library artifact link without a parent item", () => {
+  it("opens an artifact directly without inferring its parent from a concept path", () => {
     expect(
       searchResultHref(
         result("artifact-1", "library_artifact", {
           kind: "library_artifact",
           id: "artifact-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBeNull();
+    ).toBe("/workspaces/workspace-1/library/artifacts/artifact-1");
     expect(
-      searchResultLink(result("artifact-1", "library_artifact")),
-    ).toBeNull();
+      searchResultHref(result("artifact-1", "library_artifact"), "workspace-1"),
+    ).toBe("/workspaces/workspace-1/library/artifacts/artifact-1");
   });
 
   it("opens graph citation versions on their parent library item", () => {
@@ -49,8 +49,8 @@ describe("searchResultHref", () => {
         type: "library_item_version",
         concept_path: "/library/item-1.md",
         source_ref: { kind: "library_item_version", id: "version-1" },
-      }),
-    ).toBe("/library?target=item-1");
+      }, "workspace-1"),
+    ).toBe("/workspaces/workspace-1/library/items/item-1");
   });
 
   it("opens context claim hits on their parent context page", () => {
@@ -59,9 +59,9 @@ describe("searchResultHref", () => {
         result("claim-1", "context_claim", {
           kind: "context_page",
           id: "page-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBe("/context?target=page-1");
+    ).toBe("/workspaces/workspace-1/context/pages/page-1");
   });
 
   it("opens feedback hits on their target document when provided", () => {
@@ -70,35 +70,35 @@ describe("searchResultHref", () => {
         result("feedback-1", "feedback", {
           kind: "context_page",
           id: "page-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBe("/context?target=page-1");
+    ).toBe("/workspaces/workspace-1/context/pages/page-1");
     expect(
       searchResultHref(
         result("feedback-2", "feedback", {
           kind: "library_item",
           id: "item-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBe("/library?target=item-1");
+    ).toBe("/workspaces/workspace-1/library/items/item-1");
     expect(
       searchResultHref(
         result("feedback-3", "feedback", {
           kind: "agent_page",
           id: "agent-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBe("/agent?target=agent-1");
+    ).toBe("/workspaces/workspace-1/agent/pages/agent-1");
     for (const [kind, id, href, destination] of [
-      ["context_page", "page-1", "/context?target=page-1", "context"],
-      ["library_item", "item-1", "/library?target=item-1", "library"],
-      ["agent_page", "agent-1", "/agent?target=agent-1", "agent"],
+      ["context_page", "page-1", "/workspaces/workspace-1/context/pages/page-1", "context"],
+      ["library_item", "item-1", "/workspaces/workspace-1/library/items/item-1", "library"],
+      ["agent_page", "agent-1", "/workspaces/workspace-1/agent/pages/agent-1", "agent"],
     ]) {
       expect(
-        searchResultLink(result("feedback-1", "feedback", { kind, id })),
+        searchResultLink(result("feedback-1", "feedback", { kind, id }), "workspace-1"),
       ).toEqual({ href, destination });
     }
-    expect(searchResultLink(result("feedback-1", "feedback"))).toBeNull();
+    expect(searchResultLink(result("feedback-1", "feedback"), "workspace-1")).toBeNull();
   });
 
   it("opens change set hits only when a review item is known", () => {
@@ -107,21 +107,21 @@ describe("searchResultHref", () => {
         result("change-1", "change_set", {
           kind: "review_item",
           id: "review-1",
-        }),
+        }), "workspace-1"
       ),
-    ).toBe("/review?review=review-1");
-    expect(searchResultHref(result("change-2", "change_set"))).toBeNull();
+    ).toBe("/workspaces/workspace-1/review/review-1");
+    expect(searchResultHref(result("change-2", "change_set"), "workspace-1")).toBeNull();
     expect(
       searchResultLink(result("change-1", "change_set", {
         kind: "review_item", id: "review-1",
-      })),
-    ).toEqual({ href: "/review?review=review-1", destination: "review" });
-    expect(searchResultLink(result("change-2", "change_set"))).toBeNull();
+      }), "workspace-1"),
+    ).toEqual({ href: "/workspaces/workspace-1/review/review-1", destination: "review" });
+    expect(searchResultLink(result("change-2", "change_set"), "workspace-1")).toBeNull();
   });
 
   it("keeps legacy source hits as library links", () => {
-    expect(searchResultHref(result("source-1", "source"))).toBe(
-      "/library?target=source-1",
+    expect(searchResultHref(result("source-1", "source"), "workspace-1")).toBe(
+      "/workspaces/workspace-1/library/items/source-1",
     );
   });
 
@@ -180,7 +180,7 @@ describe("searchResultHref", () => {
       ).toBe("/workspaces/workspace-1/context/pages/page-1");
     });
 
-    it("leaves non-Context target types on their existing query-param link", () => {
+    it("builds an explicit artifact URL for non-Context targets", () => {
       expect(
         searchResultHref(
           result(
@@ -191,7 +191,7 @@ describe("searchResultHref", () => {
           ),
           "workspace-1",
         ),
-      ).toBe("/library?target=item-1");
+      ).toBe("/workspaces/workspace-1/library/artifacts/artifact-1");
     });
   });
 });

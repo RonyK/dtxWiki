@@ -420,11 +420,14 @@ def test_mcp_http_accepts_personal_api_token(page_service):
     assert {"list_my_workspaces", "create_context_page"}.issubset(names)
 
 
-def test_mcp_transport_personal_default_repair_survives_new_session(page_service):
+def test_mcp_transport_requires_workspace_without_repairing_default(
+    page_service, monkeypatch
+):
     import json
 
     from starlette.requests import Request
 
+    from backend.api import mcp_http
     from backend.api.mcp_http import _resolve_and_check_mcp_workspace
     from backend.models.user import User
     from backend.policy.auth import ActorContext
@@ -434,7 +437,6 @@ def test_mcp_transport_personal_default_repair_survives_new_session(page_service
         user = session.scalar(select(User).where(User.email == "test@example.com"))
         assert user is not None and user.personal_workspace_id is not None
         user_id = user.id
-        personal_workspace_id = user.personal_workspace_id
         user.default_workspace_id = None
 
     request = Request(
@@ -464,16 +466,18 @@ def test_mcp_transport_personal_default_repair_survives_new_session(page_service
         provenance="browser_session",
     )
 
-    # A token-bearing actor's workspace claim is authoritative (see
-    # backend/policy/trust_boundaries.py check_actor_can_access): a PAT/OAuth
-    # actor with an empty token_workspace_ids claim is denied outright, so it
-    # can never reach the personal-default-repair fallback this test exercises.
-    # Only a plain user_session actor (no token_kind) falls through to it.
-    assert _resolve_and_check_mcp_workspace(request, actor, body) is None
+    # Missing target input must not run preference repair or consult a target.
+    def unexpected_resolution(**_kwargs):
+        raise AssertionError("MCP execution must not select a default workspace")
+
+    monkeypatch.setattr(mcp_http, "resolve_workspace_for_actor", unexpected_resolution)
+    response = _resolve_and_check_mcp_workspace(request, actor, body)
+    assert response is not None and response.status_code == 400
+    assert json.loads(response.body)["error"]["data"]["error"] == "validation_failed"
     with page_service.session_factory() as session:
         persisted_user = session.get(User, user_id)
         assert persisted_user is not None
-        assert persisted_user.default_workspace_id == personal_workspace_id
+        assert persisted_user.default_workspace_id is None
 
 
 def test_mcp_workspace_list_personal_default_repair_survives_new_session(

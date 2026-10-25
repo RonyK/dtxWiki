@@ -1,6 +1,6 @@
 import {
   fireEvent,
-  render,
+  render as testingRender,
   screen,
   waitFor,
   within,
@@ -29,6 +29,20 @@ import {
 // its update, and replaced the very edit it should have preceded. Save then
 // sent only the field edited second. These tests deliver the first edit inside
 // the commit, so the ordering no longer depends on the scheduler.
+
+const WORKSPACE_ID = "workspace-1";
+
+function ScopedRouter({ children }: { children: ReactNode }) {
+  return (
+    <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=policies`]}>
+      {children}
+    </MemoryRouter>
+  );
+}
+
+function render(ui: React.ReactElement) {
+  return testingRender(ui, { wrapper: ScopedRouter });
+}
 
 type SaveHandler = ComponentProps<typeof PolicyGroupView>["onFieldsSave"];
 
@@ -242,8 +256,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
     edit: (host: HTMLElement) => void = noEdit,
   ) {
     return (
-      <MemoryRouter>
-        <EditDuringCommit edit={edit}>
+      <EditDuringCommit edit={edit}>
           <ReviewAutoApproveByRiskSettings
             busyKey={null}
             onFieldsSave={save}
@@ -252,7 +265,6 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
             saveNotice={null}
           />
         </EditDuringCommit>
-      </MemoryRouter>
     );
   }
 

@@ -31,7 +31,7 @@ from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
-from backend.services.context_links import link_markdown
+from backend.services.context_links import format_stable_url, link_markdown
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.entity_ref import (  # canonical (G0-1)
     context_concept_path,
@@ -104,7 +104,7 @@ def project_context_frontmatter(
         "type": page.page_type,
         "title": page.title,
         "description": _nav_description_for(version),
-        "resource": f"/w/{workspace_slug}/context/{page.slug}",
+        "resource": format_stable_url(page.workspace_id, page.id),
         "tags": list(page.tags or []),
         "aliases": list(page.aliases or []),
         # Never omit this signal. render_frontmatter drops None/empty values,

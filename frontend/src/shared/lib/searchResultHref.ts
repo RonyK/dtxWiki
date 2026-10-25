@@ -1,4 +1,4 @@
-import { formatCanonicalContextUrl } from "./contextLinks";
+import { contextPageHref as canonicalContextHref, workspacePath, workspaceTargetHref } from "./workspaceRoutes";
 export type SearchResultLinkInput = {
   id: string;
   type: string;
@@ -14,7 +14,7 @@ export type SearchResultLink = {
 
 export function searchResultHref<T extends SearchResultLinkInput>(
   result: T,
-  workspaceId?: string | null,
+  workspaceId: string,
 ): string | null {
   return searchResultLink(result, workspaceId)?.href ?? null;
 }
@@ -23,13 +23,17 @@ export function searchResultHref<T extends SearchResultLinkInput>(
 // with /context, and feedback can point to a different domain than its type.
 export function searchResultLink<T extends SearchResultLinkInput>(
   result: T,
-  workspaceId?: string | null,
+  workspaceId: string,
 ): SearchResultLink | null {
+  if (!workspaceId) return null;
   if (result.type === "feedback") {
     return sourceRefHref(result.source_ref ?? {}, workspaceId);
   }
   if (result.type === "change_set") {
-    return reviewItemHref(result.source_ref ?? {});
+    return reviewItemHref(result.source_ref ?? {}, workspaceId);
+  }
+  if (result.type === "library_artifact") {
+    return { href: workspaceTargetHref(workspaceId, "library", result.id, "artifact"), destination: "library" };
   }
   const targetId = resultDocumentId(result);
   if (
@@ -39,10 +43,13 @@ export function searchResultLink<T extends SearchResultLinkInput>(
     return contextPageHref(targetId, workspaceId);
   }
   if (result.type === "agent_page" && targetId) {
-    return { href: `/agent?target=${encodeURIComponent(targetId)}`, destination: "agent" };
+    return { href: workspaceTargetHref(workspaceId, "agent", targetId), destination: "agent" };
   }
   if (result.type === "workspace_tree_node" && targetId) {
-    return { href: `/context?target=${encodeURIComponent(targetId)}`, destination: "context" };
+    const ref = result.source_ref ?? {};
+    const section = ref.section;
+    if (ref.node_kind !== "folder" || (section !== "context" && section !== "library" && section !== "agent")) return null;
+    return { href: workspaceTargetHref(workspaceId, section, targetId, "folder"), destination: section };
   }
   if (
     (result.type === "library_item" ||
@@ -51,40 +58,34 @@ export function searchResultLink<T extends SearchResultLinkInput>(
       result.type === "source") &&
     targetId
   ) {
-    return { href: `/library?target=${encodeURIComponent(targetId)}`, destination: "library" };
+    return { href: workspaceTargetHref(workspaceId, "library", targetId), destination: "library" };
   }
   return null;
 }
 
 function sourceRefHref(
   sourceRef: Record<string, string>,
-  workspaceId?: string | null,
+  workspaceId: string,
 ): SearchResultLink | null {
   if (sourceRef.kind === "context_page" && sourceRef.id) {
     return contextPageHref(sourceRef.id, workspaceId);
   }
   if (sourceRef.kind === "agent_page" && sourceRef.id) {
-    return { href: `/agent?target=${encodeURIComponent(sourceRef.id)}`, destination: "agent" };
+    return { href: workspaceTargetHref(workspaceId, "agent", sourceRef.id), destination: "agent" };
   }
   if (sourceRef.kind === "library_item" && sourceRef.id) {
-    return { href: `/library?target=${encodeURIComponent(sourceRef.id)}`, destination: "library" };
+    return { href: workspaceTargetHref(workspaceId, "library", sourceRef.id), destination: "library" };
   }
   return null;
 }
 
-// P10.1: canonical Context permalink, once a workspace id is in scope at the
-// call site — a bare tree/folder target has no page id to canonicalize and
-// keeps using the query-param form (see treeBreadcrumbs.ts).
-function contextPageHref(pageId: string, workspaceId?: string | null): SearchResultLink {
-  if (workspaceId) {
-    return { href: formatCanonicalContextUrl(workspaceId, pageId), destination: "context" };
-  }
-  return { href: `/context?target=${encodeURIComponent(pageId)}`, destination: "context" };
+function contextPageHref(pageId: string, workspaceId: string): SearchResultLink {
+  return { href: canonicalContextHref(workspaceId, pageId), destination: "context" };
 }
 
-function reviewItemHref(sourceRef: Record<string, string>): SearchResultLink | null {
+function reviewItemHref(sourceRef: Record<string, string>, workspaceId: string): SearchResultLink | null {
   if (sourceRef.kind === "review_item" && sourceRef.id) {
-    return { href: `/review?review=${encodeURIComponent(sourceRef.id)}`, destination: "review" };
+    return { href: workspacePath(workspaceId, "review/" + encodeURIComponent(sourceRef.id)), destination: "review" };
   }
   return null;
 }

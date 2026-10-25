@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -100,7 +101,7 @@ describe("TreeRail favorite identity boundaries", () => {
       }
       throw new Error(`Unexpected request: ${path}`);
     });
-    render(<AuthProvider skipInitialSessionCheck><IdentityHarness /></AuthProvider>);
+    render(<MemoryRouter initialEntries={[`/workspaces/${workspaceId}/context`]}><AuthProvider skipInitialSessionCheck><IdentityHarness /></AuthProvider></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Authenticate A" }));
     const aRow = await screen.findByRole("treeitem", { name: page.title });
     expect(aRow.querySelector(".tree-row-favorite")).toBeInTheDocument();

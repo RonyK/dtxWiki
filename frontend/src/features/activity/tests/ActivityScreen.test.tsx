@@ -50,11 +50,11 @@ function mockFetch(responses: Record<string, unknown>) {
 function Navigation() {
   const navigate = useNavigate();
   const location = useLocation();
-  return <><output aria-label="Current location">{location.pathname}{location.search}</output><button onClick={() => navigate(-1)}>Back</button><button onClick={() => navigate(1)}>Forward</button><button onClick={() => navigate("/activity?period=week&kind=mcp&subtype=read&group_reads=0")}>Open scoped activity</button></>;
+  return <><output aria-label="Current location">{location.pathname}{location.search}</output><button onClick={() => navigate(-1)}>Back</button><button onClick={() => navigate(1)}>Forward</button><button onClick={() => navigate("/workspaces/workspace-1/activity?period=week&kind=mcp&subtype=read&group_reads=0")}>Open scoped activity</button></>;
 }
-function show(responses: Record<string, unknown>, initial = "/activity", navigation = false) {
+function show(responses: Record<string, unknown>, initial = "/workspaces/workspace-1/activity", navigation = false) {
   const fetch = mockFetch(responses);
-  return { ...render(<MemoryRouter initialEntries={[initial]}>{navigation && <Navigation />}<Routes><Route path="/activity" element={<ActivityScreen />} /><Route path="/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>), fetch };
+  return { ...render(<MemoryRouter initialEntries={[initial]}>{navigation && <Navigation />}<Routes><Route path="/workspaces/workspace-1/activity" element={<ActivityScreen />} /><Route path="/workspaces/:workspaceId/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>), fetch };
 }
 beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); activityPreferences.role = "editor"; });
 
@@ -65,7 +65,7 @@ describe("ActivityScreen", () => {
     expect(screen.getByText("Review approved")).toBeInTheDocument();
     const title = screen.getByRole("link", { name: "Open review: Review required" });
     const chip = screen.getByRole("link", { name: "Review required: Review required" });
-    expect(title).toHaveAttribute("href", "/review?review=review-1");
+    expect(title).toHaveAttribute("href", "/workspaces/workspace-1/review/review-1");
     expect(chip).toHaveAttribute("href", title.getAttribute("href"));
     expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
   });
@@ -102,13 +102,13 @@ describe("ActivityScreen", () => {
 
   it("uses the actual resource name as the main link when a keyed headline is only a verb", async () => {
     show({ [feedUrl()]: data([entry(event("publish", "ignored", { event_key: "context_page.draft.publish", target_title: "Reranking Decision Log", body: "context_page.draft.publish", operation: "publish" }))]) });
-    expect(await screen.findByRole("link", { name: "Reranking Decision Log" })).toHaveAttribute("href", "/context?target=page-publish");
+    expect(await screen.findByRole("link", { name: "Reranking Decision Log" })).toHaveAttribute("href", "/workspaces/workspace-1/context/pages/page-publish");
     expect(screen.getAllByText("Reranking Decision Log")).toHaveLength(1);
     expect(screen.getByText("Published page")).toBeInTheDocument();
   });
 
   it("exposes accessible period/type radio groups and a labeled native grouping checkbox", async () => {
-    const { container } = show({ [feedUrl({ period: "week" })]: data([]) }, "/activity?period=week");
+    const { container } = show({ [feedUrl({ period: "week" })]: data([]) }, "/workspaces/workspace-1/activity?period=week");
     await screen.findByRole("heading", { name: "Activity" });
     expect(screen.getByRole("radiogroup", { name: "Period" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Week" })).toHaveAttribute("aria-checked", "true");
@@ -118,7 +118,7 @@ describe("ActivityScreen", () => {
   });
 
   it("requests the workspace scope from the server before rendering its bounded result", async () => {
-    const { fetch } = show({ [feedUrl({ kind: "workspace" })]: data([entry(event("draft", "Draft created"))]) }, "/activity?kind=workspace");
+    const { fetch } = show({ [feedUrl({ kind: "workspace" })]: data([entry(event("draft", "Draft created"))]) }, "/workspaces/workspace-1/activity?kind=workspace");
     expect(await screen.findByText("Draft created")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Workspace" })).toHaveAttribute("aria-checked", "true");
     expect(fetch).toHaveBeenCalledWith(feedUrl({ kind: "workspace" }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
@@ -130,8 +130,8 @@ describe("ActivityScreen", () => {
     body.data.lanes.history.has_more = true;
     show({ [feedUrl()]: body });
     await screen.findByText("History event");
-    expect(document.querySelector('.metric-card[href^="/activity/history"] strong')).toHaveTextContent(/^1\+$/);
-    expect(document.querySelector('.metric-card[href^="/activity/advisory"] strong')).toHaveTextContent(/^0$/);
+    expect(document.querySelector('.metric-card[href^="/workspaces/workspace-1/activity/history"] strong')).toHaveTextContent(/^1\+$/);
+    expect(document.querySelector('.metric-card[href^="/workspaces/workspace-1/activity/advisory"] strong')).toHaveTextContent(/^0$/);
   });
   it("defaults to All and renders both workspace and system events", async () => {
     show({ [feedUrl()]: data([entry(event("draft", "Draft created")), entry(event("auth", "auth.session.created", { body: "auth.session.created" }))]) });
@@ -147,7 +147,7 @@ describe("ActivityScreen", () => {
     const { fetch } = show({
       [feedUrl({ kind: "workspace" })]: data([entry(event("context", "Page updated")), entry(event("library", "Source registered"))]),
       [feedUrl({ kind: "workspace", subtype: "library" })]: data([entry(event("library", "Source registered"))]),
-    }, "/activity?kind=workspace");
+    }, "/workspaces/workspace-1/activity?kind=workspace");
     await screen.findByText("Page updated");
     await userEvent.click(screen.getByRole("radio", { name: "Library" }));
     expect(await screen.findByText("Source registered")).toBeInTheDocument();
@@ -156,7 +156,7 @@ describe("ActivityScreen", () => {
   });
 
   it("omits subtypes for All and rejects inherited or incompatible filter keys", async () => {
-    show({ [feedUrl()]: data([]) }, "/activity?kind=constructor&subtype=__proto__&period=never");
+    show({ [feedUrl()]: data([]) }, "/workspaces/workspace-1/activity?kind=constructor&subtype=__proto__&period=never");
     await screen.findByRole("heading", { name: "Activity" });
     expect(screen.queryByRole("radiogroup", { name: "Sub-type" })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
@@ -164,10 +164,10 @@ describe("ActivityScreen", () => {
 
   it("previews five entries but keeps an always-visible scoped See all link", async () => {
     const entries = Array.from({ length: 7 }, (_, n) => entry(event(`event-${n}`, `Event ${n}`)));
-    show({ [feedUrl({ period: "week", kind: "workspace", subtype: "context", group_reads: false })]: data(entries) }, "/activity?period=week&kind=workspace&subtype=context&group_reads=0");
+    show({ [feedUrl({ period: "week", kind: "workspace", subtype: "context", group_reads: false })]: data(entries) }, "/workspaces/workspace-1/activity?period=week&kind=workspace&subtype=context&group_reads=0");
     expect(await screen.findByText("Event 4")).toBeInTheDocument();
     expect(screen.queryByText("Event 5")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View all history activity" })).toHaveAttribute("href", "/activity/history?period=week&kind=workspace&subtype=context&group_reads=0");
+    expect(screen.getByRole("link", { name: "View all history activity" })).toHaveAttribute("href", "/workspaces/workspace-1/activity/history?period=week&kind=workspace&subtype=context&group_reads=0");
     expect(screen.getByRole("link", { name: "View all pending activity" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View all advisory activity" })).toBeInTheDocument();
   });
@@ -182,7 +182,7 @@ describe("ActivityScreen", () => {
   });
 
   it("renders auth events as human-readable system activity", async () => {
-    show({ [feedUrl({ kind: "system" })]: data([entry(event("auth", "auth.session.created", { body: "auth.session.created" }))]) }, "/activity?kind=system");
+    show({ [feedUrl({ kind: "system" })]: data([entry(event("auth", "auth.session.created", { body: "auth.session.created" }))]) }, "/workspaces/workspace-1/activity?kind=system");
     expect(await screen.findByText("Signed in")).toBeInTheDocument();
     expect(screen.getByText("A user session was created.")).toBeInTheDocument();
     expect(screen.queryByText("auth.session.created")).not.toBeInTheDocument();
@@ -190,28 +190,28 @@ describe("ActivityScreen", () => {
   });
 
   it("keeps OAuth requests in the system security scope", async () => {
-    show({ [feedUrl({ kind: "system" })]: data([entry(event("oauth", "Codex CLI requested MCP OAuth access", { body: "oauth.authorization.requested", target: { target_kind: "oauth_authorization", target_id: "user-1" } }))]) }, "/activity?kind=system");
+    show({ [feedUrl({ kind: "system" })]: data([entry(event("oauth", "Codex CLI requested MCP OAuth access", { body: "oauth.authorization.requested", target: { target_kind: "oauth_authorization", target_id: "user-1" } }))]) }, "/workspaces/workspace-1/activity?kind=system");
     expect(await screen.findByText("Codex CLI requested MCP OAuth access")).toBeInTheDocument();
     expect(screen.getByText("An MCP client requested access to this workspace.")).toBeInTheDocument();
     expect(screen.queryByText("oauth.authorization.requested")).not.toBeInTheDocument();
   });
 
   it("uses structured MCP operation/result copy and keeps unknown tool IDs out of page links", async () => {
-    show({ [feedUrl({ kind: "mcp" })]: data([entry(event("search", "MCP search succeeded", { operation: "search", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, actor: { actor_kind: "mcp_client", actor_id: "client-1", display_name: "Codex CLI", is_current_user: false } }))]) }, "/activity?kind=mcp");
+    show({ [feedUrl({ kind: "mcp" })]: data([entry(event("search", "MCP search succeeded", { operation: "search", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, actor: { actor_kind: "mcp_client", actor_id: "client-1", display_name: "Codex CLI", is_current_user: false } }))]) }, "/workspaces/workspace-1/activity?kind=mcp");
     expect(await screen.findByText("Searched workspace resources")).toBeInTheDocument();
     expect(screen.queryByText("MCP search succeeded")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View MCP activity" })).toHaveAttribute("href", "/activity/history?period=all&kind=mcp&subtype=all&group_reads=1");
+    expect(screen.getByRole("link", { name: "View MCP activity" })).toHaveAttribute("href", "/workspaces/workspace-1/activity/history?period=all&kind=mcp&subtype=all&group_reads=1");
   });
 
   it("requests a deep-linked review subtype explicitly", async () => {
-    const { fetch } = show({ [feedUrl({ kind: "workspace", subtype: "review" })]: data([entry(event("review", "Approved Pricing page"))]) }, "/activity?kind=workspace&subtype=review");
+    const { fetch } = show({ [feedUrl({ kind: "workspace", subtype: "review" })]: data([entry(event("review", "Approved Pricing page"))]) }, "/workspaces/workspace-1/activity?kind=workspace&subtype=review");
     expect(await screen.findByText("Approved Pricing page")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Review" })).toHaveAttribute("aria-checked", "true");
     expect(fetch).toHaveBeenCalledWith(feedUrl({ kind: "workspace", subtype: "review" }), expect.any(Object));
   });
 
   it("keeps active scope, grouping mode and Reset visible when filters are folded", async () => {
-    show({ [feedUrl({ period: "today", kind: "workspace", group_reads: false })]: data([]) }, "/activity?period=today&kind=workspace&group_reads=0");
+    show({ [feedUrl({ period: "today", kind: "workspace", group_reads: false })]: data([]) }, "/workspaces/workspace-1/activity?period=today&kind=workspace&group_reads=0");
     await screen.findByRole("heading", { name: "Activity" });
     await userEvent.click(screen.getByRole("button", { name: "Filters (2)" }));
     expect(screen.queryByRole("radiogroup", { name: "Period" })).not.toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("ActivityScreen", () => {
 
   it("starts mobile filters folded while retaining active scope and grouping control", async () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query === "(max-width: 640px)", media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() })));
-    show({ [feedUrl({ period: "today", kind: "workspace" })]: data([]) }, "/activity?period=today&kind=workspace");
+    show({ [feedUrl({ period: "today", kind: "workspace" })]: data([]) }, "/workspaces/workspace-1/activity?period=today&kind=workspace");
     await screen.findByRole("heading", { name: "Activity" });
     expect(screen.getByRole("button", { name: "Filters (2)" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("radiogroup", { name: "Period" })).not.toBeInTheDocument();
@@ -260,7 +260,7 @@ describe("ActivityScreen", () => {
   });
 
   it("keeps See all available on empty system lanes without Context creation actions", async () => {
-    show({ [feedUrl({ kind: "system" })]: data([]) }, "/activity?kind=system");
+    show({ [feedUrl({ kind: "system" })]: data([]) }, "/workspaces/workspace-1/activity?kind=system");
     await screen.findByRole("heading", { name: "Activity" });
     expect(screen.getAllByText("No system events for this period.")).toHaveLength(3);
     expect(screen.getByRole("link", { name: "View all pending activity" })).toBeInTheDocument();
@@ -274,16 +274,16 @@ describe("ActivityScreen", () => {
     { role: "viewer", visible: false },
   ])("shows empty MCP Chats actions only for editors ($role)", async ({ role, visible }) => {
     activityPreferences.role = role;
-    show({ [feedUrl({ kind: "mcp" })]: data([]) }, "/activity?kind=mcp");
+    show({ [feedUrl({ kind: "mcp" })]: data([]) }, "/workspaces/workspace-1/activity?kind=mcp");
     await screen.findByRole("heading", { name: "Activity" });
     expect(screen.getAllByRole("link", { name: "Open MCP setup" })).toHaveLength(3);
     const links = screen.queryAllByRole("link", { name: "Open Chats" });
     expect(links).toHaveLength(visible ? 3 : 0);
-    for (const link of links) expect(link).toHaveAttribute("href", "/chats");
+    for (const link of links) expect(link).toHaveAttribute("href", "/workspaces/workspace-1/chats");
   });
 
   it("distinguishes a grouped entry from its four represented original events and resets on grouping change", async () => {
-    const read = event("read", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/context?target=page-1" } });
+    const read = event("read", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/workspaces/workspace-1/context/pages/page-1" } });
     const { fetch } = show({ [feedUrl()]: data([entry(read, 4)]), [feedUrl({ group_reads: false })]: data(Array.from({ length: 4 }, (_, n) => entry({ ...read, id: `read-${n}` }))) });
     expect((await screen.findAllByText("1 entry · 4 original events")).length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Read Guide 4 times" })).toBeInTheDocument();
@@ -294,7 +294,7 @@ describe("ActivityScreen", () => {
   });
 
   it("restores period, kind, subtype and grouping from Back/Forward navigation", async () => {
-    show({ [feedUrl()]: data([entry(event("default", "Default activity"))]), [feedUrl({ period: "week", kind: "mcp", subtype: "read", group_reads: false })]: data([entry(event("scoped", "Scoped activity"))]) }, "/activity", true);
+    show({ [feedUrl()]: data([entry(event("default", "Default activity"))]), [feedUrl({ period: "week", kind: "mcp", subtype: "read", group_reads: false })]: data([entry(event("scoped", "Scoped activity"))]) }, "/workspaces/workspace-1/activity", true);
     await screen.findByText("Default activity");
     await userEvent.click(screen.getByRole("button", { name: "Open scoped activity" }));
     expect(await screen.findByText("Scoped activity")).toBeInTheDocument();
@@ -311,9 +311,9 @@ describe("ActivityScreen", () => {
 
 describe("ActivityLanePage", () => {
   it("appends the cursor page without replacing prior entries and retains scoped overview breadcrumb", async () => {
-    show({ [feedUrl({ lane: "history", kind: "mcp", subtype: "read", period: "week", group_reads: false })]: data([entry(event("first", "Event 1"))], { next_cursor: "CURSOR2", has_more: true }), [feedUrl({ lane: "history", kind: "mcp", subtype: "read", period: "week", group_reads: false, cursor: "CURSOR2" })]: data([entry(event("second", "Event 2"))]) }, "/activity/history?period=week&kind=mcp&subtype=read&group_reads=0");
+    show({ [feedUrl({ lane: "history", kind: "mcp", subtype: "read", period: "week", group_reads: false })]: data([entry(event("first", "Event 1"))], { next_cursor: "CURSOR2", has_more: true }), [feedUrl({ lane: "history", kind: "mcp", subtype: "read", period: "week", group_reads: false, cursor: "CURSOR2" })]: data([entry(event("second", "Event 2"))]) }, "/workspaces/workspace-1/activity/history?period=week&kind=mcp&subtype=read&group_reads=0");
     await screen.findByText("Event 1");
-    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/activity?period=week&kind=mcp&subtype=read&group_reads=0");
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/workspaces/workspace-1/activity?period=week&kind=mcp&subtype=read&group_reads=0");
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Event 2")).toBeInTheDocument();
     expect(screen.getByText("Event 1")).toBeInTheDocument();
@@ -333,7 +333,7 @@ describe("ActivityLanePage", () => {
       }
       throw new Error(`Unexpected request: ${url}`);
     });
-    render(<MemoryRouter initialEntries={["/activity/history"]}><Routes><Route path="/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/workspace-1/activity/history"]}><Routes><Route path="/workspaces/:workspaceId/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>);
     await screen.findByText("Event 1");
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Failed to load more")).toBeInTheDocument();
@@ -344,7 +344,7 @@ describe("ActivityLanePage", () => {
   });
 
   it("keeps pagination reachable when an empty server page still has a cursor", async () => {
-    show({ [feedUrl({ lane: "history", kind: "system" })]: data([], { next_cursor: "CURSOR2", has_more: true }), [feedUrl({ lane: "history", kind: "system", cursor: "CURSOR2" })]: data([entry(event("later", "Later system activity"))]) }, "/activity/history?kind=system");
+    show({ [feedUrl({ lane: "history", kind: "system" })]: data([], { next_cursor: "CURSOR2", has_more: true }), [feedUrl({ lane: "history", kind: "system", cursor: "CURSOR2" })]: data([entry(event("later", "Later system activity"))]) }, "/workspaces/workspace-1/activity/history?kind=system");
     await screen.findByText("No system events for this period.");
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Later system activity")).toBeInTheDocument();
@@ -361,7 +361,7 @@ describe("ActivityLanePage", () => {
       if (url === feedUrl({ lane: "history", kind: "system" })) return jsonResponse(data([entry(event("new", "New system scope"))]));
       throw new Error(`Unexpected request: ${url}`);
     });
-    render(<MemoryRouter initialEntries={["/activity/history"]}><Routes><Route path="/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/workspaces/workspace-1/activity/history"]}><Routes><Route path="/workspaces/:workspaceId/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>);
     await screen.findByText("First scope event");
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     await userEvent.click(screen.getByRole("radio", { name: "System" }));
@@ -373,8 +373,8 @@ describe("ActivityLanePage", () => {
 });
 
 describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane => {
-  const initial = lane ? `/activity/${lane}` : "/activity";
-  function renderRoute() { return render(<MemoryRouter initialEntries={[initial]}><Routes><Route path="/activity" element={<ActivityScreen />} /><Route path="/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>); }
+  const initial = lane ? `/workspaces/workspace-1/activity/${lane}` : "/workspaces/workspace-1/activity";
+  function renderRoute() { return render(<MemoryRouter initialEntries={[initial]}><Routes><Route path="/workspaces/workspace-1/activity" element={<ActivityScreen />} /><Route path="/workspaces/:workspaceId/activity/:lane" element={<ActivityLanePage />} /></Routes></MemoryRouter>); }
 
   it("shows loading before data rather than an empty activity message or setup action", async () => {
     let complete!: (response: Response) => void;
@@ -413,8 +413,8 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
   });
 
   it.each([0, 1])("reconciles %s visible read-group members in place without re-snapshotting the feed", async visibleCount => {
-    const grouped = entry(event("group", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "old-page", title: "Old private title", href: "/context?target=old-page" } }), 4);
-    const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/context?target=visible-page" } };
+    const grouped = entry(event("group", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "old-page", title: "Old private title", href: "/workspaces/workspace-1/context/pages/old-page" } }), 4);
+    const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/workspaces/workspace-1/context/pages/visible-page" } };
     let feedAttempts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
       const url = input.toString();
@@ -422,7 +422,7 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
       if (url === feedUrl({ lane })) return feedAttempts++ === 0
         ? jsonResponse(data([grouped, entry(event("other", "Other visible activity"))]))
         : jsonResponse({ error_code: "service_unavailable", message: "Unavailable", request_id: "test", warnings: [] }, 503);
-      if (url.endsWith("/activity/read-group?token=group-group")) return jsonResponse({ data: { events: visibleCount ? [survivor] : [], event_count: visibleCount, group_id: grouped.id } });
+      if (url.endsWith("/workspaces/workspace-1/activity/read-group?token=group-group")) return jsonResponse({ data: { events: visibleCount ? [survivor] : [], event_count: visibleCount, group_id: grouped.id } });
       throw new Error(`Unexpected request: ${url}`);
     });
     renderRoute();
@@ -432,7 +432,7 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
     expect(screen.getByText("Other visible activity")).toBeInTheDocument();
     expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
     if (visibleCount) {
-      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/context?target=visible-page");
+      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/workspaces/workspace-1/context/pages/visible-page");
       expect(screen.getAllByText("2 entries · 2 original events").length).toBeGreaterThan(0);
     } else expect(screen.getAllByText("1 entry · 1 original event").length).toBeGreaterThan(0);
     // A re-snapshot would collapse the opened group and drop loaded pages.
@@ -440,7 +440,7 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("keeps the loaded group and counts when an invalid token is followed by a failed reload", async () => {
-    const grouped = entry(event("group", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "page-1", title: "Known guide", href: "/context?target=page-1" } }), 4);
+    const grouped = entry(event("group", "MCP read succeeded", { operation: "read", result_status: "succeeded", target: { target_kind: "mcp_tool_call", target_id: "call-1" }, navigation: { target_kind: "context_page", target_id: "page-1", title: "Known guide", href: "/workspaces/workspace-1/context/pages/page-1" } }), 4);
     let feedAttempts = 0;
     let detailAttempts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
@@ -449,7 +449,7 @@ describe.each([undefined, "history"] as const)("Activity recovery (%s)", lane =>
       if (url === feedUrl({ lane })) return feedAttempts++ === 0
         ? jsonResponse(data([grouped, entry(event("other", "Other activity"))]))
         : jsonResponse({ error_code: "service_unavailable", message: "Unavailable", request_id: "test", warnings: [] }, 503);
-      if (url.endsWith("/activity/read-group?token=group-group")) {
+      if (url.endsWith("/workspaces/workspace-1/activity/read-group?token=group-group")) {
         detailAttempts++;
         return jsonResponse({ error_code: "invalid_activity_token", message: "Expired token", request_id: "test", warnings: [] }, 400);
       }
@@ -481,9 +481,9 @@ describe("Activity overview lane count boundaries", () => {
     [5, 5, "5 entries · 5 original events"],
     [6, 5, "5 entries · 5 original events"],
   ] as const)("previews %s fetched history entries as %s display entries", async (returned, visible, label) => {
-    show({ [feedUrl({ period: "week", kind: "workspace", group_reads: false })]: data(Array.from({ length: returned }, (_, n) => entry(event(`boundary-${n}`, `Boundary event ${n}`)))) }, "/activity?period=week&kind=workspace&group_reads=0");
+    show({ [feedUrl({ period: "week", kind: "workspace", group_reads: false })]: data(Array.from({ length: returned }, (_, n) => entry(event(`boundary-${n}`, `Boundary event ${n}`)))) }, "/workspaces/workspace-1/activity?period=week&kind=workspace&group_reads=0");
     const link = await screen.findByRole("link", { name: "View all history activity" });
-    expect(link).toHaveAttribute("href", "/activity/history?period=week&kind=workspace&subtype=all&group_reads=0");
+    expect(link).toHaveAttribute("href", "/workspaces/workspace-1/activity/history?period=week&kind=workspace&subtype=all&group_reads=0");
     const section = link.closest("section")!;
     expect(section.querySelectorAll(".activity-feed-entry")).toHaveLength(visible);
     expect(within(section).getByText(label)).toBeInTheDocument();

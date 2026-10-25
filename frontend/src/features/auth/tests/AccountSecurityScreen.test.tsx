@@ -117,11 +117,11 @@ describe("AccountSecurityScreen", () => {
     expect(screen.getByText("OAuth apps")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /MCP keys/ })).toHaveAttribute(
       "href",
-      "/settings/integrations#integrations",
+      "/account/integrations#integrations",
     );
     expect(screen.getByRole("link", { name: /OAuth apps/ })).toHaveAttribute(
       "href",
-      "/settings/integrations#oauth-consents",
+      "/account/integrations#oauth-consents",
     );
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Update password" })).toHaveAttribute(

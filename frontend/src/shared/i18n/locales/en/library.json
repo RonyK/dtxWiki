@@ -38,7 +38,8 @@
     "moveTreeNode": "The Library item could not be moved. Try again.",
     "reorderTreeNode": "The Library item could not be reordered. Try again.",
     "upload": "The Library file could not be uploaded. Try again.",
-    "itemUnavailable": "That Library item is no longer available. It was removed from the list."
+    "itemUnavailable": "That Library item is no longer available. It was removed from the list.",
+    "folderParentUnavailable": "The parent folder is unavailable in this workspace."
   },
   "history": {
     "sourceVersion": "Source fetch version",

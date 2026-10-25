@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { authenticatePage } from "./auth";
+import { authenticatePage, currentWorkspace, workspaceUrl } from "./auth";
 import { evidenceScreenshot } from "./evidence";
 
 for (const [locale, width] of [["en", 1440], ["ko", 390]] as const) {
@@ -13,7 +13,8 @@ for (const [locale, width] of [["en", 1440], ["ko", 390]] as const) {
       // modern API there so CI also exercises real legacy copy and paste.
       if (forceLegacy) Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
     }, { language: locale, forceLegacy: !privateHttp });
-    await page.goto("/settings/integrations");
+    const workspace = await currentWorkspace(page.request);
+    await page.goto(workspaceUrl(workspace.id, "settings/integrations"));
     if (privateHttp) {
       expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
       const fallback = page.locator('#oauth-consents a[href="#mcp-key-setup"]');

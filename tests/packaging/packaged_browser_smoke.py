@@ -189,7 +189,9 @@ expect(converted.artifacts.some((artifact) =>
   artifact.stage === 'conversion' && artifact.role === 'markdown'
   && artifact.index_text.includes(marker),
 )).toBeTruthy();
-await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
+await page.goto(`${baseUrl}/workspaces/${workspaceId}/dashboard`, {
+  waitUntil: 'networkidle',
+});
 await page
   .getByRole('heading', { name: 'Workspace Operations', exact: true })
   .waitFor({ timeout: 10000 });

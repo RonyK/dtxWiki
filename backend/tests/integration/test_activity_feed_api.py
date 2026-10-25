@@ -779,7 +779,7 @@ def test_overview_reserves_visible_review_and_unread_is_raw_attention_not_entry_
     assert data["entries"][0]["event"]["review_item_id"] == review_id
     assert (
         data["entries"][0]["event"]["navigation"]["href"]
-        == f"/review?review={review_id}"
+        == f"/workspaces/{workspace_id}/review/{review_id}"
     )
     assert (
         data["unread_count"] == 6

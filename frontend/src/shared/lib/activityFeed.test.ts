@@ -29,7 +29,7 @@ describe("activity feed presenter", () => {
     expect(shown.action).toBe("logged");
   });
   it("uses the same codes for translated titles and repeated-read labels", async () => {
-    const event = feedEvent({ operation: "read", navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/context?target=page-1" } });
+    const event = feedEvent({ operation: "read", navigation: { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/workspaces/workspace-1/context/pages/page-1" } });
     expect(presentActivityFeedEvent(event, 4).title).toBe("Read Guide 4 times");
     await i18n.changeLanguage("ko");
     expect(presentActivityFeedEvent(event, 4).title).toContain("4회 읽었습니다");
@@ -43,24 +43,24 @@ describe("activity feed presenter", () => {
 
 describe("activity navigation and query scope", () => {
   it("routes review title and chip from one exact URL", () => {
-    expect(activityNavigation(feedEvent({ lane: "pending", review_item_id: "review-1" })).href).toBe("/review?review=review-1");
+    expect(activityNavigation(feedEvent({ lane: "pending", review_item_id: "review-1" }), parseActivityQuery(new URLSearchParams()), "workspace-1").href).toBe("/workspaces/workspace-1/review/review-1");
   });
   it("never treats a tool call ID as a Chat or document id", () => {
     const query = parseActivityQuery(new URLSearchParams("period=week&kind=workspace&subtype=context&group_reads=0"));
-    const navigation = activityNavigation(feedEvent(), query);
+    const navigation = activityNavigation(feedEvent(), query, "workspace-1");
     expect(navigation.href).toBeNull();
-    expect(navigation.fallbackHref).toBe("/activity/history?period=week&kind=mcp&subtype=all&group_reads=0");
+    expect(navigation.fallbackHref).toBe("/workspaces/workspace-1/activity/history?period=week&kind=mcp&subtype=all&group_reads=0");
   });
   it("accepts only matching resource routes from the projection", () => {
-    const navigation = { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/context?target=page-1" };
-    expect(activityNavigation(feedEvent({ navigation })).href).toBe(navigation.href);
-    expect(activityNavigation(feedEvent({ navigation: { ...navigation, href: "https://example.com" } })).href).toBeNull();
+    const navigation = { target_kind: "context_page", target_id: "page-1", title: "Guide", href: "/workspaces/workspace-1/context/pages/page-1" };
+    expect(activityNavigation(feedEvent({ navigation }), parseActivityQuery(new URLSearchParams()), "workspace-1").href).toBe(navigation.href);
+    expect(activityNavigation(feedEvent({ navigation: { ...navigation, href: "https://example.com" } }), parseActivityQuery(new URLSearchParams()), "workspace-1").href).toBeNull();
   });
   it("normalizes unknown filter values and preserves all scope on overview/lane links", () => {
     expect(parseActivityQuery(new URLSearchParams("kind=constructor&subtype=__proto__&period=never"))).toEqual({ kind: "all", subtype: "all", period: "all", group_reads: true });
     const query = parseActivityQuery(new URLSearchParams("kind=mcp&subtype=read&period=month&group_reads=0"));
-    expect(activityHref(query)).toBe("/activity?period=month&kind=mcp&subtype=read&group_reads=0");
-    expect(activityHref(query, "history")).toContain("/activity/history?");
+    expect(activityHref(query, undefined, "workspace-1")).toBe("/workspaces/workspace-1/activity?period=month&kind=mcp&subtype=read&group_reads=0");
+    expect(activityHref(query, "history", "workspace-1")).toContain("/workspaces/workspace-1/activity/history?");
   });
   it("distinguishes displayed entries from represented original events without a fake total", () => {
     const event = feedEvent();

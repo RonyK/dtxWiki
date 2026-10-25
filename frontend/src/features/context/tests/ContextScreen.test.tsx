@@ -27,7 +27,7 @@ import { ContextChildrenIndex, ContextScreen } from "../ContextScreen";
 // the affordances render; individual tests can flip the role to "viewer".
 const { ctxWorkspace } = vi.hoisted(() => ({
   ctxWorkspace: {
-    current: { selectedWorkspace: { role: "owner" } } as Record<
+    current: { selectedWorkspace: { id: "workspace-1", role: "owner" } } as Record<
       string,
       unknown
     >,
@@ -65,8 +65,9 @@ describe("ContextScreen", () => {
       "true",
     );
     ctxWorkspace.current = {
-      selectedWorkspace: { role: "owner", visibility: "public" },
+      selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public" },
       workspaceSlug: "demo",
+      workspaces: [{ id: WORKSPACE_ID, role: "owner", visibility: "public", slug: "demo" }],
     };
   });
 
@@ -144,6 +145,12 @@ describe("ContextScreen", () => {
           },
           ...decisionLogChildren,
         ]),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/ancestor-0`]: {
+        data: folderNode("ancestor-0", "Inbox", { children_count: 1 }),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/folder-root`]: {
+        data: folderNode("folder-root", "Inbox", { children_count: 1 }),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]: {
         data: {
@@ -436,6 +443,10 @@ describe("ContextScreen", () => {
             : { data: { items: [], unread_count: 0, next_cursor: null } }),
         },
     };
+    const visiblePageFixture = routes[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`] as { data: Record<string, unknown> };
+    routes[`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/hidden-page`] = {
+      data: { ...visiblePageFixture.data, id: "hidden-page", workspace_id: "foreign-workspace" },
+    };
     if (options.activityNextCursor) {
       routes[
         `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/activity?period=all&limit=50&cursor=${options.activityNextCursor}`
@@ -477,9 +488,11 @@ describe("ContextScreen", () => {
       reconciliationAvailable?: boolean;
     } = {},
   ) {
+    const selected = ctxWorkspace.current.selectedWorkspace as { id?: string } | undefined;
+    if (selected?.id) ctxWorkspace.current.workspaces = [selected];
     const fetchMock = mockDecisionLogRoutes(options);
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -506,7 +519,7 @@ describe("ContextScreen", () => {
     // (Upload) and Agent (+ New) already use.
     expect(
       screen.getByRole("link", { name: "New Context page" }),
-    ).toHaveAttribute("href", "/context/new");
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
     expect(screen.queryByRole("link", { name: "Context home" })).toBeNull();
     expect(screen.getByText("Unpublished draft")).toBeInTheDocument();
   });
@@ -540,6 +553,44 @@ describe("ContextScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Open Context overview" }));
     await waitFor(() => expect(screen.queryByText("Needle body")).not.toBeInTheDocument());
     expect(screen.queryByText("Published, but a formatting issue was found.")).not.toBeInTheDocument();
+  });
+
+  it("does not keep the previous page visible while a same-workspace route target loads", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const baseFetch = fetchMock.getMockImplementation();
+    if (!baseFetch) throw new Error("Expected Context fetch mock");
+    const pendingDetail = deferredResponse();
+    let detailRequested!: () => void;
+    const detailRequestStarted = new Promise<void>((resolve) => {
+      detailRequested = resolve;
+    });
+    fetchMock.mockImplementation(async (input, init) => {
+      if (input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`) {
+        detailRequested();
+        return pendingDetail.promise;
+      }
+      return baseFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+        <ContextTestRoutes />
+        <SecondPageButton />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open second page route" }));
+    await detailRequestStarted;
+    expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
+    expect(screen.queryByText("Selected second page")).not.toBeInTheDocument();
+
+    await act(async () => {
+      pendingDetail.resolve(await baseFetch(
+        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
+      ));
+    });
+    expect(await screen.findByText("Selected second page")).toBeInTheDocument();
+    expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
   });
 
   it("says a displayed draft is unpublished and names the reader-visible head", async () => {
@@ -599,7 +650,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/context?target=${PAGE_ID}&tab=children&page=2`,
+          `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=children&page=2`,
         ]}
       >
         <SearchProbe onSearch={(search) => searches.push(search)} />
@@ -617,11 +668,11 @@ describe("ContextScreen", () => {
       within(childrenPanel).queryByRole("button", { name: /Child 05/ }),
     ).toBeNull();
     expect(searches.at(-1)).toBe(
-      `?target=${PAGE_ID}&tab=children&page=2`,
+      `?tab=children&page=2`,
     );
 
     await userEvent.click(screen.getByRole("tab", { name: "View" }));
-    await waitFor(() => expect(searches.at(-1)).toBe(`?target=${PAGE_ID}`));
+    await waitFor(() => expect(searches.at(-1)).toBe(""));
     expect(
       await screen.findByRole("tabpanel", { name: "View" }),
     ).toBeInTheDocument();
@@ -633,7 +684,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/context?target=${PAGE_ID}&tab=children&page=2`,
+          `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=children&page=2`,
         ]}
       >
         <HistoryButtons />
@@ -646,14 +697,14 @@ describe("ContextScreen", () => {
       await screen.findByRole("tabpanel", { name: /Children/ }),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "View" }));
-    await waitFor(() => expect(searches.at(-1)).toBe(`?target=${PAGE_ID}`));
+    await waitFor(() => expect(searches.at(-1)).toBe(""));
 
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
     expect(
       await screen.findByRole("tabpanel", { name: /Children/ }),
     ).toBeInTheDocument();
     expect(searches.at(-1)).toBe(
-      `?target=${PAGE_ID}&tab=children&page=2`,
+      `?tab=children&page=2`,
     );
     expect(
       screen.getByRole("button", { name: "Child 06" }),
@@ -663,7 +714,7 @@ describe("ContextScreen", () => {
     expect(
       await screen.findByRole("tabpanel", { name: "View" }),
     ).toBeInTheDocument();
-    expect(searches.at(-1)).toBe(`?target=${PAGE_ID}`);
+    expect(searches.at(-1)).toBe("");
   });
 
   it("falls a stale Children deep link back to View when the page has no direct children", async () => {
@@ -672,7 +723,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/context?target=${PAGE_ID}&tab=children&page=3`,
+          `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=children&page=3`,
         ]}
       >
         <SearchProbe onSearch={(search) => searches.push(search)} />
@@ -684,7 +735,7 @@ describe("ContextScreen", () => {
       await screen.findByRole("tabpanel", { name: "View" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Children/ })).toBeNull();
-    await waitFor(() => expect(searches.at(-1)).toBe(`?target=${PAGE_ID}`));
+    await waitFor(() => expect(searches.at(-1)).toBe(""));
   });
 
   it("synchronizes History with Back and resets to View when the page changes", async () => {
@@ -692,8 +743,8 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/context?target=${SECOND_PAGE_ID}`,
-          `/context?target=${SECOND_PAGE_ID}&tab=history`,
+          `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
+          `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}?tab=history`,
         ]}
         initialIndex={1}
       >
@@ -821,7 +872,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -850,10 +901,14 @@ describe("ContextScreen", () => {
   it("renders an actor-hidden or invalid target as the generic Not Found surface", async () => {
     const fetchMock = mockDecisionLogRoutes();
     render(
-      <MemoryRouter initialEntries={["/context?target=hidden-page"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/hidden-page`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
+
+    await waitFor(() => expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/hidden-page`,
+    ));
 
     expect(
       await screen.findByRole("heading", {
@@ -864,7 +919,7 @@ describe("ContextScreen", () => {
       fetchMock.mock.calls.some((call) =>
         String(call[0]).includes("/context/pages/hidden-page"),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("renders selected markdown with page actions and copy link", async () => {
@@ -872,7 +927,7 @@ describe("ContextScreen", () => {
     mockDecisionLogRoutes();
     render(
       <MemoryRouter
-        initialEntries={["/context?target=ancestor-0&expanded=ancestor-0&view=reader"]}
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/context/folders/ancestor-0?expanded=ancestor-0&view=reader`]}
       >
         <ContextTestRoutes />
         <ContextLocationProbe />
@@ -923,7 +978,7 @@ describe("ContextScreen", () => {
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Inbox" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
     expect(writeText).toHaveBeenLastCalledWith(
-      `${window.location.origin}/context?target=ancestor-0`,
+      `${window.location.origin}/workspaces/${WORKSPACE_ID}/context/folders/ancestor-0`,
     );
     const readerTabs = within(
       screen.getByRole("tablist", { name: "Context reader views" }),
@@ -942,7 +997,7 @@ describe("ContextScreen", () => {
     await userEvent.click(screen.getByRole("treeitem", { name: "Inbox" }));
     await screen.findByRole("heading", { name: "Inbox" });
     expect(screen.getByTestId("context-location")).toHaveTextContent(
-      "/context?expanded=ancestor-0&view=reader&target=ancestor-0",
+      `/workspaces/${WORKSPACE_ID}/context/folders/ancestor-0?expanded=ancestor-0&view=reader`,
     );
   });
 
@@ -991,7 +1046,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -1038,7 +1093,7 @@ describe("ContextScreen", () => {
     const cursor = "activity-cursor-1";
     const fetchMock = mockDecisionLogRoutes({ activityNextCursor: cursor });
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -1150,7 +1205,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -1388,7 +1443,7 @@ describe("ContextScreen", () => {
     );
     expect(
       inspector.getByRole("link", { name: /Deployment Runbook/ }),
-    ).toHaveAttribute("href", "/library?target=library-1");
+      ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/artifact-1`);
     expect(inspector.getByText("CITATIONS")).toBeInTheDocument();
     expect(inspector.getByText("OFTEN READ TOGETHER")).toBeInTheDocument();
     const citations = inspector.getByLabelText("CITATIONS");
@@ -1437,7 +1492,7 @@ describe("ContextScreen", () => {
     }
     expect(
       within(graph).getByRole("link", { name: "Deployment Runbook" }),
-    ).toHaveAttribute("href", "/library?target=library-1");
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/artifact-1`);
     await userEvent.click(readerTabs.getByRole("tab", { name: /View/ }));
     await userEvent.click(
       readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }),
@@ -1504,7 +1559,7 @@ describe("ContextScreen", () => {
 
   it("requires an Owner acknowledgement for an unlisted share from a private Workspace", async () => {
     ctxWorkspace.current = {
-      selectedWorkspace: { role: "owner", visibility: "private" },
+      selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "private" },
       workspaceSlug: "demo",
     };
     const fetchMock = await renderDecisionLog();
@@ -1662,7 +1717,7 @@ describe("ContextScreen", () => {
       },
     });
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -1728,7 +1783,7 @@ describe("ContextScreen", () => {
     );
     expect(await screen.findByText("Needle body")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
-    const inspector = within(
+    let inspector = within(
       screen.getByRole("region", { name: "Context detail" }),
     );
 
@@ -1737,6 +1792,7 @@ describe("ContextScreen", () => {
     );
 
     expect(await screen.findByText("Selected second page")).toBeInTheDocument();
+    inspector = within(screen.getByRole("region", { name: "Context detail" }));
     expect(screen.getAllByText("CITATION HEALTH").length).toBeGreaterThan(0);
     expect(
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
@@ -1764,11 +1820,11 @@ describe("ContextScreen", () => {
     const breadcrumb = within(screen.getByLabelText("Breadcrumb"));
     expect(breadcrumb.getByRole("link", { name: "Context" })).toHaveAttribute(
       "href",
-      "/context",
+      `/workspaces/${WORKSPACE_ID}/context`,
     );
     expect(breadcrumb.getByRole("link", { name: "Inbox" })).toHaveAttribute(
       "href",
-      "/context?target=ancestor-0",
+      `/workspaces/${WORKSPACE_ID}/context/folders/ancestor-0`,
     );
 
     await userEvent.click(breadcrumb.getByRole("link", { name: "Inbox" }));
@@ -1802,6 +1858,9 @@ describe("ContextScreen", () => {
           treeNode("node-1", PAGE_ID, "Decision Log"),
           treeNode("node-2", SECOND_PAGE_ID, "Capped Page"),
         ]),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/folder-root`]: {
+        data: folderNode("folder-root", "Workspace", { children_count: 3 }),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`]:
         {
@@ -1839,7 +1898,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -1902,7 +1961,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -1962,7 +2021,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2102,7 +2161,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2211,7 +2270,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2282,7 +2341,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2310,7 +2369,7 @@ describe("ContextScreen", () => {
   });
 
   it("hides the History restore affordance from viewers (#7 parity)", async () => {
-    ctxWorkspace.current = { selectedWorkspace: { role: "viewer" } };
+    ctxWorkspace.current = { selectedWorkspace: { id: WORKSPACE_ID, role: "viewer" } };
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -2364,7 +2423,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2403,7 +2462,7 @@ describe("ContextScreen", () => {
 
   it("hides the mobile New FAB from viewers", async () => {
     setMobileViewport(true);
-    ctxWorkspace.current = { selectedWorkspace: { role: "viewer" } };
+    ctxWorkspace.current = { selectedWorkspace: { id: WORKSPACE_ID, role: "viewer" } };
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -2417,7 +2476,7 @@ describe("ContextScreen", () => {
     });
 
     const viewerView = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2431,9 +2490,9 @@ describe("ContextScreen", () => {
     expect(screen.queryByRole("link", { name: "New Context page" })).toBeNull();
     viewerView.unmount();
 
-    ctxWorkspace.current = { selectedWorkspace: { role: "owner" } };
+    ctxWorkspace.current = { selectedWorkspace: { id: WORKSPACE_ID, role: "owner" } };
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2451,6 +2510,7 @@ describe("ContextScreen", () => {
 
   it("shows the setup sequence and writing CTA when Context is empty", async () => {
     const folderId = "context-folder-1";
+    let createdFolder: TreeNodePayload | null = null;
     mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
@@ -2458,33 +2518,22 @@ describe("ContextScreen", () => {
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages`]: {
         data: [],
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`]: {
-        data: treeResponse("context", []),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`]: () => ({
+        data: treeResponse("context", createdFolder ? [createdFolder] : []),
+      }),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes`]: () => {
+        createdFolder = folderNode(folderId, "Research");
+        return { data: createdFolder };
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes`]: {
-        data: {
-          id: folderId,
-          section: "context",
-          title: "Research",
-          slug: "research",
-          node_kind: "folder",
-          parent_id: null,
-          sort_key: "0001",
-          target_kind: null,
-          target_id: null,
-          is_system_node: false,
-          can_have_children: true,
-          primary_placement: false,
-          visibility_status: "visible",
-          children_count: 0,
-          breadcrumb: [],
-        },
-      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/${folderId}`]: () => ({
+        data: createdFolder ?? folderNode(folderId, "Research"),
+      }),
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
+        <FolderCreateRouteButton />
       </MemoryRouter>,
     );
 
@@ -2496,23 +2545,15 @@ describe("ContextScreen", () => {
     );
     expect(
       screen.getByRole("link", { name: "Write first Context page" }),
-    ).toHaveAttribute("href", "/context/new");
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create Context item" }),
-    );
-    await userEvent.click(await screen.findByRole("radio", { name: "Folder" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open new folder route" }));
     await userEvent.type(
       await screen.findByRole("textbox", { name: "Folder name" }),
       "Research",
     );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create folder" }),
-    );
-
-    expect(
-      await screen.findByRole("treeitem", { name: "Research" }),
-    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
+    expect(await screen.findByRole("treeitem", { name: "Research" })).toBeInTheDocument();
   });
 
   it("marks manual tree refresh busy and announces completion", async () => {
@@ -2550,7 +2591,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2590,7 +2631,7 @@ describe("ContextScreen", () => {
   it("preserves a manually collapsed active path across tree refresh", async () => {
     mockDecisionLogRoutes({ nestedSecondPage: true });
     render(
-      <MemoryRouter initialEntries={[`/context?target=${SECOND_PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -2746,7 +2787,7 @@ describe("ContextScreen", () => {
       });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
         <ContextLocationProbe />
         <ContextQueryButton />
@@ -2971,7 +3012,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3122,7 +3163,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3202,11 +3243,19 @@ describe("ContextScreen", () => {
           folderTitle = JSON.parse(String(init.body)).display_name;
           return jsonResponse({ data: folderNode("folder-1", folderTitle) });
         }
+        if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/folder-1`) {
+          return jsonResponse({ data: folderNode("folder-1", folderTitle, {
+            breadcrumb: [
+              { id: "context-root", section: "context", title: "Context", slug: "context", node_kind: "folder" },
+            ],
+            parent_id: "context-root",
+          }) });
+        }
         throw new Error(`Unexpected request: ${url}`);
       });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3337,7 +3386,7 @@ describe("ContextScreen", () => {
     const { reorderBodies } = anchoredReorderFetch();
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3376,7 +3425,7 @@ describe("ContextScreen", () => {
     const { reorderBodies } = anchoredReorderFetch();
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3439,7 +3488,7 @@ describe("ContextScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3491,10 +3540,13 @@ describe("ContextScreen", () => {
           folderNode("folder-child", "Archive", { parent_id: "folder-root" }),
         ]),
       },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/folder-root`]: {
+        data: folderNode("folder-root", "Workspace", { children_count: 3 }),
+      },
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3540,11 +3592,14 @@ describe("ContextScreen", () => {
           }),
         ]),
       },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/folder-root`]: {
+        data: folderNode("folder-root", "Workspace", { children_count: 7 }),
+      },
     });
     const searches: string[] = [];
     render(
       <MemoryRouter
-        initialEntries={["/context?target=folder-root&childrenPage=2"]}
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/context/folders/folder-root?childrenPage=2`]}
       >
         <SearchProbe onSearch={(search) => searches.push(search)} />
         <ContextTestRoutes />
@@ -3563,7 +3618,7 @@ describe("ContextScreen", () => {
       within(section).getByRole("button", { name: /Folder page 6/ }),
     ).toBeInTheDocument();
     expect(within(section).getByRole("button", { name: /Archive/ })).toBeInTheDocument();
-    expect(searches.at(-1)).toBe("?target=folder-root&childrenPage=2");
+    expect(searches.at(-1)).toBe("?childrenPage=2");
   });
 
   it("pluralizes each count independently: one page, two folders (M-C)", async () => {
@@ -3588,10 +3643,13 @@ describe("ContextScreen", () => {
           folderNode("folder-b", "Backups", { parent_id: "folder-root" }),
         ]),
       },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/folder-root`]: {
+        data: folderNode("folder-root", "Workspace", { children_count: 3 }),
+      },
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3829,7 +3887,7 @@ describe("ContextScreen", () => {
   it("opens the pending draft comparison with the newer draft on the right in one click", async () => {
     mockFetch(pendingReviewFetch());
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3876,7 +3934,7 @@ describe("ContextScreen", () => {
     // publication metadata, not just `is_current`.
     mockFetch(pendingReviewFetch());
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -3988,7 +4046,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockFetch(emptyBaselineHistoryFetch());
     const searches: string[] = [];
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <SearchProbe onSearch={(search) => searches.push(search)} />
         <ContextTestRoutes />
       </MemoryRouter>,
@@ -4020,7 +4078,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/context?target=${PAGE_ID}&tab=history&compareFrom=empty&compareTo=version-1`,
+          `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=history&compareFrom=empty&compareTo=version-1`,
         ]}
       >
         <ContextTestRoutes />
@@ -4040,10 +4098,10 @@ describe("ContextScreen", () => {
   it("normalizes a reversed comparison deep link with one history replace", async () => {
     mockFetch(pendingReviewFetch());
     const searches: string[] = [];
-    const reversed = `?target=${PAGE_ID}&tab=history&compareFrom=version-2&compareTo=version-1`;
-    const normalized = `?target=${PAGE_ID}&tab=history&compareFrom=version-1&compareTo=version-2`;
+    const reversed = `?tab=history&compareFrom=version-2&compareTo=version-1`;
+    const normalized = `?tab=history&compareFrom=version-1&compareTo=version-2`;
     render(
-      <MemoryRouter initialEntries={[`/context${reversed}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}${reversed}`]}>
         <SearchProbe onSearch={(search) => searches.push(search)} />
         <ContextTestRoutes />
       </MemoryRouter>,
@@ -4062,7 +4120,7 @@ describe("ContextScreen", () => {
   it("closes a comparison when Back removes only its URL parameters", async () => {
     mockFetch(comparisonHistoryFetch());
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=history`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=history`]}>
         <BackButton />
         <ContextTestRoutes />
       </MemoryRouter>,
@@ -4087,7 +4145,7 @@ describe("ContextScreen", () => {
   it("uses native selectors that reject identical endpoints and normalize either choice order", async () => {
     const fetchMock = mockFetch(comparisonHistoryFetch());
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4168,7 +4226,7 @@ describe("ContextScreen", () => {
   it("keeps a row comparison and the selector on the same pair, then restores focus", async () => {
     mockFetch(comparisonHistoryFetch());
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4232,7 +4290,7 @@ describe("ContextScreen", () => {
     };
     const fetchMock = mockFetch(responses);
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4280,7 +4338,7 @@ describe("ContextScreen", () => {
     };
     const fetchMock = mockFetch(responses);
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4309,7 +4367,7 @@ describe("ContextScreen", () => {
   it("warns when the older endpoint is not an ancestor of the newer endpoint", async () => {
     mockFetch(comparisonHistoryFetch(true));
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4347,7 +4405,7 @@ describe("ContextScreen", () => {
     mockFetch(comparisonHistoryFetch(true));
     render(
       <MemoryRouter
-        initialEntries={[`/context?target=${PAGE_ID}&tab=history`]}
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=history`]}
       >
         <ContextTestRoutes />
       </MemoryRouter>,
@@ -4411,7 +4469,7 @@ describe("ContextScreen", () => {
     mockFetch(responses);
     render(
       <MemoryRouter
-        initialEntries={[`/context?target=${PAGE_ID}&tab=history`]}
+        initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=history`]}
       >
         <ContextTestRoutes />
       </MemoryRouter>,
@@ -4444,7 +4502,7 @@ describe("ContextScreen", () => {
     ] = { error: new Error("SQLSTATE 23505 internal detail") };
     mockFetch(responses);
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4466,7 +4524,7 @@ describe("ContextScreen", () => {
     setMobileViewport(true, 390);
     mockFetch(comparisonHistoryFetch());
     render(
-      <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4500,7 +4558,7 @@ describe("ContextScreen", () => {
     };
     mockFetch(pendingReviewFetch());
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4536,7 +4594,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockFetch(responses);
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4574,7 +4632,7 @@ describe("ContextScreen", () => {
     };
     mockFetch(pendingReviewFetch());
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4608,7 +4666,7 @@ describe("ContextScreen", () => {
       };
       mockFetch(pendingReviewFetch(earlierCount));
       render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
           <ContextTestRoutes />
         </MemoryRouter>,
       );
@@ -4625,7 +4683,7 @@ describe("ContextScreen", () => {
         screen.getByRole("link", {
           name: `View all ${earlierCount + 1} pending reviews in the queue`,
         }),
-      ).toHaveAttribute("href", "/review?review=rev-1");
+      ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
       expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     },
   );
@@ -4636,7 +4694,7 @@ describe("ContextScreen", () => {
     };
     mockFetch(pendingReviewFetch(0));
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4663,7 +4721,7 @@ describe("ContextScreen", () => {
     };
     mockFetch(pendingReviewFetch(2, "changes_requested"));
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
       </MemoryRouter>,
     );
@@ -4679,7 +4737,7 @@ describe("ContextScreen", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     expect(
       screen.getByRole("link", { name: "Open Review queue" }),
-    ).toHaveAttribute("href", "/review");
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review`);
   });
 
   describe("P10.1 canonical route", () => {
@@ -4688,7 +4746,7 @@ describe("ContextScreen", () => {
         <MemoryRouter initialEntries={[path]}>
           <ContextMismatchButton />
           <Routes>
-            <Route path="/context" element={<div>Context overview route</div>} />
+            <Route path={`/workspaces/${WORKSPACE_ID}/context`} element={<div>Context overview route</div>} />
             <Route
               path="/workspaces/:workspaceId/context/pages/:pageId"
               element={<ContextTestRoutes />}
@@ -4788,9 +4846,8 @@ describe("ContextScreen", () => {
       expect(await screen.findByText("Context overview route")).toBeInTheDocument();
     });
 
-    it("silently resyncs the ambient workspace when the routed id is already a member", async () => {
-      // Independent state regression: initial deep-link synchronization is one
-      // entry action, not permission to undo a later explicit workspace choice.
+    it("does not change ambient workspace selection for a routed workspace", async () => {
+      // The URL scopes reads without mutating the user's ambient selection.
       const selectWorkspaceId = vi.fn();
       function WorkspaceSwitchHarness() {
         const [selectedId, setSelectedId] = useState("ambient-workspace");
@@ -4799,7 +4856,7 @@ describe("ContextScreen", () => {
           setSelectedId(id);
         }, []);
         ctxWorkspace.current = {
-          selectedWorkspace: { role: "owner", visibility: "public" },
+          selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public" },
           workspaceSlug: "demo", selectedId,
           workspaces: [{ id: WORKSPACE_ID }, { id: "ambient-workspace" }],
           selectWorkspaceId: select,
@@ -4817,7 +4874,8 @@ describe("ContextScreen", () => {
         </MemoryRouter>,
       );
       await screen.findByText("Needle body");
-      expect(screen.getByTestId("selected-workspace")).toHaveTextContent(WORKSPACE_ID);
+      expect(screen.getByTestId("selected-workspace")).toHaveTextContent("ambient-workspace");
+      expect(selectWorkspaceId).not.toHaveBeenCalled();
       await userEvent.click(screen.getByRole("button", { name: "Select another workspace" }));
       await waitFor(() => expect(screen.getByTestId("selected-workspace")).toHaveTextContent("ambient-workspace"));
       expect(selectWorkspaceId).toHaveBeenLastCalledWith("ambient-workspace");
@@ -4826,7 +4884,7 @@ describe("ContextScreen", () => {
     it("does not touch ambient workspace state when the routed id is not a known member", async () => {
       const selectWorkspaceId = vi.fn();
       ctxWorkspace.current = {
-        selectedWorkspace: { role: "owner", visibility: "public" },
+        selectedWorkspace: { id: WORKSPACE_ID, role: "owner", visibility: "public" },
         workspaceSlug: "demo",
         selectedId: "ambient-workspace",
         workspaces: [{ id: "ambient-workspace" }],
@@ -4864,7 +4922,7 @@ describe("ContextChildrenIndex", () => {
     });
     const onSelectNode = vi.fn();
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextChildrenIndex
           node={parent}
           nodes={[parent, pageChild, folderChild]}
@@ -4899,7 +4957,7 @@ describe("ContextChildrenIndex", () => {
     }));
     const searches: string[] = [];
     render(
-      <MemoryRouter initialEntries={["/context?page=99"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context?page=99`]}>
         <SearchProbe onSearch={(search) => searches.push(search)} />
         <ContextChildrenIndex
           node={parent}
@@ -4948,7 +5006,7 @@ describe("ContextChildrenIndex", () => {
     };
     const searches: string[] = [];
     render(
-      <MemoryRouter initialEntries={["/context?page=not-a-page"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context?page=not-a-page`]}>
         <SearchProbe onSearch={(search) => searches.push(search)} />
         <ContextChildrenIndex
           node={parent}
@@ -5006,7 +5064,17 @@ function ContextMismatchButton() {
 
 function ContextOverviewButton() {
   const navigate = useNavigate();
-  return <button onClick={() => void navigate("/context")} type="button">Open Context overview</button>;
+  return <button onClick={() => void navigate(`/workspaces/${WORKSPACE_ID}/context`)} type="button">Open Context overview</button>;
+}
+
+function SecondPageButton() {
+  const navigate = useNavigate();
+  return <button onClick={() => void navigate(`/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`)} type="button">Open second page route</button>;
+}
+
+function FolderCreateRouteButton() {
+  const navigate = useNavigate();
+  return <button onClick={() => void navigate(`/workspaces/${WORKSPACE_ID}/context/folders/new`)} type="button">Open new folder route</button>;
 }
 
 function ContextQueryButton() {
@@ -5077,12 +5145,15 @@ function HistoryButtons() {
 }
 
 function mockFetch(responses: Record<string, unknown>) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
     // The context/pages list endpoint now carries pagination query params
     // (?limit=…&cursor=…); fall back to the query-stripped path so existing
     // mocks keyed on the bare endpoint still match.
-    const body = responses[url] ?? responses[url.split("?")[0]];
+    let body = responses[url] ?? responses[url.split("?")[0]];
+    if (!body && (url.includes("/api/v1/workspaces/foreign-workspace/") || /\/context\/pages\/(?:hidden-page|foreign-page)(?:\/|$)/.test(url) || /target_id=(?:hidden-page|foreign-page)(?:&|$)/.test(url))) {
+      return jsonResponse({ error_code: "not_found", message: "Not found.", request_id: "r1", warnings: [] }, 404);
+    }
     if (
       body &&
       typeof body === "object" &&
@@ -5093,6 +5164,13 @@ function mockFetch(responses: Record<string, unknown>) {
     }
     if (!body) {
       throw new Error(`Unexpected request: ${url}`);
+    }
+    if (typeof body === "function") {
+      body = await body(input, init);
+    }
+    if (typeof body === "object" && body !== null && "__status" in body) {
+      const value = body as { __status: number; __body: unknown };
+      return jsonResponse(value.__body, value.__status);
     }
     return jsonResponse(body);
   });

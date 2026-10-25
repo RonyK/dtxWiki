@@ -41,7 +41,7 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
@@ -53,20 +53,20 @@ describe("SetupScreen", () => {
       screen.getByRole("link", {
         name: /Library Reference materials 1 item Ready to cite Open Library/i,
       }),
-    ).toHaveAttribute("href", "/library");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/library");
     expect(screen.getByText("Workspace basics")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Citation & write policy/i }))
-      .toHaveAttribute("href", "/settings?section=citation-write");
+      .toHaveAttribute("href", "/workspaces/workspace-1/settings?section=citation-write");
     expect(screen.getByRole("link", { name: /Agent injection/i }))
-      .toHaveAttribute("href", "/settings?section=agent-injection");
+      .toHaveAttribute("href", "/workspaces/workspace-1/settings?section=agent-injection");
     expect(
       screen.getByRole("link", { name: /Connect external AI tools \(MCP\)/i }),
-    ).toHaveAttribute("href", "/settings?section=mcp");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/settings?section=mcp");
     expect(screen.getByText("Your workspace is ready.")).toBeInTheDocument();
     expect(screen.getByText("3 of 3 · Ready")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Context" })).toHaveAttribute(
       "href",
-      "/context",
+      "/workspaces/workspace-1/context",
     );
     expect(screen.queryByRole("link", { name: "Open Ask" })).not.toBeInTheDocument();
   });
@@ -97,7 +97,7 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
@@ -146,7 +146,7 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
@@ -185,7 +185,7 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
@@ -221,7 +221,7 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
@@ -245,7 +245,7 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
@@ -254,8 +254,8 @@ describe("SetupScreen", () => {
     expect(screen.getByText("Your workspace has sources and knowledge pages.")).toBeInTheDocument();
     expect(screen.queryByText("AI rules")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open Agent|Add rule/ })).not.toBeInTheDocument();
-    expect(document.querySelector('a[href="/agent"]')).toBeNull();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/agent/pages"))).toBe(false);
+    expect(document.querySelector('a[href="/workspaces/workspace-1/agent"]')).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/workspaces/workspace-1/agent/pages"))).toBe(false);
   });
 
   it("offers the Agent setup step after the Agent menu is enabled", async () => {
@@ -276,13 +276,13 @@ describe("SetupScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/setup"]}>
         <SetupScreen />
       </MemoryRouter>,
     );
 
     expect(await screen.findByText("2 of 3 · Partial")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add rule" })).toHaveAttribute("href", "/agent");
+    expect(screen.getByRole("link", { name: "Add rule" })).toHaveAttribute("href", "/workspaces/workspace-1/agent");
     expect(screen.getByText("Add an AI rule to control how answers are written.")).toBeInTheDocument();
   });
 });

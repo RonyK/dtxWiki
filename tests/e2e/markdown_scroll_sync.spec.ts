@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "./fixtures";
 
-import { backendBaseUrl, currentWorkspace, signUp } from "./auth";
+import { backendBaseUrl, currentWorkspace, signUp, workspaceUrl } from "./auth";
 
 const TALL_IMAGE_URL = "https://scroll-sync.test/tall.svg";
 
@@ -41,9 +41,9 @@ test("keeps split Markdown panes aligned by content in both directions @cross-br
     },
   );
   expect(createResponse.ok()).toBeTruthy();
-  const created = (await createResponse.json()).data as { slug: string };
+  const created = (await createResponse.json()).data as { id: string; slug: string };
 
-  await page.goto(`/context/${created.slug}/edit`, { waitUntil: "domcontentloaded" });
+  await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}/edit`), { waitUntil: "domcontentloaded" });
   await page.getByLabel("Markdown body").waitFor();
   await page.getByRole("tab", { name: "Split" }).click();
   await expect(page.getByRole("button", { name: "Linked scrolling" }))

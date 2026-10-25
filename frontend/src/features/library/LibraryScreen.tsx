@@ -1,4 +1,3 @@
-import { formatCanonicalContextUrl } from "../../shared/lib/contextLinks";
 import {
   BookOpen,
   Download,
@@ -19,7 +18,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../../shared/api/client";
 import { translate } from "../../shared/i18n";
@@ -37,6 +36,8 @@ import {
   LibraryUploadApiError,
   matchingLibraryFormat,
   readLibraryItem,
+  readLibraryArtifact,
+  readLibraryVersion,
   retryLibraryConversion,
   uploadLibraryFile,
 } from "../../shared/api/library";
@@ -45,12 +46,14 @@ import type {
   LibraryItemDetail,
   LibraryItemReference,
   LibraryItemSummary,
+  LibraryArtifactPayload,
+  LibraryItemVersionPayload,
 } from "../../shared/api/library";
 import {
   createTreeFolder,
   deleteTreeNode,
-  getCurrentWorkspaceId,
   listTreeData,
+  readTreeNode,
   moveTreeNode,
   reorderTreeNodeAt,
   updateTreeNode,
@@ -85,8 +88,6 @@ import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
-  TREE_TARGET_PARAM,
-  updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
@@ -97,6 +98,7 @@ import { buildHistoryGraph } from "../../shared/lib/historyGraph";
 import { isAbortError } from "../../shared/lib/abortError";
 import { createUuidV4 } from "../../shared/lib/uuidV4";
 import { libraryHistoryNodes } from "./libraryHistory";
+import { contextPageHref, useRouteWorkspaceId, useWorkspaceRoute, workspacePath, workspaceTargetHref, withWorkspaceQuery } from "../../shared/lib/workspaceRoutes";
 import {
   UploadQueue,
   type ResilientUploadQueueStatus,
@@ -106,6 +108,7 @@ import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { ArtifactChatsSection } from "../mcp-chats/ArtifactChatsSection";
 import { LibrarySemanticMarkdownEditor } from "./LibrarySemanticMarkdownEditor";
+import { NotFoundScreen } from "../errors/NotFoundScreen";
 import {
   currentVersionStatusKey,
   previewVersionId,
@@ -122,6 +125,9 @@ type LibraryState = {
   tree: TreeNodePayload[];
   treePolicies: Record<string, TreeSectionPolicy>;
   detail: LibraryItemDetail | null;
+  selectedArtifactId: string | null;
+  selectedArtifact: LibraryArtifactPayload | null;
+  selectedArtifactVersion: LibraryItemVersionPayload | null;
 };
 
 type UploadStatus = ResilientUploadQueueStatus;
@@ -143,8 +149,13 @@ const LIBRARY_NEW_ITEM_TYPE_ORDER: readonly NewItemType[] = [
   "folder",
 ];
 
+class LibraryRouteTargetNotFoundError extends Error {}
+
 export function LibraryScreen() {
   const { t } = useTranslation("library");
+  const routeWorkspaceId = useRouteWorkspaceId();
+  const route = useWorkspaceRoute();
+  const navigate = useNavigate();
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
   const auth = useOptionalAuth();
   const workspaceContext = useOptionalWorkspaceContext();
@@ -152,10 +163,6 @@ export function LibraryScreen() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadEntries, setUploadEntries] = useState<UploadEntry[]>([]);
-  const [createDialog, setCreateDialog] = useState<{
-    initialItemType: NewItemType;
-    parentNodeId: string | null;
-  } | null>(null);
   const [renameNode, setRenameNode] = useState<TreeNodePayload | null>(null);
   const [moveNode, setMoveNode] = useState<TreeNodePayload | null>(null);
   const [deleteNode, setDeleteNode] = useState<TreeNodePayload | null>(null);
@@ -177,12 +184,16 @@ export function LibraryScreen() {
   // bare-id resolver immediately issues the same doomed request again and
   // clears the explanatory notice.
   const unavailableTargetIdRef = useRef<string | null>(null);
+  const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
+  useEffect(() => {
+    setRouteNotFoundKey(null);
+  }, [routeWorkspaceId, route?.suffix, route?.targetId]);
   // A route target expands its ancestors once. Subsequent tree/detail refreshes
   // must preserve an intentional user collapse instead of reopening the path.
   const revealedRouteTargetRef = useRef<string | null>(null);
   const expandedWorkspaceRef = useRef<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTargetId = searchParams.get(TREE_TARGET_PARAM);
+  const requestedTargetId = route?.targetId ?? null;
   const {
     data: state,
     error,
@@ -191,10 +202,7 @@ export function LibraryScreen() {
     setError,
   } = useAsyncLoad<LibraryState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
-      if (!workspaceId) {
-        throw new Error("Workspace not found");
-      }
+      const workspaceId = routeWorkspaceId;
       const [itemsPage, treeData, capabilities] = await Promise.all([
         listLibraryItems(workspaceId, { limit: pageSize }),
         listTreeData(workspaceId, "library"),
@@ -202,13 +210,46 @@ export function LibraryScreen() {
       ]);
       const items = itemsPage.data;
       const tree = treeData.nodes;
-      const selectedItemId = resolveRequestedLibraryItemId(
-        items,
-        tree,
-        requestedTargetId,
-      );
+      if (route?.targetKind === "folder" && route.targetId) {
+        let folder = tree.find((node) => node.id === route.targetId);
+        if (!folder) {
+          try {
+            folder = await readTreeNode(workspaceId, route.targetId);
+          } catch (exc) {
+            if (exc instanceof ApiError && exc.status === 404) {
+              throw new LibraryRouteTargetNotFoundError();
+            }
+            throw exc;
+          }
+        }
+        if (folder.section !== "library" || folder.node_kind !== "folder") {
+          throw new LibraryRouteTargetNotFoundError();
+        }
+      }
+      let artifact: LibraryArtifactPayload | null = null;
+      let referencedVersion: LibraryItemVersionPayload | null = null;
+      let selectedItemId: string | null;
+      if (route?.targetKind === "artifact" && route.targetId) {
+        try {
+          artifact = await readLibraryArtifact(workspaceId, route.targetId);
+          referencedVersion = await readLibraryVersion(workspaceId, artifact.library_item_version_id);
+        } catch (exc) {
+          if (exc instanceof ApiError && exc.status === 404) throw new LibraryRouteTargetNotFoundError();
+          throw exc;
+        }
+        selectedItemId = referencedVersion.library_item_id;
+      } else if (route?.targetKind === "item" && route.targetId) {
+        selectedItemId = route.targetId;
+      } else {
+        selectedItemId = resolveRequestedLibraryItemId(items, tree, requestedTargetId);
+      }
       const detail = selectedItemId
-        ? await readLibraryItem(workspaceId, selectedItemId)
+        ? await readLibraryItem(workspaceId, selectedItemId).catch((exc) => {
+            if ((route?.targetKind === "item" || route?.targetKind === "artifact") && exc instanceof ApiError && exc.status === 404) {
+              throw new LibraryRouteTargetNotFoundError();
+            }
+            throw exc;
+          })
         : null;
       return {
         workspaceId,
@@ -220,11 +261,21 @@ export function LibraryScreen() {
         tree,
         treePolicies: treeData.policies,
         detail,
+        selectedArtifactId: artifact?.id ?? null,
+        selectedArtifact: artifact,
+        selectedArtifactVersion: referencedVersion,
       };
     },
-    [pageSize, t],
+    [routeWorkspaceId, route?.targetKind === "artifact" ? route.targetId : null, pageSize, t],
     {
       errorMessage: t("errors.load"),
+      formatError: (exc, fallback) => {
+        if (exc instanceof LibraryRouteTargetNotFoundError) {
+          setRouteNotFoundKey(`${routeWorkspaceId}:${route?.suffix ?? "library"}`);
+          return "Library target not found";
+        }
+        return libraryErrorMessage(exc, fallback);
+      },
       fallbackData: {
         workspaceId: "",
         capabilities: UNAVAILABLE_LIBRARY_CAPABILITIES,
@@ -235,6 +286,9 @@ export function LibraryScreen() {
         tree: [],
         treePolicies: {},
         detail: null,
+        selectedArtifactId: null,
+        selectedArtifact: null,
+        selectedArtifactVersion: null,
       },
       onSuccess: (nextState) => {
         const libraryTree = libraryExplorerTreeNodes(nextState.tree);
@@ -258,7 +312,7 @@ export function LibraryScreen() {
               libraryTree,
               searchParams.get(TREE_EXPANDED_PARAM),
               selectedNodeId,
-              { defaultMode: "none", storageKey: "library" },
+              { defaultMode: "none", storageKey: "library", workspaceId: routeWorkspaceId },
             );
           }
           if (revealKey && revealedRouteTargetRef.current !== revealKey) {
@@ -298,7 +352,25 @@ export function LibraryScreen() {
       cursor: state?.itemsCursor ?? null,
     });
   }, [overviewBaseKey, state?.itemsCursor]);
-  const selectedDetail = state?.detail ?? null;
+  const routedItemId = route?.targetKind === "item"
+    ? route.targetId
+    : route?.targetKind === "artifact"
+      ? state?.selectedArtifactId === route.targetId
+        ? state.selectedArtifactVersion?.library_item_id ?? null
+        : null
+      : null;
+  const artifactRouteMatchesState = route?.targetKind !== "artifact" ||
+    state?.selectedArtifactId === route.targetId;
+  const selectedDetail = routedItemId && state?.detail?.id === routedItemId
+    ? state.detail
+    : null;
+  const readerDetail = selectedDetail && route?.targetKind === "artifact" && state?.selectedArtifactVersion
+    ? libraryDetailAtArtifactVersion(
+        selectedDetail,
+        state.selectedArtifactVersion,
+        state.selectedArtifact,
+      )
+    : selectedDetail;
   useEffect(() => {
     if (!selectedDetail) {
       return;
@@ -374,14 +446,14 @@ export function LibraryScreen() {
     }
     setErrorActionLink(null);
     setError(null);
-    setSearchParams(
-      updateTreeSearchParams(searchParams, { targetId: libraryItemId }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "library", libraryItemId, "item"), searchParams));
   }
 
   useEffect(() => {
     if (!state?.workspaceId) {
+      return;
+    }
+    if (route?.targetKind === "artifact") {
       return;
     }
     const targetNode = requestedTargetId
@@ -408,7 +480,7 @@ export function LibraryScreen() {
           ) {
             return current;
           }
-          writeExpandedNodeIdsToStorage("library", next);
+          writeExpandedNodeIdsToStorage("library", next, routeWorkspaceId);
           return next;
         });
       }
@@ -421,7 +493,9 @@ export function LibraryScreen() {
       }
       unavailableTargetIdRef.current = null;
     }
-    const selectedItemId = resolveRequestedLibraryItemId(
+    const selectedItemId = route?.targetKind === "item"
+      ? route.targetId
+      : resolveRequestedLibraryItemId(
       state.items,
       state.tree,
       requestedTargetId,
@@ -484,11 +558,7 @@ export function LibraryScreen() {
                 }
               : current,
           );
-          setSearchParams(
-            (current) =>
-              updateTreeSearchParams(current, { targetId: null }),
-            { replace: true },
-          );
+          navigate(withWorkspaceQuery(workspacePath(routeWorkspaceId, "library"), searchParams), { replace: true });
           setError(
             t("errors.itemUnavailable", {
               defaultValue:
@@ -502,16 +572,43 @@ export function LibraryScreen() {
     return () => {
       cancelled = true;
     };
-  }, [requestedTargetId, setError, setSearchParams, setState, state, t]);
+  }, [navigate, requestedTargetId, route?.targetKind, route?.targetId, routeWorkspaceId, searchParams, setError, setSearchParams, setState, state, t]);
 
-  const selectedProcessingStatus = state?.detail
-    ? libraryProcessingStatus(state.detail)
+  useEffect(() => {
+    if (route?.targetKind !== "folder" || !route.targetId || !state?.workspaceId) return;
+    const existing = state.tree.find((node) => node.id === route.targetId);
+    if (existing) {
+      if (existing.section !== "library" || existing.node_kind !== "folder") {
+        setRouteNotFoundKey(`${routeWorkspaceId}:${route.suffix}`);
+        setError("Library folder not found");
+      }
+      return;
+    }
+    let cancelled = false;
+    void readTreeNode(routeWorkspaceId, route.targetId).then((node) => {
+      if (!cancelled && (node.section !== "library" || node.node_kind !== "folder")) {
+        setRouteNotFoundKey(`${routeWorkspaceId}:${route.suffix}`);
+        setError("Library folder not found");
+      }
+    }).catch((exc) => {
+      if (!cancelled && exc instanceof ApiError && exc.status === 404) {
+        setRouteNotFoundKey(`${routeWorkspaceId}:${route.suffix}`);
+        setError("Library folder not found");
+      } else if (!cancelled) {
+        setError(libraryErrorMessage(exc, t("errors.load")));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [route?.suffix, route?.targetId, route?.targetKind, routeWorkspaceId, setError, state?.tree, state?.workspaceId, t]);
+
+  const selectedProcessingStatus = selectedDetail
+    ? libraryProcessingStatus(selectedDetail)
     : null;
   const shouldPollSelectedItem = isPollingStatus(selectedProcessingStatus);
   useEffect(() => {
     const workspaceId = state?.workspaceId;
-    const itemId = state?.detail?.id;
-    const currentVersionId = state?.detail?.current_version?.id ?? null;
+    const itemId = selectedDetail?.id;
+    const currentVersionId = selectedDetail?.current_version?.id ?? null;
     if (!workspaceId || !itemId || !shouldPollSelectedItem) {
       return;
     }
@@ -564,8 +661,8 @@ export function LibraryScreen() {
   }, [
     setState,
     shouldPollSelectedItem,
-    state?.detail?.current_version?.id,
-    state?.detail?.id,
+    selectedDetail?.current_version?.id,
+    selectedDetail?.id,
     state?.workspaceId,
   ]);
 
@@ -575,6 +672,10 @@ export function LibraryScreen() {
     title: string;
   }) {
     if (!state) {
+      return;
+    }
+    if (input.parentNodeId && !state.tree.some((node) => node.id === input.parentNodeId && node.section === "library" && node.can_have_children)) {
+      setError(t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" }));
       return;
     }
     clearError();
@@ -589,12 +690,7 @@ export function LibraryScreen() {
       folder.parent_id,
     );
     setStoredExpandedNodeIds(nextExpandedNodeIds);
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: folder.id,
-      }),
-      { replace: true },
-    );
+    navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "library", folder.id, "folder"), searchParams), { replace: true });
     setState((current) =>
       current
         ? {
@@ -696,10 +792,7 @@ export function LibraryScreen() {
   }
 
   function copyTreeNodeLink(node: TreeNodePayload) {
-    const params = updateTreeSearchParams(new URLSearchParams(), {
-      targetId: node.id,
-    });
-    const path = `/library?${params.toString()}`;
+    const path = workspaceTargetHref(routeWorkspaceId, "library", node.target_id ?? node.id, node.target_kind === "library_artifact" ? "artifact" : node.node_kind === "folder" ? "folder" : "item");
     const href =
       typeof window === "undefined" ? path : `${window.location.origin}${path}`;
     void navigator.clipboard?.writeText(href);
@@ -812,7 +905,7 @@ export function LibraryScreen() {
           }
         },
         errorMessage: (error) =>
-          libraryUploadError(error, t("errors.upload")).message,
+          libraryUploadError(error, t("errors.upload"), routeWorkspaceId).message,
         onChange: (entry) => {
           const failure = entry.status === "failed"
             ? libraryUploadRetryMetadata(errorsById.get(entry.id))
@@ -849,10 +942,7 @@ export function LibraryScreen() {
             : current,
         );
         localTargetIdRef.current = uploaded.id;
-        setSearchParams(
-          updateTreeSearchParams(searchParams, { targetId: uploaded.id }),
-          { replace: true },
-        );
+        navigate(workspaceTargetHref(routeWorkspaceId, "library", uploaded.id, "item"), { replace: true });
         try {
           const [itemsPage, treeData] = await Promise.all([
             listLibraryItems(state.workspaceId, { limit: pageSize }),
@@ -893,7 +983,7 @@ export function LibraryScreen() {
         reportUploadFailures(entries.length, failures);
       }
     } catch (exc) {
-      const uploadError = libraryUploadError(exc, t("errors.upload"));
+      const uploadError = libraryUploadError(exc, t("errors.upload"), routeWorkspaceId);
       setErrorActionLink(uploadError.settingsLink);
       setError(uploadError.message);
     } finally {
@@ -935,7 +1025,7 @@ export function LibraryScreen() {
     failures: { file: File; error: unknown }[],
   ) {
     const uploadErrors = failures.map(({ error }) =>
-      libraryUploadError(error, t("errors.upload")),
+      libraryUploadError(error, t("errors.upload"), routeWorkspaceId),
     );
     setErrorActionLink(
       uploadErrors.find((entry) => entry.settingsLink)?.settingsLink ?? null,
@@ -996,15 +1086,33 @@ export function LibraryScreen() {
 
   function setStoredExpandedNodeIds(nodeIds: string[]) {
     setExpandedNodeIds(nodeIds);
-    writeExpandedNodeIdsToStorage("library", nodeIds);
+    writeExpandedNodeIdsToStorage("library", nodeIds, routeWorkspaceId);
   }
 
   useDocumentTitle(
-    state?.detail ? libraryItemDisplayTitle(state.detail) : null,
+    selectedDetail ? libraryItemDisplayTitle(selectedDetail) : null,
     " - ",
   );
 
+  if (routeNotFoundKey === `${routeWorkspaceId}:${route?.suffix ?? "library"}`) {
+    return <NotFoundScreen />;
+  }
   if (!state) {
+    return <RouteLoading label={t("loading")} />;
+  }
+  if (route?.targetKind === "artifact" && !artifactRouteMatchesState) {
+    if (error) {
+      return (
+        <section className="feature-main">
+          <StatusBanner
+            tone="warning"
+            action={<button className="icon-button" onClick={reload} type="button">{t("workspaceResolution.retry", { ns: "shell", defaultValue: "Retry" })}</button>}
+          >
+            {error}
+          </StatusBanner>
+        </section>
+      );
+    }
     return <RouteLoading label={t("loading")} />;
   }
   const libraryTree = libraryExplorerTreeNodes(state.tree);
@@ -1012,17 +1120,31 @@ export function LibraryScreen() {
   const uploadAccept = libraryUploadAccept(state.capabilities);
   const capabilitiesUnavailable =
     state.capabilities.capability_revision === "unavailable";
-  const canUpload = canEdit && state.capabilities.formats.some((format) => format.upload);
+  const canUpload = canEdit && route?.targetKind !== "artifact" && state.capabilities.formats.some((format) => format.upload);
   // Named once: the rail's "+" uses it to decide whether the new-item dialog
   // has a choice worth showing, and the dialog itself gates the folder branch
   // on the same policy.
   const canCreateLibraryFolder =
     canEdit && (libraryPolicy?.allow_user_folder_create ?? false);
-  const detailFormatCapability = state.detail
-    ? findLibraryFormatCapability(state.detail, state.capabilities)
+  const folderCreateRoute = Boolean(route?.create && route.suffix === "library/folders/new");
+  const uploadCreateRoute = Boolean(route?.create && route.suffix === "library/items/new");
+  const routeFolderParentId = folderCreateRoute ? searchParams.get("parent") : null;
+  const routeFolderParent = routeFolderParentId
+    ? libraryTree.find((node) => node.id === routeFolderParentId && node.section === "library" && node.can_have_children)
     : null;
-  const createDialogParent = createDialog?.parentNodeId
-    ? (libraryTree.find((node) => node.id === createDialog.parentNodeId) ??
+  const routeActionParentId = (folderCreateRoute || uploadCreateRoute) ? searchParams.get("parent") : null;
+  const routeActionParentValid = !routeActionParentId || libraryTree.some((node) => node.id === routeActionParentId && node.section === "library" && node.can_have_children);
+  const activeCreateDialog = (
+    uploadCreateRoute && routeActionParentValid ? { initialItemType: "upload" as const, parentNodeId: routeActionParentId }
+      : folderCreateRoute && (!routeFolderParentId || routeFolderParent)
+        ? { initialItemType: "folder" as const, parentNodeId: routeFolderParentId }
+        : null
+  );
+  const detailFormatCapability = selectedDetail
+    ? findLibraryFormatCapability(selectedDetail, state.capabilities)
+    : null;
+  const createDialogParent = activeCreateDialog?.parentNodeId
+    ? (libraryTree.find((node) => node.id === activeCreateDialog.parentNodeId) ??
       null)
     : null;
   // F-5: folder destinations the new-folder dialog's location picker can target.
@@ -1059,7 +1181,7 @@ export function LibraryScreen() {
             title={t("libraryName")}
             accent="library"
             nodes={libraryTree}
-            activeTargetId={state.detail?.id}
+            activeTargetId={selectedDetail?.id}
             activeNodeId={selectedNode?.id ?? null}
             expandedNodeIds={expandedNodeIds}
             forceActivePathExpanded={false}
@@ -1073,17 +1195,21 @@ export function LibraryScreen() {
             onCreateItem={
               canEdit
                 ? ({ itemType, parentNodeId }) => {
+                    if (!canCreateLibraryFolder) {
+                      pickFiles(parentNodeId);
+                      return;
+                    }
                     // The dialog earns its step only when it has a choice to
                     // offer. With folder creation disabled by policy, upload is
                     // the only type left and NewItemDialog would render no
                     // segmented control -- so go straight to the file picker
                     // and keep uploading a one-click action, as it was before
                     // the rail's "+" learned to offer folders.
-                    if (!canCreateLibraryFolder) {
-                      pickFiles(parentNodeId);
-                      return;
-                    }
-                    setCreateDialog({ initialItemType: itemType, parentNodeId });
+                    const destination = itemType === "folder" && canCreateLibraryFolder
+                      ? "library/folders/new"
+                      : "library/items/new";
+                    const query = parentNodeId ? `?parent=${encodeURIComponent(parentNodeId)}` : "";
+                    navigate(`${workspacePath(routeWorkspaceId, destination)}${query}`);
                   }
                 : undefined
             }
@@ -1104,10 +1230,7 @@ export function LibraryScreen() {
                 selectLibraryItem(node.target_id);
                 return;
               }
-              setSearchParams(
-                updateTreeSearchParams(searchParams, { targetId: node.id }),
-                { replace: true },
-              );
+              navigate(withWorkspaceQuery(workspaceTargetHref(routeWorkspaceId, "library", node.target_id ?? node.id, node.target_kind === "library_artifact" ? "artifact" : "folder"), searchParams));
             }}
           />
         )}
@@ -1138,17 +1261,24 @@ export function LibraryScreen() {
             ) : null}
             <Breadcrumbs
               items={targetBreadcrumbs({
-                basePath: "/library",
+                workspaceId: routeWorkspaceId,
+                basePath: workspacePath(routeWorkspaceId, "library"),
                 rootLabel: t("libraryName"),
                 nodes: libraryTree,
-                targetId: state.detail?.id,
+                targetId: selectedDetail?.id,
                 targetNodeId: selectedNode?.id,
-                fallbackLabel: state.detail
-                  ? libraryItemDisplayTitle(state.detail)
+                fallbackLabel: selectedDetail
+                  ? libraryItemDisplayTitle(selectedDetail)
                   : undefined,
               })}
             />
-            {!state.detail ? (
+            {folderCreateRoute && routeFolderParentId && !routeFolderParent ? (
+              <StatusBanner tone="warning">{t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" })}</StatusBanner>
+            ) : null}
+            {uploadCreateRoute && routeActionParentId && !routeActionParentValid ? (
+              <StatusBanner tone="warning">{t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" })}</StatusBanner>
+            ) : null}
+            {!selectedDetail ? (
               <div className="feature-header">
                 <div>
                   <p className="eyebrow">
@@ -1219,7 +1349,7 @@ export function LibraryScreen() {
               onCancel={cancelUpload}
               onRetry={retryUpload}
             />
-            {!state.detail ? (
+            {!selectedDetail ? (
               overviewItems.length === 0 ? (
                 <LibraryList
                   activeId={null}
@@ -1297,11 +1427,11 @@ export function LibraryScreen() {
               )
             ) : null}
             <LibraryReader
-              canEdit={canEdit}
+              canEdit={canEdit && route?.targetKind !== "artifact"}
               canUpload={canUpload}
               capabilities={state.capabilities}
-              detail={state.detail}
-              key={`${state.workspaceId}:${state.detail?.id ?? "none"}:${state.detail?.current_version?.id ?? "none"}`}
+              detail={readerDetail}
+              key={`${state.workspaceId}:${readerDetail?.id ?? "none"}:${readerDetail?.current_version?.id ?? "none"}`}
               workspaceId={state.workspaceId}
               previewKind={detailFormatCapability?.preview_kind ?? null}
               onConversionRetried={(retriedDetail) => {
@@ -1319,8 +1449,8 @@ export function LibraryScreen() {
                 );
               }}
               onDelete={() => {
-                if (state.detail) {
-                  setDeleteItem(state.detail);
+                if (selectedDetail) {
+                  setDeleteItem(selectedDetail);
                 }
               }}
               onVersionAdded={(updatedDetail) => {
@@ -1336,10 +1466,10 @@ export function LibraryScreen() {
           </section>
         }
         inspector={
-          state.detail ? <LibraryInspector detail={state.detail} /> : undefined
+          readerDetail ? <LibraryInspector detail={readerDetail} /> : undefined
         }
       />
-      {createDialog ? (
+      {activeCreateDialog ? (
         <NewItemDialog
           canCreateFolder={libraryPolicy?.allow_user_folder_create ?? false}
           canCreatePage={false}
@@ -1347,15 +1477,15 @@ export function LibraryScreen() {
           typeOrder={LIBRARY_NEW_ITEM_TYPE_ORDER}
           uploadAccept={uploadAccept}
           initialItemType={
-            canUpload && createDialog.initialItemType !== "folder"
+            canUpload && activeCreateDialog.initialItemType !== "folder"
               ? "upload"
-              : createDialog.initialItemType
+              : activeCreateDialog.initialItemType
           }
-          initialParentId={createDialog.parentNodeId ?? ""}
+          initialParentId={activeCreateDialog.parentNodeId ?? ""}
           parentLabel={createDialogParent?.title ?? t("libraryName")}
           parentNodes={libraryFolderNodes}
           rootLabel={t("libraryName")}
-          onClose={() => setCreateDialog(null)}
+          onClose={() => navigate(workspacePath(routeWorkspaceId, "library"), { replace: true })}
           onPickFiles={(files, parentNodeId) =>
             uploadFiles(files, parentNodeId)
           }
@@ -1409,10 +1539,7 @@ export function LibraryScreen() {
             const deletedId = deleteItem.id;
             setDeleteItem(null);
             unavailableTargetIdRef.current = requestedTargetId ?? deletedId;
-            setSearchParams(
-              updateTreeSearchParams(searchParams, { targetId: null }),
-              { replace: true },
-            );
+            navigate(withWorkspaceQuery(workspacePath(routeWorkspaceId, "library"), searchParams), { replace: true });
             // Drop every cached occurrence before the route update commits.
             // The overview has a separate Load-more accumulator, so filtering
             // only the first page leaves a dead selectable row behind when the
@@ -1682,7 +1809,7 @@ function LibraryDeleteDialog({
             <ul className="library-reference-list">
               {references!.map((reference) => (
                 <li key={reference.id}>
-                  <Link to={formatCanonicalContextUrl(workspaceId, reference.id)}>
+                  <Link to={contextPageHref(workspaceId, reference.id)}>
                     {reference.title ?? reference.slug}
                   </Link>
                 </li>
@@ -1740,7 +1867,7 @@ class LibraryUploadValidationError extends Error {
   }
 }
 
-function libraryUploadError(exc: unknown, fallback: string) {
+function libraryUploadError(exc: unknown, fallback: string, workspaceId: string) {
   if (
     exc instanceof ApiError &&
     (exc.body.error_code === "library_upload_too_large" ||
@@ -1748,7 +1875,7 @@ function libraryUploadError(exc: unknown, fallback: string) {
   ) {
     return {
       message: exc.message,
-      settingsLink: exc.body.settings_link ?? "/settings?section=library",
+      settingsLink: exc.body.settings_link ?? `${workspacePath(workspaceId, "settings")}?section=library`,
     };
   }
   return {
@@ -1769,6 +1896,7 @@ function LibraryList({
   onUpload?: () => void;
 }) {
   const { t } = useTranslation("library");
+  const routeWorkspaceId = useRouteWorkspaceId();
   if (items.length === 0) {
     return (
       <div className="empty-state empty-state-rich">
@@ -1793,7 +1921,7 @@ function LibraryList({
               })}
             </button>
           ) : null}
-          <Link className="icon-button text-button" to="/context">
+          <Link className="icon-button text-button" to={workspacePath(routeWorkspaceId, "context")}>
             {t("overview.openContext", { defaultValue: "Open Context" })}
           </Link>
         </div>
@@ -2198,7 +2326,7 @@ function LibraryAddVersionAction({
       setStatus("idle");
       onVersionAdded(updated);
     } catch (exc) {
-      const uploadError = libraryUploadError(exc, t("errors.upload"));
+      const uploadError = libraryUploadError(exc, t("errors.upload"), workspaceId);
       setStatus("failed");
       setError(uploadError.message);
       setErrorActionLink(uploadError.settingsLink);
@@ -2649,6 +2777,25 @@ function readyLibraryArtifacts(detail: LibraryItemDetail) {
   );
 }
 
+function libraryDetailAtArtifactVersion(
+  detail: LibraryItemDetail,
+  version: LibraryItemVersionPayload,
+  artifact: LibraryArtifactPayload | null,
+): LibraryItemDetail {
+  return {
+    ...detail,
+    current_version: version,
+    current_version_id: version.id,
+    current_ready_version: null,
+    current_ready_version_id: null,
+    current_preview_version_id: version.id,
+    versions: [...detail.versions.filter((item) => item.id !== version.id), version],
+    artifacts: artifact
+      ? [...detail.artifacts.filter((item) => item.id !== artifact.id), artifact]
+      : detail.artifacts,
+  };
+}
+
 function editableLibraryMarkdownVersionId(detail: LibraryItemDetail | null) {
   if (!detail) return null;
   const version = readyLibraryVersion(detail);
@@ -2681,10 +2828,9 @@ function readyLibraryVersion(detail: LibraryItemDetail) {
  * is displaying -- never a separately-guessed candidate (a stale
  * `readyLibraryVersion`, the item-level `original_url`, or the raw
  * connector `uri`) that could silently point at a different version than
- * what's on screen. §3-D: that's always the latest version now -- History's
- * past-version preview and its `selectedVersionId` are gone (a version's
- * *own* download button lives on its History row instead, gated on the
- * server-authoritative `original_download_available`, not this function).
+ * what's on screen. An artifact route supplies detail pinned to the
+ * server-confirmed artifact version. History's per-version download is
+ * separately gated on server-authoritative `original_download_available`.
  */
 function libraryOriginalUrl(detail: LibraryItemDetail) {
   const versionId = previewVersionId(detail);

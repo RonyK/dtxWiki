@@ -12,7 +12,7 @@ describe("NotFoundScreen", () => {
     await i18n.changeLanguage("en");
   });
 
-  it("renders the 404 heading and a Back to dashboard link", () => {
+  it("renders the 404 heading and global recovery links without a workspace", () => {
     render(
       <MemoryRouter>
         <NotFoundScreen />
@@ -23,11 +23,11 @@ describe("NotFoundScreen", () => {
       screen.getByRole("heading", { name: "We couldn't find that page" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Back to dashboard" }),
-    ).toHaveAttribute("href", "/dashboard");
-    expect(screen.getByRole("link", { name: "Open Context" })).toHaveAttribute(
+      screen.getByRole("link", { name: "Find workspaces" }),
+    ).toHaveAttribute("href", "/workspaces/find");
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
       "href",
-      "/context",
+      "/account",
     );
   });
 });

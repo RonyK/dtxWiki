@@ -19,7 +19,7 @@ describe("Settings account recovery surfaces", () => {
   it("shows the User accounts tab and recovery surface only to a Server Admin", async () => {
     mockSettingsFetch({ isServerAdmin: true });
     render(
-      <MemoryRouter initialEntries={["/settings?section=users"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=users`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -36,7 +36,7 @@ describe("Settings account recovery surfaces", () => {
   it("hides the User accounts tab and gates a direct link for a non-admin", async () => {
     mockSettingsFetch({ isServerAdmin: false });
     render(
-      <MemoryRouter initialEntries={["/settings?section=users"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=users`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );
@@ -61,7 +61,7 @@ describe("Settings account recovery surfaces", () => {
       deployment: deploymentResponse(),
     });
     render(
-      <MemoryRouter initialEntries={["/settings?section=deployment"]}>
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=deployment`]}>
         <SettingsScreen />
       </MemoryRouter>,
     );

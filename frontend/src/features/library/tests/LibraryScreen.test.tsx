@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeNodePayload } from "../../../shared/api/workspace";
@@ -82,7 +82,7 @@ describe("LibraryScreen", () => {
       },
     });
     const { unmount } = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -138,7 +138,7 @@ describe("LibraryScreen", () => {
     // C2: no ?target no longer auto-opens items[0]; deep-link the item so its
     // detail is selected.
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -178,9 +178,9 @@ describe("LibraryScreen", () => {
     ).toHaveAttribute("aria-selected", "true");
     const breadcrumb = within(screen.getByLabelText("Breadcrumb"));
     expect(breadcrumb.getByRole("link", { name: "Library" }))
-      .toHaveAttribute("href", "/library");
+      .toHaveAttribute("href", "/workspaces/workspace-1/library");
     expect(breadcrumb.getByRole("link", { name: "References" }))
-      .toHaveAttribute("href", "/library?target=ancestor-0");
+      .toHaveAttribute("href", "/workspaces/workspace-1/library/folders/ancestor-0");
 
     await userEvent.click(breadcrumb.getByRole("link", { name: "References" }));
 
@@ -226,7 +226,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -283,7 +283,7 @@ describe("LibraryScreen", () => {
     // Land on a folder node so no item is selected and the overview renders
     // (entry without a target still auto-selects items[0] until C2).
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library/folders/references"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -360,7 +360,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library/folders/references"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -431,7 +431,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library/folders/references"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -491,7 +491,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the first item so its detail is selected (no auto-open).
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -573,7 +573,7 @@ describe("LibraryScreen", () => {
 
     render(
       <MemoryRouter
-        initialEntries={[`/library?target=${SECOND_LIBRARY_ITEM_ID}`]}
+        initialEntries={[`/workspaces/workspace-1/library/items/${SECOND_LIBRARY_ITEM_ID}`]}
       >
         <LibraryScreen />
       </MemoryRouter>,
@@ -645,7 +645,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the item so its detail is selected (no auto-open).
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -676,7 +676,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -745,7 +745,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -791,7 +791,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -810,7 +810,7 @@ describe("LibraryScreen", () => {
     expect(
       fetchMock.mock.calls.some(
         ([input, init]) =>
-          input.toString().endsWith("/library/items") && init?.method === "POST",
+          input.toString().endsWith("/workspaces/workspace-1/library/items") && init?.method === "POST",
       ),
     ).toBe(false);
   });
@@ -850,7 +850,7 @@ describe("LibraryScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -917,7 +917,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -944,7 +944,7 @@ describe("LibraryScreen", () => {
     expect(
       fetchMock.mock.calls.some(
         ([input, init]) =>
-          input.toString().endsWith("/library/items") && init?.method === "POST",
+          input.toString().endsWith("/workspaces/workspace-1/library/items") && init?.method === "POST",
       ),
     ).toBe(false);
   });
@@ -1016,7 +1016,7 @@ describe("LibraryScreen", () => {
               request_id: "request-2",
               warnings: [],
               limit_bytes: 1000000,
-              settings_link: "/settings?section=library",
+              settings_link: "/workspaces/workspace-1/settings?section=library",
             },
             422,
           );
@@ -1043,7 +1043,7 @@ describe("LibraryScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1072,7 +1072,7 @@ describe("LibraryScreen", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open Library policy settings" }),
-    ).toHaveAttribute("href", "/settings?section=library");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/settings?section=library");
     expect(screen.getByRole("treeitem", { name: "Second Notes" }))
       .toHaveAttribute("aria-selected", "true");
   });
@@ -1137,7 +1137,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1213,7 +1213,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1296,7 +1296,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1355,7 +1355,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1419,7 +1419,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1523,7 +1523,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1581,7 +1581,7 @@ describe("LibraryScreen", () => {
             request_id: "request-1",
             warnings: [],
             limit_bytes: 1000000,
-            settings_link: "/settings?section=library",
+            settings_link: "/workspaces/workspace-1/settings?section=library",
           },
           422,
         );
@@ -1593,7 +1593,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1613,7 +1613,7 @@ describe("LibraryScreen", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open Library policy settings" }),
-    ).toHaveAttribute("href", "/settings?section=library");
+    ).toHaveAttribute("href", "/workspaces/workspace-1/settings?section=library");
     expect(
       screen.queryByRole("button", { name: "Retry upload for large.md" }),
     ).toBeNull();
@@ -1661,7 +1661,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the JSON item so its detail is selected (no auto-open).
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1716,7 +1716,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the PDF item so its detail is selected (no auto-open).
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1799,7 +1799,7 @@ describe("LibraryScreen", () => {
     });
 
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1900,7 +1900,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -1990,7 +1990,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2125,7 +2125,7 @@ describe("LibraryScreen", () => {
       });
 
       render(
-        <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+        <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
           <LibraryScreen />
         </MemoryRouter>,
       );
@@ -2303,7 +2303,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2381,7 +2381,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2483,7 +2483,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2617,7 +2617,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library/folders/references"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2709,7 +2709,7 @@ describe("LibraryScreen", () => {
 
     // C2: deep-link the PDF item so its detail is selected (no auto-open).
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2754,7 +2754,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/library"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2810,7 +2810,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2879,7 +2879,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2919,7 +2919,7 @@ describe("LibraryScreen", () => {
     // C2: deep-link the item so its detail is selected (no auto-open), then
     // assert the viewer sees no write affordances on the reader.
     const view = render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -2966,7 +2966,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3014,7 +3014,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3049,7 +3049,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3097,7 +3097,7 @@ describe("LibraryScreen", () => {
       .mockImplementation(() => undefined);
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3177,7 +3177,7 @@ describe("LibraryScreen", () => {
       const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
 
       render(
-        <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+        <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
           <LibraryScreen />
         </MemoryRouter>,
       );
@@ -3222,7 +3222,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3270,7 +3270,7 @@ describe("LibraryScreen", () => {
 
     // Land on a folder so the overview header (not an item detail) renders.
     render(
-      <MemoryRouter initialEntries={["/library?target=references"]}>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library/folders/references"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3309,7 +3309,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3339,6 +3339,65 @@ describe("LibraryScreen", () => {
     await userEvent.click(screen.getByRole("tab", { name: "View" }));
     expect(await screen.findByText(/Second version body/)).toBeInTheDocument();
     expect(screen.queryByText(/First version body/)).toBeNull();
+  });
+
+  it("opens a preview artifact against its version even when the ready head is newer", async () => {
+    const detail = twoVersionLibraryItemDetail();
+    const olderVersion = detail.versions[1];
+    const olderArtifact = detail.artifacts[1];
+    Object.assign(detail, {
+      current_ready_version_id: detail.current_version.id,
+      current_preview_version_id: olderVersion.id,
+    });
+    Object.assign(olderArtifact, {
+      stage: "preview_generation",
+      role: "markdown",
+      media_type: "text/markdown",
+      is_complete: true,
+    });
+    const currentArtifact = detail.artifacts[0];
+    let resolveCurrentArtifact!: (value: unknown) => void;
+    const currentArtifactResponse = new Promise<unknown>((resolve) => { resolveCurrentArtifact = resolve; });
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: {
+        data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`]: {
+        data: [libraryItemSummary(LIBRARY_ITEM_ID, "Versioned Item", "https://example.com/versioned-source")],
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`]: {
+        data: treeResponse("library", [treeNode("node-1", LIBRARY_ITEM_ID, "Versioned Item")]),
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/artifacts/${olderArtifact.id}`]: {
+        data: olderArtifact,
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/artifacts/${currentArtifact.id}`]: () => currentArtifactResponse,
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/versions/${olderVersion.id}`]: {
+        data: olderVersion,
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/versions/${detail.versions[0].id}`]: {
+        data: detail.versions[0],
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${LIBRARY_ITEM_ID}`]: {
+        data: detail,
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/artifacts/${olderArtifact.id}`]}>
+        <LibraryScreen />
+        <LibraryArtifactRouteSwitch artifactId={currentArtifact.id} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Versioned Item", level: 2 })).toBeInTheDocument();
+    expect(await screen.findByText(/First version body/)).toBeInTheDocument();
+    expect(screen.queryByText(/Second version body/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Delete item/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Navigate to current artifact" }));
+    await waitFor(() => expect(screen.queryByText(/First version body/)).toBeNull());
+    resolveCurrentArtifact({ data: currentArtifact });
+    expect(await screen.findByText(/Second version body/)).toBeInTheDocument();
   });
 
   it("uploads a new version onto an existing item and reflects it as current (P10.2)", async () => {
@@ -3388,7 +3447,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3412,7 +3471,7 @@ describe("LibraryScreen", () => {
     ).toHaveAttribute("href", updatedVersion.original_url);
 
     const versionsCall = fetchMock.mock.calls.find(([input]) =>
-      String(input).endsWith(`/library/items/${LIBRARY_ITEM_ID}/versions`),
+      String(input).endsWith(`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}/versions`),
     );
     expect(versionsCall).toBeDefined();
     const [, init] = versionsCall!;
@@ -3454,7 +3513,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={[`/library?target=${LIBRARY_ITEM_ID}`]}>
+      <MemoryRouter initialEntries={[`/workspaces/workspace-1/library/items/${LIBRARY_ITEM_ID}`]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3502,7 +3561,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3544,7 +3603,7 @@ describe("LibraryScreen", () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
       </MemoryRouter>,
     );
@@ -3612,6 +3671,18 @@ function mockFetch(
       headers: { "Content-Type": "application/json" },
     });
   });
+}
+
+function LibraryArtifactRouteSwitch({ artifactId }: { artifactId: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(`/workspaces/workspace-1/library/artifacts/${artifactId}`)}
+    >
+      Navigate to current artifact
+    </button>
+  );
 }
 
 function defaultLibraryCapabilities() {
