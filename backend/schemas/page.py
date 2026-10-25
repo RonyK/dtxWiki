@@ -52,6 +52,19 @@ CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD = Field(
 )
 
 
+class ContextPageLocation(BaseModel):
+    workspace_id: UUID
+    page_id: UUID
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextPageLocationResponse(RESTResponseBase):
+    data: ContextPageLocation
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class PageSummary(BaseModel):
     id: UUID
     slug: str
@@ -127,7 +140,8 @@ class PagePayload(PageSummary):
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
     # What the write that produced this payload changed. Set by the MCP edit
     # commands and read by their handlers; a private attribute, so the REST
-    # payload and the idempotency ledger's stored result stay unchanged.
+    # payload stays unchanged. The command ledger retains it separately for
+    # an identical receipt when an idempotent patch is replayed.
     _edit_receipt: EditReceipt | None = PrivateAttr(default=None)
 
 

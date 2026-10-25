@@ -95,6 +95,10 @@ const DEPLOYMENT = {
   current_version: "0.1.0",
   latest_version: null,
   update_available: false,
+  check_status: "succeeded",
+  checked_at: "2026-10-23T00:00:00Z",
+  stale: false,
+  source: "pypi",
 };
 
 function mockFetch(role: string, deployment = DEPLOYMENT) {
@@ -172,6 +176,10 @@ describe("Settings > Deployment tab", () => {
       (await screen.findAllByText("https://wiki.example.com")).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("https://wiki.example.com/mcp")).toBeInTheDocument();
+    const instanceScope = screen.getByText(/these settings apply to the whole instance \(all workspaces\)/);
+    const updateCard = screen.getByRole("heading", { name: "Version & updates" }).closest("section");
+    expect(instanceScope).toBeInTheDocument();
+    expect(updateCard).not.toContainElement(instanceScope);
     expect(screen.getByText("OAuth access lifetime")).toBeInTheDocument();
     expect(screen.getByText("OAuth client self-registration")).toBeInTheDocument();
     expect(screen.getByText("3600 seconds · Environment override")).toBeInTheDocument();
@@ -363,7 +371,7 @@ describe("Settings > Deployment tab", () => {
     ).toBeInTheDocument();
   });
 
-  it("surfaces an update-available banner when a newer version exists", async () => {
+  it("shows the release and installation selector without a generic updater command", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       const json = (body: unknown) =>
@@ -415,9 +423,15 @@ describe("Settings > Deployment tab", () => {
       </MemoryRouter>,
     );
 
-    expect(
-      await screen.findByText(/0\.2\.0 is available/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("New release")).toBeInTheDocument();
+    expect(screen.getByText("0.2.0")).toBeInTheDocument();
+    const selector = screen.getByRole("combobox", {
+      name: "Installation method",
+    });
+    expect(selector).toHaveValue("");
+    expect(within(selector).getAllByRole("option")).toHaveLength(8);
+    expect(screen.queryByText(/dtxwiki update/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/I don.t know/i)).not.toBeInTheDocument();
   });
 
   it("hides the Deployment tab from non-admins", async () => {

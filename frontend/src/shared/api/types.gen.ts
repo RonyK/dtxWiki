@@ -129,6 +129,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/deployment/update-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Deployment Update Check
+         * @description Check the package index for a release without applying any update.
+         */
+        post: operations["admin_deployment_update_check_api_v1_admin_deployment_update_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/jobs": {
         parameters: {
             query?: never;
@@ -530,6 +550,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/context/pages/{page_id}/location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Page Location */
+        get: operations["read_page_location_api_v1_context_pages__page_id__location_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/w/{workspace_slug}": {
         parameters: {
             query?: never;
@@ -695,6 +732,40 @@ export interface paths {
         };
         /** List Activity */
         get: operations["list_activity_api_v1_workspaces__workspace_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/activity/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Activity Feed */
+        get: operations["list_activity_feed_api_v1_workspaces__workspace_id__activity_feed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/activity/read-group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Activity Read Group */
+        get: operations["get_activity_read_group_api_v1_workspaces__workspace_id__activity_read_group_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2819,6 +2890,114 @@ export interface components {
              */
             is_current_user: boolean;
         };
+        /** ActivityFeedData */
+        ActivityFeedData: {
+            /** Entries */
+            entries: components["schemas"]["ActivityFeedEntry"][];
+            /** Has More */
+            has_more: boolean;
+            /** Lanes */
+            lanes: {
+                [key: string]: components["schemas"]["ActivityFeedLaneCount"];
+            };
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Represented Event Count */
+            represented_event_count: number;
+            /** Returned Entry Count */
+            returned_entry_count: number;
+            /** Unread Count */
+            unread_count: number;
+        };
+        /** ActivityFeedEntry */
+        ActivityFeedEntry: {
+            /**
+             * Entry Type
+             * @enum {string}
+             */
+            entry_type: "event" | "read_group";
+            event: components["schemas"]["ActivityFeedEvent"];
+            /** Event Count */
+            event_count: number;
+            /**
+             * First Occurred At
+             * Format: date-time
+             */
+            first_occurred_at: string;
+            /** Group Token */
+            group_token?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Last Occurred At
+             * Format: date-time
+             */
+            last_occurred_at: string;
+        };
+        /** ActivityFeedEvent */
+        ActivityFeedEvent: {
+            actor: components["schemas"]["ActivityActor"] | null;
+            /** Affordances */
+            affordances: ("restore_version" | "undo_change" | "mark_read" | "open")[];
+            /** Body */
+            body: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Event Args */
+            event_args: {
+                [key: string]: string;
+            };
+            /** Event Key */
+            event_key: ("context_page.draft.publish" | "tree.node.move" | "tree.node.rename" | "workspace.join_request.requested" | "workspace.join_request.approved" | "workspace.join_request.rejected") | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "pending" | "advisory" | "history";
+            navigation?: components["schemas"]["ActivityNavigation"] | null;
+            /**
+             * Operation
+             * @default log
+             */
+            operation: string;
+            /** Public Error Code */
+            public_error_code?: string | null;
+            /** Result Status */
+            result_status?: string | null;
+            /** Review Item Id */
+            review_item_id: string | null;
+            target: components["schemas"]["ActivityTarget"] | null;
+            /** Target Title */
+            target_title?: string | null;
+            /** Title */
+            title: string;
+            /** Tool Name */
+            tool_name?: string | null;
+        };
+        /** ActivityFeedLaneCount */
+        ActivityFeedLaneCount: {
+            /** Has More */
+            has_more: boolean | null;
+            /** Represented Event Count */
+            represented_event_count: number;
+            /** Returned Entry Count */
+            returned_entry_count: number;
+        };
+        /** ActivityFeedResponse */
+        ActivityFeedResponse: {
+            data: components["schemas"]["ActivityFeedData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** ActivityItemRead */
         ActivityItemRead: {
             actor: components["schemas"]["ActivityActor"] | null;
@@ -2867,6 +3046,34 @@ export interface components {
         /** ActivityListResponse */
         ActivityListResponse: {
             data: components["schemas"]["ActivityListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ActivityNavigation */
+        ActivityNavigation: {
+            /** Href */
+            href: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Kind */
+            target_kind: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** ActivityReadGroupData */
+        ActivityReadGroupData: {
+            /** Event Count */
+            event_count: number;
+            /** Events */
+            events: components["schemas"]["ActivityFeedEvent"][];
+            /** Group Id */
+            group_id: string;
+        };
+        /** ActivityReadGroupResponse */
+        ActivityReadGroupResponse: {
+            data: components["schemas"]["ActivityReadGroupData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ActivityTarget */
@@ -4620,6 +4827,24 @@ export interface components {
              */
             total: number;
         };
+        /** ContextPageLocation */
+        ContextPageLocation: {
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** ContextPageLocationResponse */
+        ContextPageLocationResponse: {
+            data: components["schemas"]["ContextPageLocation"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** ContextPageSummary */
         ContextPageSummary: {
             /** Aliases */
@@ -5111,6 +5336,14 @@ export interface components {
             app_mode: string;
             /** Behind Proxy */
             behind_proxy: boolean;
+            /**
+             * Check Status
+             * @default not_checked
+             * @enum {string}
+             */
+            check_status: "not_checked" | "succeeded" | "failed" | "disabled";
+            /** Checked At */
+            checked_at?: string | null;
             /** Current Version */
             current_version?: string | null;
             /** Env File Hint */
@@ -5137,6 +5370,17 @@ export interface components {
             public_base_url: string | null;
             recovery: components["schemas"]["RecoveryConfigurationStatus"];
             signup: components["schemas"]["SignupConfigurationStatus"];
+            /**
+             * Source
+             * @default pypi
+             * @enum {string}
+             */
+            source: "pypi" | "configured_index";
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
             /** Suggested Commands */
             suggested_commands: components["schemas"]["SuggestedCommand"][];
             /** Tls Mode */
@@ -5152,30 +5396,49 @@ export interface components {
             data: components["schemas"]["DeploymentStatus"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
-        /** DisambiguationCandidate */
-        DisambiguationCandidate: {
-            /** Concept Path */
-            concept_path?: string | null;
+        /** DeploymentUpdateCheckRequest */
+        DeploymentUpdateCheckRequest: {
             /**
-             * Id
-             * Format: uuid
+             * Force
+             * @default false
              */
-            id: string;
-            /** Match Reason */
-            match_reason: string;
-            /** Title */
-            title: string;
+            force: boolean;
         };
-        /** DisambiguationPayload */
-        DisambiguationPayload: {
-            /** Candidates */
-            candidates: components["schemas"]["DisambiguationCandidate"][];
+        /** DeploymentUpdateStatus */
+        DeploymentUpdateStatus: {
             /**
-             * Status
-             * @default ambiguous
-             * @constant
+             * Check Status
+             * @default not_checked
+             * @enum {string}
              */
-            status: "ambiguous";
+            check_status: "not_checked" | "succeeded" | "failed" | "disabled";
+            /** Checked At */
+            checked_at?: string | null;
+            /** Current Version */
+            current_version?: string | null;
+            /** Latest Version */
+            latest_version?: string | null;
+            /**
+             * Source
+             * @default pypi
+             * @enum {string}
+             */
+            source: "pypi" | "configured_index";
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
+             * Update Available
+             * @default false
+             */
+            update_available: boolean;
+        };
+        /** DeploymentUpdateStatusResponse */
+        DeploymentUpdateStatusResponse: {
+            data: components["schemas"]["DeploymentUpdateStatus"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** DiscardContextEditRequest */
         DiscardContextEditRequest: {
@@ -5246,7 +5509,7 @@ export interface components {
              * @description Stable warning code; must be drawn from WARNING_CODES.
              * @enum {string}
              */
-            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "disambiguation_required" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete";
+            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete";
             /** Message */
             message: string;
         };
@@ -8205,6 +8468,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Location */
+            location?: string[] | null;
             /** Match Reason */
             match_reason?: ("exact_id" | "exact_slug" | "exact_title" | "exact_alias" | "trigram" | "keyword" | "semantic" | "hybrid" | "associative") | null;
             /** Matched Name */
@@ -8221,9 +8486,12 @@ export interface components {
             } | null;
             /**
              * Stale
+             * @deprecated
              * @default false
              */
             stale: boolean;
+            /** Summary */
+            summary?: string | null;
             /** Title */
             title: string;
             /**
@@ -9064,6 +9332,12 @@ export interface components {
             date_to?: string | null;
             /** Format Hint */
             format_hint?: string[] | null;
+            /**
+             * Include Agents
+             * @description Whether Agent pages are included in search results.
+             * @default true
+             */
+            include_agents: boolean;
             /** Status */
             status?: string[] | null;
             /** Tag */
@@ -9073,7 +9347,6 @@ export interface components {
         };
         /** SearchPayload */
         SearchPayload: {
-            disambiguation?: components["schemas"]["DisambiguationPayload"] | null;
             /**
              * Has More
              * @default false
@@ -10595,6 +10868,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentStatusResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_deployment_update_check_api_v1_admin_deployment_update_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentUpdateCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentUpdateStatusResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -12422,6 +12755,73 @@ export interface operations {
             };
         };
     };
+    read_page_location_api_v1_context_pages__page_id__location_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                page_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextPageLocationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     read_public_workspace_api_v1_public_w__workspace_slug__get: {
         parameters: {
             query?: never;
@@ -13192,6 +13592,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    list_activity_feed_api_v1_workspaces__workspace_id__activity_feed_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "yesterday" | "week" | "month" | "all";
+                kind?: "all" | "workspace" | "mcp" | "system" | "review_decision";
+                subtype?: string;
+                lane?: ("pending" | "advisory" | "history") | null;
+                group_reads?: boolean;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityFeedResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    get_activity_read_group_api_v1_workspaces__workspace_id__activity_read_group_get: {
+        parameters: {
+            query: {
+                token: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityReadGroupResponse"];
                 };
             };
             /** @description Unauthorized */

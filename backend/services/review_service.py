@@ -67,6 +67,7 @@ from backend.services.actor_visible_read import (
     context_version_is_visible,
 )
 from backend.services.audit_service import AuditService
+from backend.services.body_preparer import BodyPreparer
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.job_queue import (
     JobQueueService,
@@ -178,8 +179,12 @@ class ReviewService:
         audit_service: AuditService | None = None,
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
+        body_preparer: BodyPreparer | None = None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
+        self.body_preparer = (
+            body_preparer if body_preparer is not None else BodyPreparer()
+        )
         self.context_media_repository_factory = context_media_repository_factory
 
     def list_reviews(
@@ -1797,7 +1802,6 @@ class ReviewService:
             role=actor_role,
         )
         if lock:
-            acquire_workspace_write_intent(session)
             self._lock_context_page_for_review_update(
                 session,
                 workspace_id=workspace_id,
@@ -2299,13 +2303,24 @@ class ReviewService:
                     request=request,
                 ):
                     raise ReviewDecisionIdConflictError()
-                return self._detail(
+                receipt = self._detail(
                     session,
                     review,
                     actor_user_id=principal,
                     actor_role=actor_role,
                     actor=actor,
+                    include_undo=actor_kind == "human",
                 )
+                if existing.decision_type == "approve":
+                    receipt.published_version_id = next((
+                        item.content.candidate_version_id
+                        for item in receipt.evidence.operations
+                        if item.document is not None
+                        and item.document.document_kind == "context"
+                        and item.content is not None
+                        and item.content.candidate_version_id is not None
+                    ), None)
+                return receipt
 
         # A retry of the exact terminal rejection is a read of the original
         # result, not a second state transition. This guard runs under the same
@@ -2501,6 +2516,7 @@ class ReviewService:
                 sync_page_projections(session, page=page, version=resulting_version)
                 ContextWriteService(
                     audit_service=self.audit_service,
+                    body_preparer=self.body_preparer,
                     context_media_repository_factory=(
                         self.context_media_repository_factory
                     ),
@@ -2508,6 +2524,7 @@ class ReviewService:
                     session,
                     page=page,
                     transition_version=version,
+                    decision_id=decision.id,
                 )
                 rejection_record["retired_version_ids"] = [
                     str(member.id) for member in plan.retired
@@ -2589,6 +2606,7 @@ class ReviewService:
 
             published = ContextWriteService(
                 audit_service=self.audit_service,
+                body_preparer=self.body_preparer,
                 context_media_repository_factory=self.context_media_repository_factory,
             ).publish_draft(
                 session=session,
@@ -2601,6 +2619,7 @@ class ReviewService:
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 publish_chain_ancestor=True,
+                review_decision_id=decision.id,
             )
             published_version_id = published.published_version_id
             restore_version_id = published.previous_published_version_id
@@ -3288,6 +3307,7 @@ class ReviewService:
         principal_role: str | None = None,
         *,
         context_write_service,
+        actor_provenance: str = "internal",
         update: UpdateDraftRequest | None = None,
         create: WriteDraftRequest | None = None,
         note: str | None = None,
@@ -3390,6 +3410,7 @@ class ReviewService:
             request=update,
             actor_kind=actor_kind,
             actor_id=actor_id,
+            actor_provenance=actor_provenance,
             origin_chat_session_id=origin_chat_session_id,
             # A revision answering a change request must never auto-approve — it
             # goes back to a human ("the AI never approves" — Risk 6). (re-review
@@ -3678,6 +3699,10 @@ class ReviewService:
         workspace_id: UUID,
         review_item_id: UUID,
     ) -> ContextPage | AgentPage | None:
+        # SQLite ignores FOR UPDATE. Take its writer lock before loading any
+        # decision state; the populated SELECT below then refreshes the page
+        # under that lock for undo, approval and rejection alike.
+        acquire_workspace_write_intent(session)
         review = get_in_workspace(
             session,
             ReviewItem,

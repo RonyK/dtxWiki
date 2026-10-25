@@ -1,22 +1,24 @@
 import {
-  ExternalLink,
+  ChevronRight,
   Bot,
   CheckSquare,
   FileText,
   Library,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import {
   getSettingsPolicies,
-  listActivity,
+  listActivityFeed,
   listRecentReviewDecisions,
   listReviews,
 } from "../../shared/api/operations";
 import type {
-  ActivityItem,
+  ActivityFeedEntry,
+  ActivityFeedData,
+  ActivityFeedEvent,
   ActivityPeriod,
   ReviewItem,
   SettingsPolicies,
@@ -24,7 +26,8 @@ import type {
 import { listContextPages } from "../../shared/api/context";
 import { listLibraryItems } from "../../shared/api/library";
 import { getCurrentWorkspaceId } from "../../shared/api/workspace";
-import { ActivityActorBadge } from "../../shared/components/ActivityActorBadge";
+import { ActivityEntryRow } from "../../shared/components/ActivityEntryRow";
+import { ActivityGroupingControl } from "../../shared/components/ActivityGroupingControl";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { CountChip } from "../../shared/components/CountChip";
 import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
@@ -36,35 +39,28 @@ import {
   type FirstUseProgress,
 } from "../../shared/components/FirstUseChecklist";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { StatusPill } from "../../shared/components/StatusPill";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
+import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
-import {
-  activityTargetHref,
-  isSystemActivityItem,
-  presentActivityItem,
-} from "../../shared/lib/activityLabels";
+import { activityCountLabel, activityEntryCounts, activityHref, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
 import { iconForActivityLane } from "../../shared/lib/activityLanes";
-import {
-  formatRelativeTimestamp,
-  formatVersionTimestamp,
-} from "../../shared/lib/datetime";
 import { applyPeriodParam, parsePeriodParam } from "../../shared/lib/urlState";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { isEditorRole } from "../../shared/workspace/permissions";
 
 const DASHBOARD_PERIODS: ActivityPeriod[] = ["today", "week", "month", "all"];
-// The activity overview path returns no cursor, so lane counts are computed
-// from a wide fetch window; a full window means the counts are lower bounds
-// and render with a "+" suffix. The feed itself stays a short preview.
+// The server completes read groups before budgeting display entries. The card
+// previews eight entries and labels the original events they represent separately.
 const DASHBOARD_ACTIVITY_FETCH_LIMIT = 50;
 const DASHBOARD_RECENT_DISPLAY_LIMIT = 8;
 
 type DashboardState = {
-  activity: ActivityItem[];
-  activityHasMore: boolean;
+  workspaceId: string;
+  queryKey: string;
+  activity: ActivityFeedEntry[];
+  activityLaneCounts: ActivityFeedData["lanes"] | null;
   systemActivityCount: number;
   reviews: ReviewItem[];
   reviewsHasMore: boolean;
@@ -73,11 +69,14 @@ type DashboardState = {
 };
 
 export function DashboardScreen() {
-  const { t, i18n } = useTranslation("dashboard");
+  const { t } = useTranslation("dashboard");
   const { preferences: labsPreferences } = useLabsPreferences();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const period = parsePeriod(searchParams.get("period"));
+  const query = { ...parseActivityQuery(searchParams, { period: "today", kind: "workspace" }), period, kind: "workspace" as const, subtype: "all" };
+  const groupReads = query.group_reads;
+  const queryKey = `${period}:${groupReads}`;
   const welcome = searchParams.get("welcome") === "1";
   // A viewer bounced off an editor-gated route lands here carrying the reason;
   // surface it so the redirect is explained instead of silently swallowed.
@@ -88,7 +87,7 @@ export function DashboardScreen() {
   // are hidden for sub-editor roles. Backend RBAC still re-enforces.
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
-  const { data: state, error } = useAsyncLoad<DashboardState>(
+  const { data: state, error, loading, reload, setData } = useAsyncLoad<DashboardState>(
     async () => {
       const workspaceId = await getCurrentWorkspaceId();
       if (!workspaceId) {
@@ -104,12 +103,11 @@ export function DashboardScreen() {
         contextPages,
       ] =
         await Promise.all([
-          listActivity(workspaceId, {
-            period,
-            kind: "workspace",
+          listActivityFeed(workspaceId, {
+            ...query,
             limit: DASHBOARD_ACTIVITY_FETCH_LIMIT,
           }),
-          listActivity(workspaceId, { period, kind: "system", limit: 1 }),
+          listActivityFeed(workspaceId, { period, kind: "system", group_reads: groupReads, limit: 1 }),
           listReviews(workspaceId, { status: "pending", limit: 20 }),
           listRecentReviewDecisions(workspaceId, { limit: 1 }),
           getSettingsPolicies(workspaceId),
@@ -117,12 +115,11 @@ export function DashboardScreen() {
           listContextPages(workspaceId),
         ]);
       return {
-        activity: activity.items,
-        // The overview activity path never returns a cursor, so a full fetch
-        // window is the cap signal: counts then read as lower bounds ("N+").
-        activityHasMore:
-          activity.items.length >= DASHBOARD_ACTIVITY_FETCH_LIMIT,
-        systemActivityCount: systemActivity.items.length,
+        workspaceId,
+        queryKey,
+        activity: activity.entries,
+        activityLaneCounts: activity.lanes,
+        systemActivityCount: systemActivity.entries.length,
         reviews: reviews.items,
         // The pending count is fetched capped at limit:20; a next_cursor means
         // there are more pending reviews than counted (C19).
@@ -139,18 +136,9 @@ export function DashboardScreen() {
         },
       };
     },
-    [period],
+    [period, groupReads],
     {
       errorMessage: t("errors.load", { defaultValue: "Failed to load Dashboard" }),
-      fallbackData: {
-        activity: [],
-        activityHasMore: false,
-        systemActivityCount: 0,
-        reviews: [],
-        reviewsHasMore: false,
-        policies: emptyPolicies(),
-        setupProgress: {},
-      },
     },
   );
 
@@ -161,32 +149,40 @@ export function DashboardScreen() {
     );
   }
 
-  // Activity links must carry BOTH the period and the kind. The lane counts are
-  // computed from the workspace-only slice of the current Dashboard period, but
-  // ActivityScreen defaults a missing `period` to "all" (not "today") and a
-  // missing `kind` to "all" (system events included). Omitting either would
-  // land the user on a different scope than the card counted, so always emit
-  // period + kind explicitly.
-  const systemActivityHref = `/activity?period=${period}&kind=system`;
-  const workspaceActivity = useMemo(
-    () => (state?.activity ?? []).filter((item) => !isSystemActivityItem(item)),
-    [state?.activity],
-  );
+  const systemActivityHref = activityHref({ ...query, kind: "system" });
+  const workspaceActivity = state?.activity ?? [];
+  const preview = workspaceActivity.slice(0, DASHBOARD_RECENT_DISPLAY_LIMIT);
+  const previewCounts = activityEntryCounts(preview);
+  const loadedCounts = activityEntryCounts(workspaceActivity);
+  const reconcileGroup = useCallback((token: string, events: ActivityFeedEvent[]) => {
+    setData(current => current?.queryKey === queryKey ? { ...current, activity: reconcileActivityReadGroup(current.activity, token, events) } : current);
+  }, [queryKey, setData]);
+  const loadGroup = useActivityGroupLoader(state?.workspaceId, reconcileGroup, reload);
+  function updateGrouping(checked: boolean) {
+    const next = new URLSearchParams(searchParams);
+    next.set("group_reads", checked ? "1" : "0");
+    // Keep the controlled native checkbox in sync with its URL-backed value.
+    setSearchParams(next, { replace: true, flushSync: true });
+  }
   const hiddenSystemActivityCount = state?.systemActivityCount ?? 0;
   const setupStarted = Object.values(state?.setupProgress ?? {}).some(Boolean);
   const needsSetupGuide =
     !state?.setupProgress.library ||
     !state.setupProgress.context ||
     !state.setupProgress.review;
-  const lanes = useMemo(() => {
+  // A lane count reads as a lower bound only where the server confirmed more
+  // for that lane; a merely full window is described by the scope text.
+  const laneMoreSuffix = (lane: "advisory" | "history") =>
+    state?.activityLaneCounts?.[lane]?.has_more === true ? "+" : undefined;
+  const lanes = (() => {
     // Pending reviews appear in the activity feed as one pending-lane row per
     // ReviewItem (carrying review_item_id); those rows are already counted via
     // reviews.length, so only review-less pending activity rows add here.
     const pending = workspaceActivity.filter(
-      (item) => item.lane === "pending" && item.review_item_id == null,
+      (item) => item.event.lane === "pending" && item.event.review_item_id == null,
     );
-    const advisory = workspaceActivity.filter((item) => item.lane === "advisory");
-    const history = workspaceActivity.filter((item) => item.lane === "history");
+    const advisory = workspaceActivity.filter((item) => item.event.lane === "advisory");
+    const history = workspaceActivity.filter((item) => item.event.lane === "history");
     // One vocabulary with the Activity trio: same titles, same descriptions,
     // same glyphs. No period suffix on the titles either — the segmented
     // control directly above already states the period, and only two of the
@@ -208,26 +204,28 @@ export function DashboardScreen() {
         id: "advisory",
         title: t("lanes.advisory", { defaultValue: "Advisory" }),
         description: t("lanes.advisoryHint", { defaultValue: "Needs attention" }),
-        count: advisory.length,
-        // Activity-derived counts come from a capped fetch window; a full
-        // window means the period holds more rows, so render a lower bound.
-        countSuffix: state?.activityHasMore ? "+" : undefined,
-        href: `/activity/advisory?period=${period}&kind=workspace`,
+        count: activityEntryCounts(advisory).represented_event_count,
+        countSuffix: laneMoreSuffix("advisory"),
+        href: activityHref(query, "advisory"),
         icon: iconForActivityLane("advisory"),
       },
       {
         id: "history",
         title: t("lanes.history", { defaultValue: "History" }),
         description: t("lanes.historyHint", { defaultValue: "Completed changes" }),
-        count: history.length,
-        countSuffix: state?.activityHasMore ? "+" : undefined,
-        href: `/activity/history?period=${period}&kind=workspace`,
+        count: activityEntryCounts(history).represented_event_count,
+        countSuffix: laneMoreSuffix("history"),
+        href: activityHref(query, "history"),
         icon: iconForActivityLane("history"),
       },
     ];
-  }, [period, state, t, workspaceActivity]);
+  })();
 
-  if (!state) {
+  if (!state || state.queryKey !== queryKey) {
+    if (error && !loading) return <div className="workspace-screen single-column"><section className="feature-main">
+      <h1>{t("header.title", { defaultValue: "Workspace Operations" })}</h1>
+      <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("activity:feed.reload")}</button></StatusBanner>
+    </section></div>;
     return <RouteLoading />;
   }
 
@@ -249,13 +247,12 @@ export function DashboardScreen() {
             // A plain count, so it takes the count chip every other header uses
             // — StatusPill is reserved for real states (Setup's "Partial").
             <CountChip
-              value={workspaceActivity.length}
-              approxMore={state.activityHasMore}
-              label={activityUnitForPeriod(workspaceActivity.length, period, t)}
+              value={loadedCounts.returned_entry_count}
+              formatted={activityCountLabel(loadedCounts.returned_entry_count, loadedCounts.represented_event_count)}
             />
           ) : null}
         </div>
-        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error ? <StatusBanner tone="warning">{error}<button className="icon-button text-button activity-feed-reload" type="button" onClick={reload}>{t("activity:feed.reload")}</button></StatusBanner> : null}
         {editorRequired ? (
           <StatusBanner tone="info">
             {t("editorRequiredBanner", {
@@ -278,6 +275,7 @@ export function DashboardScreen() {
                   {lane.countSuffix ?? ""}
                 </strong>
                 <p>{lane.description}</p>
+                {lane.id !== "pending" ? <p className="activity-feed-scope">{t("activity:feed.scope", { defaultValue: "Current query range" })}</p> : null}
               </Link>
             ))}
           </div>
@@ -324,23 +322,23 @@ export function DashboardScreen() {
             ) : null}
           </div>
         </section>
-        <section className="feature-section">
+        <section className="feature-section activity-feed-panel">
           <ListPanelHeader
             title={t("recent.title", { defaultValue: "Recent activity" })}
-            count={workspaceActivity.length}
-            // The overview activity path has no cursor, so a full fetch window
-            // means the count is a lower bound ("N+"), not a true total.
-            approxMore={state.activityHasMore}
-            unit={t(
-              workspaceActivity.length === 1
-                ? "recent.unit_one"
-                : "recent.unit_other",
-              {
-                defaultValue:
-                  workspaceActivity.length === 1 ? "event" : "events",
-              },
-            )}
+            count={preview.length}
+            unit={t("activity:feed.entryUnit", { count: preview.length, defaultValue: "entries" })}
+            action={<Link className="activity-feed-see-all" to={activityHref(query)}>
+              {t("recent.viewAll", { defaultValue: "View all activity" })}
+              <ChevronRight size={14} aria-hidden="true" />
+            </Link>}
           />
+          <div className="activity-feed-summary">
+            <div>
+              <p className="activity-feed-counts">{activityCountLabel(previewCounts.returned_entry_count, previewCounts.represented_event_count)}</p>
+              <p className="activity-feed-scope">{t("activity:feed.preview", { count: preview.length, loaded: loadedCounts.returned_entry_count, defaultValue: "Showing {{count}} entries from the loaded range" })} · {t("activity:feed.scope", { defaultValue: "Current query range" })}</p>
+            </div>
+            <ActivityGroupingControl checked={groupReads} onChange={updateGrouping} />
+          </div>
           {workspaceActivity.length === 0 ? (
             <div className="empty-state empty-state-rich">
               <h2>
@@ -374,87 +372,8 @@ export function DashboardScreen() {
               ) : null}
             </div>
           ) : (
-            <div className="operations-list">
-              {workspaceActivity
-                .slice(0, DASHBOARD_RECENT_DISPLAY_LIMIT)
-                .map((item) => {
-                  const presented = presentActivityItem(item);
-                  const action = classifyDashboardActivityAction(item);
-                  const targetHref = activityTargetHref(item);
-                  const targetKind = item.target?.target_kind;
-                  // Same rule as ActivityRow: show the real target name only
-                  // when the headline does not already say it, otherwise the
-                  // kind label -- never the same string twice in one row.
-                  const targetTitle = item.target_title?.trim() || null;
-                  const chipText =
-                    targetTitle && targetTitle !== presented.title
-                      ? targetTitle
-                      : targetKind
-                        ? t(`activity:targetKinds.${targetKind}`, {
-                            defaultValue: targetKind.replace(/_/g, " "),
-                          })
-                        : null;
-                  return (
-                    <article className="activity-row" key={item.id}>
-                      <div className="activity-row__main">
-                        <div className="activity-row__body">
-                          <p className="activity-row__title">
-                            <ActivityActorBadge actor={item.actor} />
-                            <span>{presented.title}</span>
-                          </p>
-                          {presented.body ? (
-                            <p className="activity-row__detail">
-                              {presented.body}
-                            </p>
-                          ) : null}
-                          {targetHref && chipText ? (
-                            <span className="row-badges activity-row__chips">
-                              <Link
-                                aria-label={t("activity:actions.openTarget", {
-                                  title: targetTitle ?? presented.title,
-                                  defaultValue: `Open target ${targetTitle ?? presented.title}`,
-                                })}
-                                className="activity-source-chip"
-                                to={targetHref}
-                              >
-                                <ExternalLink size={13} aria-hidden="true" />
-                                <span>{chipText}</span>
-                              </Link>
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="activity-row__trailing">
-                          <StatusPill
-                            status={dashboardActivityActionLabel(item, t)}
-                            // The pill infers its tone from the English label,
-                            // so a translated one has to state it.
-                            tone={action === "failed" ? "danger" : undefined}
-                            compact
-                          />
-                          {/* C5: one timestamp convention — relative text with
-                              the long absolute tooltip, matching ActivityRow. */}
-                          <time
-                            className="activity-relative-time"
-                            dateTime={item.created_at}
-                            title={formatVersionTimestamp(item.created_at, "long")}
-                          >
-                            {formatRelativeTimestamp(item.created_at, i18n.language)}
-                          </time>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              {workspaceActivity.length > DASHBOARD_RECENT_DISPLAY_LIMIT ? (
-                <div className="load-more-row">
-                  <Link
-                    className="icon-button text-button"
-                    to={`/activity?period=${period}`}
-                  >
-                    {t("recent.viewAll", { defaultValue: "View all activity" })}
-                  </Link>
-                </div>
-              ) : null}
+            <div className="operations-list activity-feed-list">
+              {preview.map((entry) => <ActivityEntryRow entry={entry} query={query} loadGroup={loadGroup} key={entry.id} />)}
             </div>
           )}
         </section>
@@ -701,114 +620,4 @@ function periodFilterLabel(
   t: ReturnType<typeof useTranslation>["t"],
 ) {
   return t(`period.filterOptions.${period}`, { defaultValue: labelFor(period) });
-}
-
-// "events", not "changes": the same number is chipped as events in the Recent
-// activity header and on Activity, so one noun counts it everywhere.
-function activityUnitForPeriod(
-  count: number,
-  period: ActivityPeriod,
-  t: ReturnType<typeof useTranslation>["t"],
-) {
-  return t(`header.activityUnit.${period}`, {
-    count,
-    defaultValue: "events",
-  });
-}
-
-type DashboardActivityAction =
-  | "restored"
-  | "published"
-  | "created"
-  | "edited"
-  | "failed";
-
-// Audit-derived activity carries the machine action code in body
-// ("domain.entity.operation"), which is locale-independent — classify from it
-// first so Korean (or any localized) titles still resolve the right action.
-const AUDIT_ACTION_CODE_PATTERN = /^[a-z0-9_]+(?:\.[a-z0-9_]+)+$/;
-
-/** Same axis as the row's badge, so glyph and label never disagree. */
-// An attempt that did not happen must never read as a completed change. MCP and
-// job rows name the outcome as the last word of the title ("MCP update draft
-// failed") and as a status/error field in the detail body; the verb keywords
-// below see only the tool name and would call that row an edit.
-const FAILED_TITLE_PATTERN = /\s(failed|rejected_by_policy|conflict)$/i;
-const FAILED_DETAIL_PATTERN =
-  /(?:^|;\s*)(?:status=(?:failed|rejected_by_policy|conflict)|error=)/;
-
-function classifyDashboardActivityAction(
-  item: ActivityItem,
-): DashboardActivityAction | null {
-  const body = item.body ?? "";
-  if (FAILED_TITLE_PATTERN.test(item.title) || FAILED_DETAIL_PATTERN.test(body)) {
-    return "failed";
-  }
-  if (AUDIT_ACTION_CODE_PATTERN.test(body)) {
-    const operation = body.split(".").at(-1) ?? "";
-    if (/^(restore|revert)/.test(operation)) {
-      return "restored";
-    }
-    if (/^(publish|activate)/.test(operation)) {
-      return "published";
-    }
-    if (/^(create|import|upload|add)/.test(operation)) {
-      return "created";
-    }
-    if (/^(update|edit|save|draft|write)/.test(operation)) {
-      return "edited";
-    }
-  }
-  // Free-text rows (e.g. review decision summaries) fall back to keyword
-  // matching over the display text.
-  const text = `${item.title} ${body} ${(item.affordances ?? []).join(" ")}`
-    .toLowerCase();
-  if (/\b(restored|restore|reverted|revert)\b/.test(text)) {
-    return "restored";
-  }
-  if (/\b(published|publish|activated|activate)\b/.test(text)) {
-    return "published";
-  }
-  if (/\b(created|create|imported|import|uploaded|upload|added|add)\b/.test(text)) {
-    return "created";
-  }
-  if (/\b(edited|edit|updated|update|saved|save|draft|write|wrote)\b/.test(text)) {
-    return "edited";
-  }
-  return null;
-}
-
-function dashboardActivityActionLabel(
-  item: ActivityItem,
-  t: ReturnType<typeof useTranslation>["t"],
-) {
-  const action = classifyDashboardActivityAction(item);
-  if (action) {
-    return t(`recent.action.${action}`, { defaultValue: labelFor(action) });
-  }
-  // The badge column is one axis: what happened. An unclassifiable row (an MCP
-  // read, a search) falls back to a neutral verb, never to its lane name — a
-  // "History" badge next to "Created"/"Edited" would silently switch axes.
-  return t("recent.action.logged", { defaultValue: "Logged" });
-}
-
-function emptyPolicies(): SettingsPolicies {
-  const policy = (name: string, title: string) => ({
-    name,
-    title,
-    policy: {},
-    // A fallback response must never masquerade as a server revision. If a
-    // caller reaches a guarded save, this value produces a safe conflict.
-    revision: "unavailable",
-  });
-  return {
-    workspace: policy("workspace", "Workspace policy"),
-    library: policy("library", "Library policy"),
-    citation: policy("citation", "Citation policy"),
-    context_write: policy("context_write", "Context policy"),
-    agent_injection: policy("agent_injection", "Agent policy"),
-    review: policy("review", "Review policy"),
-    lint: policy("lint", "Lint rules"),
-    mcp_clients: [],
-  };
 }

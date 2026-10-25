@@ -4,8 +4,7 @@ import type { Job, JobStatus } from "./operations";
 
 export type { Job, JobStatus };
 
-// Epic-2 Phase 6a fan-out (doc/design/workspace-database-separation-plan.md
-// §4): both server-admin surfaces below now scan every workspace's Job
+// Both server-admin surfaces below scan every workspace's Job
 // table and sum/merge the results, so both response shapes carry
 // unreachable_workspace_ids -- non-empty means some workspace's shard could
 // not be reached, so the count/list is a partial one, not a short-but-

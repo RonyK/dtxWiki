@@ -54,9 +54,8 @@ class ContextMediaAccessPolicy:
     """Resolve workspace membership and exact PageVersion visibility.
 
     ``ContextPage``/``ContextPageVersion``/``ContextMediaAsset`` are
-    workspace-plane domain tables under a routing-capable ``DatabaseProvider``
-    (see doc/design/workspace-database-separation-plan.md D-1): every method
-    here resolves ``workspace_id`` on the control plane through
+    workspace-plane domain tables under a routing-capable ``DatabaseProvider``:
+    every method here resolves ``workspace_id`` on the control plane through
     ``directory`` (a thin, overlay-swappable id lookup -- the same seam
     ``backend.api.context_pages._workspace_page_service`` already uses), then opens the
     actual page/version read on ``db.session_for(workspace_id)``.
@@ -374,8 +373,7 @@ def resolve_public_context_media_scope(
 
     Used to span one query across ``Workspace`` (identity-plane) and
     ``ContextPage``/``ContextPageVersion`` (workspace-plane) -- impossible
-    once those tables can live in different databases (doc/design/
-    workspace-database-separation-plan.md D-1). ``workspace`` resolves first,
+    once those tables can live in different databases. ``workspace`` resolves first,
     on the control session, because it is the only identifier the workspace
     session can be opened with; the page/version read then runs on
     ``db.session_for(workspace.id)``. Both rows are handed together, from

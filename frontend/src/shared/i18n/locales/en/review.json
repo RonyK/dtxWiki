@@ -151,6 +151,7 @@
     "discardTitle": "Discard selected reconciliation branches?",
     "discardBody": "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
     "discardReason": "Discard reason",
+    "discardBlocked": "The review state changed. Close this dialog and refresh the queue before continuing.",
     "discarding": "Discarding",
     "confirmDiscard": "Discard selected branches",
     "discardResult": "Discarded {{discarded}} branches. Skipped {{skipped}}.",

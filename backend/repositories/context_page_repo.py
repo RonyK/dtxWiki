@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, aliased
 from backend.context_media.application import SyncVersionUsage
 from backend.context_media.domain import validate_markdown_media_policy
 from backend.context_media.ports import ContextMediaRepository
+from backend.domain.prepared_body import PreparedBody
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.repositories.context_visibility import visible_context_version_expression
 from backend.utils.actor_display import resolve_actor_display_name
@@ -21,6 +22,7 @@ from backend.utils.block_identity import (
     block_map_for_version,
     compute_block_map_with_ids,
 )
+from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.page_frontmatter import (
     derive_nav_description,
     validate_page_markdown_input,
@@ -327,6 +329,92 @@ def insert_page_or_get_locked(
 
 
 def insert_version(
+    session: Session,
+    page_id: UUID,
+    parent_version_id: UUID | None,
+    body: PreparedBody,
+    actor_kind: str,
+    actor_id: str,
+    version_status: str = "published_snapshot",
+    graph_status: str = "linear",
+    change_set_id: UUID | None = None,
+    context_media_repository: ContextMediaRepository | None = None,
+    operation_provenance: Sequence[BlockOperationProvenance | Mapping[str, object]]
+    | None = None,
+    identity_seed: str | None = None,
+    explicit_block_replacements: dict[str, str] | None = None,
+    prepared_block_map: list[dict] | None = None,
+) -> ContextPageVersion:
+    """Insert new authored bytes only after the shared body preparation gate."""
+
+    if not isinstance(body, PreparedBody):
+        raise TypeError("insert_version requires a PreparedBody")
+    return _insert_version_raw(
+        session,
+        page_id=page_id,
+        parent_version_id=parent_version_id,
+        body_md=body.body,
+        content_hash=body.content_hash,
+        actor_kind=actor_kind,
+        actor_id=actor_id,
+        version_status=version_status,
+        graph_status=graph_status,
+        change_set_id=change_set_id,
+        context_media_repository=context_media_repository,
+        operation_provenance=operation_provenance,
+        identity_seed=identity_seed,
+        explicit_block_replacements=explicit_block_replacements,
+        prepared_block_map=prepared_block_map,
+    )
+
+
+def insert_version_copy(
+    session: Session,
+    page_id: UUID,
+    parent_version_id: UUID | None,
+    source_version: ContextPageVersion | None,
+    actor_kind: str,
+    actor_id: str,
+    version_status: str = "published_snapshot",
+    graph_status: str = "linear",
+    change_set_id: UUID | None = None,
+    context_media_repository: ContextMediaRepository | None = None,
+    operation_provenance: Sequence[BlockOperationProvenance | Mapping[str, object]]
+    | None = None,
+    identity_seed: str | None = None,
+    explicit_block_replacements: dict[str, str] | None = None,
+    prepared_block_map: list[dict] | None = None,
+) -> ContextPageVersion:
+    """Copy stored bytes and their hash, or seed an empty editing session."""
+
+    if source_version is not None and not isinstance(
+        source_version, ContextPageVersion
+    ):
+        raise TypeError("insert_version_copy requires a stored ContextPageVersion")
+    return _insert_version_raw(
+        session,
+        page_id=page_id,
+        parent_version_id=parent_version_id,
+        body_md=source_version.body_md if source_version is not None else "",
+        content_hash=(
+            source_version.content_hash
+            if source_version is not None
+            else calculate_content_hash("")
+        ),
+        actor_kind=actor_kind,
+        actor_id=actor_id,
+        version_status=version_status,
+        graph_status=graph_status,
+        change_set_id=change_set_id,
+        context_media_repository=context_media_repository,
+        operation_provenance=operation_provenance,
+        identity_seed=identity_seed,
+        explicit_block_replacements=explicit_block_replacements,
+        prepared_block_map=prepared_block_map,
+    )
+
+
+def _insert_version_raw(
     session: Session,
     page_id: UUID,
     parent_version_id: UUID | None,

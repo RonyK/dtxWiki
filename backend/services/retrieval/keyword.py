@@ -113,6 +113,8 @@ class KeywordRetriever:
         candidate_limit = max(1, limit * _OVERFETCH)
         results: list[RankedResult] = []
         source_kinds = _source_kinds_for_scope(scope)
+        if not filters.include_agents:
+            source_kinds.discard("agent_page")
         if source_kinds and query.strip():
             results.extend(
                 self._search_fts(
@@ -125,7 +127,7 @@ class KeywordRetriever:
                     limit=candidate_limit,
                 )
             )
-        if scope in {"feedback", "all"} and actor_can_read_feedback(actor):
+        if scope == "feedback" and actor_can_read_feedback(actor):
             results.extend(
                 self._search_feedback(
                     session=session,
@@ -134,7 +136,7 @@ class KeywordRetriever:
                     limit=candidate_limit,
                 )
             )
-        if scope in {"change", "all"} and actor_can_read_audit_records(actor):
+        if scope == "change" and actor_can_read_audit_records(actor):
             results.extend(
                 self._search_changes(
                     session=session,
@@ -284,7 +286,7 @@ class KeywordRetriever:
                         result_type="context_page",
                         title=page.title,
                         citation_available=True,
-                        stale=page.lifecycle_status == "stale",
+                        summary_markdown=version.body_md,
                         archived=page.lifecycle_status == "archived",
                         concept_path=context_concept_path(page.slug),
                         concept_type=page.page_type,
@@ -349,6 +351,7 @@ class KeywordRetriever:
                         result_id=claim.id,
                         result_type="context_claim",
                         title="Context claim",
+                        summary_markdown=version.body_md,
                         citation_available=True,
                         archived=claim.status != "active",
                         concept_path=context_concept_path(page.slug),
@@ -420,6 +423,7 @@ class KeywordRetriever:
                         result_id=item.id,
                         result_type="library_item",
                         title=item.title or item.uri,
+                        summary_markdown=body_md,
                         citation_available=canonical_artifact is not None,
                         concept_path=library_concept_path(item.id),
                         concept_type="library_item",
@@ -497,6 +501,8 @@ class KeywordRetriever:
                             or artifact.kind.replace("_", " ").title()
                         ),
                         citation_available=True,
+                        summary_markdown=artifact.conversion_detail.index_text,
+                        location_fallback=("library_item", item.id),
                         concept_path=library_concept_path(item.id),
                         concept_type="library_artifact",
                         heading_path=public_heading_path(location),
@@ -560,6 +566,7 @@ class KeywordRetriever:
                         result_id=page.id,
                         result_type="agent_page",
                         title=page.title,
+                        summary_markdown=version.body_markdown,
                         citation_available=False,
                         heading_path=public_heading_path(location),
                         section_id=(
@@ -1051,7 +1058,8 @@ def _ranked(
     result_type: str,
     title: str,
     citation_available: bool,
-    stale: bool = False,
+    summary_markdown: str | None = None,
+    location_fallback: tuple[str, UUID] | None = None,
     archived: bool = False,
     concept_path: str | None = None,
     concept_type: str | None = None,
@@ -1060,14 +1068,13 @@ def _ranked(
     version_id: UUID | None = None,
     source_ref: dict[str, str] | None = None,
 ) -> RankedResult:
-    return RankedResult(
+    result = RankedResult(
         id=result_id,
         type=result_type,
         title=title,
         snippet=hit.snippet,
         score=1000.0 - hit.rank,
         citation_available=citation_available,
-        stale=stale,
         archived=archived,
         concept_path=concept_path,
         concept_type=concept_type,
@@ -1077,6 +1084,9 @@ def _ranked(
         source_ref=source_ref,
         match_reason="keyword",
     )
+    result._summary_markdown = summary_markdown
+    result._location_fallback = location_fallback
+    return result
 
 
 def _visible_library_items_statement(

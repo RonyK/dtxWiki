@@ -1,10 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
+import { useEffect } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
+import {
+  useWorkspaceContext,
+  WorkspaceProvider,
+} from "../../../shared/workspace/WorkspaceContext";
 import { SearchScreen } from "../SearchScreen";
 
 const BASE = "http://127.0.0.1:21080";
@@ -31,10 +36,15 @@ describe("SearchScreen", () => {
               result("context-1", "context_page", "Decision Log", "", 1, {
                 match_reason: "trigram",
                 matched_name: "Decision Log",
+                location: ["Team", "Decisions"],
               }),
               result("source-1", "library_item", "Library Source", "Supporting hit", 0.7, {
                 concept_path: "/library/source-1.md",
                 match_reason: "keyword",
+              }),
+              result("context-2", "context_page", "Decision Log", "Another document with the same title", 0.6, {
+                match_reason: "exact_title",
+                location: ["Team", "Decisions"],
               }),
               result("change-1", "change_set", "Review Change", "Workflow hit", 0.4, {
                 source_ref: { kind: "review_item", id: "review-1" },
@@ -64,35 +74,42 @@ describe("SearchScreen", () => {
     await userEvent.type(screen.getByLabelText("Query"), "needle");
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(await screen.findByText("Decision Log")).toBeInTheDocument();
+    await screen.findByRole("link", { name: "Open Library Source" });
+    const rows = Array.from(container.querySelectorAll(".operations-list > .search-result-row"));
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+      "/context?target=context-1",
+      "/library?target=source-1",
+      "/context?target=context-2",
+      "/review?review=review-1",
+    ]);
+    for (const row of screen.getAllByRole("link", { name: "Open Decision Log" })) {
+      expect(row.querySelector(".search-result-location")).toHaveTextContent(/Team.*Decisions/);
+    }
     expect(searchBody).toEqual({
       query: "needle",
       scope: "all",
-      filters: {},
+      filters: { include_agents: false },
       retrieval_mode: "keyword",
       limit: 20,
     });
     expect(screen.getByText("Results")).toBeInTheDocument();
     expect(screen.queryByText("Supporting")).not.toBeInTheDocument();
     expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
-    expect(screen.getByText("Fuzzy name")).toBeInTheDocument();
+    expect(container.querySelector(".search-result-reason")).toHaveTextContent("Decision Log");
     expect(
       screen.getByText(
         "Restricted Library items and artifacts are hidden for your current permissions · Tag filter not applied yet",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("RAW BACKEND PERMISSION NOTE")).not.toBeInTheDocument();
-    expect(screen.getByText("Keyword")).toBeInTheDocument();
+    expect(screen.queryByText("Keyword", { exact: true })).not.toBeInTheDocument();
     // M-11 (260908 UI audit): ".md" is a backend identifier, not a real file.
-    expect(screen.getByText("/library/source-1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open Library Source" })
+        .querySelector(".search-result-location"),
+    ).toHaveTextContent("/library/source-1");
     expect(screen.queryByText("/library/source-1.md")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Decision Log" }))
-      .toHaveAttribute("href", "/context?target=context-1");
-    expect(screen.getByRole("link", { name: "Open Library Source" }))
-      .toHaveAttribute("href", "/library?target=source-1");
-    expect(screen.getByRole("link", { name: "Open Review Change" }))
-      .toHaveAttribute("href", "/review?review=review-1");
-    expect(screen.getAllByText("3 results").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("4 results")).toBeInTheDocument();
     // The header states the result count; the rows themselves carry no chips.
     expect(container.querySelectorAll(".search-result-row .count-chip")).toHaveLength(0);
     expect(container.querySelector(".score-pill")).toBeNull();
@@ -194,7 +211,7 @@ describe("SearchScreen", () => {
     );
   });
 
-  it("renders the mapped open label for a linkable result, never the raw type", async () => {
+  it("renders a destination tone and chevron for a linkable result", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
@@ -224,14 +241,15 @@ describe("SearchScreen", () => {
     await user.type(screen.getByLabelText("Query"), "source");
     await user.click(screen.getByRole("button", { name: "Search" }));
 
-    // The Open-Library label resolves from i18n; the raw snake_case type never
-    // leaks into the row (the domainLabel fallback would humanize it otherwise).
     expect(await screen.findByText("Source Title")).toBeInTheDocument();
-    expect(screen.getByText("Open Library")).toBeInTheDocument();
+    const row = screen.getByRole("link", { name: "Open Source Title" });
+    expect(row.querySelector(".search-result-kind")).toHaveAttribute("data-identity", "library");
+    expect(row.querySelector(".search-result-chevron")).toHaveAttribute("aria-hidden", "true");
+    expect(within(row).queryByText("Open Library")).not.toBeInTheDocument();
     expect(screen.queryByText("library_item")).not.toBeInTheDocument();
   });
 
-  it("renders destination labels for claim, feedback, change, and artifact links", async () => {
+  it("keeps destination tones and links for claim, feedback, change, and artifact results", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
@@ -281,70 +299,108 @@ describe("SearchScreen", () => {
       .toHaveAttribute("href", "/review?review=review-1");
     expect(screen.getByRole("link", { name: "Open Artifact Hit" }))
       .toHaveAttribute("href", "/library?target=item-1");
-    expect(screen.getByText("Open Context")).toBeInTheDocument();
-    expect(screen.getAllByText("Open Library")).toHaveLength(2);
-    expect(screen.getByText("Open Review")).toBeInTheDocument();
+    for (const [title, destination] of [
+      ["Claim Hit", "context"],
+      ["Feedback Hit", "library"],
+      ["Change Hit", "review"],
+      ["Artifact Hit", "library"],
+    ]) {
+      const row = screen.getByRole("link", { name: `Open ${title}` });
+      expect(row.querySelector(".search-result-kind")).toHaveAttribute("data-identity", destination);
+      expect(row.querySelector(".search-result-chevron")).toHaveAttribute("aria-hidden", "true");
+    }
     expect(screen.queryByText("Open unavailable")).not.toBeInTheDocument();
   });
 
-  it("renders disambiguation candidates as navigable links with paths", async () => {
-    const user = userEvent.setup();
+  it("renders accessible C2 search cards with a selected workspace and honest unavailable states", async () => {
+    const pageId = "aa123456-1111-4111-8111-111111111111";
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+        return jsonResponse({ data: {
+          current_workspace_id: WORKSPACE_ID,
+          workspaces: [{
+            id: WORKSPACE_ID, slug: "selected-workspace", title: "Selected workspace",
+            name: "Selected workspace", goal: "", default_language: "en", visibility: "private",
+          }],
+        } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/search/capabilities`) {
+        return jsonResponse({ data: { supported_retrieval_modes: ["keyword"] } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/search`) {
-        return jsonResponse({
-          data: {
-            ranked_results: [
-              result("page-a1", "context_page", "Deploy Checklist", "Alpha", 1),
-              result("page-b2", "context_page", "Deploy Checklist", "Bravo", 1),
-            ],
-            supported_retrieval_modes: ["keyword"],
-            permission_note: null,
-            disambiguation: {
-              status: "ambiguous",
-              candidates: [
-                {
-                  id: "page-a1",
-                  title: "Deploy Checklist",
-                  concept_path: "/context/deploy-checklist-alpha.md",
-                  match_reason: "exact_title",
-                },
-                {
-                  id: "page-b2",
-                  title: "Deploy Checklist",
-                  concept_path: "/context/deploy-checklist-bravo.md",
-                  match_reason: "exact_title",
-                },
-              ],
-            },
-          },
-        });
+        return jsonResponse({ data: {
+          ranked_results: [
+            result(pageId, "context_page", "Embedding policy", "", 1, {
+              source_ref: { kind: "context_page", id: pageId },
+              concept_path: `/context/p-${pageId}.md`,
+              matched_name: "Embedding policy", match_reason: "exact_title",
+              summary: "**Embedding** policy explains [retrieval](https://example.com).",
+              location: ["Product", "Research", "Very long document title kept in the accessible description", "Search", "Policies"],
+              stale: true, citation_available: false,
+            }),
+            result("human-path", "context_page", "Search handbook", "A **clean** `snippet`. model_name and model_version. Keep x < 10 and y > 2. `a*b*c` and _emphasis_. vector<T>.", 0.8, {
+              concept_path: "/context/search-handbook.md", match_reason: "keyword",
+              heading_path: ["Search handbook", "Storage"],
+            }),
+            // Old API responses and explicit audit scopes may still carry
+            // unmapped results, even though ordinary all searches exclude them.
+            result("unmapped-change", "change_set", "Unmapped change", "", 0.7),
+            result("unmapped-artifact", "library_artifact", "Unmapped artifact", "", 0.6),
+          ],
+          supported_retrieval_modes: ["keyword"],
+        } });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    render(
-      <MemoryRouter>
-        <SearchScreen />
+    const { container } = render(
+      <MemoryRouter initialEntries={["/search?q=Embedding%20policy"]}>
+        <WorkspaceProvider>
+          <WorkspaceSearchHarness />
+        </WorkspaceProvider>
       </MemoryRouter>,
     );
 
-    await user.type(screen.getByLabelText("Query"), "Deploy Checklist");
-    await user.click(screen.getByRole("button", { name: "Search" }));
-
-    // §12.2: candidate click = navigate; the concept path disambiguates
-    // same-named candidates visually.
-    const alpha = await screen.findByRole("link", {
-      name: /Deploy Checklist.*deploy-checklist-alpha/,
-    });
-    const bravo = screen.getByRole("link", {
-      name: /Deploy Checklist.*deploy-checklist-bravo/,
-    });
-    expect(alpha).toHaveAttribute("href", "/context?target=page-a1");
-    expect(bravo).toHaveAttribute("href", "/context?target=page-b2");
+    const row = await screen.findByRole("link", { name: "Open Embedding policy" });
+    expect(row).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/${pageId}`);
+    expect(row.querySelector(".search-result-kind")).toHaveAttribute("data-identity", "context");
+    expect(row.querySelector(".search-result-chevron")).toHaveAttribute("aria-hidden", "true");
+    expect(within(row).queryByText("Open unavailable")).not.toBeInTheDocument();
+    expect(within(row).queryByText("Matched name: Embedding policy")).not.toBeInTheDocument();
+    expect(within(row).getByText("Embedding policy explains retrieval.")).toBeInTheDocument();
+    const title = row.querySelector(".search-result-title");
+    const snippet = row.querySelector(".search-result-snippet");
+    const location = row.querySelector(".search-result-location");
+    const reason = row.querySelector(".search-result-reason");
+    expect(location).toHaveTextContent("Product");
+    expect(location).toHaveTextContent("Search");
+    expect(reason).toHaveTextContent("Title match");
+    expect(title!.compareDocumentPosition(snippet!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(snippet!.compareDocumentPosition(location!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(location!.compareDocumentPosition(reason!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(row).toHaveAccessibleDescription(
+      "Product › Research › Very long document title kept in the accessible description › Search › Policies. Title match",
+    );
+    expect(row.querySelector("nav, a, button")).toBeNull();
+    expect(container.textContent).not.toContain(`/context/p-${pageId}`);
+    const handbook = screen.getByRole("link", { name: "Open Search handbook" });
+    expect(handbook).toHaveTextContent("/context/search-handbook");
+    expect(handbook).toHaveTextContent("A clean snippet.");
+    expect(handbook).toHaveTextContent("model_name and model_version. Keep x < 10 and y > 2. a*b*c and emphasis. vector<T>.");
+    expect(handbook.querySelector(".search-result-snippet strong")).toHaveTextContent("Storage");
+    expect(within(handbook).queryByText("Keyword", { exact: true })).not.toBeInTheDocument();
+    const unavailable = container.querySelectorAll(".search-result-row.is-disabled");
+    expect(unavailable).toHaveLength(2);
+    expect(unavailable[0].tagName).toBe("DIV");
+    expect(unavailable[0]).toHaveTextContent(/Cannot open directly from search.*review/i);
+    expect(unavailable[1]).toHaveTextContent(/Cannot open directly from search.*link/i);
+    expect(unavailable[0].querySelector(".search-result-chevron")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open Unmapped change" })).not.toBeInTheDocument();
+    expect(container.querySelector(".search-source-chip")).toBeNull();
+    expect(screen.queryByText("No citation")).not.toBeInTheDocument();
+    expect(screen.queryByText("stale", { exact: true })).not.toBeInTheDocument();
+    expect((await axe(container)).violations).toEqual([]);
   });
 
   it("shows the exact total_count in the header chip even when the displayed list is capped", async () => {
@@ -394,7 +450,7 @@ describe("SearchScreen", () => {
     ).toContainElement(screen.getByText("42 results"));
   });
 
-  it("uses the backend change scope value for Changes searches", async () => {
+  it("opens a legacy Changes URL in All with an explanatory notice", async () => {
     const user = userEvent.setup();
     let searchBody: unknown = null;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -415,18 +471,33 @@ describe("SearchScreen", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    render(
-      <MemoryRouter>
+    const view = render(
+      <MemoryRouter initialEntries={["/search?q=review&scope=change"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
 
-    await user.type(screen.getByLabelText("Query"), "review");
-    await user.selectOptions(screen.getByLabelText("Scope"), "change");
-    await user.click(screen.getByRole("button", { name: "Search" }));
-
     await waitFor(() =>
-      expect(searchBody).toMatchObject({ query: "review", scope: "change" }),
+      expect(searchBody).toMatchObject({ query: "review", scope: "all" }),
+    );
+    expect(screen.getByLabelText("Scope")).toHaveValue("all");
+    expect(screen.queryByRole("option", { name: "Changes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/activity");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "/review");
+    view.unmount();
+    searchBody = null;
+    render(
+      <MemoryRouter initialEntries={["/search?scope=change"]}>
+        <SearchScreen />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    await user.selectOptions(screen.getByLabelText("Scope"), "context_page");
+    expect(screen.getByTestId("location")).toHaveTextContent("?scope=context_page");
+    expect(screen.queryByText(/Showing all documents/)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Query"), "review");
+    await waitFor(() =>
+      expect(searchBody).toMatchObject({ query: "review", scope: "context_page" }),
     );
   });
 
@@ -508,14 +579,14 @@ describe("SearchScreen", () => {
     expect(screen.queryByText("No search run")).not.toBeInTheDocument();
   });
 
-  it("runs search from the q URL parameter", async () => {
+  it("runs search from the q URL parameter with a disabled Agent scope normalized to all", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/search`) {
-        expect(JSON.parse(String(init?.body))).toMatchObject({ query: "needle" });
+        expect(JSON.parse(String(init?.body))).toMatchObject({ query: "needle", scope: "all" });
         return jsonResponse({
           data: {
             ranked_results: [
@@ -530,7 +601,7 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle"]}>
+      <MemoryRouter initialEntries={["/search?q=needle&scope=agent_page"]}>
         <SearchScreen />
       </MemoryRouter>,
     );
@@ -559,19 +630,19 @@ describe("SearchScreen", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/search?q=needle&scope=change"]}>
+      <MemoryRouter initialEntries={["/search?q=needle&scope=library_item"]}>
         <SearchScreen />
         <LocationProbe />
       </MemoryRouter>,
     );
 
     expect(screen.getByLabelText("Query")).toHaveValue("needle");
-    expect(screen.getByLabelText("Scope")).toHaveValue("change");
+    expect(screen.getByLabelText("Scope")).toHaveValue("library_item");
 
     await user.click(screen.getByRole("button", { name: "Clear search" }));
 
     expect(screen.getByLabelText("Query")).toHaveValue("");
-    expect(screen.getByTestId("location")).toHaveTextContent("?scope=change");
+    expect(screen.getByTestId("location")).toHaveTextContent("?scope=library_item");
   });
 
   it("syncs scope changes to the URL while a query is active", async () => {
@@ -1102,4 +1173,12 @@ function result(
 function LocationProbe() {
   const location = useLocation();
   return <span data-testid="location">{location.search}</span>;
+}
+
+function WorkspaceSearchHarness() {
+  const { refreshWorkspaces, selectedId } = useWorkspaceContext();
+  useEffect(() => {
+    void refreshWorkspaces();
+  }, [refreshWorkspaces]);
+  return selectedId ? <SearchScreen /> : null;
 }

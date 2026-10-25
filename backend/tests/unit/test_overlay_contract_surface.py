@@ -20,15 +20,16 @@ from backend.worker.runtime import OneShotWorker
 def test_overlay_assembly_surface_signatures_are_pinned():
     """Public overlay surface: changes require an explicit changelog entry."""
 
-    # assemble() exposes the blob_store_provider injection point alongside
-    # the workspace directory provider.
+    # assemble() exposes explicit lint modules alongside the existing provider
+    # injection points. The additive overlay contract is recorded in CHANGELOG.
     assert str(inspect.signature(assemble)) == (
         "(settings: 'Settings', *, db: 'DatabaseProvider | None' = None, "
         "session_factory: 'sessionmaker[Session] | None' = None, page_service: "
         "'object | None' = None, search_service: 'object | None' = None, "
         "ask_service: 'object | None' = None, directory: "
         "'WorkspaceDirectory | None' = None, services: "
-        "'ServiceRegistry | None' = None, blob_store_provider: "
+        "'ServiceRegistry | None' = None, lint_modules: 'tuple[LintModule, ...]' = (), "
+        "blob_store_provider: "
         "'BlobStoreProvider | None' = None) -> 'AppContainer'"
     )
     assert str(inspect.signature(create_app)) == (
@@ -176,6 +177,8 @@ SPI_PAYLOAD_FIELD_SHAPES = {
         "citation_available": "<class 'bool'>",
         "stale": "<class 'bool'>",
         "archived": "<class 'bool'>",
+        "summary": "str | None",
+        "location": "list[str] | None",
         "concept_path": "str | None",
         "concept_type": "str | None",
         "version_id": "uuid.UUID | None",
@@ -191,6 +194,7 @@ SPI_PAYLOAD_FIELD_SHAPES = {
         "entity_ref": "dict[str, str] | None",
     },
     "SearchFilters": {
+        "include_agents": "<class 'bool'>",
         "context_type": "list[str] | None",
         "connector_type": "list[str] | None",
         "format_hint": "list[str] | None",

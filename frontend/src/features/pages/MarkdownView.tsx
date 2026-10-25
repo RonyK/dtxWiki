@@ -1554,13 +1554,27 @@ function normalizeMermaidSvgDimensions(root: Element) {
 
 function normalizeMermaidSvgTypography(root: Element) {
   setMermaidSvgTypography(root);
+  const isSequence = mermaidDiagramFamily(root) === "sequence";
 
   for (const element of Array.from(root.querySelectorAll("text, tspan"))) {
-    setMermaidSvgTypography(element);
+    let fontSize = MERMAID_FONT_SIZE;
+    if (isSequence && element.matches("text.sequenceNumber")) {
+      // Mermaid shrinks long numbers to fit a fixed-size badge. Keep those
+      // renderer sizes while normalizing the font family with other labels.
+      const badgeFontSize = element.getAttribute("font-size") ?? "";
+      const size = Number.parseFloat(badgeFontSize);
+      if (
+        /^\d+(?:\.\d+)?px$/.test(badgeFontSize) &&
+        size > 0 && size <= Number.parseFloat(MERMAID_FONT_SIZE)
+      ) {
+        fontSize = badgeFontSize;
+      }
+    }
+    setMermaidSvgTypography(element, fontSize);
   }
 }
 
-function setMermaidSvgTypography(element: Element) {
+function setMermaidSvgTypography(element: Element, fontSize = MERMAID_FONT_SIZE) {
   const style = (element as SVGElement).style;
   const preservedFontProperties = [
     "font-style",
@@ -1584,9 +1598,9 @@ function setMermaidSvgTypography(element: Element) {
     }
   }
   element.setAttribute("font-family", MERMAID_FONT_FAMILY);
-  element.setAttribute("font-size", MERMAID_FONT_SIZE);
+  element.setAttribute("font-size", fontSize);
   style.setProperty("font-family", MERMAID_FONT_FAMILY);
-  style.setProperty("font-size", MERMAID_FONT_SIZE);
+  style.setProperty("font-size", fontSize);
 }
 
 function removeMermaidInlineStyleProperties(
@@ -1634,6 +1648,157 @@ function mermaidDiagramFamily(root: Element) {
 // which is what pushed ER table names and attribute rows off their left edge.
 const MERMAID_CENTRED_LABEL_FAMILIES = new Set(["flowchart-v2", "flowchart"]);
 
+// The shared colour for connectors and the marker heads drawn on them.
+const MERMAID_CONNECTOR_STROKE = "#64748b";
+
+const MERMAID_SEQUENCE_MESSAGE_CLASSES = new Set(["messageLine0", "messageLine1"]);
+const MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH = "1.5";
+const MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH = "2";
+// The restored badge has a 24px diameter; leave 2px inside each edge.
+const MERMAID_SEQUENCE_NUMBER_TEXT_LENGTH = "20";
+
+// Mermaid 11.16.1 neutral-theme values for the sequence chrome its stylesheet
+// painted. Actors and lifelines already carry Mermaid's own greys as
+// attributes, so frames and activation bars stay in that palette; only the
+// signal colour (messages and their heads) maps to the shared connector.
+const MERMAID_SEQUENCE_ACTIVATION_CLASSES = new Set([
+  "activation0",
+  "activation1",
+  "activation2",
+]);
+const MERMAID_SEQUENCE_ACTIVATION_FILL = "#f4f4f4";
+const MERMAID_SEQUENCE_ACTIVATION_STROKE = "#666";
+const MERMAID_SEQUENCE_ACTOR_FILL = "#eee";
+const MERMAID_SEQUENCE_ACTOR_STROKE = "#d4d4d4";
+const MERMAID_SEQUENCE_FRAME_STROKE = "#d4d4d4";
+const MERMAID_SEQUENCE_FRAME_STROKE_WIDTH = "2";
+const MERMAID_SEQUENCE_FRAME_DASHARRAY = "2, 2";
+
+function hasMermaidClass(element: Element, classes: Set<string>) {
+  return Array.from(element.classList).some((name) => classes.has(name));
+}
+
+type MermaidFallbackRule = {
+  applies: (element: Element) => boolean;
+  apply: (element: Element) => void;
+};
+
+const MERMAID_SEQUENCE_FALLBACK_RULES: MermaidFallbackRule[] = [
+  {
+    applies: (element) =>
+      ["line", "path"].includes(element.localName.toLowerCase()) &&
+      hasMermaidClass(element, MERMAID_SEQUENCE_MESSAGE_CLASSES),
+    apply: (element) => {
+      // Sequence messages use `stroke="none"` as a placeholder for CSS.
+      // Remove it so the shared connector fallback supplies the colour.
+      // Restore the stylesheet's width too: markers scale with stroke width.
+      // Intentional `none` elsewhere (gantt text, wardley markers, cynefin
+      // domains) and explicit message colours keep their attributes.
+      if (element.getAttribute("stroke") === "none") {
+        element.removeAttribute("stroke");
+      }
+      element.setAttribute("stroke-width", MERMAID_SEQUENCE_MESSAGE_STROKE_WIDTH);
+    },
+  },
+  {
+    applies: (element) =>
+      element.localName.toLowerCase() === "line" &&
+      (element.getAttribute("marker-start") ?? "").endsWith("-sequencenumber)"),
+    apply: (element) => {
+      // Autonumber circles sit on zero-length lines. Mermaid emits width 0
+      // then overrides it with CSS; without that width the marker vanishes.
+      if (element.getAttribute("stroke-width") === "0") {
+        element.removeAttribute("stroke-width");
+      }
+      setSvgAttributeIfMissing(
+        element,
+        "stroke-width",
+        MERMAID_SEQUENCE_NUMBER_STROKE_WIDTH,
+      );
+    },
+  },
+  {
+    applies: (element) => element.matches("text.sequenceNumber"),
+    apply: (element) => {
+      setSvgAttributeIfMissing(element, "fill", "#fff");
+      // Inter's digits are wider than Mermaid's sans-serif digits. Even the
+      // renderer's reduced font sizes can overflow with four or more digits.
+      if ((element.textContent?.length ?? 0) > 3) {
+        setSvgAttributeIfMissing(element, "textLength", MERMAID_SEQUENCE_NUMBER_TEXT_LENGTH);
+        setSvgAttributeIfMissing(element, "lengthAdjust", "spacingAndGlyphs");
+      }
+    },
+  },
+  {
+    // Sequence message heads, control-participant heads, and autonumber
+    // badges use the connector colour. Two hard-code black instead:
+    // the crosshead (`#000000`, which that stylesheet overrode) and the stick
+    // half-arrows (`black`, close to Mermaid's dark signal but not to ours).
+    applies: (element) =>
+      MERMAID_MARKER_SHAPE_TAGS.has(element.localName.toLowerCase()) &&
+      element.closest("marker") !== null,
+    apply: (element) => element.setAttribute("stroke", MERMAID_CONNECTOR_STROKE),
+  },
+  {
+    applies: (element) => element.matches("g.actor"),
+    apply: (element) => {
+      // Queue and database bodies are plain paths that inherit `.actor`
+      // styles. Restore the group so their bodies do not default to black,
+      // and keep inline group styles ahead of the fallback attributes.
+      setSvgAttributeIfMissing(element, "fill", MERMAID_SEQUENCE_ACTOR_FILL);
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_ACTOR_STROKE);
+    },
+  },
+  {
+    applies: (element) =>
+      element.localName.toLowerCase() === "rect" &&
+      hasMermaidClass(element, MERMAID_SEQUENCE_ACTIVATION_CLASSES),
+    apply: (element) => {
+      // Activation bars come from the note rectangle helper, whose `#EDF2AE`
+      // fill the stylesheet replaced; left as is they read as notes.
+      element.setAttribute("fill", MERMAID_SEQUENCE_ACTIVATION_FILL);
+      element.setAttribute("stroke", MERMAID_SEQUENCE_ACTIVATION_STROKE);
+    },
+  },
+  {
+    applies: (element) => element.matches("line.loopLine"),
+    apply: (element) => {
+      // `.loopLine` drew every alt/opt/loop/par/critical/break frame dashed
+      // at 2px. Section dividers carry an inline `3, 3` dash, which still
+      // wins over these attributes just as it won over the stylesheet.
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_FRAME_STROKE);
+      setSvgAttributeIfMissing(
+        element,
+        "stroke-width",
+        MERMAID_SEQUENCE_FRAME_STROKE_WIDTH,
+      );
+      setSvgAttributeIfMissing(
+        element,
+        "stroke-dasharray",
+        MERMAID_SEQUENCE_FRAME_DASHARRAY,
+      );
+    },
+  },
+  {
+    applies: (element) => element.matches("polygon.labelBox"),
+    apply: (element) =>
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_SEQUENCE_FRAME_STROKE),
+  },
+  {
+    // `rect rgb(...)` highlight blocks have no stroke, and the stylesheet's
+    // `g rect.rect` border never reached them: they are not inside a <g>.
+    applies: (element) => element.matches("rect.rect"),
+    apply: (element) => setSvgAttributeIfMissing(element, "stroke", "none"),
+  },
+  {
+    // The stylesheet set `stroke: none` on every sequence text class. Actor
+    // figures carry an inline group stroke, which their labels otherwise
+    // inherit as an outline that blurs the name.
+    applies: (element) => element.localName.toLowerCase() === "text",
+    apply: (element) => setSvgAttributeIfMissing(element, "stroke", "none"),
+  },
+];
+
 // The marker shapes Mermaid deliberately leaves unfilled, and the tags it
 // draws them with. Matched on the marker's SEMANTIC CLASS rather than its
 // id: Mermaid stamps `class="marker aggregation class"` identically under
@@ -1660,22 +1825,30 @@ function mermaidMarkerFill(marker: Element, isEntityRelationship: boolean) {
   if (isEntityRelationship) {
     return "none";
   }
-  const classes = (marker.getAttribute("class") ?? "").split(/s+/);
+  const classes = (marker.getAttribute("class") ?? "").split(/\s+/);
   const id = marker.getAttribute("id") ?? "";
   const hollow = MERMAID_HOLLOW_MARKER_WORDS.some(
     (word) => classes.includes(word) || id.includes(word),
   );
-  return hollow ? "transparent" : "#64748b";
+  return hollow ? "transparent" : MERMAID_CONNECTOR_STROKE;
 }
 
 function applyMermaidFallbackStyles(root: Element) {
   const family = mermaidDiagramFamily(root);
   const centresNodeLabels = MERMAID_CENTRED_LABEL_FAMILIES.has(family);
   const isEntityRelationship = family === "er";
+  const sequenceRules = family === "sequence" ? MERMAID_SEQUENCE_FALLBACK_RULES : [];
   for (const element of Array.from(root.querySelectorAll("*"))) {
     const tagName = element.localName.toLowerCase();
     const className = element.getAttribute("class") ?? "";
-    // Marker shapes first, and then skip the node rules below. A marker is not
+    // Family rules first: they restore what the stripped stylesheet painted,
+    // marker heads included, so the generic rules below fill only the rest.
+    for (const rule of sequenceRules) {
+      if (rule.applies(element)) {
+        rule.apply(element);
+      }
+    }
+    // Marker shapes next, and then skip the node rules below. A marker is not
     // a node: without the `continue` the generic shape rule claims `neo`'s
     // <polygon> inheritance triangle and paints it like a node box, and
     // whichever rule runs first wins because these all write only if the
@@ -1699,7 +1872,7 @@ function applyMermaidFallbackStyles(root: Element) {
         "fill",
         mermaidMarkerFill(markerAncestor, isEntityRelationship),
       );
-      setSvgAttributeIfMissing(element, "stroke", "#64748b");
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_CONNECTOR_STROKE);
       setSvgAttributeIfMissing(element, "stroke-width", "1");
       continue;
     }
@@ -1720,7 +1893,7 @@ function applyMermaidFallbackStyles(root: Element) {
           className,
         ))
     ) {
-      setSvgAttributeIfMissing(element, "stroke", "#64748b");
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_CONNECTOR_STROKE);
       setSvgAttributeIfMissing(element, "fill", "none");
     }
     if (
@@ -1731,8 +1904,8 @@ function applyMermaidFallbackStyles(root: Element) {
       setSvgAttributeIfMissing(element, "stroke", "#334155");
     }
     if (tagName === "path" && className.includes("arrowMarkerPath")) {
-      setSvgAttributeIfMissing(element, "fill", "#64748b");
-      setSvgAttributeIfMissing(element, "stroke", "#64748b");
+      setSvgAttributeIfMissing(element, "fill", MERMAID_CONNECTOR_STROKE);
+      setSvgAttributeIfMissing(element, "stroke", MERMAID_CONNECTOR_STROKE);
     }
     if (tagName === "text") {
       setSvgAttributeIfMissing(element, "fill", "#0f172a");

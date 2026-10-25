@@ -3,12 +3,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select
 
-import backend.services.lint  # noqa: F401  (registers knowledge rules)
 from backend.models.context import ContextPage, ContextPageVersion, PageNameIndex
 from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
 from backend.schemas.lint import LintRunCreateRequest
-from backend.services.lint import base
+from backend.services.lint import LintContext, LintRegistry
+from backend.services.lint.scopes import findings_for_target
 from backend.services.lint_service import LintService
 from backend.services.page_service import refresh_page_links
 
@@ -51,8 +51,10 @@ def _refresh(session, *pages):
 
 
 def _check(session, rule_id, page):
-    return base.get_rule(rule_id).check(
-        session=session, workspace_id=page.workspace_id, target=page
+    return findings_for_target(
+        LintRegistry.builtin().rule(rule_id),
+        page,
+        LintContext(session, page.workspace_id, page=page),
     )
 
 
@@ -171,9 +173,7 @@ def test_knowledge_rules_ignore_draft_only_pages(session_factory):
             page_type="concept",
             lifecycle_status="draft",
         )
-        published = _page(
-            session, wsid, "published-name", title="Duplicate Draft Name"
-        )
+        published = _page(session, wsid, "published-name", title="Duplicate Draft Name")
         session.add(draft_only)
         session.flush()
 
@@ -231,18 +231,21 @@ def test_run_lint_clears_rule_caches_between_runs(session_factory):
     assert still_open == []
 
 
-def test_knowledge_rules_are_default_on(session_factory):
+def test_knowledge_rules_are_default_on():
     # Sprint-6 decision: knowledge checks apply to existing and new workspaces.
-    from backend.services.lint import enabled_rules
-
-    ids = {r.rule_id for r in enabled_rules(None, target_type="context_page")}
+    ids = {
+        r.rule_id
+        for r in LintRegistry.builtin().enabled(None, target_type="context_page")
+    }
     assert "kb.orphan_page" in ids
     assert "kb.missing_backlink" in ids
     assert "kb.duplicate_concept" in ids
     # Workspace policy can still explicitly disable a noisy rule.
     off = {
         r.rule_id
-        for r in enabled_rules({"kb.orphan_page": False}, target_type="context_page")
+        for r in LintRegistry.builtin().enabled(
+            {"kb.orphan_page": False}, target_type="context_page"
+        )
     }
     assert "kb.orphan_page" not in off
 

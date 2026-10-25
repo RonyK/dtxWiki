@@ -50,6 +50,7 @@ from backend.services.library_policy import (
     LibraryFamilyPolicyService,
     get_default_library_family_policy_service,
 )
+from backend.services.lint import LintRegistry
 from backend.services.mcp_credential_health import binding_key_for_client
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
@@ -265,7 +266,11 @@ class SettingsService:
         *,
         library_family_policy: LibraryFamilyPolicyService | None = None,
         orphan_retention_hours: int = 168,
+        lint_registry: LintRegistry | None = None,
     ) -> None:
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else LintRegistry.builtin()
+        )
         self.orphan_retention_hours = orphan_retention_hours
         self.library_family_policy = (
             library_family_policy or get_default_library_family_policy_service()
@@ -392,9 +397,7 @@ class SettingsService:
                 control_session,
                 health,
                 name_search=normalized_query,
-                oauth_client_ids={
-                    row[2] for row in bound_rows if row[2] is not None
-                }
+                oauth_client_ids={row[2] for row in bound_rows if row[2] is not None}
                 | bound_app_ids,
             )
             matched_bindings = [
@@ -1118,20 +1121,17 @@ class SettingsService:
             raise SettingsPolicyUpdateRejected(f"{key} cannot be empty")
         setattr(workspace, key, text)
 
-    @staticmethod
-    def _update_lint_policy(workspace: Workspace, key: str, value) -> None:
+    def _update_lint_policy(self, workspace: Workspace, key: str, value) -> None:
         # Lint toggles are dynamic ({rule_id: bool}), so they bypass the
         # fixed-key _update_json_policy. The reserved "auto_fix" key sets the
         # workspace auto-fix mode (F2); everything else is a rule_id toggle
         # validated against the registry. Both require a boolean.
-        from backend.services.lint import all_rules
-
         if not isinstance(value, bool):
             raise SettingsPolicyUpdateRejected("lint toggle must be a boolean")
         if key == "auto_fix":
             workspace.auto_fix_enabled = value
             return
-        rule = next((item for item in all_rules() if item.rule_id == key), None)
+        rule = self.lint_registry.rule(key)
         if rule is None:
             raise SettingsPolicyUpdateRejected(f"unknown lint rule_id: {key}")
         if not getattr(rule, "runtime_checkable", True):

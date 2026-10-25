@@ -142,7 +142,7 @@ def test_direct_path_slug_and_uuid_short_circuit_fallback(session_factory):
     ]
 
 
-def test_bare_slug_collision_disambiguates_but_explicit_path_stays_direct(
+def test_bare_slug_collision_returns_ranked_matches_but_explicit_path_stays_direct(
     session_factory,
 ):
     slug_page = PageService(session_factory).write_page(
@@ -190,10 +190,11 @@ def test_bare_slug_collision_disambiguates_but_explicit_path_stays_direct(
     expected_ids = {slug_page.id, title_page.id}
     assert {result.id for result in ambiguous.ranked_results} == expected_ids
     assert {result.id for result in quoted.ranked_results} == expected_ids
-    assert "disambiguation_required" in ambiguous.warnings
-    assert "disambiguation_required" in quoted.warnings
-    assert len(ambiguous.disambiguation.candidates) == 2
-    assert len(quoted.disambiguation.candidates) == 2
+    assert ambiguous.total_count == quoted.total_count == 2
+    assert ambiguous.warnings == quoted.warnings == explicit.warnings
+    assert [result.match_reason for result in ambiguous.ranked_results] == [
+        "exact_slug", "exact_title"
+    ]
     assert [result.id for result in explicit.ranked_results] == [slug_page.id]
     assert explicit.ranked_results[0].match_reason == "exact_slug"
     assert explicit.tried_lanes == ["direct"]

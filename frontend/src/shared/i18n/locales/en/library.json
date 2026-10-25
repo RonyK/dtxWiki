@@ -198,6 +198,7 @@
       "conversionReady": "Document conversion completed.",
       "sourceVersion": "Original file version.",
       "downloadVersion": "Download this version",
+      "downloadShort": "Download",
       "downloadingVersion": "Downloading this version…",
       "sourceUnavailable": "The original file is no longer retained."
     },

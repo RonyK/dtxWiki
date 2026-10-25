@@ -16,6 +16,7 @@ from backend.models.lint import LintFinding, LintRun
 from backend.models.review import ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
+from backend.services.body_preparer import BodyPreparer
 from backend.services.client_round_state import (
     MAINTENANCE_STATE_KIND,
     ClientRoundStateCodec,
@@ -468,6 +469,14 @@ def test_m3_task_preview_and_stable_yield_identical_domain_effects(
     task_type,
     media_installer_factory,
 ):
+    prepared_provenances = []
+    prepare = BodyPreparer.prepare
+
+    def record_prepare(self, input, ctx):
+        prepared_provenances.append(ctx.actor_provenance)
+        return prepare(self, input, ctx)
+
+    monkeypatch.setattr(BodyPreparer, "prepare", record_prepare)
     monkeypatch.setattr(
         maintenance_tools,
         "get_settings",
@@ -502,6 +511,8 @@ def test_m3_task_preview_and_stable_yield_identical_domain_effects(
     assert returned_preview_id == preview_task_id
     assert stable_result.staged == [stable_task_id]
     assert preview_result.staged == [preview_task_id]
+    if task_type == "folder_overview_draft":
+        assert set(prepared_provenances) == {actor.provenance}
     assert _m3_domain_effect(
         page_service, stable_task_id, task_type
     ) == _m3_domain_effect(page_service, preview_task_id, task_type)

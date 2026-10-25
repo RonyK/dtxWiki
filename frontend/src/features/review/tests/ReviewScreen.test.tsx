@@ -406,7 +406,7 @@ describe("ReviewScreen", () => {
       </MemoryRouter>,
     );
 
-    const row = await screen.findByRole("button", { name: "Versioned Context page · v3" });
+    const row = await screen.findByRole("button", { name: /^Versioned Context page · v3 ·/ });
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText("v3")).toBeInTheDocument();
   });
@@ -470,7 +470,7 @@ describe("ReviewScreen", () => {
       ),
     ).toEqual(["v3", "v2", "v1", "v9", "Plain publish"]);
     expect(screen.queryByRole("region", { name: "Plain publish" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Plain publish · v1" }).closest(".review-document-group")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Plain publish · v1 ·/ }).closest(".review-document-group")).toBeNull();
   });
 
   it("says only what it can see while more results are still outstanding", async () => {
@@ -540,7 +540,7 @@ describe("ReviewScreen", () => {
         </MemoryRouter>,
       );
 
-      await userEvent.click(await screen.findByRole("button", { name: `Settlement impact ${count} · v1` }));
+      await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^Settlement impact ${count} · v1 ·`) }));
       expect(await screen.findByText(copy)).toBeInTheDocument();
       await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     },
@@ -561,7 +561,7 @@ describe("ReviewScreen", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "No settlement impact · v1" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^No settlement impact · v1 ·/ }));
     expect(await screen.findByRole("heading", { level: 2, name: "No settlement impact" }))
       .toBeInTheDocument();
     expect(screen.queryByText(/other reviews of this version/i)).toBeNull();
@@ -697,7 +697,7 @@ describe("ReviewScreen", () => {
       expect(screen.getByText("Custom backend audit summary")).toBeInTheDocument();
       expect(screen.getByText("Future backend summary")).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Translated summary page · v1" }));
+      await userEvent.click(screen.getByRole("button", { name: /^Translated summary page · v1 ·/ }));
       expect(
         await screen.findAllByText("Context 수정 초안을 리뷰해야 합니다"),
       ).toHaveLength(2);
@@ -2105,7 +2105,7 @@ describe("ReviewScreen", () => {
     await screen.findByRole("heading", { name: "First detail", level: 2 });
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Second detail · v1" }));
+    await user.click(screen.getByRole("button", { name: /^Second detail · v1 ·/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     await act(async () => { finishFirst(jsonResponse({ data: first })); });
@@ -2883,7 +2883,7 @@ describe("ReviewScreen", () => {
     await user.type(reason, "Please keep the first note");
     expect(sessionStorage.getItem(key)).toBe("Please keep the first note");
     expect(localStorage.getItem(key)).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Second draft · v1" }));
+    await user.click(screen.getByRole("button", { name: /^Second draft · v1 ·/ }));
     await screen.findByRole("heading", { name: "Second draft", level: 2 });
     await user.click(screen.getByText("Add a decision reason (optional)"));
     expect(screen.getByRole("textbox", { name: "Decision reason" })).toHaveValue("");
@@ -2900,7 +2900,7 @@ describe("ReviewScreen", () => {
     expect(secondReason).toHaveFocus();
     await user.type(secondReason, "Independent second note");
     expect(secondReason).toHaveValue("Independent second note");
-    await user.click(screen.getByRole("button", { name: "Second draft · v1" }));
+    await user.click(screen.getByRole("button", { name: /^Second draft · v1 ·/ }));
     await user.click(screen.getByRole("button", { name: "History back" }));
     await screen.findByRole("heading", { name: "First draft", level: 2 });
     expect(screen.getByLabelText("Decision reason")).toHaveValue("Please keep the first note");
@@ -3016,9 +3016,9 @@ describe("ReviewScreen", () => {
     expect(await within(group).findByText("3 selected for this document")).toBeVisible();
     expect(groupCheck).toBeChecked();
     expect(selectionBodies).toEqual([{ filters: { status: "pending", scope: "all", target_page_id: "page-group" } }]);
-    expect(screen.queryByRole("button", { name: "Grouped document · v11" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Grouped document · v11 ·/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Load more" }));
-    await within(group).findByRole("button", { name: "Grouped document · v13" });
+    await within(group).findByRole("button", { name: /^Grouped document · v13 ·/ });
     expect(groupCheck).toBePartiallyChecked();
     const rowLabels = [...group.querySelectorAll(".review-row-select input")]
       .map(input => input.getAttribute("aria-label")!);
@@ -3174,7 +3174,7 @@ describe("ReviewScreen", () => {
       expect(await screen.findByText(`${label} → Review version v3`)).toBeVisible();
     }
     const reads = vi.mocked(pagesApi.readPage).mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "Metadata target · v1" }));
+    await user.click(screen.getByRole("button", { name: /^Metadata target · v1 ·/ }));
     await screen.findByRole("heading", { name: "Metadata target", level: 2 });
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
@@ -3225,7 +3225,7 @@ describe("ReviewScreen", () => {
     expect(screen.queryByRole("button", { name: "Approve selected" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next review" })).toBeDisabled();
     expect(screen.getByRole("tab", { name: "Pending" })).toBeVisible();
-    expect(within(screen.getByRole("complementary", { name: "Review queue" })).queryByRole("button", { name: "Saved first · v1" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("complementary", { name: "Review queue" })).queryByRole("button", { name: /^Saved first · v1 ·/ })).not.toBeInTheDocument();
     expect(sessionStorage.getItem(key)).toBeNull();
     expect(sessionStorage.getItem(`${key}.pending`)).toBeNull();
     expect(decisions).toHaveLength(1);

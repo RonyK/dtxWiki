@@ -1,16 +1,16 @@
-import importlib
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
 from alembic import command
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import create_engine, event, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from backend.migrations.revision_modules.v0_1.content_event_backfill_v1 import (
+    backfill_content_event_times,
+)
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.audit import AuditEvent
 from backend.models.context import ContextPage, ContextPageVersion
@@ -229,7 +229,7 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
 
 
 def _minimal_backfill_tables():
-    """Only legacy columns the real upgrade needs, with real UUID/JSON types."""
+    """Only final columns the data backfill needs, with real UUID/JSON types."""
     metadata = sa.MetaData()
     pages = sa.Table(
         "context_page",
@@ -237,6 +237,7 @@ def _minimal_backfill_tables():
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("workspace_id", sa.Uuid()),
         sa.Column("current_published_version_id", sa.Uuid()),
+        sa.Column("content_changed_at", sa.DateTime(timezone=True)),
     )
     versions = sa.Table(
         "context_page_version",
@@ -254,6 +255,7 @@ def _minimal_backfill_tables():
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("workspace_id", sa.Uuid()),
         sa.Column("current_active_version_id", sa.Uuid()),
+        sa.Column("content_changed_at", sa.DateTime(timezone=True)),
     )
     sa.Table(
         "agent_page_version", metadata, sa.Column("id", sa.Uuid(), primary_key=True)
@@ -321,9 +323,6 @@ def _seed_unchanged_chain(connection, pages, versions, audits, count):
 
 
 def test_upgrade_publication_chain_work_grows_linearly():
-    migration = importlib.import_module(
-        "backend.migrations.versions.v0_1.c7a4e91b2d60_tree_rail_metadata"
-    )
     measurements = []
     for count in (256, 1024):
         engine = create_engine("sqlite:///:memory:")
@@ -340,10 +339,9 @@ def test_upgrade_publication_chain_work_grows_linearly():
                 raw = connection.connection.driver_connection
                 raw.set_progress_handler(progress, 100)
                 try:
-                    # Execute the actual upgrade: it must create the index
+                    # The release's data helper must create the lookup index
                     # used by the actual lookup, then remove it afterwards.
-                    with Operations.context(MigrationContext.configure(connection)):
-                        migration.upgrade()
+                    backfill_content_event_times(connection)
                 finally:
                     raw.set_progress_handler(None, 0)
                 measurements.append(ticks[0] * 100)
@@ -380,9 +378,6 @@ def test_upgrade_publication_chain_work_grows_linearly():
     ],
 )
 def test_upgrade_keeps_unproven_publication_times_unknown(broken_proof):
-    migration = importlib.import_module(
-        "backend.migrations.versions.v0_1.c7a4e91b2d60_tree_rail_metadata"
-    )
     engine = create_engine("sqlite:///:memory:")
     metadata, pages, versions, audits = _minimal_backfill_tables()
     metadata.create_all(engine)
@@ -428,8 +423,7 @@ def test_upgrade_keeps_unproven_publication_times_unknown(broken_proof):
                     .where(audits.c.id == version_ids[-1])
                     .values({column: value})
                 )
-            with Operations.context(MigrationContext.configure(connection)):
-                migration.upgrade()
+            backfill_content_event_times(connection)
             assert (
                 connection.exec_driver_sql(
                     "SELECT content_changed_at FROM context_page"
@@ -442,9 +436,6 @@ def test_upgrade_keeps_unproven_publication_times_unknown(broken_proof):
 
 @pytest.mark.parametrize("same_timestamp", [False, True])
 def test_upgrade_uses_newest_exact_version_event_across_uuid_spellings(same_timestamp):
-    migration = importlib.import_module(
-        "backend.migrations.versions.v0_1.c7a4e91b2d60_tree_rail_metadata"
-    )
     engine = create_engine("sqlite:///:memory:")
     metadata, pages, versions, audits = _minimal_backfill_tables()
     metadata.create_all(engine)
@@ -483,8 +474,7 @@ def test_upgrade_uses_newest_exact_version_event_across_uuid_spellings(same_time
                     "payload": {"version_id": str(version_ids[-1]) + "x" * 8192},
                 },
             )
-            with Operations.context(MigrationContext.configure(connection)):
-                migration.upgrade()
+            backfill_content_event_times(connection)
             assert connection.exec_driver_sql(
                 "SELECT content_changed_at FROM context_page"
             ).scalar_one() == timestamp.replace(tzinfo=None).isoformat(

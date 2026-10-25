@@ -138,16 +138,24 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  13 -- Bundle categories now expose the supported enum, review notes reject
 #        invalid Unicode, and body budgets describe the final stored Markdown.
 #        Refresh tools/list before submitting content and bundle requests.
-#  14 -- list_requested_changes evidence adds independently authorized document
+#  14 -- General search excludes feedback and changes; explicit audit scopes
+#        remain available. Search results gain optional summary and location,
+#        and the always-false stale field is deprecated. Refresh tools/list.
+#  15 -- Search returns exact-name matches only through ranked_results and no
+#        longer emits a separate disambiguation projection or search warning.
+#        Optional filters.include_agents defaults true; false excludes Agent
+#        pages before result counts and pagination. Refresh tools/list.
+#        Explicit read_concept and write-target ambiguity policies are retained.
+#  16 -- list_requested_changes evidence adds independently authorized document
 #        destinations and exact candidate/baseline content descriptors,
 #        including the earlier draft a candidate was written on. Clients may
 #        ignore these additive fields and keep using the existing target and
 #        diff_ref fields; no tool or input schema changed.
-#  15 -- what_changed adds unpublished when an undone first publication leaves
+#  17 -- what_changed adds unpublished when an undone first publication leaves
 #        no published version. Refresh the output contract and invalidate the
 #        page's cached publication by page_id; version_id is null. Existing
 #        visibility rules still apply, including draft visibility.
-MCP_TOOL_CONTRACT_REVISION = 15
+MCP_TOOL_CONTRACT_REVISION = 17
 ERROR_CODES = (
     "not_found",
     "stale_base_version",
@@ -178,8 +186,7 @@ ERROR_CODES = (
     "text_match_low_confidence",
     "section_not_found",
     "section_hash_mismatch",
-    # Block-addressed operations (design doc
-    # doc/design/block-provenance-contract.md section 2).
+    # Block-addressed operations.
     "block_not_found",
     "block_hash_mismatch",
     "row_not_found",
@@ -306,12 +313,11 @@ WARNING_CODES = (
     # without re-reading the page, which is the cost patching removes.
     "text_occurrence_mismatch",
     "text_not_found",
-    # Search advisory codes (design §8.2). unsupported_filter_*,
-    # disambiguation_required, and explicit semantic/hybrid fallback fire
-    # today; coverage_gap_recorded is emitted by Ask/REST/MCP zero-hit paths.
+    # Search advisory codes (design §8.2). unsupported_filter_* and explicit
+    # semantic/hybrid fallback fire today; coverage_gap_recorded is emitted by
+    # Ask/REST/MCP zero-hit paths.
     "unsupported_filter_tag",
     "unsupported_filter_date",
-    "disambiguation_required",
     "semantic_fallback_used",
     "keyword_lane_unavailable",
     "coverage_gap_recorded",
@@ -323,8 +329,7 @@ WARNING_CODES = (
     # deterministic evidence pack; these say why it is not the composed one.
     "llm_provider_unavailable",
     "llm_composer_failed",
-    # Epic-2 Phase 6a fan-out (doc/design/workspace-database-separation-plan.md
-    # §4): one or more workspace shards could not be reached while building a
+    # One or more workspace shards could not be reached while building a
     # cross-workspace admin job listing/summary, so the result is a partial
     # one -- the reachable workspaces' data, not every workspace's.
     "job_fanout_incomplete",

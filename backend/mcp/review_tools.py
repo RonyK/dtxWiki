@@ -121,6 +121,7 @@ def submit_revision_for_review(
                 principal=principal,
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
+                actor_provenance=actor.provenance,
                 principal_role=principal_role,
                 context_write_service=ctx.services.context_write,
                 update=request.update,

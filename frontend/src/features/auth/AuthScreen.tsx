@@ -291,7 +291,7 @@ export function AuthScreen() {
               // least 8 characters." instead of "Password"). Same pattern
               // and copy as AccountSecurityScreen's new-password-rule.
               <p className="field-hint field-hint--attached" id="signup-password-rule">
-                {t("password.rule", { defaultValue: "15–128 characters." })}
+                {t("password.rule", { defaultValue: "8–128 characters." })}
               </p>
             ) : null}
             <label className="checkbox-field auth-remember">

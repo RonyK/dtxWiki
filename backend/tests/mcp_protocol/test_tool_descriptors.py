@@ -84,6 +84,8 @@ def test_search_descriptor_advertises_planner_and_optional_modes():
 
     assert "direct paths" in search.description
     assert "semantic and hybrid" in search.description
+    assert "all scope excludes feedback and changes" in search.description
+    assert "explicit feedback or change scope" in search.description
     assert "rejected" not in search.description
 
 

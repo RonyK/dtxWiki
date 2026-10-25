@@ -14,8 +14,7 @@ queue_summary back the separate server-admin surface -- deliberately not the
 same query with an extra filter, so a rewrite of one never has to touch the
 other.
 
-Phase 6a (doc/design/workspace-database-separation-plan.md §4) is that
-rewrite for list_all_jobs/queue_summary: both now fan out across the
+list_all_jobs/queue_summary now fan out across the
 workspace roster instead of running one cross-workspace query, because once
 Job is workspace-plane data a single query has nothing left to read. See
 each method's docstring for the cursor and partial-failure design.
@@ -491,9 +490,8 @@ class JobReadService:
           globally monotonic. Out of order beats silently missing.
 
         The cost is O(workspace count) shard queries per page rather than one;
-        see queue_summary for the same trade-off and
-        doc/design/workspace-database-separation-plan.md §3 D-2 for why this
-        repository defers the round-robin/hint optimization Phase 6b gives the
+        see queue_summary for the same trade-off. This
+        repository defers the round-robin/hint optimization used by the
         worker -- this is an operator screen, not the claim loop.
 
         Ordering contract: unchanged from the single-query version --

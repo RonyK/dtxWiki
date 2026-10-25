@@ -48,7 +48,9 @@ const identityRecoveryEnv = {
 const backendServerScript = [
   "import uvicorn",
   "from backend.app.main import create_app",
-  `uvicorn.run(create_app(bootstrap_on_startup=True), host="127.0.0.1", port=${backendPort})`,
+  // Explicit response closure prevents Playwright's HTTP agent from reusing
+  // an idle socket whose peer FIN has not reached the client's event loop.
+  `uvicorn.run(create_app(bootstrap_on_startup=True), host="127.0.0.1", port=${backendPort}, headers=[("Connection", "close")])`,
 ].join("; ");
 // Single-origin E2E never issues a cross-origin request, so this list only has
 // to stay non-empty: Settings rejects an empty DTXWIKI_CORS_ORIGINS at startup.
@@ -188,8 +190,8 @@ export default defineConfig({
     // credential from the environment, so a published token authenticates
     // against a database that no longer exists. Treat it as a hygiene and
     // contract defect. The only mitigation that reaches index.html is a
-    // redaction step before upload-artifact in the e2e job -- see
-    // docs/reviews/phase5/FINAL-REVIEW.md S1.
+    // redaction step before upload-artifact in the e2e job; see
+    // scripts/redact_evidence.sh --dir playwright-report.
     trace: "retain-on-failure",
   },
   projects: [

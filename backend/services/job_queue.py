@@ -134,11 +134,19 @@ def context_page_embed_idempotency_key(
     marker: str,
     version_id: UUID,
     content_hash: str,
+    *,
+    decision_id: UUID | None = None,
 ) -> str:
-    """Return a version-addressed key for a page-head embed trigger."""
+    """Address a page-head trigger by version or by a review transition.
+
+    After undo, a fresh decision can publish or reject the same version again.
+    Its decision ID distinguishes that transition from the earlier completed job.
+    """
 
     if marker not in {"draft", "published"}:
         raise ValueError("context embed marker must be draft or published")
+    if decision_id is not None:
+        return f"context_page:{page_id}:decision:{decision_id}"
     return f"context_page:{page_id}:{marker}:{version_id}:{content_hash}"
 
 
@@ -399,8 +407,7 @@ class JobQueueService:
         max-total-attempts semantics. Updates are status-guarded so a job
         completed or failed concurrently is left alone.
 
-        ``workspace_id`` is required, not optional (Epic-2 Phase 6a,
-        doc/design/workspace-database-separation-plan.md §3 D-2 point 1): the
+        ``workspace_id`` is required, not optional: the
         pre-6a signature had no workspace filter at all and scanned every
         'running' row globally, which is exactly the shape that goes silent
         once the DB is sharded per workspace -- a caller that forgot to
@@ -481,11 +488,9 @@ class JobQueueService:
         leaving it at its already-exhausted value means: if this one extra
         attempt fails too, the very next fail() call terminates it again
         immediately -- it does not grant a fresh multi-attempt budget. A reset
-        counter would let repeated manual retries retry the same job forever
-        (D-6, doc/design/workspace-database-separation-plan.md).
+        counter would let repeated manual retries retry the same job forever.
 
-        ``workspace_id`` must be the job's own workspace (Epic-2 Phase 6c,
-        doc/design/workspace-database-separation-plan.md §4). ``session`` is
+        ``workspace_id`` must be the job's own workspace. ``session`` is
         already routed to that workspace's shard by the caller
         (``session_for(workspace_id)``), which is enough to make a wrong
         guess miss entirely once the DB is actually split -- a shard simply

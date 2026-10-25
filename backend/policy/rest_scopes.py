@@ -35,6 +35,7 @@ from backend.services.read_errors import RejectedByPolicyError
 
 # (HTTP method, FastAPI route path template) → required scopes (any-of).
 REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("GET", "/api/v1/context/pages/{page_id}/location"): CONTEXT_PAGE_BODY_SCOPES,
     # /api/v1/workspaces/{workspace_id}/context/pages (P9.1 canonical Context
     # route family -- replaces the old /api/v1/pages* (PageService, P8) and
     # the intermediate context-pages* (DomainReadService/ContextWriteService)
@@ -300,6 +301,8 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}",
     ): ("review-read",),
     ("GET", "/api/v1/workspaces/{workspace_id}/activity"): ("audit-read",),
+    ("GET", "/api/v1/workspaces/{workspace_id}/activity/feed"): ("audit-read",),
+    ("GET", "/api/v1/workspaces/{workspace_id}/activity/read-group"): ("audit-read",),
     # Same sensitivity tier as /activity (which surfaces job status and the
     # redacted error_code inline -- last_error itself never crosses either
     # API, admin included; it is a protected server-log/DB-diagnostic value
@@ -621,10 +624,7 @@ def require_token_scope(
         path=path,
         actor=actor,
     )
-    if (
-        actor.token_kind == "session"
-        and (method, path) in REST_SESSION_UNSCOPED_ROUTES
-    ):
+    if actor.token_kind == "session" and (method, path) in REST_SESSION_UNSCOPED_ROUTES:
         return actor
     if request.path_params.get("workspace_id") is not None:
         return scope_actor_to_request_workspace(request, actor)
@@ -664,8 +664,7 @@ def _require_live_consent_for_bound_workspace(
             detail={
                 "error_code": "token_workspace_denied",
                 "message": (
-                    "token_workspace_denied: OAuth credential has no allowed "
-                    "workspace"
+                    "token_workspace_denied: OAuth credential has no allowed workspace"
                 ),
             },
         )

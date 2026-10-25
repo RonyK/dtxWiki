@@ -29,8 +29,14 @@ from backend.schemas.lint import (
 from backend.services.audit_service import AuditService
 from backend.services.delegated_tasks import produce_folder_summary_tasks
 from backend.services.job_queue import JobQueueService
-from backend.services.lint import all_rules, enabled_rules
-from backend.services.lint.base import PUBLICATION_FLOOR_RULES
+from backend.services.lint import (
+    LintContext,
+    LintModule,
+    LintPolicy,
+    LintRegistry,
+    LintStage,
+)
+from backend.services.lint.scopes import findings_for_target
 from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
@@ -64,7 +70,12 @@ class LintService:
         self,
         audit_service: AuditService | None = None,
         job_queue: JobQueueService | None = None,
+        *,
+        lint_registry: LintRegistry | None = None,
     ) -> None:
+        self.lint_registry = (
+            lint_registry if lint_registry is not None else LintRegistry.builtin()
+        )
         self.audit_service = audit_service or AuditService()
         self.job_queue = job_queue or JobQueueService()
 
@@ -91,16 +102,13 @@ class LintService:
         # not a list filter: a finding_id deep link bypasses the caller's
         # severity/layer/status filters but stays subject to it.
         workspace = session.get(Workspace, workspace_id)
-        policy = (
-            workspace.lint_policy
-            if workspace is not None and workspace.lint_policy
-            else {}
-        )
+        policy = LintPolicy(workspace)
+        enabled_ids = {rule.rule_id for rule in self.lint_registry.enabled(policy)}
         disabled_ids = [
             rule.rule_id
-            for rule in all_rules()
+            for rule in self.lint_registry.rules()
             if getattr(rule, "runtime_checkable", True)
-            if not policy.get(rule.rule_id, rule.default_enabled)
+            if rule.rule_id not in enabled_ids
         ]
         base = select(LintFinding).where(LintFinding.workspace_id == workspace_id)
         if disabled_ids:
@@ -139,7 +147,9 @@ class LintService:
             if layer is not None:
                 # Layer is a property of the producing rule, not the finding, so
                 # map it to the rule_ids registered under that layer.
-                layer_rule_ids = [r.rule_id for r in all_rules() if r.layer == layer]
+                layer_rule_ids = [
+                    r.rule_id for r in self.lint_registry.rules() if r.layer == layer
+                ]
                 base = base.where(LintFinding.rule_id.in_(layer_rule_ids))
         if actor is not None:
             # Tree-node findings: node visibility is projection-based, so check
@@ -287,6 +297,11 @@ class LintService:
         lint_run.started_at = now
         lint_run.completed_at = None
         lint_scope = dict(lint_run.lint_scope or {"kind": request.lint_scope})
+        registry = (
+            self.lint_registry
+            if rules is None
+            else LintRegistry((LintModule("run", 0, tuple(rules)),))
+        )
         targets = self._resolve_targets(session, workspace_id, lint_scope)
         linted_target_ids = {target_id for _, _, target_id in targets}
 
@@ -298,7 +313,9 @@ class LintService:
         for target_type in {tt for tt, _, _ in targets}:
             enabled_ids |= {
                 r.rule_id
-                for r in enabled_rules(policy, rules=rules, target_type=target_type)
+                for r in registry.rules_for(
+                    LintStage.RUN, policy, target_type=target_type
+                )
             }
         existing = (
             list(
@@ -322,9 +339,12 @@ class LintService:
         counts: dict[str, int] = {}
         produced_keys: set[tuple[UUID | None, str]] = set()
         for target_type, target, target_id in targets:
-            for rule in enabled_rules(policy, rules=rules, target_type=target_type):
-                for draft in rule.check(
-                    session=session, workspace_id=workspace_id, target=target
+            ctx = LintContext(session, workspace_id, page=target)
+            for rule in registry.rules_for(
+                LintStage.RUN, policy, target_type=target_type
+            ):
+                for draft in findings_for_target(
+                    rule, target, ctx
                 ):
                     tid = draft.target_id if draft.target_id is not None else target_id
                     key = (tid, draft.fingerprint)
@@ -504,21 +524,21 @@ class LintService:
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
             raise ReadNotFoundError("workspace not found")
-        policy = workspace.lint_policy or {}
         infos = [
             LintRuleInfo(
                 rule_id=rule.rule_id,
                 layer=rule.layer,
                 default_enabled=rule.default_enabled,
                 enabled=(
-                    True
-                    if rule.rule_id in PUBLICATION_FLOOR_RULES
-                    else policy.get(rule.rule_id, rule.default_enabled)
+                    LintStage.PUBLISH_FLOOR in rule.stages
+                    or LintPolicy(workspace).rule_enabled(
+                        rule.rule_id, default_enabled=rule.default_enabled
+                    )
                 ),
                 runtime_checkable=getattr(rule, "runtime_checkable", True),
-                policy_locked=rule.rule_id in PUBLICATION_FLOOR_RULES,
+                policy_locked=LintStage.PUBLISH_FLOOR in rule.stages,
             )
-            for rule in all_rules()
+            for rule in self.lint_registry.rules()
         ]
         infos.sort(key=lambda info: (info.layer, info.rule_id))
         return LintRuleListData(rules=infos)

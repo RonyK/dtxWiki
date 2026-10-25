@@ -26,7 +26,7 @@ from uuid import UUID
 from sqlalchemy import event
 from sqlalchemy.orm import Session, attributes
 
-from backend.models.change import ChangeSet
+from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.lint import LintFinding
@@ -66,6 +66,9 @@ _TRACKED: dict[type, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     ),
     ReviewItem: ("review_item", ("status", "claimed_by", "claimed_at"), ()),
     ChangeSet: ("change_set", ("status",), ()),
+    # First-publishing an earlier draft synthesizes staged metadata for its
+    # successors. Undo must remove those patches as well as restore the page.
+    ChangeOperation: ("change_operation", ("diff_summary", "diff_ref"), ()),
     LintFinding: ("lint_finding", (), ("status", "resolved_at")),
     ClientDelegatedTask: ("client_delegated_task", (), ("status", "lease_expires_at")),
 }
@@ -75,6 +78,7 @@ _ADVISORY = {table: set(advisory) for table, _guarded, advisory in _TRACKED.valu
 # on its behalf (dependents flagged stale keep their own maintenance state).
 _PAGE_SCOPED = {
     ContextPage: "id",
+    ChangeOperation: "target_id",
     LintFinding: "target_id",
     ClientDelegatedTask: "target_id",
 }
@@ -131,6 +135,10 @@ class DecisionEffectRecorder:
         model = type(obj)
         if model not in _TRACKED:
             return False
+        if isinstance(obj, ChangeOperation) and (
+            obj.target_type != "context_page" or obj.operation != "metadata_patch"
+        ):
+            return False
         attribute = _PAGE_SCOPED.get(model)
         return attribute is None or getattr(obj, attribute) == self.page_id
 
@@ -139,6 +147,8 @@ class DecisionEffectRecorder:
             if self._in_scope(obj):
                 table = _TRACKED[type(obj)][0]
                 self._created.setdefault(table, set()).add(obj.id)
+                if isinstance(obj, ChangeOperation):
+                    self._objects[(type(obj), obj.id)] = obj
         for obj in session.dirty:
             model = type(obj)
             if not self._in_scope(obj) or obj.id in self._created.get(
@@ -166,6 +176,12 @@ class DecisionEffectRecorder:
         if not self.complete or self._created.get("context_page_version"):
             return None
         rows: dict[str, dict[str, dict[str, list[object]]]] = {}
+        for row_id in self._created.get("change_operation", ()):
+            patch = self._objects[(ChangeOperation, row_id)]
+            rows.setdefault("change_operation", {})[str(row_id)] = {
+                column: [None, _encode(getattr(patch, column))]
+                for column in _TRACKED[ChangeOperation][1]
+            }
         for (model, row_id), before in self._before.items():
             obj = self._objects[(model, row_id)]
             changed = {
@@ -187,7 +203,10 @@ class DecisionEffectRecorder:
             "created": {
                 table: sorted(str(row_id) for row_id in ids)
                 for table, ids in self._created.items()
-                if table in {"review_item", "lint_finding", "client_delegated_task"}
+                if table in {
+                    "review_item", "lint_finding", "client_delegated_task",
+                    "change_operation",
+                }
             },
             **{key: _encode(value) for key, value in extra.items()},
         }
@@ -253,6 +272,13 @@ def effect_still_current(
             return False
     page_id = effect.get("page_id")
     if page_id is not None:
+        page = get_in_workspace(
+            session, ContextPage, workspace_id=workspace_id, resource_id=UUID(page_id)
+        )
+        # Archiving can happen without changing a column this decision wrote.
+        # It still retires the publication and must not be undone indirectly.
+        if page is None or page.lifecycle_status == "archived":
+            return False
         newer = session.scalar(
             select_in_workspace(
                 ContextPageVersion,
@@ -302,6 +328,11 @@ def restore_effect(
     for batch in (demoted, loaded.keys() - demoted):
         for table, row_id in batch:
             obj = loaded[(table, row_id)]
+            if table == "change_operation" and row_id in effect["created"].get(
+                table, ()
+            ):
+                session.delete(obj)
+                continue
             for column, (before, after) in effect["rows"][table][row_id].items():
                 moved = _encode(getattr(obj, column)) != after
                 if column in _ADVISORY[table] and moved:

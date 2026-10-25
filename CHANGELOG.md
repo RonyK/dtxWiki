@@ -1,19 +1,107 @@
 # Changelog
 
-## 0.1.2 — Unreleased
+## Unreleased
 
-### Release distribution
+### Fixes
 
-- Fix the npm publish command to use an explicit local tarball path. The
-  release workflow publishes PyPI first, then the matching npm launcher,
-  and creates the GitHub Release after both uploads succeed.
-- Version 0.1.1 reached PyPI, but its npm upload failed and no GitHub Release
-  was created. Version 0.1.2 replaces that interrupted distribution; the
-  temporary 0.1.1 recovery workflow is removed.
-- Desktop installers remain outside this release.
+- Review evidence now distinguishes the current document destination from the
+  exact reviewed Context version and its comparison baseline. Group approvals
+  use a fixed, signed selection and preserve individual results across batches;
+  single decisions accept a durable receipt ID for safe retries.
+- MCP tool contract revision 16 adds authorized document and content descriptors
+  to `list_requested_changes` evidence, including the earlier draft a candidate
+  was written on. Existing clients can ignore these additive fields and
+  continue using the existing target and `diff_ref` fields.
+- MCP tool contract revision 17 adds `unpublished` to `what_changed` when an
+  undone first publication leaves no published version. Refresh the output
+  contract and invalidate the cached publication by `page_id`; `version_id`
+  is null. Draft visibility still applies, so readers without draft access
+  receive no unpublished-page metadata.
+- Approving a Context review publishes the changes up to that draft; rejecting
+  one also rejects the later drafts written on it and returns the edit head to
+  the draft below them. Earlier drafts and branched alternatives are untouched.
+  A reject confirmation whose impact changed meanwhile is refused with 409
+  `review_decision_impact_changed`.
+- A Context review decision can be undone while its recorded result is current:
+  an approval (including an automatic one), a rejection, or a first-round
+  change request. Undoing restores the published and draft heads, page
+  metadata and the reviews the decision settled or opened; the decision stays
+  in the history followed by an `undo` record. The decider (or an owner) may
+  undo a decision, any editor an automatic approval, which then waits for a
+  person. Browser sessions only:
+  `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
+  refused with 409 `review_decision_undo_unavailable` after a newer version or
+  a change to the recorded result. Later metadata changes the decision did
+  not touch, such as a tree rename, are preserved. Claims on restored change
+  requests return with their original timestamps and expiry.
+  Decisions made before this release, and approvals that revived an archived
+  page, cannot be undone. Reading a page as of a later time follows the undone
+  publication, the page's own stale warning returns with its older content,
+  and a withdrawn change request leaves `list_requested_changes` and refuses
+  revisions.
+- Preserve restored drafts' mandatory human-review conditions and first-publish
+  metadata across page-first submissions and authenticated autosaves. Restart
+  rejected content only while its surviving head is unchanged, refresh rejection
+  previews when confirming, and compare draft parents independently of the
+  published version's diff limit.
+
+- Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
+  Writers and readers share that container's registry. Workers passed the same
+  `services` use it too; standalone CLI worker processes build their own builtin
+  registry and do not inherit another process's injected modules. Supply modules
+  before the registry is first used; late injection raises `ValueError`.
+  Module injection is typed as `tuple[LintModule, ...]`;
+  `LintPolicy.rule_enabled` requires an explicit `default_enabled` argument.
+- Context lint modules receive the actual caller provenance, including browser
+  reconciliation and MCP revision and maintenance writes.
+- Preserve Markdown hard breaks during formatting and block identities after
+  formatted patches. Whole-body edit retries retain their original receipt.
+- With auto-fix disabled, `write_page`/`update_page` and Context writes preserve
+  authored trailing whitespace. For those writes, NFC/NFD differences, line
+  endings and the final newline do not create a new version on their own.
+  Autosave retains its existing exact-text comparison.
+- Autosave checks the supplied base before preparing content. A stale base takes
+  precedence when both the base and save-time content checks would fail.
+- Keep legacy citation-only updates and patch previews compatible with stored
+  frontmatter, and verify reconciliation independently of current fixer settings.
+
+## 0.1.4 — 2026-10-23
+
+### Search results
+
+- Show search results with readable summaries and folder locations, distinct
+  match explanations, and a clear link indicator. Context results retain their
+  correct destination styling when opened through workspace permalinks.
+- Put the result type above the title on mobile and allow longer titles to
+  wrap. Hide duplicate matched names, generated UUID paths, stale markers, and
+  citation-availability labels; clean Markdown syntax from displayed snippets.
+- Use the same result cards and location display for every match reason and
+  duplicate title. Remove separate candidate prompts, short IDs, and path tooltips.
+- Exclude Agent pages from browser search and hide the Agent scope when the
+  Agent Labs feature is off. Apply the preference before search pagination.
+- Exclude changes and feedback from general search and remove the browser's
+  change-history search option. Explicit API and MCP change and feedback
+  scopes remain available, and old browser change-search links open all results
+  with guidance to Activity and Review.
+- Add optional `summary` and `location` search fields with permission-aware
+  batch location reads. Skip metadata lists when deriving page summaries and
+  advance the MCP tool contract to revision 15.
+
+### Database
+
+- Index `change_operation.change_set_id` for Review, explicit change searches,
+  and cascading deletion. Upgrade from the unchanged 0.1.3 revision and retain
+  all existing change-operation rows when adding or removing the index.
+- Freeze the 0.1.3 migration and its helper modules together with the new
+  0.1.4 revision in both source and package artifact checks.
+
+## 0.1.3 — 2026-10-23
 
 ### Runtime and upgrades
 
+- Upgrade the published 0.1.2 database directly to the final 0.1.3 schema in
+  one revision. Validate inputs before changing tables, combine new columns and
+  input checks per table, and retain proven content-event timestamps.
 - `dtxwiki` and `dtxwiki serve` now start and stop the required background
   worker together. If another process manager already runs `dtxwiki-worker run`,
   set `DTXWIKI_WORKER_MODE=external` or pass `--worker-mode external` before
@@ -48,12 +136,12 @@
   Finalization verifies the updater's live data-directory and database guards
   before migrating, while retaining compatibility with older updaters.
 
-### Fixes
+### Input validation
 
 - Apply shared input limits across browser, REST, MCP, CLI, services and storage:
   display names use 1–32 Unicode code points, email uses at most 254 UTF-8
   bytes (64 for the local part), and every password is capped at 128 code
-  points. New passwords require at least 15; older longer passwords require
+  points. New passwords require at least 8; older longer passwords require
   password recovery. Explicit input is rejected rather than shortened.
 - Bound content metadata, final edited bodies, OAuth metadata, credentials and
   submitted grant lists. Existing history and larger stored grant sets remain
@@ -72,53 +160,9 @@
 - Separate upgrade-blocking input findings from preserved history, support
   baseline audits and independent Library label repairs, and honor runtime
   activity locks during maintenance.
-- Review evidence now distinguishes the current document destination from the
-  exact reviewed Context version and its comparison baseline. Group approvals
-  use a fixed, signed selection and preserve individual results across batches;
-  single decisions accept a durable receipt ID for safe retries.
-- MCP tool contract revision 14 adds authorized document and content descriptors
-  to `list_requested_changes` evidence, including the earlier draft a candidate
-  was written on. Existing clients can ignore these additive fields and
-  continue using the existing target and `diff_ref` fields.
-- MCP tool contract revision 15 adds `unpublished` to `what_changed` when an
-  undone first publication leaves no published version. Refresh the output
-  contract and invalidate the cached publication by `page_id`; `version_id`
-  is null. Draft visibility still applies, so readers without draft access
-  receive no unpublished-page metadata.
-- Approving a Context review publishes the changes up to that draft; rejecting
-  one also rejects the later drafts written on it and returns the edit head to
-  the draft below them. Earlier drafts and branched alternatives are untouched.
-  A reject confirmation whose impact changed meanwhile is refused with 409
-  `review_decision_impact_changed`.
-- A Context review decision can be undone while its recorded result is current:
-  an approval (including an automatic one), a rejection, or a first-round
-  change request. Undoing restores the published and draft heads, page
-  metadata and the reviews the decision settled or opened; the decision stays
-  in the history followed by an `undo` record. The decider (or an owner) may
-  undo a decision, any editor an automatic approval, which then waits for a
-  person. Browser sessions only:
-  `POST /api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decisions/{decision_id}/undo`,
-  refused with 409 `review_decision_undo_unavailable` after a newer version or
-  a change to the recorded result. Later metadata changes the decision did
-  not touch, such as a tree rename, are preserved. Claims on restored change
-  requests return with their original timestamps and expiry.
-  Decisions made before this release, and approvals that revived an archived
-  page, cannot be undone. Reading a page as of a later time follows the undone
-  publication, the page's own stale warning returns with its older content,
-  and a withdrawn change request leaves `list_requested_changes` and refuses
-  revisions.
-- Preserve restored drafts' mandatory human-review conditions and first-publish
-  metadata across page-first submissions and authenticated autosaves. Restart
-  rejected content only while its surviving head is unchanged, refresh rejection
-  previews when confirming, and compare draft parents independently of the
-  published version's diff limit.
-- Select the Context publish replay audit by version and change-set identity.
-- Persist changes to nested workspace settings policies.
-- Prevent Settings draft resets from overwriting the user's first edit.
-- Accept OAuth access tokens across backward clock steps while retaining
-  expiration, not-before, signature, issuer, and audience validation.
-- Avoid deleting Preview runs, attempts, and detail rows twice during a
-  Library hard delete.
+
+### MCP access settings
+
 - Settings > MCP Access judges each connected client by its own Personal
   Access Token or OAuth grant, so an expired or revoked credential no longer
   shows as active because a sibling grant is valid. Cards separate
@@ -135,13 +179,51 @@
 - Cancel stalled workspace-list reads after 30 seconds, including incomplete
   response bodies, so a failed refresh can finish and a later attempt can retry.
 
+### Test coverage
+
+- Include MCP connection facets in the PostgreSQL pull-request gate, and bound
+  browser operations with request lifecycle diagnostics for workspace access.
+
+### Documentation
+
+- Write the English and Korean READMEs for 0.1.3, covering installation, web
+  server startup, administrator grants, local and remote access, and background
+  execution with the managed worker.
+- Include Claude Code and Codex MCP registration commands, endpoint selection,
+  token environment handling, scope and workspace permissions, and practical
+  setup troubleshooting. Link SMTP and advanced operations to the docs.
+- Align the npm guide with the same release and runtime behavior.
+- Correct deployment-guide recovery and SMTP instructions and stale README links.
+- Add explicit MCP anchors, matching English/Korean setup steps and release-pinned
+  links. Restore input-audit, password-recovery and worker-mode upgrade guidance.
+
+## 0.1.2 — 2026-10-14
+
+### Release distribution
+
+- Fix the npm publish command to use an explicit local tarball path. The
+  release workflow publishes PyPI first, then the matching npm launcher,
+  and creates the GitHub Release after both uploads succeed.
+- Version 0.1.1 reached PyPI, but its npm upload failed and no GitHub Release
+  was created. Version 0.1.2 replaces that interrupted distribution; the
+  temporary 0.1.1 recovery workflow is removed.
+- Desktop installers remain outside this release.
+
+### Fixes
+
+- Select the Context publish replay audit by version and change-set identity.
+- Persist changes to nested workspace settings policies.
+- Prevent Settings draft resets from overwriting the user's first edit.
+- Accept OAuth access tokens across backward clock steps while retaining
+  expiration, not-before, signature, issuer, and audience validation.
+- Avoid deleting Preview runs, attempts, and detail rows twice during a
+  Library hard delete.
+
 ### Tests
 
 - Replace flaky timing and ordering assumptions with deterministic checks,
   isolate shared test state, and keep benchmark timing in its separate lane.
 - Reduce backend test setup time through isolated SQLite schema templates.
-- Include MCP connection facets in the PostgreSQL pull-request gate, and bound
-  browser operations with request lifecycle diagnostics for workspace access.
 
 ## 0.1.1 — 2026-10-13
 

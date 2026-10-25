@@ -528,8 +528,7 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
 def _sweep_email_outbox(
     database_provider: DatabaseProvider, settings: Settings
 ) -> None:
-    """Deliver due password-reset/email-verification mail (Epic-2 D-6/D-9,
-    doc/design/workspace-database-separation-plan.md). Since MAIL-02 this is
+    """Deliver due password-reset/email-verification mail. Since MAIL-02 this is
     the ONLY delivery route: the `email_delivery` Job that used to carry it
     is gone, because email_outbox is identity-plane data and that Job was
     workspace-sharded, so it landed where no claim path could reach it.

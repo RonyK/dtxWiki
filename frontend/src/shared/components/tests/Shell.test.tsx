@@ -184,13 +184,13 @@ describe("Shell", () => {
     expect(screen.getByRole("option", { name: "AskKnowledge" })).toBeInTheDocument();
 
     await user.click(agentToggle);
-    await user.click(searchbox);
+    await user.click(screen.getByRole("combobox", { name: "Search workspace" }));
     expect(within(sidebar).queryByText("Agent")).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "AgentKnowledge" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "AskKnowledge" })).toBeInTheDocument();
 
     await user.click(askToggle);
-    await user.click(searchbox);
+    await user.click(screen.getByRole("combobox", { name: "Search workspace" }));
     expect(within(sidebar).queryByText("Ask")).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "AskKnowledge" })).not.toBeInTheDocument();
   });

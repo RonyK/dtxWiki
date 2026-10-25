@@ -1,4 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ActivityFeedEntry, ActivityFeedEvent } from "../../../shared/api/operations";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,13 +40,13 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             activityItem("activity-1", "pending", "Review queued", undefined, "review-1"),
-            activityItem("activity-2", "advisory", "Context page edited", "Draft updated"),
-            activityItem("activity-3", "history", "Context page published"),
-            activityItem("activity-4", "history", "Version restored"),
+            { ...activityItem("activity-2", "advisory", "Context page edited", "Draft updated"), operation: "edit", result_status: "succeeded" },
+            { ...activityItem("activity-3", "history", "Context page published"), operation: "publish", result_status: "succeeded" },
+            { ...activityItem("activity-4", "history", "Version restored"), operation: "restore", result_status: "succeeded" },
           ],
           next_cursor: null,
           unread_count: 1,
@@ -70,7 +72,7 @@ describe("DashboardScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Workspace Operations" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("4 events today")).toBeInTheDocument();
+    expect(screen.getAllByText("4 entries · 4 original events")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: /Next:/ })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Ask Ask questions/ })).toBeNull();
     expect(screen.getByRole("link", { name: /Pending 1/ })).toHaveAttribute(
@@ -81,11 +83,11 @@ describe("DashboardScreen", () => {
     // scope once, and Pending (all waiting reviews) is not period-scoped.
     expect(screen.getByRole("link", { name: /Advisory 1/ })).toHaveAttribute(
       "href",
-      "/activity/advisory?period=today&kind=workspace",
+      "/activity/advisory?period=today&kind=workspace&subtype=all&group_reads=1",
     );
     expect(screen.getByRole("link", { name: /History 2/ })).toHaveAttribute(
       "href",
-      "/activity/history?period=today&kind=workspace",
+      "/activity/history?period=today&kind=workspace&subtype=all&group_reads=1",
     );
     expect(screen.getByText("Context page edited")).toBeInTheDocument();
     expect(screen.getByText("Edited")).toBeInTheDocument();
@@ -102,7 +104,7 @@ describe("DashboardScreen", () => {
     // not at the far right of the header band, and keeps its translated unit.
     const recentTitle = screen.getByText("Recent activity");
     expect(recentTitle.closest(".panel-title-with-count")).not.toBeNull();
-    expect(within(recentTitle.parentElement!).getByText("4 events"))
+    expect(within(recentTitle.parentElement!).getByText("4 entries"))
       .toBeInTheDocument();
   });
 
@@ -116,7 +118,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             {
@@ -143,7 +145,7 @@ describe("DashboardScreen", () => {
     );
 
     const title = await screen.findByText("Context page published");
-    const row = title.closest(".activity-row") as HTMLElement;
+    const row = title.closest(".activity-feed-entry") as HTMLElement;
     const time = within(row).getByText(
       formatRelativeTimestamp(createdAt, "en"),
     );
@@ -163,7 +165,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             {
@@ -201,7 +203,7 @@ describe("DashboardScreen", () => {
     const title = await screen.findByText(resolved);
     // The headline shares its line with the actor badge now, so it is a
     // <span> inside .activity-row__title rather than a bare <strong>.
-    expect(title.closest(".activity-row__title")).not.toBeNull();
+    expect(title.closest(".activity-entry__heading")).not.toBeNull();
     expect(title).toHaveTextContent("Ask activity");
   });
 
@@ -212,7 +214,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             {
@@ -222,7 +224,8 @@ describe("DashboardScreen", () => {
                 "MCP update draft failed",
                 "Claude Code; status=failed; Tool call failed.",
               ),
-              actor: { actor_kind: "mcp_client", actor_id: "client-1" },
+              actor: { actor_kind: "mcp_client", actor_id: "client-1", display_name: "Claude Code" },
+              operation: "edit", result_status: "failed", tool_name: "update_context_edit",
               target_title: "Claude Code",
               target: { target_kind: "mcp_tool_call", target_id: "call-1" },
             },
@@ -248,14 +251,13 @@ describe("DashboardScreen", () => {
       </MemoryRouter>,
     );
 
-    const row = (await screen.findByText("MCP update draft failed")).closest(
-      ".activity-row",
+    const row = (await screen.findByText(i18n.t("activity:feed.mcpResults.failed"))).closest(
+      ".activity-feed-entry",
     ) as HTMLElement;
-    expect(within(row).getByText("Failed")).toHaveClass("status-pill-danger");
+    expect(within(row).getByText("Failed").closest("[data-action]")).toHaveAttribute("data-action", "failed");
     expect(within(row).queryByText("Edited")).toBeNull();
-    // The status token is dropped from the detail: the title already carries it.
-    expect(within(row).getByText("Claude Code · Tool call failed."))
-      .toBeInTheDocument();
+    expect(row).not.toHaveTextContent("Claude Code; status=failed; Tool call failed.");
+    expect(row.querySelector("details")).not.toBeNull();
   });
 
   it("badges an unclassifiable row with a neutral verb, not its lane name", async () => {
@@ -266,7 +268,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             {
@@ -299,8 +301,8 @@ describe("DashboardScreen", () => {
       </MemoryRouter>,
     );
 
-    const row = (await screen.findByText("MCP read page succeeded")).closest(
-      ".activity-row",
+    const row = (await screen.findByText(i18n.t("activity:feed.mcpFallback"))).closest(
+      ".activity-feed-entry",
     ) as HTMLElement;
     expect(within(row).getByText("Logged")).toBeInTheDocument();
     expect(within(row).queryByText("History")).toBeNull();
@@ -314,7 +316,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: { items: [], next_cursor: null, unread_count: 0 },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`]: {
@@ -345,7 +347,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: { items: [], next_cursor: null, unread_count: 0 },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`]: {
@@ -377,7 +379,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             activityItem("activity-1", "pending", "Review queued", undefined, "review-1"),
@@ -416,7 +418,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=week&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=week&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [activityItem("activity-4", "history", "Weekly publish")],
           next_cursor: null,
@@ -445,7 +447,7 @@ describe("DashboardScreen", () => {
     );
     expect(screen.getByRole("link", { name: /History 1/ })).toHaveAttribute(
       "href",
-      "/activity/history?period=week&kind=workspace",
+      "/activity/history?period=week&kind=workspace&subtype=all&group_reads=1",
     );
   });
 
@@ -454,14 +456,14 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [],
           next_cursor: null,
           unread_count: 0,
         },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=system&limit=1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=system&group_reads=true&limit=1`]: {
         data: {
           items: [
             activityItem(
@@ -493,7 +495,7 @@ describe("DashboardScreen", () => {
       await screen.findByText("No workspace activity for today"),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View system events in Activity" }))
-      .toHaveAttribute("href", "/activity?period=today&kind=system");
+      .toHaveAttribute("href", "/activity?period=today&kind=system&subtype=all&group_reads=1");
     expect(screen.queryByText("Signed in")).not.toBeInTheDocument();
     expect(screen.queryByText("auth.session.created")).not.toBeInTheDocument();
   });
@@ -503,14 +505,14 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=week&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=week&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [],
           next_cursor: null,
           unread_count: 0,
         },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=week&kind=system&limit=1`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=week&kind=system&group_reads=true&limit=1`]: {
         data: {
           items: [
             activityItem(
@@ -541,7 +543,7 @@ describe("DashboardScreen", () => {
     expect(await screen.findByText("No workspace activity for week"))
       .toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View system events in Activity" }))
-      .toHaveAttribute("href", "/activity?period=week&kind=system");
+      .toHaveAttribute("href", "/activity?period=week&kind=system&subtype=all&group_reads=1");
   });
 
   it("keeps the welcome guide visible when opened from signup", async () => {
@@ -549,7 +551,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [activityItem("activity-5", "history", "Existing publish")],
           next_cursor: null,
@@ -599,7 +601,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [activityItem("activity-6", "history", "Source imported")],
           next_cursor: null,
@@ -641,7 +643,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: { items: [], next_cursor: null, unread_count: 0 },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`]: {
@@ -673,7 +675,7 @@ describe("DashboardScreen", () => {
     ).toHaveAttribute("aria-valuenow", "67");
   });
 
-  it("shows an empty dashboard with a warning when live data load fails", async () => {
+  it("shows a retryable load error without empty activity, counts, or setup guidance", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -706,18 +708,15 @@ describe("DashboardScreen", () => {
         "The service is temporarily unavailable. Try again shortly.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Pending 0/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Advisory 0/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /History 0/ })).toBeInTheDocument();
-    expect(screen.getByText("Start your first workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Review Approve/ })).toHaveAttribute(
-      "href",
-      "/review",
-    );
-    expect(screen.getByText("No workspace activity for today")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Pending 0/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Advisory 0/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /History 0/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Start your first workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("No workspace activity for today")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload activity" })).toBeInTheDocument();
   });
 
-  it("marks capped advisory/history counts and the summary pill as lower bounds", async () => {
+  it("distinguishes capped query counts from totals without inventing per-lane plus signs", async () => {
     const items = Array.from({ length: 50 }, (_, index) => ({
       ...activityItem(
         `activity-${index}`,
@@ -733,7 +732,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: { items, next_cursor: null, unread_count: 0 },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`]: {
@@ -753,15 +752,17 @@ describe("DashboardScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Workspace Operations" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("50+ events today")).toBeInTheDocument();
+    expect(screen.getByText("50 entries · 50 original events")).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /Advisory 25\+/ }),
+      screen.getByRole("link", { name: /Advisory 25/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /History 25\+/ }),
+      screen.getByRole("link", { name: /History 25/ }),
     ).toBeInTheDocument();
     // The feed stays a short preview even though the count window grew.
     expect(screen.getAllByText(/Filler item/)).toHaveLength(8);
+    expect(screen.queryByText(/50\+|25\+/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all activity" })).toHaveAttribute("href", "/activity?period=today&kind=workspace&subtype=all&group_reads=1");
   });
 
   it("classifies activity actions from audit codes when titles are localized", async () => {
@@ -769,7 +770,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             // The human page name arrives via target_title; the audit code lives
@@ -812,7 +813,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: {
           items: [
             activityItem("activity-1", "history", "Context page published"),
@@ -836,7 +837,7 @@ describe("DashboardScreen", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("2 건 · 오늘")).toBeInTheDocument();
+    expect(await screen.findAllByText(i18n.t("activity:feed.count", { count: 2, events: 2 }))).toHaveLength(2);
   });
 
   it("hides the setup write CTAs for viewer-role users", async () => {
@@ -845,7 +846,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: { items: [], next_cursor: null, unread_count: 0 },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`]: {
@@ -875,7 +876,7 @@ describe("DashboardScreen", () => {
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] },
       },
-      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?period=today&kind=workspace&limit=50`]: {
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`]: {
         data: { items: [], next_cursor: null, unread_count: 0 },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`]: {
@@ -901,12 +902,139 @@ describe("DashboardScreen", () => {
       screen.queryByRole("link", { name: "Write first Context page" }),
     ).toBeNull();
   });
+  it("keeps the initial loading state distinct from empty activity and setup", async () => {
+    let complete!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { complete = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      if (url === dashboardFeedUrl) return pending;
+      return jsonResponse(dashboardResponse(url));
+    });
+    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+    expect(screen.queryByText("No workspace activity for today")).not.toBeInTheDocument();
+    expect(screen.queryByText("Start your first workspace")).not.toBeInTheDocument();
+    await act(async () => complete(jsonResponse(dashboardFeed([dashboardEntry("loaded", "Loaded activity")]))));
+    expect(await screen.findByText("Loaded activity")).toBeInTheDocument();
+  });
+
+  it("recovers from an initial permission error through the explicit retry action", async () => {
+    let feedAttempts = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      if (url === dashboardFeedUrl && feedAttempts++ === 0) return jsonResponse({ error_code: "forbidden", message: "Denied", request_id: "test", warnings: [] }, 403);
+      return jsonResponse(url === dashboardFeedUrl ? dashboardFeed([dashboardEntry("recovered", "Recovered activity")]) : dashboardResponse(url));
+    });
+    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("No workspace activity for today")).not.toBeInTheDocument();
+    expect(screen.queryByText("Start your first workspace")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Reload activity" }));
+    expect(await screen.findByText("Recovered activity")).toBeInTheDocument();
+  });
+
+  it.each([0, 1])("reconciles a permission-shrunken read group to %s visible events without reloading", async visibleCount => {
+    let feedAttempts = 0;
+    const grouped = dashboardReadGroup();
+    const survivor = { ...grouped.event, id: "visible-member", navigation: { target_kind: "context_page", target_id: "visible-page", title: "Visible survivor", href: "/context?target=visible-page" } };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      if (url === dashboardFeedUrl) {
+        if (feedAttempts++ > 0) return jsonResponse({ error_code: "service_unavailable", message: "Unavailable", request_id: "test", warnings: [] }, 503);
+        return jsonResponse(dashboardFeed([grouped, dashboardEntry("other", "Other visible activity")]));
+      }
+      if (url.endsWith("/activity/read-group?token=opaque-group")) return jsonResponse({ data: { events: visibleCount ? [survivor] : [], event_count: visibleCount, group_id: grouped.id } });
+      return jsonResponse(dashboardResponse(url));
+    });
+    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    await screen.findByRole("link", { name: "Read Old private title 4 times" });
+    await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
+    await vi.waitFor(() => expect(screen.queryByText(/Old private title/)).not.toBeInTheDocument());
+    expect(screen.getByText("Other visible activity")).toBeInTheDocument();
+    expect(screen.queryByText(/5 original events/)).not.toBeInTheDocument();
+    if (visibleCount) {
+      expect(screen.getByRole("link", { name: "Read Visible survivor" })).toHaveAttribute("href", "/context?target=visible-page");
+      expect(screen.getAllByText("2 entries · 2 original events")).toHaveLength(2);
+    } else expect(screen.getAllByText("1 entry · 1 original event")).toHaveLength(2);
+    // The reconciled entry replaces the group in place; nothing re-fetches.
+    expect(feedAttempts).toBe(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("marks a lane count as a lower bound only when the server confirms more for that lane", async () => {
+    const feed = dashboardFeed([dashboardEntry("history", "History event")]);
+    feed.data.lanes.history.has_more = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      return jsonResponse(url === dashboardFeedUrl ? feed : dashboardResponse(url));
+    });
+    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    await screen.findByText("History event");
+    expect(document.querySelector('.metric-card[href^="/activity/history"] strong')).toHaveTextContent(/^1\+$/);
+    expect(document.querySelector('.metric-card[href^="/activity/advisory"] strong')).toHaveTextContent(/^0$/);
+  });
+
+  it("keeps loaded group counts and detail retry when an invalid token refresh also fails", async () => {
+    let feedAttempts = 0;
+    let detailAttempts = 0;
+    const grouped = dashboardReadGroup();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      if (url === dashboardFeedUrl) {
+        if (feedAttempts++ > 0) return jsonResponse({ error_code: "service_unavailable", message: "Unavailable", request_id: "test", warnings: [] }, 503);
+        return jsonResponse(dashboardFeed([grouped, dashboardEntry("other", "Other activity")]));
+      }
+      if (url.endsWith("/activity/read-group?token=opaque-group")) {
+        detailAttempts++;
+        return jsonResponse({ error_code: "invalid_activity_token", message: "Expired token", request_id: "test", warnings: [] }, 400);
+      }
+      return jsonResponse(dashboardResponse(url));
+    });
+    render(<MemoryRouter><DashboardScreen /></MemoryRouter>);
+    await screen.findByRole("link", { name: "Read Old private title 4 times" });
+    await userEvent.click(screen.getByRole("button", { name: "Expand 4 original events" }));
+    expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
+    expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Read Old private title 4 times" })).toBeVisible();
+    expect(screen.getAllByText("2 entries · 5 original events")).toHaveLength(2);
+    expect(screen.getByText("Other activity")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Original events could not be loaded. Try again.")).toBeVisible();
+    expect(await screen.findByText("The service is temporarily unavailable. Try again shortly.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Read Old private title 4 times" })).toBeVisible();
+    expect(screen.getAllByText("2 entries · 5 original events")).toHaveLength(2);
+    expect(detailAttempts).toBe(2);
+  });
+
+  it.each([
+    [0, 0, "0 entries · 0 original events"],
+    [1, 1, "1 entry · 1 original event"],
+    [8, 8, "8 entries · 8 original events"],
+    [9, 8, "8 entries · 8 original events"],
+    [50, 8, "8 entries · 8 original events"],
+  ] as const)("previews %s fetched entries as %s entries with a scoped header link", async (returned, visible, label) => {
+    const scopedFeedUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=week&kind=workspace&subtype=all&group_reads=false&limit=50`;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input.toString();
+      return jsonResponse(url === scopedFeedUrl ? dashboardFeed(Array.from({ length: returned }, (_, n) => dashboardEntry(`boundary-${n}`, `Boundary event ${n}`))) : dashboardResponse(url));
+    });
+    render(<MemoryRouter initialEntries={["/dashboard?period=week&group_reads=0"]}><DashboardScreen /></MemoryRouter>);
+    const link = await screen.findByRole("link", { name: "View all activity" });
+    expect(link).toHaveAttribute("href", "/activity?period=week&kind=workspace&subtype=all&group_reads=0");
+    const panel = link.closest("section")!;
+    expect(panel.querySelectorAll(".activity-feed-entry")).toHaveLength(visible);
+    expect(within(panel).getByText(label)).toBeInTheDocument();
+    expect(panel.querySelector(".count-chip")).toHaveTextContent(`${visible} ${visible === 1 ? "entry" : "entries"}`);
+    expect(panel.textContent).not.toContain("+");
+    if (returned > 8) expect(screen.queryByText("Boundary event 8")).not.toBeInTheDocument();
+  });
+
 });
 
 function mockFetch(responses: Record<string, unknown>) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = input.toString();
-    const body = responses[url] ?? defaultDashboardResponse(url);
+    const body = typedFeedResponse(url, responses[url] ?? defaultDashboardResponse(url));
     if (!body) {
       throw new Error(`Unexpected request: ${url}`);
     }
@@ -930,7 +1058,7 @@ function defaultDashboardResponse(url: string) {
     return { data: [] };
   }
   if (
-    url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity?`) &&
+    url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?`) &&
     url.includes("kind=system")
   ) {
     return { data: { items: [], next_cursor: null, unread_count: 0 } };
@@ -975,6 +1103,7 @@ function activityItem(
     created_at: "2026-05-09T00:00:00Z",
     review_item_id: reviewItemId,
     affordances: ["open"],
+    event_key: null, event_args: {},
   };
 }
 
@@ -1021,4 +1150,45 @@ function policies() {
     agent_injection: card("agent_injection", "Agent policy"),
     mcp_clients: [],
   };
+}
+
+function typedFeedResponse(url: string, body: unknown) {
+  if (!body || !url.includes("/activity/feed?")) return body;
+  const data = (body as { data?: { items?: Array<Record<string, unknown>>; next_cursor?: string | null; unread_count?: number } }).data;
+  if (!data?.items) return body;
+  const entries = data.items.map(item => ({
+    entry_type: "event", id: item.id, event: {
+      event_key: null, event_args: {}, operation: null, result_status: null,
+      ...item,
+      actor: item.actor ? { display_name: "Editor", is_current_user: false, ...(item.actor as object) } : null,
+    }, event_count: 1, first_occurred_at: item.created_at, last_occurred_at: item.created_at, group_token: null,
+  }));
+  const lanes = Object.fromEntries(["pending", "advisory", "history"].map(lane => {
+    const count = data.items!.filter(item => item.lane === lane).length;
+    return [lane, { returned_entry_count: count, represented_event_count: count, has_more: null }];
+  }));
+  return { data: { entries, next_cursor: data.next_cursor ?? null, unread_count: data.unread_count ?? 0,
+    returned_entry_count: entries.length, represented_event_count: entries.length, has_more: Boolean(data.next_cursor), lanes } };
+}
+
+const dashboardFeedUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/activity/feed?period=today&kind=workspace&subtype=all&group_reads=true&limit=50`;
+function dashboardEntry(id: string, title: string): ActivityFeedEntry {
+  const value: ActivityFeedEvent = { id, title, lane: "history", body: null, actor: null, target: { target_kind: "context_page", target_id: id }, created_at: "2026-05-09T00:00:00Z", review_item_id: null, affordances: ["open"], event_key: null, event_args: {}, operation: "log" };
+  return { entry_type: "event", id, event: value, event_count: 1, first_occurred_at: value.created_at, last_occurred_at: value.created_at };
+}
+function dashboardReadGroup(): ActivityFeedEntry {
+  const single = dashboardEntry("group-entry", "MCP read succeeded");
+  return { ...single, entry_type: "read_group", event_count: 4, group_token: "opaque-group", event: { ...single.event, target: { target_kind: "mcp_tool_call", target_id: "call-1" }, operation: "read", result_status: "succeeded", navigation: { target_kind: "context_page", target_id: "old-page", title: "Old private title", href: "/context?target=old-page" } } };
+}
+function dashboardFeed(entries: ActivityFeedEntry[]) {
+  const lane = (name: string) => { const shown = entries.filter(item => item.event.lane === name); return { returned_entry_count: shown.length, represented_event_count: shown.reduce((sum, item) => sum + item.event_count, 0), has_more: false }; };
+  return { data: { entries, next_cursor: null, unread_count: 0, returned_entry_count: entries.length, represented_event_count: entries.reduce((sum, item) => sum + item.event_count, 0), has_more: false, lanes: { pending: lane("pending"), advisory: lane("advisory"), history: lane("history") } } };
+}
+function dashboardResponse(url: string): unknown {
+  if (url === `${BASE}/api/v1/workspaces`) return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [workspaceSummary()] } };
+  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=20`) return { data: { items: [], next_cursor: null } };
+  if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`) return { data: policies() };
+  const response = defaultDashboardResponse(url);
+  if (response) return typedFeedResponse(url, response);
+  throw new Error(`Unexpected request: ${url}`);
 }

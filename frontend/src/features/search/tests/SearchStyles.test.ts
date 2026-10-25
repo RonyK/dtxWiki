@@ -28,40 +28,35 @@ describe("Search result geometry", () => {
     }
   });
 
-  it("joins the match reason and open action into one bordered box", () => {
-    // The wrapper owns the border and radius so the two segments cannot drift
-    // to different heights the way the old separate chips did (20px vs 24px).
+  it("distinguishes the neutral location from the informational reason", () => {
     expect(css).toMatch(
-      /\.search-source-chip\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*7px;[^}]*overflow:\s*hidden;/s,
+      /\.search-result-location\s*\{[^}]*color:\s*var\(--ink-muted\);/s,
     );
-    for (const seg of [
-      "\\.search-source-chip__reason",
-      "\\.search-source-chip__open",
-    ]) {
-      expect(css).toMatch(new RegExp(`${seg}\\s*\\{[^}]*min-height:\\s*30px;`, "s"));
-    }
-    // The divider only appears when there IS a reason segment to divide from.
     expect(css).toMatch(
-      /\.search-source-chip__reason \+ \.search-source-chip__open\s*\{[^}]*border-left:\s*1px solid var\(--border\);/s,
+      /\.search-result-reason\s*\{[^}]*color:\s*var\(--info\);/s,
     );
   });
 
-  it("lifts both joined segments to 44px on narrow or touch layouts", () => {
+  it("stacks the kind above a three-line title on mobile", () => {
     expect(css).toMatch(
-      /@media \(max-width: 1024px\), \(any-pointer: coarse\)[\s\S]*\.search-source-chip__reason,\s*\.search-source-chip__open\s*\{[^}]*min-height:\s*44px;/,
+      /@media \(max-width: 640px\)[\s\S]*\.search-result-title\s*\{[^}]*flex-direction:\s*column;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*\.search-result-title-text\s*\{[^}]*-webkit-line-clamp:\s*3;/,
     );
   });
 
-  it("gives the chip row more air than the title-to-snippet gap", () => {
+  it("spaces the reason separately and provides a visible keyboard focus ring", () => {
     expect(css).toMatch(/\.search-result-body\s*\{[^}]*gap:\s*6px;/s);
-    expect(css).toMatch(/\.search-result-chips\s*\{[^}]*margin-top:\s*4px;/s);
+    expect(css).toMatch(/\.search-result-reason\s*\{[^}]*margin-top:\s*4px;/s);
+    expect(css).toMatch(/a\.search-result-row:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--info\);/s);
   });
 
   it("retires the pre-redesign search chip classes", () => {
-    // .search-open-btn and .search-match-reason were the two chips whose
-    // heights disagreed; leaving their rules behind would let a stale caller
-    // silently re-introduce the mismatch.
-    for (const gone of [".search-open-btn", ".search-match-reason", ".search-result-submeta"]) {
+    for (const gone of [
+      ".search-open-btn", ".search-match-reason", ".search-result-submeta",
+      ".search-source-chip", ".search-source-chip__reason", ".search-source-chip__open",
+    ]) {
       expect(css).not.toContain(`${gone} {`);
     }
   });

@@ -13,6 +13,20 @@ export type ActivitySubTab = "live" | "history" | "traces" | "proposals";
 // sets an ActivityTarget).
 export type ActivityItem = components["schemas"]["ActivityItemRead"];
 export type ActivityListData = components["schemas"]["ActivityListData"];
+export type ActivityFeedEvent = components["schemas"]["ActivityFeedEvent"];
+export type ActivityFeedEntry = components["schemas"]["ActivityFeedEntry"];
+export type ActivityFeedData = components["schemas"]["ActivityFeedData"];
+export type ActivityReadGroupData = components["schemas"]["ActivityReadGroupData"];
+
+export type ActivityFeedFilters = {
+  period?: ActivityPeriod;
+  kind?: "all" | "workspace" | "system" | "mcp" | "review_decision";
+  subtype?: string;
+  lane?: ActivityLane;
+  group_reads?: boolean;
+  limit?: number;
+  cursor?: string | null;
+};
 
 export type ActivityFilters = {
   period?: ActivityPeriod;
@@ -161,6 +175,7 @@ export type AskSessionDetail = components["schemas"]["AskSessionDetail"];
 export type EnvelopeWarning = components["schemas"]["EnvelopeWarning"];
 export type GraphNeighborEntry = components["schemas"]["GraphNeighborEntry"];
 export type GraphNeighborsPayload = components["schemas"]["GraphNeighborsPayload"];
+export type ContextPageLocation = components["schemas"]["ContextPageLocation"];
 
 export type McpChatArtifactKind =
   | "context_page"
@@ -241,6 +256,30 @@ export async function listActivity(
   const query = encodeQuery(filters);
   const response = await apiRequest<{ data: ActivityListData }>(
     `/api/v1/workspaces/${workspaceId}/activity${query}`,
+  );
+  return response.data;
+}
+
+export async function listActivityFeed(
+  workspaceId: string,
+  filters: ActivityFeedFilters = {},
+  signal?: AbortSignal,
+): Promise<ActivityFeedData> {
+  const response = await apiRequest<{ data: ActivityFeedData }>(
+    `/api/v1/workspaces/${workspaceId}/activity/feed${encodeQuery(filters)}`,
+    { signal },
+  );
+  return response.data;
+}
+
+export async function getActivityReadGroup(
+  workspaceId: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<ActivityReadGroupData> {
+  const response = await apiRequest<{ data: ActivityReadGroupData }>(
+    `/api/v1/workspaces/${workspaceId}/activity/read-group${encodeQuery({ token })}`,
+    { signal },
   );
   return response.data;
 }
@@ -525,14 +564,25 @@ export type DeploymentHealthComponents =
   components["schemas"]["HealthComponents"];
 
 export type DeploymentStatus = components["schemas"]["DeploymentStatus"];
+export type DeploymentUpdateStatus =
+  components["schemas"]["DeploymentUpdateStatus"];
 
 // Read-only instance deployment state for the system (server-admin) settings
 // tab. Workspace-independent: it describes the whole dtxWiki server. The app
 // cannot mutate /etc, so this returns status + copyable `dtxwiki config set`
 // commands rather than an editable form.
-export async function getDeploymentStatus() {
+export async function getDeploymentStatus(signal?: AbortSignal) {
   const response = await apiRequest<{ data: DeploymentStatus }>(
     "/api/v1/admin/deployment",
+    { signal },
+  );
+  return response.data;
+}
+
+export async function checkDeploymentUpdate(force: boolean, signal?: AbortSignal) {
+  const response = await apiRequest<{ data: DeploymentUpdateStatus }>(
+    "/api/v1/admin/deployment/update-check",
+    { method: "POST", body: JSON.stringify({ force }), signal },
   );
   return response.data;
 }
@@ -627,6 +677,13 @@ export async function createAskTurn(
     data: response.data,
     warnings: response.envelope?.warnings ?? [],
   };
+}
+
+export async function getContextPageLocation(pageId: string) {
+  const response = await apiRequest<{ data: ContextPageLocation }>(
+    `/api/v1/context/pages/${encodeURIComponent(pageId)}/location`,
+  );
+  return response.data;
 }
 
 export async function getContextPageNeighbors(

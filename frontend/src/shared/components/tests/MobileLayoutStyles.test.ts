@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse, type AnyNode } from "postcss";
 
 const styles = readFileSync(
   resolve(process.cwd(), "src/styles/08-responsive-deployment.css"),
@@ -100,7 +101,7 @@ describe("mobile layout regression styles", () => {
       /@media \(max-width: 480px\)[\s\S]*?\.workspace-initials \{[^}]*display:\s*none;/,
     );
     expect(workspaceStyles).toMatch(
-      /@media \(max-width: 480px\)[\s\S]*?\.workspace-switcher-button,[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) 14px;/,
+      /@media \(max-width: 480px\)[\s\S]*?\.workspace-switcher-button\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 14px;/,
     );
   });
 
@@ -317,9 +318,6 @@ describe("mobile layout regression styles", () => {
     ).toContain(
       "grid-template-columns: minmax(0, 1fr) auto",
     );
-    expect(
-      ruleBody('.app-shell[data-sidebar-collapsed="true"] .topbar', workspaceStyles),
-    ).toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(ruleBody(".editor-shortcut-grid", workspaceStyles)).toContain(
       "grid-template-columns: minmax(0, 1fr)",
     );
@@ -328,6 +326,33 @@ describe("mobile layout regression styles", () => {
       /grid-template-columns:\s*1fr\b/.test(mobileBlock.slice(0, 6000)),
       "mobile shell block still declares a bare `1fr` track",
     ).toBe(false);
+  });
+
+  it("confines every collapsed-sidebar style to desktop widths", () => {
+    // Read every stylesheet, so a collapsed rule added to any file is checked.
+    const stylesDir = resolve(process.cwd(), "src/styles");
+    const sources = readdirSync(stylesDir)
+      .filter((name) => name.endsWith(".css"))
+      .map((name) => readFileSync(resolve(stylesDir, name), "utf8"));
+    const selectors: string[] = [];
+    for (const source of sources) {
+      parse(source).walkRules((rule) => {
+        if (!/\[data-sidebar-collapsed="true"\]|\.sidebar\[data-collapsed="true"\]/.test(rule.selector)) return;
+        selectors.push(rule.selector);
+        let desktopOnly = false;
+        for (let parent: AnyNode | undefined = rule.parent; parent; parent = parent.parent) {
+          if (parent.type === "atrule" && parent.name === "media" &&
+              /\(min-width:\s*1025px\)/.test(parent.params)) {
+            desktopOnly = true;
+          }
+        }
+        expect(desktopOnly, rule.selector).toBe(true);
+      });
+    }
+    expect(selectors).toContain('.app-shell[data-sidebar-collapsed="true"]');
+    expect(selectors).toContain(
+      '.app-shell[data-sidebar-collapsed="true"] .workspace-switcher-button',
+    );
   });
 
   it("gives the account-notice surface an explicit column track", () => {

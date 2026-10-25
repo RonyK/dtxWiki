@@ -214,6 +214,7 @@ export function ReviewScreen() {
   const [bulkDialog, setBulkDialog] = useState<BulkApproveDialog | null>(null);
   const [bulkResult, setBulkResult] =
     useState<ReviewBulkDecisionResult | null>(null);
+  const [bulkResultRun, setBulkResultRun] = useState(0);
   const [bulkDiscardResult, setBulkDiscardResult] =
     useState<ReviewReconciliationBulkDiscardResult | null>(null);
   const [bulkDiscardOpen, setBulkDiscardOpen] = useState(false);
@@ -328,6 +329,7 @@ export function ReviewScreen() {
     setBulkDialog(null);
     if (bulkRunRef.current !== null) setBulkStopped(true);
     setCompletedReview(null);
+    setUndoneDecision(null);
     setDetachedReview(null);
     setRejectDialogKey(null);
     setRefreshFailed(false);
@@ -383,6 +385,9 @@ export function ReviewScreen() {
     key: string; review: ReviewItem | null; error: string | null;
   } | null>(null);
   const listedReview = state?.reviews.find((review) => review.id === reviewParam);
+  const completedReviewIsCurrent = completedReview?.id === reviewParam
+    && (!listedReview || (listedReview.status === completedReview.status
+      && listedReview.updated_at === completedReview.updated_at));
   const selectedDetailKey = workspaceIsCurrent && reviewParam
     ? JSON.stringify([state?.workspaceId, reviewParam, listedReview?.updated_at ?? null, listedReview?.status ?? null]) : null;
   useEffect(() => {
@@ -395,7 +400,7 @@ export function ReviewScreen() {
         ? { ...current, selectedReviewId: null } : current);
       return () => controller.abort();
     }
-    if (completedReview?.id === reviewParam) return () => controller.abort();
+    if (completedReviewIsCurrent) return () => controller.abort();
     const workspaceId = state.workspaceId;
     const key = selectedDetailKey;
     const acceptDetail = (review: ReviewItem) => {
@@ -427,7 +432,7 @@ export function ReviewScreen() {
     return () => controller.abort();
     // List rows can be replaced without changing the selected revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDetailKey, detailReload, completedReview?.id, workspaceIsCurrent, setState, t]);
+  }, [selectedDetailKey, detailReload, completedReviewIsCurrent, workspaceIsCurrent, setState, t]);
 
   async function reloadRejectDetail(reviewId: string, signal: AbortSignal): Promise<ReviewItem | null> {
     if (!workspaceIsCurrent || !state?.workspaceId || !selectedDetailKey || reviewParam !== reviewId) return null;
@@ -458,7 +463,8 @@ export function ReviewScreen() {
   }
 
   useEffect(() => {
-    if (!reviewParam || focusReviewRef.current !== reviewParam || state?.selectedReviewId !== reviewParam) return;
+    if (busyId || !reviewParam || focusReviewRef.current !== reviewParam || state?.selectedReviewId !== reviewParam
+      || selectedDetail?.key !== selectedDetailKey || !selectedDetail.review) return;
     // Let the mobile drawer finish returning focus before moving it into the
     // selected review. The direct-link load does not steal initial focus.
     const frame = requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -474,7 +480,7 @@ export function ReviewScreen() {
       }
     }));
     return () => cancelAnimationFrame(frame);
-  }, [reviewParam, state?.selectedReviewId]);
+  }, [reviewParam, state?.selectedReviewId, detailReload, selectedDetail, selectedDetailKey, busyId]);
 
   // R7: auto-load the next page when the rail list is scrolled near its end,
   // replacing the explicit "Load more" button with infinite scroll. The button
@@ -612,26 +618,42 @@ export function ReviewScreen() {
       setPendingDecision(key, null);
     }
     if (loadMoreGenerationRef.current !== generation) return;
+    setError(null);
     setSelectedBulkIds((current) => new Set([...current].filter((id) => id !== receipt.id)));
     setGroupSelectionIds((current) => Object.fromEntries(Object.entries(current).map(
       ([groupKey, ids]) => [groupKey, ids.filter((id) => id !== receipt.id)],
     )));
-    setCompletedReview(receipt);
+    const stillDecided = receipt.status !== "pending" && receipt.decisions[0]?.decision_type !== "undo";
+    setCompletedReview(stillDecided ? receipt : null);
     setUndoneDecision(null);
-    setDetachedReview(null);
+    setDetachedReview(stillDecided ? null : receipt);
+    detailCacheRef.current.clear();
+    setDetailReload((value) => value + 1);
     setRefreshFailed(true);
     setState((current) => current && current.workspaceId === receipt.workspace_id ? {
-      ...current, reviews: current.reviews.filter((review) => review.id !== receipt.id),
+      ...current, reviews: stillDecided
+        ? current.reviews.filter((review) => review.id !== receipt.id)
+        : current.reviews.map((review) => review.id === receipt.id ? receipt : review),
     } : current);
   }
+
+  // Reloading during a POST retains its durable request ID in session storage.
+  // The already-fetched detail can resolve that uncertainty without another GET.
+  useEffect(() => {
+    const fresh = selectedDetail?.key === selectedDetailKey ? selectedDetail.review : null;
+    if (!fresh || !uncertainDecision || !draftKey || busyId
+      || !hasDecisionReceipt(fresh, uncertainDecision, auth?.user?.user_id)) return;
+    storeDecisionReceipt(fresh, draftKey, loadMoreGenerationRef.current);
+    setError(null);
+    void refreshQueueAfterBulk(true).catch(() => setError(t("workflow.savedRefreshFailed")));
+    // Receipt handling is a transition from a loaded detail, not a render trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDetail, selectedDetailKey, uncertainDecision, draftKey, busyId, auth?.user?.user_id]);
 
   async function recoverDecision(pending: PendingReviewDecision, key: string, generation: number): Promise<boolean> {
     const fresh = await getReview(pending.workspaceId, pending.reviewId);
     if (generation !== loadMoreGenerationRef.current) return false;
-    const receipt = fresh.decisions.some((item) => item.decision_id === pending.decisionId
-      && item.decision_type === pending.decision
-      && item.actor_id === auth?.user?.user_id
-      && (item.decision_reason ?? null) === pending.reason);
+    const receipt = hasDecisionReceipt(fresh, pending, auth?.user?.user_id);
     if (!receipt) {
       setRefreshFailed(true);
       setError(t("workflow.decisionOutcomeUnknown"));
@@ -663,7 +685,7 @@ export function ReviewScreen() {
       }
       if (generation !== loadMoreGenerationRef.current) return;
       setError(null);
-      try { await refreshQueueAfterBulk(); }
+      try { await refreshQueueAfterBulk(true); }
       catch { if (generation === loadMoreGenerationRef.current) setError(t("workflow.savedRefreshFailed")); }
     } catch (exc) {
       if (generation === loadMoreGenerationRef.current) {
@@ -688,7 +710,7 @@ export function ReviewScreen() {
     if (reasonError) throw new Error(reasonError);
     if (!state?.workspaceId || (workspaceContext?.selectedId && workspaceContext.selectedId !== state.workspaceId)
         || !selected || !selectedDetail?.review || selectedDetail.key !== selectedDetailKey
-        || busyId || bulkBusy || refreshFailed || uncertainDecision
+        || busyId || bulkBusy || refreshing || refreshFailed || uncertainDecision
         || (decision === "request_changes" && !reason)) return "failed";
     const workspaceId = state.workspaceId;
     const generation = loadMoreGenerationRef.current;
@@ -723,7 +745,7 @@ export function ReviewScreen() {
         } catch {
           return "unknown";
         }
-        try { await refreshQueueAfterBulk(); }
+        try { await refreshQueueAfterBulk(true); }
         catch {
           if (generation === loadMoreGenerationRef.current) setError(t("workflow.savedRefreshFailed"));
         }
@@ -732,7 +754,7 @@ export function ReviewScreen() {
       storeDecisionReceipt(receipt, key, generation);
       if (loadMoreGenerationRef.current !== generation) return "saved";
       try {
-        await refreshQueueAfterBulk();
+        await refreshQueueAfterBulk(true);
       } catch (exc) {
         if (generation === loadMoreGenerationRef.current) {
           setRefreshFailed(true);
@@ -828,11 +850,11 @@ export function ReviewScreen() {
 
   function reviewForCurrentParam(): ReviewItem | null {
     if (!workspaceIsCurrent || !state || !reviewParam) return null;
-    const review = completedReview?.id === reviewParam
+    const review = completedReviewIsCurrent
       ? completedReview
       : state.reviews.find((item) => item.id === reviewParam)
         ?? (detachedReview?.id === reviewParam ? detachedReview : null);
-    const detail = completedReview?.id !== reviewParam && selectedDetail?.key === selectedDetailKey
+    const detail = !completedReviewIsCurrent && selectedDetail?.key === selectedDetailKey
       ? selectedDetail.review : null;
     const current = detail ?? review;
     return current?.workspace_id === state.workspaceId ? settledReviewView(current) : null;
@@ -932,7 +954,7 @@ export function ReviewScreen() {
     });
   }
 
-  async function refreshQueueAfterBulk() {
+  async function refreshQueueAfterBulk(preserveReceipt = false) {
     if (!mountedRef.current || !workspaceIsCurrent || !state?.workspaceId) return;
     const workspaceId = state.workspaceId;
     const generation = loadMoreGenerationRef.current;
@@ -943,7 +965,17 @@ export function ReviewScreen() {
     ]);
     if (!mountedRef.current || generation !== loadMoreGenerationRef.current) return;
     setRefreshFailed(false);
+    setSettledReviewStates({});
     setGroupSnapshotTotals({});
+    detailCacheRef.current.clear();
+    setSelectedDetail(null);
+    setDetailReload((value) => value + 1);
+    setCompletedReview((current) => {
+      if (!preserveReceipt || !current) return null;
+      const fresh = reviewPage.items.find((review) => review.id === current.id);
+      return !fresh || (fresh.status === current.status && fresh.updated_at === current.updated_at)
+        ? current : null;
+    });
     setState((current) => current && current.workspaceId === workspaceId ? {
       ...current,
       reviews: reviewPage.items,
@@ -956,7 +988,7 @@ export function ReviewScreen() {
   }
 
   async function refreshQueue() {
-    if (refreshing) {
+    if (refreshing || busyId || bulkBusy) {
       return;
     }
     setRefreshing(true);
@@ -965,6 +997,8 @@ export function ReviewScreen() {
       const generation = loadMoreGenerationRef.current;
       if (uncertainDecision && draftKey && !await recoverDecision(uncertainDecision, draftKey, generation)) return;
       await refreshQueueAfterBulk();
+      setBulkResult(null);
+      setUndoneDecision(null);
     } catch (exc) {
       setError(reviewErrorMessage(exc, t("errors.refresh")));
     } finally {
@@ -1009,6 +1043,8 @@ export function ReviewScreen() {
     setBulkBusy(true);
     bulkRunRef.current = operation;
     setBulkStopped(false);
+    setBulkResultRun((value) => value + 1);
+    setUndoneDecision(null);
     setBulkResult(aggregate);
     setError(null);
     const isCurrentWorkspace = () => mountedRef.current
@@ -1161,6 +1197,7 @@ export function ReviewScreen() {
       setSettledReviewStates({});
       setCompletedReview(null);
       setUndoneDecision({ reviewId, decisionType });
+      if (searchParamsRef.current.get("review") === reviewId) focusReviewRef.current = reviewId;
       setDetailReload((value) => value + 1);
       try {
         await refreshQueueAfterBulk();
@@ -1277,6 +1314,8 @@ export function ReviewScreen() {
   });
   const canBulkApproveSelected =
     workspaceIsCurrent && state.canEditDirectly && lifecycleTab !== "resolved" && selectedBulkCount > 0 && !busyId && !bulkBusy && !refreshFailed && !groupBusyKey && !uncertainDecision;
+  const bulkDiscardBlocked = !workspaceIsCurrent || Boolean(busyId) || bulkBusy
+    || refreshing || refreshFailed || Boolean(uncertainDecision);
 
   return (
     <>
@@ -1307,7 +1346,7 @@ export function ReviewScreen() {
                 refresh={{
                   label: t("rail.refresh", { defaultValue: "Refresh reviews" }),
                   onRefresh: refreshQueue,
-                  refreshing,
+                  refreshing: refreshing || Boolean(busyId) || bulkBusy,
                 }}
                 expandWidth={
                   onExpandWidth
@@ -1548,7 +1587,7 @@ export function ReviewScreen() {
                   {selectedReconciliationCount > 0 ? (
                     <button
                       className="icon-button danger"
-                      disabled={bulkBusy}
+                      disabled={bulkDiscardBlocked}
                       onClick={() => {
                         setBulkDiscardReason("");
                         setBulkDiscardOpen(true);
@@ -1740,7 +1779,7 @@ export function ReviewScreen() {
                       "Approved {{approved}} reviews. Skipped {{skipped}}.",
                   })}
                 </span>
-                <ReviewBulkOutcomes result={bulkResult} onOpen={setReviewParam} onUndo={undoDecision} busy={Boolean(busyId) || bulkBusy} />
+                <ReviewBulkOutcomes key={bulkResultRun} result={bulkResult} onOpen={setReviewParam} onUndo={undoDecision} busy={Boolean(busyId) || bulkBusy} />
               </StatusBanner>
             ) : null}
             {bulkDiscardResult ? (
@@ -1770,13 +1809,13 @@ export function ReviewScreen() {
                 <ReviewDetail
                   key={rejectDialogKey?.reviewId === selectedReview.id ? rejectDialogKey.key : reviewContentKey(selectedReview)}
                   workspaceId={state.workspaceId}
-                  decisionSaved={completedReview?.id === selectedReview.id}
+                  decisionSaved={completedReviewIsCurrent}
                   nextDisabled={refreshFailed || refreshing || Boolean(busyId) || bulkBusy || Boolean(uncertainDecision) || (state.reviews.length === 0 && state.nextCursor === null)}
                   nextLabel={nextQueuedReview ? `${reviewTargetTitle(nextQueuedReview, t)}${reviewTargetVersionNo(nextQueuedReview) != null ? ` · v${reviewTargetVersionNo(nextQueuedReview)}` : ""}` : null}
                   noNextReview={!refreshFailed && state.reviews.length === 0 && state.nextCursor === null}
                   onNextReview={() => void openNextReview()}
                   busy={Boolean(busyId) || bulkBusy}
-                  decisionsBlocked={refreshFailed || Boolean(uncertainDecision) || !detailReady}
+                  decisionsBlocked={refreshing || refreshFailed || Boolean(uncertainDecision) || !detailReady}
                   canEditDirectly={state.canEditDirectly}
                   decisionReason={decisionReason}
                   onDecision={submitDecision}
@@ -1918,6 +1957,9 @@ export function ReviewScreen() {
                   "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
               })}
             </p>
+            {bulkDiscardBlocked && !bulkBusy ? (
+              <StatusBanner tone="warning">{t("bulk.discardBlocked")}</StatusBanner>
+            ) : null}
             <label>
               <span>
                 {t("bulk.discardReason", { defaultValue: "Discard reason" })}
@@ -1944,7 +1986,7 @@ export function ReviewScreen() {
               <button
                 className="danger"
                 disabled={
-                  bulkBusy
+                  bulkDiscardBlocked
                   || bulkDiscardReason.trim().length === 0
                   || selectedReconciliationCount === 0
                 }
@@ -2373,7 +2415,7 @@ function ReviewRow({
       ) : null}
       <button
         aria-current={active ? "true" : undefined}
-        aria-label={`${targetTitle}${targetVersionNo != null ? ` · v${targetVersionNo}` : ""}`}
+        aria-label={`${targetTitle}${targetVersionNo != null ? ` · v${targetVersionNo}` : ""} · ${i18n.t(`shell:status.${review.status}`, { defaultValue: humanizeEnum(review.status) })} · ${t(`filters.riskOptions.${review.risk_level}`, { defaultValue: humanizeEnum(review.risk_level) })}`}
         className={`review-row selectable-row${active ? " active" : ""}${grouped ? " review-row-grouped" : ""}`}
         type="button"
         onClick={() => onSelect(review.id)}
@@ -3635,7 +3677,13 @@ function reviewErrorMessage(error: unknown, fallback: string): string {
   const code = error.body.error_code;
   if (i18n.exists(`shell:apiErrors.${code}`)) return error.displayMessage;
   if (i18n.exists(`review:workflow.reasons.${code}`)) return i18n.t(`review:workflow.reasons.${code}`);
-  return error.body.message?.trim() || error.displayMessage;
+  return fallback;
+}
+
+function hasDecisionReceipt(review: ReviewItem, pending: PendingReviewDecision, actorId: string | undefined) {
+  return review.decisions.some((item) => item.decision_id === pending.decisionId
+    && item.decision_type === pending.decision && item.actor_id === actorId
+    && (item.decision_reason ?? null) === pending.reason);
 }
 
 type ReviewLocale = "en" | "ko";
@@ -4007,9 +4055,9 @@ function ReviewBulkOutcomes({ result, onOpen, onUndo, busy }: {
             </div>
             <button className="icon-button" onClick={() => onOpen(item.id)} type="button">{t("workflow.openReview")}</button>
             {item.outcome === "approved" && "decision_id" in item && item.decision_id ? (
-              undone.has(item.id) ? <span>{t("undo.undone")}</span> : (
+              undone.has(item.decision_id) ? <span>{t("undo.undone")}</span> : (
                 <button className="icon-button" disabled={busy} onClick={() => void onUndo(item.id, item.decision_id!, "approve").then((ok) => {
-                  if (ok) setUndone((current) => new Set([...current, item.id]));
+                  if (ok) setUndone((current) => new Set([...current, item.decision_id!]));
                 })} type="button">
                   <Undo2 size={15} aria-hidden="true" />{t("undo.action.approve")}
                 </button>

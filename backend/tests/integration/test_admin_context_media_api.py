@@ -124,6 +124,15 @@ def test_admin_cursor_crosses_workspace_boundaries_searches_and_binds_filters(
     assert admin.get(URL, params={"cursor": "not-a-cursor"}).status_code == 422
     assert admin.get(URL, params={"q": "no-match"}).json()["data"]["items"] == []
     assert len(admin.get(URL, params={"mine": True}).json()["data"]["items"]) == 5
+    # Reusing the same filter shape must bind the current operator each time.
+    other = make_server_admin_client(page_service, "other-paging-operator@example.com")
+    other_actor = _user_id(page_service, "other-paging-operator@example.com")
+    other_asset = _seed(page_service, wid, other_actor, filename="other-operator.png")
+    assert [
+        row["asset_id"]
+        for row in other.get(URL, params={"mine": True}).json()["data"]["items"]
+    ] == [other_asset["asset_id"]]
+    assert len(admin.get(URL, params={"mine": True}).json()["data"]["items"]) == 5
 
 
 def test_admin_cleanup_checks_workspace_usage_token_and_audits(page_service):

@@ -88,7 +88,9 @@ export function presentActivityItem(item: ActivityItem) {
           : item.target_title ?? targetKindLabel(item),
     });
   }
-  const label = ACTIVITY_LABELS[item.title] ?? ACTIVITY_LABELS[item.body ?? ""];
+  const label = Object.hasOwn(ACTIVITY_LABELS, item.title)
+    ? ACTIVITY_LABELS[item.title]
+    : Object.hasOwn(ACTIVITY_LABELS, item.body ?? "") ? ACTIVITY_LABELS[item.body ?? ""] : undefined;
   if (!label) {
     // No hand-authored copy: resolve a translated label from the workspace
     // audit code (body "domain.entity.op") instead of leaking the raw code.
@@ -112,10 +114,10 @@ export function presentActivityItem(item: ActivityItem) {
     });
   }
   const hasSpecificSummary =
-    item.title !== item.body && !ACTIVITY_LABELS[item.title];
+    item.title !== item.body && !Object.hasOwn(ACTIVITY_LABELS, item.title);
   return distinctPresentation({
     title: item.target_title ?? (hasSpecificSummary ? item.title : label.title),
-    body: !item.body || item.body === item.title || ACTIVITY_LABELS[item.body]
+    body: !item.body || item.body === item.title || Object.hasOwn(ACTIVITY_LABELS, item.body)
       || AUDIT_CODE_PATTERN.test(item.body)
       ? label.body
       : item.body,
@@ -261,8 +263,7 @@ export function isMcpActivityItem(item: ActivityItem) {
 // Second-level sub-type filter (v3). Each top-level Type (kind) splits into a
 // small, fixed set of sub-types; "all" is the per-kind default. Classification
 // is purely client-side off existing item fields (audit action prefix in body,
-// MCP tool name parsed from the title, job via target_kind) — see
-// doc/design/activity-classification-contract.md.
+// MCP tool name parsed from the title, job via target_kind).
 export const ACTIVITY_SUBTYPES: Record<string, readonly string[]> = {
   workspace: ["all", "library", "context", "agent", "ask", "review", "chat"],
   mcp: ["all", "read", "write", "search"],
@@ -303,7 +304,8 @@ export function auditCodeLabel(
     return i18n.t("activity:auditCode.reviewUndo");
   }
   const prefix = (body ?? "").split(".")[0];
-  const subtype = WORKSPACE_SUBTYPE_BY_PREFIX[prefix];
+  const subtype = Object.hasOwn(WORKSPACE_SUBTYPE_BY_PREFIX, prefix)
+    ? WORKSPACE_SUBTYPE_BY_PREFIX[prefix] : undefined;
   const humanized = humanizeEnum(title);
   if (!subtype) {
     return humanized;
@@ -372,7 +374,7 @@ export function activitySubtype(item: ActivityItem): string {
     return systemSubtype(item);
   }
   const prefix = (item.body ?? "").split(".")[0];
-  return WORKSPACE_SUBTYPE_BY_PREFIX[prefix] ?? "";
+  return Object.hasOwn(WORKSPACE_SUBTYPE_BY_PREFIX, prefix) ? WORKSPACE_SUBTYPE_BY_PREFIX[prefix] : "";
 }
 
 // M-11 (260908 UI audit): the backend titles a job row by title-casing its

@@ -3,11 +3,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-import backend.services.lint  # noqa: F401
 from backend.models.context import ContextPage
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
-from backend.services.lint import base
+from backend.services.lint import LintContext, LintRegistry
+from backend.services.lint.scopes import findings_for_target
 
 pytestmark = pytest.mark.integration
 
@@ -35,10 +35,10 @@ def _folder(session, workspace_id, slug, *, parent_id=None, visible=True):
 
 
 def _check(session, rule_id, target):
-    return base.get_rule(rule_id).check(
-        session=session,
-        workspace_id=target.workspace_id,
-        target=target,
+    return findings_for_target(
+        LintRegistry.builtin().rule(rule_id),
+        target,
+        LintContext(session, target.workspace_id, page=target),
     )
 
 

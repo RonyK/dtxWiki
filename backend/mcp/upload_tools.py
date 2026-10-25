@@ -30,8 +30,7 @@ def upload_image(payload: dict, ctx: ToolCallContext) -> UploadImageToolOutput:
         request = UploadImageInput.model_validate(
             {**payload, "conversation_token": ctx.conversation_token}
         )
-        # D-7 (doc/design/workspace-database-separation-plan.md): Context
-        # media is workspace-owned data, so the write must go to the plane
+        # Context media is workspace-owned data, so the write must go to the plane
         # this call was AUTHORIZED for -- ctx.workspace_id, which
         # backend.mcp.router binds from resolve_target_actor's
         # require_workspace_role check, not request.workspace_id, which is

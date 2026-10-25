@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -9,6 +10,35 @@ PAGE_METADATA_FIELDS = {"title", "slug", "type", "tags", "aliases"}
 TAG_MAX_LENGTH = 48
 ALIAS_MAX_LENGTH = 80
 METADATA_LIST_MAX_ITEMS = 32
+
+
+def normalize_page_tags(tags: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in tags or []:
+        value = str(tag).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def normalize_page_aliases(aliases: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases or []:
+        value = " ".join(str(alias).strip().split())[:80]
+        key = value.casefold()
+        if not value or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(value)
+        if len(normalized) >= 32:
+            break
+    return normalized
+
+
 PAGE_TYPES = {
     "overview",
     "source",
@@ -454,6 +484,7 @@ def derive_nav_description(
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     prose: list[str] = []
     in_fence = False
+    skipped_paragraph = False
     for line in body.split("\n"):
         stripped = line.strip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -464,10 +495,26 @@ def derive_nav_description(
         if not stripped:
             if prose:
                 break  # first prose paragraph complete
+            skipped_paragraph = False
             continue
-        if stripped.startswith(("#", "---", "|", ">")):
+        # Lists and metadata blocks describe the document's administration,
+        # rather than its subject. Skip their continuation lines as well.
+        structural = stripped.startswith(("#", "---", "|", ">"))
+        metadata = re.match(
+            r"^(?:[-+*]\s+|\d+[.)]\s+|"
+            r"(?:\*\*|__)?(?:status|state|date|created|updated|author|owner|"
+            r"title|type|tags|aliases|version|document|source|"
+            r"상태|문서\s*상태|날짜|작성일|갱신일|작성자|담당자|소유자|유형|버전|출처)"
+            r"(?:\*\*|__)?\s*[:：])",
+            stripped,
+            re.IGNORECASE,
+        )
+        if structural or metadata:
             if prose:
                 break  # a structural line ends the paragraph
+            skipped_paragraph = bool(metadata)
+            continue
+        if skipped_paragraph:
             continue
         prose.append(stripped)
     if not prose:
@@ -476,3 +523,21 @@ def derive_nav_description(
     if len(collapsed) > max_length:
         return collapsed[: max_length - 1].rstrip() + "…"
     return collapsed
+
+
+def frontmatter_body_offset(lines: list[str]) -> int:
+    """Index of the first body line after a leading YAML frontmatter block.
+
+    Matches :func:`backend.utils.page_frontmatter.parse_page_frontmatter`
+    exactly (incl. the ``len < 3`` minimum): a leading ``---`` is frontmatter
+    ONLY when a later ``---``/``...`` closes it. An unclosed leading ``---`` is
+    body (a thematic break) — there is no "unclosed frontmatter" error, because
+    it can't be told apart from a valid rule + colon line like ``Note: ...``
+    (LG-F4). Returns 0 when there is no closed frontmatter block to strip.
+    """
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return 0
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() in FRONTMATTER_DELIMITERS:
+            return idx + 1
+    return 0

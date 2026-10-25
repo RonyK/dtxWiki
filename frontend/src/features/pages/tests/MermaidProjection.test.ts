@@ -9,10 +9,13 @@ const REAL_MERMAID_FIXTURES = [
   ["flowchart", "flowchart LR\n  A[Alpha] --> B[Beta]"],
   [
     "sequence",
-    "sequenceDiagram\n  participant A as Alpha\n  participant B as Beta\n  A->>B: Hello",
+    "sequenceDiagram\n  autonumber\n  participant A as Alpha\n  participant B as Beta\n  A->>B: Hello\n  B-->>A: Reply\n  A-->>A: Self call",
   ],
   ["state", "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Done"],
-  ["class", "classDiagram\n  class Animal\n  Animal : +name string"],
+  [
+    "class",
+    "classDiagram\n  class Animal\n  Animal : +name string\n  Animal --> Habitat",
+  ],
   ["entity relationship", "erDiagram\n  CUSTOMER ||--o{ ORDER : places"],
 ] as const;
 
@@ -116,7 +119,12 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
       expect(height).toBeGreaterThan(0);
       expect(textElements.length).toBeGreaterThan(0);
       expect(
-        textElements.every((element) => element.getAttribute("font-size") === "13px"),
+        textElements.filter((element) => !element.matches(".sequenceNumber"))
+          .every((element) => element.getAttribute("font-size") === "13px"),
+      ).toBe(true);
+      expect(
+        textElements.filter((element) => element.matches(".sequenceNumber"))
+          .every((element) => element.getAttribute("font-size") === "12px"),
       ).toBe(true);
       expect(
         textElements.every((element) =>
@@ -129,6 +137,20 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
           '[fill]:not([fill="none"]), [stroke]:not([stroke="none"])',
         ).length,
       ).toBeGreaterThan(0);
+      const connectors = Array.from(
+        svg?.querySelectorAll(
+          'line, polyline, path[marker-start], path[marker-end], ' +
+          'path.flowchart-link, path.transition, path.relation, ' +
+          'path.relationshipLine, path.messageLine0, path.messageLine1',
+        ) ?? [],
+      ).filter((element) => !element.closest("marker"));
+      expect(connectors.length).toBeGreaterThan(0);
+      expect(
+        connectors.filter((element) => {
+          const stroke = element.getAttribute("stroke")?.trim().toLowerCase();
+          return !stroke || stroke === "none" || stroke === "transparent";
+        }).map((element) => element.outerHTML),
+      ).toEqual([]);
       expect(document.querySelector("body > svg")).toBeNull();
     },
     // This case deliberately drives the real Mermaid parser, layout engines and
@@ -196,8 +218,12 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
   // label; asserting only the flowchart half is what shipped the ER bug.
   it("centres node labels only for the family whose stylesheet does", async () => {
     const flowchart = await renderRealMermaid(
-      "flowchart LR\n  A[Alpha] --> B[Beta]",
+      "flowchart LR\n  A[Alpha] --> B[Beta]\n  class A messageLine0",
     );
+    const nodeWithSequenceClass = flowchart.querySelector("g.node.messageLine0");
+    expect(nodeWithSequenceClass).toBeInTheDocument();
+    expect(nodeWithSequenceClass).not.toHaveAttribute("stroke");
+    expect(nodeWithSequenceClass).not.toHaveAttribute("stroke-width");
     const flowchartLabels = Array.from(flowchart.querySelectorAll("text"))
       .filter((text) => text.closest(".node"));
     expect(flowchartLabels.length).toBeGreaterThan(0);
@@ -251,6 +277,90 @@ describe("Mermaid projection and intrinsic geometry contract", () => {
         return Boolean(stroke) && stroke !== "none";
       }),
     ).toBe(true);
+  }, 60_000);
+
+  // Sequence diagrams keep most of their chrome in the stylesheet, and Mermaid
+  // stamps placeholder attributes that stylesheet overrode. Each assertion is
+  // a part that rendered wrong once it was stripped: invisible autonumber
+  // badges, activation bars in note yellow, solid frames, black heads, an
+  // outlined highlight block and an outlined actor name.
+  it("restores the sequence chrome the stylesheet painted", async () => {
+    const sequence = await renderRealMermaid(
+      [
+        "sequenceDiagram",
+        "  autonumber 999",
+        "  actor U as User",
+        "  participant F as Frontend",
+        '  participant Q@{ "type": "queue", "alias": "Queue" }',
+        '  participant D@{ "type": "database", "alias": "Database" }',
+        "  U->>+F: Open",
+        "  alt cached",
+        "    F-->>U: Hit",
+        "  else fresh",
+        "    F--xU: Miss",
+        "  end",
+        "  rect rgb(240, 240, 255)",
+        "    autonumber 100000",
+        "    F-\\\\U: Stick half-arrow",
+        "  end",
+        "  deactivate F",
+      ].join(String.fromCharCode(10)),
+    );
+    const attributes = (selector: string, name: string) =>
+      Array.from(sequence.querySelectorAll(selector)).map((element) =>
+        element.getAttribute(name));
+
+    const badgeWidths = attributes('line[marker-start$="-sequencenumber)"]', "stroke-width");
+    expect(badgeWidths).toHaveLength(4);
+    expect(badgeWidths.every((width) => width === "2")).toBe(true);
+    expect(attributes("text.sequenceNumber", "fill")).toEqual(
+      badgeWidths.map(() => "#fff"),
+    );
+    expect(attributes("text.sequenceNumber", "font-size"))
+      .toEqual(["12px", "9px", "9px", "7px"]);
+    const badgeNumbers = Array.from(sequence.querySelectorAll("text.sequenceNumber"));
+    expect(badgeNumbers.map((number) => number.textContent))
+      .toEqual(["999", "1000", "1001", "100000"]);
+    expect(badgeNumbers.map((number) => (number as SVGElement).style.fontSize))
+      .toEqual(["12px", "9px", "9px", "7px"]);
+    expect(attributes("text.sequenceNumber", "textLength"))
+      .toEqual([null, "20", "20", "20"]);
+    expect(attributes("text.sequenceNumber", "lengthAdjust"))
+      .toEqual([null, "spacingAndGlyphs", "spacingAndGlyphs", "spacingAndGlyphs"]);
+    const regularLabels = Array.from(sequence.querySelectorAll("text:not(.sequenceNumber), tspan"));
+    expect(regularLabels.length).toBeGreaterThan(0);
+    expect(regularLabels.every((label) => label.getAttribute("font-size") === "13px"))
+      .toBe(true);
+
+    // Queue and database shapes use unclassified paths inside CSS-painted
+    // actor groups. Check both mirrored copies so neither loses its fill.
+    const pathActors = Array.from(sequence.querySelectorAll("g.actor.actor-top, g.actor.actor-bottom"));
+    expect(pathActors).toHaveLength(4);
+    expect(pathActors.filter((actor) => actor.matches(".actor-top"))).toHaveLength(2);
+    expect(pathActors.flatMap((actor) => Array.from(actor.querySelectorAll("path"))))
+      .toHaveLength(6);
+    expect(pathActors.every((actor) => actor.getAttribute("fill") === "#eee"))
+      .toBe(true);
+    expect(pathActors.every((actor) => actor.getAttribute("stroke") === "#d4d4d4"))
+      .toBe(true);
+
+    expect(attributes("rect.activation0", "fill")).toEqual(["#f4f4f4"]);
+    expect(attributes("rect.activation0", "stroke")).toEqual(["#666"]);
+
+    const frameDashes = attributes("line.loopLine", "stroke-dasharray");
+    expect(frameDashes.length).toBeGreaterThan(0);
+    expect(frameDashes.every((dash) => dash === "2, 2")).toBe(true);
+    expect(attributes("line.loopLine", "stroke-width").every((width) => width === "2"))
+      .toBe(true);
+
+    const headStrokes = attributes("marker path, marker circle", "stroke");
+    expect(headStrokes.length).toBeGreaterThan(0);
+    expect(headStrokes.every((stroke) => stroke === "#64748b")).toBe(true);
+
+    expect(attributes('rect.rect[fill="rgb(240, 240, 255)"]', "stroke"))
+      .toEqual(["none"]);
+    // Top and bottom copies of the actor figure.
+    expect(attributes("text.actor-man", "stroke")).toEqual(["none", "none"]);
   }, 60_000);
 
   // Both halves in one case on purpose: the hollow/filled split IS the UML

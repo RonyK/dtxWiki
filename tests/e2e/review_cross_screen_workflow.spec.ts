@@ -51,10 +51,33 @@ test("reads review evidence, approves a document group and a single review, and 
   await expect(detail.locator("#review-detail-title")).toHaveText(second.title);
   await detail.getByText("Add a decision reason (optional)", { exact: true }).click();
   await detail.getByLabel("Decision reason").fill("Cross-screen workflow reviewed");
+  const decisionResponsePromise = page.waitForResponse((response) => response.request().method() === "POST"
+    && new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/reviews/${second.review_item_id}/decision`);
   await detail.getByRole("button", { name: "Approve", exact: true }).click();
+  const decided = await responseData<{ id: string }>(await decisionResponsePromise);
+  expect(decided.id).toBe(second.review_item_id);
   await expect(secondGroup).toHaveCount(0);
+  const feedResponsePromise = page.waitForResponse((response) => response.request().method() === "GET"
+    && new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/activity/feed`);
   await page.goto("/activity");
-  await expect(page.locator("article.activity-row").getByText("Review decision", { exact: true }).first()).toBeVisible();
+  const feed = await responseData<{ entries: unknown[] }>(await feedResponsePromise);
+  expect(feed.entries).toEqual(expect.arrayContaining([
+    expect.objectContaining({ event: expect.objectContaining({
+      body: "review.decision",
+      target: expect.objectContaining({ target_kind: "review_item", target_id: decided.id }),
+    }) }),
+  ]));
+  const decisionRow = page.getByRole("article").filter({
+    has: page.getByText("Review decision", { exact: true }),
+  });
+  await expect(decisionRow).toHaveCount(1);
+  await expect(decisionRow).toBeVisible();
+  await decisionRow.getByRole("link", { name: "View activity list", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/activity/history"
+    && url.searchParams.get("period") === "all" && url.searchParams.get("kind") === "all"
+    && url.searchParams.get("subtype") === "all" && url.searchParams.get("group_reads") === "1");
+  await expect(decisionRow).toHaveCount(1);
+  await expect(decisionRow).toBeVisible();
 });
 
 // Engine behavior: a sticky decision header must not cover keyboard focus,

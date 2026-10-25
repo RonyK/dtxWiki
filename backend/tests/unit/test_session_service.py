@@ -253,19 +253,19 @@ def test_login_rejects_unknown_or_wrong_password(session_service):
 def test_login_and_password_change_rotate_credentials(session_service):
     signed_up = session_service.signup(
         email="change@example.com",
-        password="old-password-123",
+        password="old-pass",
     )
     logged_in = session_service.login(
         email="CHANGE@example.com",
-        password="old-password-123",
+        password="old-pass",
     )
 
     assert logged_in.user == signed_up.user
 
     changed = session_service.change_password(
         user_id=signed_up.user.user_id,
-        current_password="old-password-123",
-        new_password="new-password-123",
+        current_password="old-pass",
+        new_password="new-pass",
     )
 
     assert changed.user == signed_up.user
@@ -275,11 +275,11 @@ def test_login_and_password_change_rotate_credentials(session_service):
         session_service.authenticate_session(logged_in.session_token)
     assert session_service.authenticate_session(changed.session_token) == changed.user
     with pytest.raises(InvalidCredentialsError):
-        session_service.login(email="change@example.com", password="old-password-123")
+        session_service.login(email="change@example.com", password="old-pass")
     assert (
         session_service.login(
             email="change@example.com",
-            password="new-password-123",
+            password="new-pass",
         ).user
         == signed_up.user
     )

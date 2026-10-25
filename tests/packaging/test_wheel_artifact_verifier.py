@@ -194,7 +194,7 @@ def _write_cyclic_revisions(stage):
 
 
 def _write_duplicate_revision(stage):
-    _write_revision(stage, CURRENT_HEAD, ("c7a4e91b2d60", "d148b9746ff5"))
+    _write_revision(stage, CURRENT_HEAD, "efcbcf724889")
 
 
 def _detach_core_schema_from_the_baseline(stage):
@@ -290,7 +290,7 @@ def test_verifier_accepts_a_complete_dist(tmp_path):
         assert (
             f"{name}: alembic head {CURRENT_HEAD}, "
             f"{REVISION_MODULES} packaged core revision modules, "
-            "15 frozen migration files intact, "
+            "19 frozen migration files intact, "
             "frontend bundle intact"
         ) in result.stdout
 
@@ -564,16 +564,36 @@ def _rehash_manifest(stage):
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_verifier_rejects_rewritten_historical_release_mapping(tmp_path):
-    def rewrite(stage):
-        path = stage / "backend/migrations/release_manifest.json"
-        payload = json.loads(path.read_text())
-        payload["schema_releases"]["0.1.1"]["head"] = "bd62193d5cf6"
-        path.write_text(json.dumps(payload))
+def test_verifier_rejects_missing_or_rewritten_historical_release_mappings(tmp_path):
+    # Check each boundary independently: corrupting both at once could hide
+    # a verifier that pins only one of them. Share the existing archive check.
+    for release, head in (
+        ("0.1.1", "bd62193d5cf6"),
+        ("0.1.2", CURRENT_HEAD),
+        ("0.1.2", None),
+        ("0.1.3", "efcbcf724889"),
+        ("0.1.3", None),
+        ("0.1.4", "19db79d3e622"),
+        ("0.1.4", None),
+    ):
+        def rewrite(stage, release=release, head=head):
+            path = stage / "backend/migrations/release_manifest.json"
+            payload = json.loads(path.read_text())
+            if head is None:
+                del payload["schema_releases"][release]
+            else:
+                payload["schema_releases"][release]["head"] = head
+            path.write_text(json.dumps(payload))
 
-    result = _run_verifier(_dist(tmp_path, mutate=rewrite))
-    assert result.returncode == 1
-    assert "release_manifest.json is missing or invalid" in result.stderr
+        case = tmp_path / f"{release}-{head or 'missing'}"
+        case.mkdir()
+        result = _run_verifier(_dist(case, mutate=rewrite))
+        assert result.returncode == 1, (release, head, result.stdout, result.stderr)
+        for artifact in (WHEEL_NAME, SDIST_NAME):
+            assert (
+                f"{artifact}: backend/migrations/release_manifest.json "
+                "is missing or invalid"
+            ) in result.stderr, (release, head)
 
 
 @pytest.mark.parametrize(

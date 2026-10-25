@@ -1,6 +1,6 @@
-# Desktop installers are not part of release 0.1.2, so a `v*` tag no longer
-# starts this workflow: the tag publishes the Python package and creates the
-# GitHub Release through release.yml alone. Before any release ships
+# Desktop installers are not part of standard tagged releases. A `v*` tag
+# publishes the Python package and creates the GitHub Release through
+# release.yml alone. Before any release ships
 # installers, the signing and notarization secrets must exist and the macOS
 # packages must carry the Electron license notices; only then should this
 # workflow be dispatched on that release's tag, where publish-release adds the
@@ -67,7 +67,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.18"
           cache: npm
@@ -149,7 +149,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: dtxwiki-desktop-*
           path: release
