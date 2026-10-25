@@ -35,7 +35,11 @@ from backend.policy.trust_boundaries import (
     actor_can_read_drafts,
     actor_can_read_sensitive_agent_pages,
 )
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    join_in_workspace,
+    select_in_workspace,
+)
 from backend.schemas.read import (
     AgentCategoryEntry,
     AgentPageDetail,
@@ -74,6 +78,11 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.context_lifecycle import project_context_version
+from backend.services.context_link_targets import (
+    context_link_targets,
+    legacy_wikilink_targets,
+    page_link_target_condition,
+)
 from backend.services.context_review_disposition import (
     context_version_review_disposition,
     context_version_review_metadata,
@@ -233,10 +242,12 @@ class DomainReadService:
         *,
         library_blob_repository_factory: LibraryBlobRepositoryFactory | None = None,
         lint_registry: LintRegistry | None = None,
+        context_link_origins: frozenset[str] | None = None,
     ) -> None:
         self.lint_registry = (
             lint_registry if lint_registry is not None else LintRegistry.builtin()
         )
+        self.context_link_origins = context_link_origins
         self.tree_read_service = tree_read_service or TreeReadService()
         # Doc §3-D: History's per-version download button needs a
         # server-authoritative "is the original still retrievable" answer,
@@ -927,71 +938,31 @@ class DomainReadService:
         parent_node_id = tree_node.parent_id if tree_node is not None else None
         backlink_count = (
             session.scalar(
-                select(func.count())
-                .select_from(PageLink)
-                .join(ContextPage, ContextPage.id == PageLink.source_page_id)
-                .where(PageLink.workspace_id == workspace_id)
-                .where(
-                    (PageLink.target_page_id == page.id)
-                    | (
-                        PageLink.target_page_id.is_(None)
-                        & (PageLink.target_slug == page.slug)
-                    )
+                join_in_workspace(
+                    select_in_workspace(
+                        PageLink,
+                        workspace_id=workspace_id,
+                        conditions=(
+                            page_link_target_condition(page),
+                            PageLink.source_page_id != page.id,
+                            ContextPage.lifecycle_status != "archived",
+                            PageLink.source_version_id
+                            == visible_context_version_expression(actor),
+                        ),
+                    ),
+                    PageLink,
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    on=ContextPage.id == PageLink.source_page_id,
                 )
-                .where(PageLink.source_page_id != page.id)
-                .where(ContextPage.lifecycle_status != "archived")
-                .where(
-                    PageLink.source_version_id
-                    == visible_context_version_expression(actor)
-                )
+                .with_only_columns(func.count(func.distinct(PageLink.source_page_id)))
             )
             or 0
         )
-        wikilink_targets = []
-        if version is not None:
-            target_page = aliased(ContextPage)
-            # A link pinned at write time to a page that did not exist yet
-            # leaves `target_page_id` NULL forever -- nothing re-resolves it
-            # when the target is created later, so the link renders broken
-            # even after the page shows up. Fall back to a live slug lookup
-            # for exactly those unresolved rows, mirroring the same
-            # `target_page_id IS NULL AND target_slug matches` fallback the
-            # backlink_count query above already uses. Archived pages resolve
-            # nowhere (see B-8 in _sync_page_name_index), so they don't count.
-            target_page_by_slug = aliased(ContextPage)
-            wikilink_targets = [
-                {
-                    "target_slug": link.target_slug,
-                    "target_page_id": link.target_page_id or fallback_page_id,
-                    "current_slug": current_slug or fallback_slug,
-                }
-                for (
-                    link,
-                    current_slug,
-                    fallback_page_id,
-                    fallback_slug,
-                ) in session.execute(
-                    select(
-                        PageLink,
-                        target_page.slug,
-                        target_page_by_slug.id,
-                        target_page_by_slug.slug,
-                    )
-                    .outerjoin(target_page, target_page.id == PageLink.target_page_id)
-                    .outerjoin(
-                        target_page_by_slug,
-                        (target_page_by_slug.workspace_id == PageLink.workspace_id)
-                        & (target_page_by_slug.slug == PageLink.target_slug)
-                        & (target_page_by_slug.lifecycle_status != "archived")
-                        & PageLink.target_page_id.is_(None),
-                    )
-                    .where(
-                        PageLink.source_page_id == page.id,
-                        PageLink.source_version_id == version.id,
-                    )
-                    .order_by(PageLink.target_slug.asc())
-                )
-            ]
+        wikilink_targets = (
+            legacy_wikilink_targets(session, page=page, version=version, actor=actor)
+            if version is not None else []
+        )
         # M1: lint the EXACT version being displayed (version-aware), so warnings
         # match the body in the response. Skipped on internal existence-check
         # reads (e.g. citation validation) via include_warnings=False.
@@ -1127,6 +1098,13 @@ class DomainReadService:
             ),
             "backlink_count": backlink_count,
             "wikilink_targets": wikilink_targets,
+            "link_targets": (
+                context_link_targets(
+                    session, page=page, version=version, actor=actor,
+                    self_origins=self.context_link_origins,
+                )
+                if version is not None else []
+            ),
             "warnings": warnings,
             "pending_draft_version_id": pending_draft_version_id,
             "pending_draft_warnings": pending_draft_warnings,

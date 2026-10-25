@@ -4,10 +4,15 @@ import json
 from pathlib import Path
 from uuid import UUID
 
-from backend.services.context_links import classify, format_stable_url, link_markdown
+from backend.services.context_links import (
+    classify,
+    extract_links,
+    format_stable_url,
+    link_markdown,
+)
 
 
-def test_context_link_contract_and_source_decisions():
+def test_context_link_contract_and_source_decisions(monkeypatch):
     # Budget exception: each fixture row's `reason` names a different URL
     # boundary (scheme, authority, scope, encoding, identity, or fragment).
     # Existing service tests cannot detect Python/TypeScript parser drift.
@@ -48,4 +53,32 @@ def test_context_link_contract_and_source_decisions():
                 case["workspace_id"], case["page_id"], case["title"], case["fragment"]
             )
             == case["link_markdown"]
+        )
+
+    # Independent exclusions: code/fence/math/frontmatter/raw HTML/image,
+    # shared references and split text nodes have different parser mechanisms.
+    # One mixed document proves they cannot acquire eligibility from probes.
+    body = (
+        "---\ntitle: '[hidden](/context/front.md)'\n---\n\n"
+        "한글 [label](/context/good.md#part) and [[good|Label]].\n\n"
+        "`[code](/context/code.md)`\n\n"
+        "```md\n[fence](/context/fence.md)\n```\n\n"
+        "$[math](/context/math.md)$\n\n"
+        "<span>[html](/context/html.md)</span>\n\n"
+        "<SPAN>[[mixed-case]]</span>\n\n"
+        "<span>first<span>[[nested]]</span> [[outer]]</span>\n\n"
+        "![image](/context/image.md)\n\n"
+        "[[tar*get*]]\n\n"
+        "[shared][r] ![image][r]\n\n[r]: /context/shared.md\n"
+    )
+    occurrences = extract_links(body)
+    assert [item.href for item in occurrences] == [
+        "/context/good.md#part",
+        "[[good|Label]]",
+    ]
+    for item in occurrences:
+        assert item.span.text(body) == item.href
+        assert (
+            body.encode()[item.span.byte_start : item.span.byte_end].decode()
+            == item.href
         )

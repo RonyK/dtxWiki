@@ -376,12 +376,14 @@ class ServiceRegistry:
 
     @cached_property
     def domain_read(self):
+        from backend.services.context_links import configured_self_origins
         from backend.services.domain_read import DomainReadService
 
         return DomainReadService(
             self.tree_read,
             library_blob_repository_factory=self.library_blob_repository_factory,
             lint_registry=self.lint_registry,
+            context_link_origins=configured_self_origins(self.settings),
         )
 
     @cached_property
@@ -944,8 +946,12 @@ class ServiceRegistry:
     @cached_property
     def body_preparer(self):
         from backend.services.body_preparer import BodyPreparer
+        from backend.services.context_links import configured_self_origins
 
-        return BodyPreparer(registry=self.lint_registry)
+        return BodyPreparer(
+            registry=self.lint_registry,
+            self_origins=configured_self_origins(self.settings),
+        )
 
     @cached_property
     def lint_registry(self):
@@ -1031,6 +1037,11 @@ class AppContainer:
     search_service: object | None = None
     ask_service: object | None = None
     services: ServiceRegistry = field(default_factory=ServiceRegistry)
+
+    def __post_init__(self) -> None:
+        # Bind settings before any cached service can be constructed, including
+        # get_page_service() callers that have not requested get_services() yet.
+        self.services.settings = self.settings
 
     def get_page_service(self):
         if self.page_service is None:

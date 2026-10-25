@@ -10,7 +10,7 @@ control- or mixed-plane tables need purpose-specific lookup APIs.
 from collections.abc import Collection, Iterable
 from uuid import UUID
 
-from sqlalchemy import Select, inspect, select
+from sqlalchemy import Delete, Select, delete, inspect, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -86,6 +86,17 @@ def select_in_workspace[Model](
     return select(model).where(model.workspace_id == workspace_id, *conditions)
 
 
+def delete_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    conditions: Iterable[ColumnElement[bool]] = (),
+) -> Delete:
+    """Delete only supported model rows in an explicit Workspace."""
+    _validate_workspace_model(model, operation="delete_in_workspace")
+    return delete(model).where(model.workspace_id == workspace_id, *conditions)
+
+
 def list_in_workspace[Model](
     session: Session,
     model: type[Model],
@@ -126,3 +137,37 @@ def where_in_workspace[Model](
             "where_in_workspace requires the first selected workspace model"
         )
     return statement.where(model.workspace_id == workspace_id, *conditions)
+
+
+def join_in_workspace(
+    statement: Select,
+    root_model: type,
+    joined_model: type,
+    *,
+    workspace_id: UUID,
+    on: ColumnElement[bool],
+    isouter: bool = False,
+) -> Select:
+    """Join supported models inside one Workspace, preserving outer joins.
+
+    Scope the full selected root before projection. Both the explicit scope
+    and root equality belong in the ON clause for the joined model, so a
+    missing or foreign joined row cannot remove a valid outer-join root.
+    Existing ORM aliases may be joined; their underlying model must satisfy
+    the same required Workspace and single-id identity contract.
+    """
+    statement = where_in_workspace(
+        statement, root_model, workspace_id=workspace_id
+    )
+    joined = inspect(joined_model)
+    _validate_workspace_model(
+        joined.mapper.class_ if joined.is_aliased_class else joined_model,
+        operation="join_in_workspace",
+    )
+    return statement.join(
+        joined_model,
+        on
+        & (joined_model.workspace_id == workspace_id)
+        & (joined_model.workspace_id == root_model.workspace_id),
+        isouter=isouter,
+    )

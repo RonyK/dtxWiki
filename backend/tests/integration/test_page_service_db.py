@@ -496,7 +496,27 @@ def test_page_service_rejects_base_version_id_belonging_to_another_page():
 
 
 def test_wikilink_pin_survives_rename_rescan_and_restore():
+    from backend.app.container import assemble
+    from backend.app.settings import Settings
+    from backend.models.lint import LintFinding
+    from backend.schemas.lint import LintRunCreateRequest
+
     service = make_service()
+    self_origin = "https://pin-origin-fixture.invalid:54443"
+    configured = assemble(
+        Settings(
+            database_url="sqlite+pysqlite:///:memory:",
+            session_secret="test-session-secret",
+            public_base_url=self_origin,
+        ),
+        session_factory=service.session_factory,
+    )
+    service = configured.get_page_service()
+    reader = configured.get_services().domain_read
+    with service.session_factory.begin() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        # This fixture exercises indexing of legacy bytes, not the save fixer.
+        workspace.lint_policy = {"link_fix_mode": "suggest"}
     target = service.write_page(
         workspace_slug="default",
         slug="한글-문서",
@@ -506,28 +526,65 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         actor_id="dev-local-user",
         actor_provenance="browser_session",
     )
+    # Distinct failure mechanisms in the same existing lifecycle: normalized
+    # page-id keys must coalesce URL forms; slug reuse must respect prior pins;
+    # hidden pins must fail closed rather than fall back to the reused slug.
+    linked_body = (
+        "# Link Source\n\nSee [[한글 문서]]. "
+        "[Legacy](/context/한글-문서.md) "
+        f"[Configured]({self_origin}/context/한글-문서.md) "
+        f"[Short](/p/{target.id}) [Full](/p/{target.workspace_id}/{target.id}) "
+        f"[Navigation](/context?target={target.id})"
+    )
     linked = service.write_page(
         workspace_slug="default",
         slug="link-source",
         title="Link Source",
-        body_md="# Link Source\n\nSee [[한글 문서]].",
+        body_md=linked_body,
         actor_kind="human",
         actor_id="dev-local-user",
         actor_provenance="browser_session",
     )
     with service.session_factory.begin() as session:
         link = session.scalar(
-            select(PageLink).where(PageLink.source_version_id == linked.version_id)
+            select(PageLink).where(
+                PageLink.source_version_id == linked.version_id,
+                PageLink.locator_key == "wikilink:한글-문서",
+            )
         )
         assert link.target_slug == "한글-문서"
         assert link.target_page_id == target.id
+        keyed = {
+            row.locator_key: row
+            for row in session.scalars(
+                select(PageLink).where(PageLink.source_version_id == linked.version_id)
+            )
+        }
+        assert set(keyed) == {
+            "wikilink:한글-문서",
+            "concept_path:한글-문서",
+            f"page_id:{target.id}",
+        }
+        assert keyed[f"page_id:{target.id}"].target_slug is None
+        assert keyed[f"page_id:{target.id}"].occurrence_count == 3
+        assert keyed["concept_path:한글-문서"].occurrence_count == 2
         session.get(ContextPage, target.id).slug = "renamed-korean-page"
+    replacement = service.write_page(
+        workspace_slug="default",
+        slug="한글-문서",
+        title="Replacement",
+        body_md="# Replacement",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    assert replacement.id != target.id
 
     duplicate = service.write_page(
         workspace_slug="default",
         slug="link-source",
         title="Link Source",
-        body_md="# Link Source\n\nSee [[한글 문서]].",
+        body_md=linked_body,
         actor_kind="human",
         actor_id="dev-local-user",
         base_version_id=linked.version_id,
@@ -538,7 +595,7 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         workspace_slug="default",
         slug="link-source",
         title="Link Source",
-        body_md="# Link Source\n\nChanged, still see [[한글 문서]].",
+        body_md=linked_body + "\n\nChanged.",
         actor_kind="human",
         actor_id="dev-local-user",
         base_version_id=duplicate.version_id,
@@ -566,7 +623,7 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         assert restored.version_id in {pin.source_version_id for pin in pins}
         assert all(pin.target_page_id == target.id for pin in pins)
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        detail = DomainReadService().read_context_page(
+        detail = reader.read_context_page(
             session=session,
             workspace_id=workspace.id,
             page_id=linked.id,
@@ -583,6 +640,185 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     assert detail.wikilink_targets[0].target_slug == "한글-문서"
     assert detail.wikilink_targets[0].target_page_id == target.id
     assert detail.wikilink_targets[0].current_slug == "renamed-korean-page"
+
+    assert len(detail.link_targets) == 6
+    assert all(entry.state == "ok" for entry in detail.link_targets)
+    assert all(entry.target_page_id == target.id for entry in detail.link_targets)
+    # Injected Settings must govern SAVE, projection, READ and RUN alike;
+    # ambient get_settings() does not contain this unusual trusted origin.
+    # This distinct DI failure path reuses the same target and registry fixture.
+    absolute_body = (
+        f"# Configured Origin\n\n[Target]({self_origin}/context/renamed-korean-page.md)"
+    )
+    absolute_source = service.write_page(
+        workspace_slug="default",
+        slug="configured-origin",
+        title="Configured Origin",
+        body_md=absolute_body,
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    with service.session_factory.begin() as session:
+        view = reader.read_context_page(
+            session=session,
+            workspace_id=target.workspace_id,
+            page_id=absolute_source.id,
+            include_warnings=False,
+        )
+        assert view.link_targets[0].state == "ok"
+        assert view.link_targets[0].target_page_id == target.id
+        configured.get_services().lint.run_lint(
+            session,
+            target.workspace_id,
+            LintRunCreateRequest(trigger_type="manual"),
+            "system",
+            "lint-fixture",
+        )
+        assert (
+            session.scalar(
+                select(LintFinding.id).where(
+                    LintFinding.target_id == absolute_source.id,
+                    LintFinding.rule_id == "link.internal-noncanonical",
+                )
+            )
+            is not None
+        )
+        session.get(Workspace, target.workspace_id).lint_policy = {
+            "link_fix_mode": "auto"
+        }
+    fixed_origin = service.write_page(
+        workspace_slug="default",
+        slug="configured-origin",
+        title="Configured Origin",
+        body_md=absolute_body,
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+        base_version_id=absolute_source.version_id,
+        base_content_hash=absolute_source.content_hash,
+    )
+    assert self_origin not in fixed_origin.body_md
+    assert f"](/p/{target.workspace_id}/{target.id})" in fixed_origin.body_md
+    # An independent pin lifetime failure needs two private editors: another
+    # author's autosave moves the global pointer without ending the first
+    # author's live edit. Its pin must still precede a subsequently reused slug.
+    with service.session_factory.begin() as session:
+        session.get(Workspace, target.workspace_id).lint_policy = {
+            "link_fix_mode": "suggest"
+        }
+    private_source = service.write_page(
+        workspace_slug="default",
+        slug="private-pin-source",
+        title="Private Pin Source",
+        body_md="# Private Pin Source",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    edits = [
+        service.begin_context_edit(
+            page_id=private_source.id,
+            workspace_id=target.workspace_id,
+            actor_kind="human",
+            actor_id=author,
+            actor_provenance="browser_session",
+            idempotency_key="private-pin-begin-" + author,
+        )
+        for author in ("first-editor", "second-editor")
+    ]
+    first_edit = service.autosave_page(
+        page_id=private_source.id,
+        workspace_id=target.workspace_id,
+        title="Private Pin Source",
+        body_md="# Private Pin Source\n\n[Target](/context/renamed-korean-page.md)",
+        actor_kind="human",
+        actor_id="first-editor",
+        actor_provenance="browser_session",
+        base_version_id=edits[0].version_id,
+        base_content_hash=edits[0].content_hash,
+        expected_editing_revision=edits[0].editing_revision,
+        editing_version_id=edits[0].version_id,
+        idempotency_key="private-pin-save-first-editor",
+    )
+    service.autosave_page(
+        page_id=private_source.id,
+        workspace_id=target.workspace_id,
+        title="Private Pin Source",
+        body_md="# Private Pin Source\n\nAnother editor's private text.",
+        actor_kind="human",
+        actor_id="second-editor",
+        actor_provenance="browser_session",
+        base_version_id=edits[1].version_id,
+        base_content_hash=edits[1].content_hash,
+        expected_editing_revision=edits[1].editing_revision,
+        editing_version_id=edits[1].version_id,
+        idempotency_key="private-pin-save-second-editor",
+    )
+    with service.session_factory.begin() as session:
+        assert session.scalar(
+            select(PageLink.target_page_id).where(
+                PageLink.source_version_id == first_edit.version_id
+            )
+        ) == target.id
+        session.get(ContextPage, target.id).slug = "private-pin-renamed"
+    service.write_page(
+        workspace_slug="default",
+        slug="renamed-korean-page",
+        title="Second Replacement",
+        body_md="# Second Replacement",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    with service.session_factory.begin() as session:
+        private_view = reader.read_context_page(
+            session=session,
+            workspace_id=target.workspace_id,
+            page_id=private_source.id,
+            version_id=first_edit.version_id,
+            include_warnings=False,
+            actor=ActorContext(
+                actor_kind="human",
+                actor_id="first-editor",
+                workspace_role="editor",
+                role="editor",
+                workspace_id=target.workspace_id,
+            ),
+        )
+        assert private_view.link_targets[0].target_page_id == target.id
+    with service.session_factory.begin() as session:
+        from backend.services.page_service import refresh_page_links
+
+        target_page = session.get(ContextPage, target.id)
+        target_page.lifecycle_status = "archived"
+        source_page = session.get(ContextPage, linked.id)
+        source_version = session.get(ContextPageVersion, restored.version_id)
+        refresh_page_links(session, page=source_page, version=source_version)
+        assert all(
+            row.target_page_id == target.id
+            for row in session.scalars(
+                select(PageLink).where(PageLink.source_page_id == linked.id)
+            )
+        )
+        hidden = reader.read_context_page(
+            session=session,
+            workspace_id=target.workspace_id,
+            page_id=linked.id,
+            version_id=restored.version_id,
+            include_warnings=False,
+            actor=ActorContext(
+                actor_kind="human",
+                actor_id="editor",
+                workspace_role="editor",
+                role="editor",
+                workspace_id=target.workspace_id,
+            ),
+        )
+    assert all(entry.state == "unavailable" for entry in hidden.link_targets)
+    assert all(entry.target_page_id is None for entry in hidden.link_targets)
+    assert all(entry.href is None for entry in hidden.link_targets)
+    assert hidden.wikilink_targets[0].target_page_id is None
 
 
 def test_context_read_includes_unresolved_wikilink_target():

@@ -213,9 +213,12 @@ def test_get_in_workspace_rejects_nullable_workspace_scope(monkeypatch):
 
 
 def test_scoped_batch_and_statement_helpers_always_constrain_foreign_id_candidates():
-    from sqlalchemy import or_, select
+    from sqlalchemy import or_, select, true
+    from sqlalchemy.orm import aliased
 
     from backend.repositories.workspace_scoped import (
+        delete_in_workspace,
+        join_in_workspace,
         list_in_workspace,
         select_in_workspace,
         where_in_workspace,
@@ -265,9 +268,39 @@ def test_scoped_batch_and_statement_helpers_always_constrain_foreign_id_candidat
         assert session.scalars(narrowed).all() == [own]
         with pytest.raises(TypeError, match="selected workspace model"):
             where_in_workspace(select(User), LibraryItem, workspace_id=home.id)
+        # Join scope must constrain both sides even with a permissive relation;
+        # the same constraints must stay in ON for a missing outer-joined row.
+        # These differ from a root-only SELECT and reuse its existing fixture.
+        related = aliased(LibraryItem)
+        joined = join_in_workspace(
+            select(LibraryItem), LibraryItem, related,
+            workspace_id=home.id, on=true(),
+        ).with_only_columns(LibraryItem.id, related.id)
+        assert session.execute(joined).all() == [(own.id, own.id)]
+        outer = join_in_workspace(
+            select(LibraryItem), LibraryItem, related,
+            workspace_id=home.id, on=related.id == foreign.id, isouter=True,
+        ).with_only_columns(LibraryItem.id, related.id)
+        assert session.execute(outer).all() == [(own.id, None)]
+        with pytest.raises(TypeError, match="selected workspace model"):
+            join_in_workspace(
+                select(User), LibraryItem, related,
+                workspace_id=home.id, on=true(),
+            )
         for unsupported in (User, AuditEvent, ContextMediaAsset):
             with pytest.raises(TypeError):
                 list_in_workspace(session, unsupported, workspace_id=home.id)
+            with pytest.raises(TypeError):
+                join_in_workspace(
+                    select(LibraryItem), LibraryItem, unsupported,
+                    workspace_id=home.id, on=true(),
+                )
+        # A scoped delete cannot widen to a foreign candidate either.
+        session.execute(delete_in_workspace(
+            LibraryItem, workspace_id=home.id, conditions=candidate_ids,
+        ))
+        assert session.get(LibraryItem, own.id) is None
+        assert session.get(LibraryItem, foreign.id) is foreign
 
 
 def test_statement_adapter_rejects_an_unbounded_first_entity_or_scalar_projection():

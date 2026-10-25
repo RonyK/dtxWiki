@@ -345,8 +345,8 @@ class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         UniqueConstraint(
             "source_page_id",
             "source_version_id",
-            "target_slug",
-            name="uq_page_links_source_version_target",
+            "locator_key",
+            name="uq_page_links_source_version_locator",
         ),
         Index("idx_page_links_target_workspace", "workspace_id", "target_slug"),
         Index("idx_page_links_target_page", "workspace_id", "target_page_id"),
@@ -387,7 +387,8 @@ class PageLink(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         Uuid(as_uuid=True),
         nullable=False,
     )
-    target_slug: Mapped[str] = mapped_column(Text, nullable=False)
+    locator_key: Mapped[str] = mapped_column(Text, nullable=False)
+    target_slug: Mapped[str | None] = mapped_column(Text)
     target_page_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     first_snippet: Mapped[str | None] = mapped_column(Text)

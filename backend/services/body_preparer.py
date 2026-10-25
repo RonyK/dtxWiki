@@ -63,9 +63,16 @@ class BodyPreparer:
         self,
         registry: LintRegistry | None = None,
         policy_factory: Callable[[Workspace], LintPolicy] = LintPolicy,
+        *,
+        self_origins: frozenset[str] | None = None,
     ) -> None:
         self.registry = registry if registry is not None else LintRegistry.builtin()
         self.policy_factory = policy_factory
+        from backend.services.context_links import configured_self_origins
+
+        self.self_origins = (
+            configured_self_origins() if self_origins is None else self_origins
+        )
 
     def prepare(
         self,

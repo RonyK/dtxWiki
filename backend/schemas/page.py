@@ -20,6 +20,7 @@ from backend.schemas.context_ingress import ContextPageType
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.input_policy import InputRequest
 from backend.schemas.read import (
+    ContextLinkTarget,
     PendingReviewInfo,
     PublishedVersionInfo,
     TreePathEntry,
@@ -92,7 +93,7 @@ class PageSummary(BaseModel):
 
 
 class PagePayload(PageSummary):
-    # Authenticated stable permalinks (`/p/{page_id}`) can be opened while a
+    # Authenticated permalinks (`/p/{workspace_id}/{page_id}`) can open while a
     # different Workspace is selected. The authorized read response therefore
     # carries the owning Workspace identity so the client can switch before
     # resolving the page in that Workspace's Context tree. Public payloads do
@@ -149,6 +150,7 @@ class PublicPagePayload(BaseModel):
     body_md: str
     updated_at: datetime
     exposure_scope: Literal["indexed_web", "unlisted_web"]
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -662,6 +664,7 @@ class ContextPageDetail(PagePayload):
     children_count: int = 0
     backlink_count: int = 0
     wikilink_targets: list[WikilinkTarget] = Field(default_factory=list)
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     pending_draft_version_id: UUID | None = None
     pending_draft_warnings: list[str] = Field(default_factory=list)

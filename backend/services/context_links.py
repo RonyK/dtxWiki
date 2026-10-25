@@ -6,6 +6,7 @@ causes a database read, and an existing pin always precedes a name lookup.
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from collections.abc import Mapping
@@ -13,18 +14,20 @@ from dataclasses import dataclass
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.context_media.domain.markdown_media import SourceSpan
 from backend.models.context import (
     ContextPage,
     ContextPageVersion,
     PageLink,
     PageNameIndex,
 )
+from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.context_visibility import visible_context_version_id
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+MCP_PAGE_INPUT_PATTERN = rf"^(?:{_UUID}|/p/{_UUID}(?:/{_UUID})?(?:#[^\s]*)?)$"
 _WIKI = re.compile(r"\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]")
 
 
@@ -82,6 +85,12 @@ def normalize_wikilink_target(value: str | None) -> str:
     return re.sub(r"[\W_]+", "-", normalized).strip("-")[:80]
 
 
+def normalize_heading(value: str) -> str:
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9-]+", "-", value.strip().lower())).strip(
+        "-"
+    )[:80]
+
+
 def configured_self_origins(settings=None) -> frozenset[str]:
     if settings is None:
         from backend.app.settings import get_settings
@@ -123,7 +132,7 @@ def classify(href: str, self_origins=()) -> Locator:
         return Locator(
             "wikilink" if target.strip() else "local",
             slug=normalize_wikilink_target(target),
-            fragment=fragment or None,
+            fragment=normalize_heading(fragment) or None,
             href=href,
         )
     if (
@@ -269,17 +278,17 @@ def resolve(
     if pinned is None and locator.node_id is not None:
         pinned = (preserved_pins or {}).get(f"page_id:{locator.node_id}")
     if pinned is None and ctx.source_page_id is not None:
-        statement = select(PageLink.target_page_id).where(
-            PageLink.workspace_id == ctx.workspace_id,
+        conditions = [
             PageLink.source_page_id == ctx.source_page_id,
             PageLink.target_page_id.is_not(None),
-        )
+            PageLink.locator_key == locator.key,
+        ]
         # During a rolling upgrade the legacy model has no locator_key yet.
-        statement = statement.where(PageLink.locator_key == locator.key)
         if ctx.source_version_id is not None:
-            statement = statement.where(
-                PageLink.source_version_id == ctx.source_version_id
-            )
+            conditions.append(PageLink.source_version_id == ctx.source_version_id)
+        statement = select_in_workspace(
+            PageLink, workspace_id=ctx.workspace_id, conditions=conditions
+        ).with_only_columns(PageLink.target_page_id)
         pinned = session.scalar(statement.order_by(PageLink.created_at.desc()).limit(1))
         if pinned is None and ctx.source_version_id is not None:
             # A newly opened copy has no projection yet. Live source pins
@@ -288,41 +297,54 @@ def resolve(
             if locator.node_id is not None:
                 keys.append(f"page_id:{locator.node_id}")
             pinned = session.scalar(
-                select(PageLink.target_page_id)
-                .where(
-                    PageLink.workspace_id == ctx.workspace_id,
-                    PageLink.source_page_id == ctx.source_page_id,
-                    PageLink.locator_key.in_(keys),
-                    PageLink.target_page_id.is_not(None),
+                select_in_workspace(
+                    PageLink,
+                    workspace_id=ctx.workspace_id,
+                    conditions=(
+                        PageLink.source_page_id == ctx.source_page_id,
+                        PageLink.locator_key.in_(keys),
+                        PageLink.target_page_id.is_not(None),
+                    ),
                 )
+                .with_only_columns(PageLink.target_page_id)
                 .order_by(PageLink.created_at.desc())
                 .limit(1)
             )
     page_id = pinned or locator.page_id
     if page_id is None and locator.node_id is not None:
         page_id = session.scalar(
-            select(ContextPage.id).where(
-                ContextPage.workspace_id == ctx.workspace_id,
-                ContextPage.id == locator.node_id,
-            )
+            select_in_workspace(
+                ContextPage,
+                workspace_id=ctx.workspace_id,
+                conditions=(ContextPage.id == locator.node_id,),
+            ).with_only_columns(ContextPage.id)
         )
         if page_id is None:
             from backend.models.tree import WorkspaceTreeNode
 
             page_id = session.scalar(
-                select(WorkspaceTreeNode.target_id).where(
-                    WorkspaceTreeNode.workspace_id == ctx.workspace_id,
-                    WorkspaceTreeNode.id == locator.node_id,
-                    WorkspaceTreeNode.target_kind == "context_page",
-                )
+                select_in_workspace(
+                    WorkspaceTreeNode,
+                    workspace_id=ctx.workspace_id,
+                    conditions=(
+                        WorkspaceTreeNode.id == locator.node_id,
+                        WorkspaceTreeNode.target_kind == "context_page",
+                    ),
+                ).with_only_columns(WorkspaceTreeNode.target_id)
             )
-    statement = select(ContextPage).where(ContextPage.workspace_id == ctx.workspace_id)
     if page_id is not None:
-        pages = list(session.scalars(statement.where(ContextPage.id == page_id)))
+        condition = ContextPage.id == page_id
     elif locator.slug is not None:
-        pages = list(session.scalars(statement.where(ContextPage.slug == locator.slug)))
+        condition = ContextPage.slug == locator.slug
     else:
         return Resolution("unavailable")
+    pages = list(
+        session.scalars(
+            select_in_workspace(
+                ContextPage, workspace_id=ctx.workspace_id, conditions=(condition,)
+            )
+        )
+    )
     if len(pages) != 1:
         if len(pages) > 1:
             return Resolution("ambiguous")
@@ -331,11 +353,16 @@ def resolve(
 
             candidates = (
                 session.scalars(
-                    statement.join(
-                        PageNameIndex, PageNameIndex.page_id == ContextPage.id
-                    ).where(
-                        PageNameIndex.workspace_id == ctx.workspace_id,
-                        PageNameIndex.name_norm == normalize_entity_name(locator.slug),
+                    join_in_workspace(
+                        select_in_workspace(ContextPage, workspace_id=ctx.workspace_id),
+                        ContextPage,
+                        PageNameIndex,
+                        workspace_id=ctx.workspace_id,
+                        on=(PageNameIndex.page_id == ContextPage.id)
+                        & (
+                            PageNameIndex.name_norm
+                            == normalize_entity_name(locator.slug)
+                        ),
                     )
                 )
                 .unique()
@@ -363,10 +390,13 @@ def _published_page(page, ctx) -> bool:
     if page.current_published_version_id is None:
         return False
     version = ctx.session.scalar(
-        select(ContextPageVersion).where(
-            ContextPageVersion.workspace_id == ctx.workspace_id,
-            ContextPageVersion.page_id == page.id,
-            ContextPageVersion.id == page.current_published_version_id,
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=ctx.workspace_id,
+            conditions=(
+                ContextPageVersion.page_id == page.id,
+                ContextPageVersion.id == page.current_published_version_id,
+            ),
         )
     )
     return version is not None and version.version_status in {
@@ -382,10 +412,13 @@ def _visible_page(page, ctx) -> bool:
     if version_id is None:
         return False
     version = ctx.session.scalar(
-        select(ContextPageVersion).where(
-            ContextPageVersion.workspace_id == ctx.workspace_id,
-            ContextPageVersion.page_id == page.id,
-            ContextPageVersion.id == version_id,
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=ctx.workspace_id,
+            conditions=(
+                ContextPageVersion.page_id == page.id,
+                ContextPageVersion.id == version_id,
+            ),
         )
     )
     from backend.services.actor_visible_read import context_version_is_visible
@@ -398,3 +431,347 @@ def resolve_page_input(value: str | UUID, ctx: LinkContext) -> UUID:
     if result.state not in {"ok", "needs_review"} or result.page_id is None:
         raise PageLocatorNotFound("Context page not found")
     return result.page_id
+
+
+@dataclass(frozen=True)
+class LinkOccurrence:
+    href: str
+    kind: str
+    span: SourceSpan
+    slug: str | None = None
+    label: str | None = None
+    snippet: str = ""
+
+    @property
+    def destination_span(self) -> SourceSpan:
+        return self.span
+
+
+def _span(body: str, start: int, end: int) -> SourceSpan:
+    return SourceSpan(
+        start, end, len(body[:start].encode("utf-8")), len(body[:end].encode("utf-8"))
+    )
+
+
+def _markdown_parser():
+    from markdown_it import MarkdownIt
+
+    return MarkdownIt("commonmark", {"html": True}).enable("table")
+
+
+def _rendered_destinations(body: str) -> list[str]:
+    return [
+        child.attrGet("href")
+        for token in _markdown_parser().parse(body)
+        for child in token.children or ()
+        if child.type == "link_open"
+    ]
+
+
+def _plain_text_nodes(body: str) -> list[str]:
+    result = []
+    for token in _markdown_parser().parse(body):
+        link_depth = 0
+        for child in token.children or ():
+            if child.type == "link_open":
+                link_depth += 1
+            elif child.type == "link_close":
+                link_depth -= 1
+            elif child.type == "text" and not link_depth:
+                result.append(child.content)
+    return result
+
+
+def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
+    """Verify exact source destinations against the original rendered structure.
+
+    Shared reference definitions are deliberately not rewritable: a definition
+    may serve an image or another link. The probe never creates eligibility;
+    original text-node membership is checked before probing a wikilink.
+    """
+    from collections import Counter
+    from hashlib import sha256
+
+    from backend.context_media.domain.markdown_media import (
+        _GFM_AUTOLINK_LITERAL,
+        _code_mask,
+        _gfm_literal_source_spans_visible,
+        _gfm_literal_url_candidates,
+        _is_escaped,
+        _line_offsets,
+        _math_mask,
+        _parse_bracket,
+        _parse_definition_line,
+        _parse_image_use,
+        _parse_inline_image_destination,
+        _parse_link_reference,
+        _rendered_page_body,
+    )
+
+    rendered, offset = _rendered_page_body(body)
+    masked = _code_mask(rendered)
+    math_mask = _math_mask(rendered)
+    for index, value in enumerate(math_mask):
+        if value:
+            masked[index] = 1
+    line_offsets = _line_offsets(rendered)
+    tokens = _markdown_parser().parse(rendered)
+    for token in tokens:
+        if token.type == "html_block" and token.map:
+            start, end = line_offsets[token.map[0]], line_offsets[token.map[1]]
+            masked[start:end] = b"\x01" * (end - start)
+    # Raw HTML, including its contents, does not participate in authored links.
+    # Track paired tags so nesting and mixed-case closing tags cannot leave
+    # part of an HTML region eligible. Quoted attribute values may contain >.
+    html_stack: list[tuple[str, int]] = []
+    void_tags = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+    for match in re.finditer(
+        r"<!--.*?(?:-->|$)|</?(?P<tag>[A-Za-z][\w:-]*)(?=\s|/?>)"
+        r"(?:\"[^\"]*\"|'[^']*'|[^'\"<>])*?>",
+        rendered,
+        re.S,
+    ):
+        start, end = match.span()
+        if masked[start]:
+            continue
+        masked[start:end] = b"\x01" * (end - start)
+        if match["tag"] is None:
+            continue
+        tag = match["tag"].lower()
+        if match[0].startswith("</"):
+            for index in range(len(html_stack) - 1, -1, -1):
+                if html_stack[index][0] == tag:
+                    start = html_stack[index][1]
+                    masked[start:end] = b"\x01" * (end - start)
+                    del html_stack[index:]
+                    break
+        elif tag not in void_tags and not match[0].endswith("/>"):
+            html_stack.append((tag, start))
+    for _, start in html_stack:
+        masked[start:] = b"\x01" * (len(rendered) - start)
+
+    definitions = {}
+    definition_counts = Counter()
+    definition_ranges = []
+    cursor = 0
+    for line in rendered.splitlines(keepends=True):
+        end = cursor + len(line.rstrip("\r\n"))
+        definition = _parse_definition_line(rendered, cursor, end, masked)
+        if definition is not None and not any(
+            masked[definition.syntax_start : definition.syntax_end]
+        ):
+            definitions[definition.label] = definition
+            definition_counts[definition.label] += 1
+            definition_ranges.append((cursor, cursor + len(line)))
+        cursor += len(line)
+
+    candidates = []
+    uses = Counter()
+    reference_uses = []
+    original_text = _plain_text_nodes(rendered)
+    eligible_wikis = {
+        match[0] for node in original_text for match in _WIKI.finditer(node)
+    }
+    wiki_candidates = []
+    salt = sha256(body.encode()).hexdigest()[:16]
+    while f"dtxlinkprobe{salt}" in rendered:
+        salt += "x"
+    cursor = 0
+    while cursor < len(rendered):
+        definition_end = next(
+            (end for start, end in definition_ranges if start <= cursor < end), None
+        )
+        if definition_end is not None:
+            cursor = definition_end
+            continue
+        if masked[cursor] or _is_escaped(rendered, cursor):
+            cursor += 1
+            continue
+        if rendered.startswith("![", cursor):
+            image = _parse_image_use(rendered, cursor, masked)
+            if image is not None:
+                if image.reference_label:
+                    uses[image.reference_label] += 1
+                cursor = image.syntax_end
+                continue
+        wiki = _WIKI.match(rendered, cursor)
+        if wiki:
+            raw = wiki[0]
+            # Replacing [[tar*get*]] with a probe FIRST would incorrectly turn
+            # emphasis/text into a valid wikilink. Keep the original parse.
+            decoded = html.unescape(
+                re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", raw)
+            )
+            if decoded in eligible_wikis:
+                wiki_candidates.append(
+                    (cursor, wiki.end(), raw, decoded, wiki[1], wiki[2])
+                )
+            cursor = wiki.end()
+            continue
+        if rendered[cursor] == "[":
+            bracket = _parse_bracket(rendered, cursor, masked)
+            if bracket:
+                bracket_end, label = bracket
+                if bracket_end < len(rendered) and rendered[bracket_end] == "(":
+                    parsed = _parse_inline_image_destination(rendered, bracket_end)
+                    if parsed:
+                        start, end, syntax_end = parsed
+                        if not any(masked[start:end]):
+                            candidates.append(
+                                (
+                                    start,
+                                    end,
+                                    rendered[start:end],
+                                    "markdown",
+                                    None,
+                                    label,
+                                )
+                            )
+                        cursor = syntax_end
+                        continue
+                reference = _parse_link_reference(rendered, cursor, masked)
+                if reference and reference[0] in definitions:
+                    label_key, syntax_end = reference
+                    uses[label_key] += 1
+                    reference_uses.append((label_key, label))
+                    cursor = syntax_end
+                    continue
+        if rendered[cursor] == "<":
+            angle = re.match(
+                r"<((?:https?://|dtxwiki://)[^<>\s]+)>", rendered[cursor:], re.I
+            )
+            if angle:
+                candidates.append(
+                    (
+                        cursor,
+                        cursor + len(angle[0]),
+                        angle[1],
+                        "autolink",
+                        None,
+                        angle[1],
+                    )
+                )
+                cursor += len(angle[0])
+                continue
+        cursor += 1
+    # Insert markers around, never instead of, original wiki syntax. A single
+    # parse qualifies every occurrence without an O(links) document reparse.
+    marked_parts = []
+    cursor = 0
+    marked_wikis = []
+    for index, (start, end, raw, decoded, slug, label) in enumerate(wiki_candidates):
+        before, after = f"dtxlinkprobe{salt}a{index}x", f"dtxlinkprobe{salt}b{index}x"
+        marked_parts.extend((rendered[cursor:start], before, raw, after))
+        cursor = end
+        marked_wikis.append((before + decoded + after, start, end, raw, slug, label))
+    marked_parts.append(rendered[cursor:])
+    qualified_nodes = (
+        _plain_text_nodes("".join(marked_parts)) if wiki_candidates else []
+    )
+    for marker, start, end, raw, slug, label in marked_wikis:
+        if any(marker in node for node in qualified_nodes):
+            candidates.append((start, end, raw, "wikilink", slug, label))
+
+    for label_key, label in reference_uses:
+        definition = definitions[label_key]
+        if uses[label_key] == 1 and definition_counts[label_key] == 1:
+            candidates.append(
+                (
+                    definition.destination_start,
+                    definition.destination_end,
+                    definition.destination,
+                    "markdown",
+                    None,
+                    label,
+                )
+            )
+
+    literals = []
+    for match in _GFM_AUTOLINK_LITERAL.finditer(rendered):
+        if any(masked[match.start() : match.end()]):
+            continue
+        # The last candidate has GFM punctuation/entity trimming applied.
+        href = _gfm_literal_url_candidates(match[0])[-1]
+        end = match.start() + len(href)
+        if any(match.start() < stop and end > start for start, stop, *_ in candidates):
+            continue
+        literals.append((match.start(), end, href))
+    visible_literals = _gfm_literal_source_spans_visible(
+        rendered, tuple((start, end) for start, end, _ in literals)
+    )
+    candidates.extend(
+        (start, end, href, "literal_autolink", None, href)
+        for index, (start, end, href) in enumerate(literals)
+        if index in visible_literals
+    )
+
+    # All Markdown destinations are probed together, once, like Context media.
+    # Every unique marker must be a rendered link exactly once, not an image.
+    probes = {}
+    pieces = []
+    cursor = 0
+    ordered = sorted(candidates)
+    for index, (start, end, _href, kind, _slug, _label) in enumerate(ordered):
+        if start < cursor:
+            continue
+        probe = f"https://dtxlinkprobe.invalid/{salt}/{index}"
+        replacement = f"<{probe}>" if kind == "autolink" else probe
+        if kind in {"wikilink", "literal_autolink"}:
+            replacement = rendered[start:end]
+        pieces.extend((rendered[cursor:start], replacement))
+        cursor = end
+        probes[index] = probe
+    pieces.append(rendered[cursor:])
+    rendered_probes = Counter(_rendered_destinations("".join(pieces)))
+    result = []
+    for index, (start, end, href, kind, slug, label) in enumerate(ordered):
+        if index not in probes or (
+            kind not in {"wikilink", "literal_autolink"}
+            and rendered_probes[probes[index]] != 1
+        ):
+            continue
+        raw_href = (
+            href
+            if kind in {"autolink", "literal_autolink"}
+            else html.unescape(
+                re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", href)
+            )
+        )
+        # remark-gfm gives www literals an implicit HTTP scheme. Readers see
+        # that destination while the authored label and span stay unchanged.
+        if kind == "literal_autolink" and raw_href.lower().startswith("www."):
+            raw_href = "http://" + raw_href
+        result.append(
+            LinkOccurrence(
+                raw_href,
+                kind,
+                _span(body, offset + start, offset + end),
+                html.unescape(
+                    re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", slug)
+                )
+                if slug is not None
+                else None,
+                html.unescape(
+                    re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", label)
+                )
+                if kind == "wikilink" and label is not None
+                else label,
+                body[max(0, offset + start - 60) : offset + end + 60],
+            )
+        )
+    return tuple(result)

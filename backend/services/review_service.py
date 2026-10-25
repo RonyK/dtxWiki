@@ -1276,6 +1276,7 @@ class ReviewService:
                     session,
                     page=page,
                     version=resulting_version,
+                    self_origins=self.body_preparer.self_origins,
                 )
                 ContextWriteService(
                     audit_service=self.audit_service,
