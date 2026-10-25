@@ -918,6 +918,13 @@ def test_search_service_claim_search_keeps_published_claim_with_pending_draft():
     assert hit.id == published_claim.id
     assert hit.version_id == created.version_id
     assert hit.source_ref == {"kind": "context_page", "id": str(created.id)}
+    # Claims have their own identity; the MCP web link must address the parent
+    # page, while the shared search result keeps its retriever concept_path.
+    from backend.services.mcp_context_projection import search_payload
+    projected = search_payload(results, workspace.id)["ranked_results"][0]
+    assert projected["stable_url"] == f"/p/{workspace.id}/{created.id}"
+    assert "concept_path" not in projected
+    assert hit.concept_path == "/context/claim-version-parent.md"
 
 
 def test_keyword_search_uses_shared_visibility_for_pending_drafts():

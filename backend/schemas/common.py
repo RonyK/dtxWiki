@@ -146,7 +146,11 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        Optional filters.include_agents defaults true; false excludes Agent
 #        pages before result counts and pagination. Refresh tools/list.
 #        Explicit read_concept and write-target ambiguity policies are retained.
-MCP_TOOL_CONTRACT_REVISION = 15
+#  16 -- MCP Context results use workspace-qualified stable_url/link_markdown
+#        and drop concept_path/resource_uri. Page inputs share one locator
+#        grammar; Library lookup paths remain separate. Archived what_changed
+#        links are required-nullable. Refresh tool and result-schema caches.
+MCP_TOOL_CONTRACT_REVISION = 16
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

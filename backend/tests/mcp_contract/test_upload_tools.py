@@ -403,7 +403,7 @@ def test_upload_image_rejects_cross_workspace_page(
             editing_version_id=uuid4(),
         ),
     )
-    assert response.envelope.error_code == "inconsistent_identifier"
+    assert response.envelope.error_code == "not_found"
 
 
 def test_upload_image_rejects_missing_page_as_not_found(
@@ -508,8 +508,8 @@ def test_upload_image_rejects_visible_page_from_a_different_workspace(
         ),
     )
 
-    assert response.envelope.error_code == "inconsistent_identifier"
-    assert response.envelope.result_status == "rejected_by_policy"
+    assert response.envelope.error_code == "not_found"
+    assert response.envelope.result_status == "failed"
 
 
 def test_upload_image_page_target_binds_asset_to_the_open_editing_version(
@@ -524,7 +524,7 @@ def test_upload_image_page_target_binds_asset_to_the_open_editing_version(
         actor,
         _payload(
             workspace_id,
-            page_id=editing_page.id,
+            page_id=f"/p/{workspace_id}/{editing_page.id}",
             editing_version_id=editing_page.version_id,
         ),
     )

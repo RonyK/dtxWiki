@@ -1,8 +1,11 @@
 import time
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
+from backend.mcp.protocol.instructions import MCP_SERVER_INSTRUCTIONS
+from backend.mcp.protocol.tool_descriptors import TOOL_META
 from backend.mcp.router import dispatch
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import EdgeProjection
@@ -16,6 +19,7 @@ from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
 from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
 from backend.services.retrieval.outline_location import raw_body_sha256
+from backend.spi.tool_presentation import MCP_CONTEXT_LINK_GUIDANCE
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
 
@@ -112,6 +116,11 @@ def test_mcp_guide_and_agent_read_tools(page_service, actor, mcp_default_actor):
         "read",
         "list_agent_categories",
     ]
+    link_guidance = MCP_CONTEXT_LINK_GUIDANCE
+    assert link_guidance in guide.data.required_workflow
+    assert link_guidance in MCP_SERVER_INSTRUCTIONS
+    for name in ("create_context_page", "update_context_edit", "patch_context_edit"):
+        assert link_guidance in TOOL_META[name].description
     assert categories.data[0].category == "agent_guide"
     assert agent_page.data.body_markdown.startswith("# Default System Prompt")
     assert agent_page.data.tree_path[-1].title == "Default System Prompt"
@@ -126,7 +135,7 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
     written = page_service.write_page(
         workspace_slug="default",
         slug="mcp-read-context",
-        title="MCP Read Context",
+        title=r"MCP [Read] \Context",
         body_md="# MCP Read Context\n\nNeedle body",
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
@@ -148,7 +157,7 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
         {
             "workspace_id": str(workspace_id),
             "target_type": "context_page",
-            "target_id": str(written.id),
+            "target_id": f"/p/{workspace_id}/{written.id}",
         },
         actor=actor,
         page_service=page_service,
@@ -158,7 +167,7 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
         {
             "workspace_id": str(workspace_id),
             "target_type": "context_page",
-            "target_id": str(written.id),
+            "target_id": f"/p/{written.id}",
             "include_diff": True,
         },
         actor=actor,
@@ -167,7 +176,43 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
 
     assert search.envelope.result_status == "succeeded"
     assert search.data.ranked_results[0].type == "context_page"
+    stable_url = f"/p/{workspace_id}/{written.id}"
+    link_markdown = rf"[MCP \[Read\] \\Context]({stable_url})"
+    assert search.data.ranked_results[0].stable_url == stable_url
+    assert search.data.ranked_results[0].link_markdown == link_markdown
+    exact = dispatch(
+        "search",
+        {
+            "workspace_id": str(workspace_id),
+            "query": stable_url,
+            "scope": "context_page",
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert exact.data.ranked_results[0].entity_ref["stable_url"] == stable_url
+    assert "link_markdown" not in exact.data.ranked_results[0].entity_ref
+    for reference in (
+        exact.data.ranked_results[0].entity_ref,
+        exact.data.ranked_results[0].source_ref,
+    ):
+        assert reference["stable_url"] == stable_url
+        assert "concept_path" not in reference and "resource_uri" not in reference
+    assert "concept_path" not in search.data.ranked_results[0].model_dump()
     assert read.data["body_markdown"] == "# MCP Read Context\n\nNeedle body"
+    assert read.data["stable_url"] == stable_url
+    assert read.data["link_markdown"] == link_markdown
+    index = dispatch(
+        "get_index",
+        {"workspace_id": str(workspace_id), "sections": ["context"]},
+        actor=actor,
+        page_service=page_service,
+    )
+    assert f"* {link_markdown} — Needle body" in index.index
+    assert (
+        "stable_url:" not in index.index
+        and "/context/mcp-read-context.md" not in index.index
+    )
     assert changes.data.changesets[0].status == "applied"
     assert changes.data.diffs[0]["target_type"] == "context_page"
 
@@ -231,7 +276,7 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/canonical-alpha.md",
+            "path": f"/p/{workspace_id}/{alpha.id}",
             "format": "mermaid",
         },
         actor=actor,
@@ -240,8 +285,14 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
 
     assert redirected.envelope.result_status == "succeeded"
     assert redirected.status == "redirected"
-    assert redirected.canonical_path == "/context/canonical-alpha.md"
+    assert "canonical_path" not in redirected.model_dump()
     assert redirected.page_id is not None
+    assert redirected.stable_url == f"/p/{workspace_id}/{alpha.id}"
+    assert (
+        redirected.link_markdown == f"[Canonical Alpha](/p/{workspace_id}/{alpha.id})"
+    )
+    assert redirected.frontmatter["resource"] == redirected.stable_url
+    assert f"resource: {redirected.stable_url}" in redirected.content
     assert redirected.version_id is not None
     assert "# Canonical Alpha" in redirected.content
     assert redirected.mermaid is None
@@ -250,20 +301,47 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     assert redirected.neighbors.co_access[0].kind == "context_page"
     assert redirected.neighbors.co_access[0].edge_kind == "co_access"
     assert redirected.neighbors.co_access[0].direction == "out"
+    assert redirected.neighbors.co_access[0].path is None
+    assert (
+        redirected.neighbors.co_access[0].stable_url == f"/p/{workspace_id}/{beta.id}"
+    )
+    assert redirected.neighbors.co_access[0].link_markdown == (
+        f"[Canonical Beta](/p/{workspace_id}/{beta.id})"
+    )
     assert mermaid.mermaid is not None
     assert mermaid.mermaid.startswith("graph LR")
     assert ambiguous.envelope.result_status == "succeeded"
     assert ambiguous.status == "ambiguous"
-    assert {candidate.concept_path for candidate in ambiguous.candidates} == {
-        "/context/canonical-alpha.md",
-        "/context/canonical-beta.md",
-    }
     assert set(type(ambiguous.candidates[0]).model_fields) == {
         "id",
         "title",
-        "concept_path",
         "match_reason",
+        "stable_url",
+        "link_markdown",
     }
+    assert {candidate.stable_url for candidate in ambiguous.candidates} == {
+        f"/p/{workspace_id}/{alpha.id}",
+        f"/p/{workspace_id}/{beta.id}",
+    }
+    # These transport rows cover wiring, not a second locator grammar matrix:
+    # UUID/short forms take the direct identity branch, while legacy aliases
+    # above take name resolution. A unit parser test cannot prove scoped MCP
+    # resolution or the foreign-workspace error boundary. Reuse this fixture.
+    for locator in (str(alpha.id), f"/p/{alpha.id}"):
+        direct = dispatch(
+            "read_concept",
+            {"workspace_id": str(workspace_id), "path": locator},
+            actor=actor, page_service=page_service,
+        )
+        assert direct.envelope.result_status == "succeeded"
+        assert direct.page_id == alpha.id
+        assert direct.path == locator
+    foreign = dispatch(
+        "read_concept",
+        {"workspace_id": str(workspace_id), "path": f"/p/{uuid4()}/{alpha.id}"},
+        actor=actor, page_service=page_service,
+    )
+    assert foreign.envelope.error_code == "not_found"
 
 
 def test_read_context_outline_duplicate_sections_and_selected_hash(
@@ -285,7 +363,7 @@ def test_read_context_outline_duplicate_sections_and_selected_hash(
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "target": {"path": f"/p/{workspace_id}/{page.id}"},
         },
         actor=actor,
         page_service=page_service,
@@ -486,7 +564,10 @@ def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):
     )
 
     assert response.envelope.result_status == "succeeded"
-    assert response.matches[0]["concept_path"] == "/context/grep-target.md"
+    assert response.matches[0]["stable_url"] == (
+        f"/p/{workspace_id}/{response.matches[0]['page_id']}"
+    )
+    assert "concept_path" not in response.matches[0]
     assert response.matches[0]["line"] == "literal/needle"
     assert "Before" in response.matches[0]["context"]
     assert "After" in response.matches[0]["context"]
@@ -858,7 +939,9 @@ def test_read_concept_resolves_library_paths(
             title="A8 Source",
             raw_text="# A8 Source\n\nExtracted source text needle.",
         )
-        ExtractionService(media_installer_factory=media_installer_factory).extract_library_item_version(
+        ExtractionService(
+            media_installer_factory=media_installer_factory
+        ).extract_library_item_version(
             session=session,
             library_item_version_id=registration.version.id,
         )
@@ -879,6 +962,15 @@ def test_read_concept_resolves_library_paths(
     assert output.target_id == item_id
     assert "Extracted source text needle." in output.content
     assert output.frontmatter["type"] == "source"
+    # A bare UUID is a Context identity, never an implicit Library fallback.
+    # Reuse this Library fixture: a parser unit cannot prove that dispatch
+    # avoids resolving an identity against the other content table.
+    bare = dispatch(
+        "read_concept",
+        {"workspace_id": str(workspace_id), "path": str(item_id)},
+        actor=actor, page_service=page_service,
+    )
+    assert bare.envelope.error_code == "not_found"
 
     # index advertises the same path — parity check
     index = dispatch(

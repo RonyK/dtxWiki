@@ -25,8 +25,11 @@ from sqlalchemy.orm import Session
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
+from backend.services.context_links import link_markdown
 from backend.services.context_visibility import visible_context_version_id
-from backend.services.entity_ref import context_concept_path, library_concept_path
+from backend.services.entity_ref import (
+    library_concept_path,
+)
 from backend.services.tree_projection import TreeProjection, TreeProjectionService
 from backend.utils.page_frontmatter import derive_nav_description
 from backend.utils.uuid import parse_uuid_or_none
@@ -227,10 +230,9 @@ def _node_entry_lines(
             page = pages.get(child.target_id)
             if page is None:
                 continue
-            path = context_concept_path(page.slug)
             description = descriptions.get(page.id) or ""
             suffix = " *(draft)*" if drafts.get(page.id) else ""
-            line = f"* [{page.title}]({path})"
+            line = "* " + link_markdown(page.workspace_id, page.id, page.title)
             if description:
                 line += f" \u2014 {_clip(description)}"
             line += suffix

@@ -403,6 +403,11 @@ def test_what_changed_mcp_tool_cursor_roundtrip(
         published[2:]
     )
     assert second.next_cursor is None
+    for entry in [*first.entries, *second.entries]:
+        assert entry.stable_url == f"/p/{workspace_id}/{entry.page_id}"
+        assert (
+            entry.link_markdown == f"[{entry.title}](/p/{workspace_id}/{entry.page_id})"
+        )
 
 
 def test_what_changed_rejects_negative_cursor(
@@ -433,7 +438,9 @@ def test_what_changed_rejects_negative_cursor(
     assert result.envelope.error_code == "validation_failed"
 
 
-def test_archive_surfaces_as_archived_delta(session_factory, page_service):
+def test_archive_surfaces_as_archived_delta(
+    session_factory, page_service, mcp_default_actor
+):
     from backend.models.tree import WorkspaceTreeNode
     from backend.services.tree_service import TreeService
 
@@ -473,3 +480,17 @@ def test_archive_surfaces_as_archived_delta(session_factory, page_service):
     archived = [e for e in entries if e.page_id == payload.id]
     assert len(archived) == 1
     assert archived[0].change_kind == "archived"
+    response = dispatch(
+        "what_changed",
+        {"workspace_id": str(workspace_id), "since": since.isoformat()},
+        actor=mcp_default_actor(scopes=("mcp:read",)),
+        page_service=page_service,
+    )
+    assert response.envelope.result_status == "succeeded"
+    assert len(response.entries) == 1
+    entry = response.entries[0]
+    assert entry.change_kind == "archived"
+    assert entry.stable_url is None
+    assert entry.link_markdown is None
+    assert entry.model_dump()["stable_url"] is None
+    assert "concept_path" not in entry.model_dump()

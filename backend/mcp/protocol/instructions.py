@@ -1,11 +1,13 @@
 """Client-facing instructions shared by the HTTP MCP server implementations.
 
-Kept in its own import-free module because ``create_mcp_server`` and
+Kept in its own module because ``create_mcp_server`` and
 ``_build_dispatcher_server`` each used to carry their own byte-identical copy
 of this string. Two copies meant neither was updated when the legacy Pages
 tools were deleted, so both HTTP modes kept advertising tools that returned
 ``unknown_tool``.
 """
+
+from backend.spi.tool_presentation import MCP_CONTEXT_LINK_GUIDANCE
 
 MCP_SERVER_INSTRUCTIONS = (
     "Call list_my_workspaces to choose a workspace_id, then guide for that "
@@ -19,10 +21,11 @@ MCP_SERVER_INSTRUCTIONS = (
     "catalog. To create a new Context page, call create_context_page; to edit "
     "an existing one, call begin_context_edit then update_context_edit (whole "
     "body) or patch_context_edit (typed block/section operations addressed by "
-    "read_structure_map ids) followed by submit_context_edit_for_review. Read "
+    "read_structure_map ids) followed by submit_context_edit_for_review. "
+    "Read "
     "and discovery tools accept "
     "conversation_token "
     "optionally. Content tools (writes, citations, feedback, bundles, and "
     "maintenance) require it: echo envelope.conversation_token from an earlier "
     'call or pass the literal "new" to start a conversation.'
-)
+) + " " + MCP_CONTEXT_LINK_GUIDANCE

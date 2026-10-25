@@ -518,7 +518,7 @@ def test_m4_answers_escalate_advice_without_human_resolution(session_factory, tm
                     "queries": [
                         {
                             "query": "What changed in the stale policy?",
-                            "expected_concept_path": "/context/stale-dependent.md",
+                            "expected_page": str(page.id),
                         }
                     ]
                 },
@@ -541,9 +541,9 @@ def test_m4_answers_escalate_advice_without_human_resolution(session_factory, tm
         )
         assert (
             json.loads(golden_finding.suggested_action)["queries"][0][
-                "expected_concept_path"
+                "expected_page"
             ]
-            == "/context/stale-dependent.md"
+            == f"/p/{workspace_id}/{page.id}"
         )
     assert golden.read_bytes() == before
 

@@ -290,7 +290,7 @@ def test_resolve_workspace_id_for_tool_rejects_page_id_slug_mismatch(
     page_service,
 ):
     """Fix-6 Task 1.1 (B-F5-CODEX-1): page_id + workspace_slug pointing to
-    different workspaces must reject with `inconsistent_identifier`.
+    different workspaces must reject with `not_found`.
 
     Codex's reproduction: caller knows workspace B's page_id but provides
     workspace A's slug. Previously the slug branch decided the auth check
@@ -315,7 +315,7 @@ def test_resolve_workspace_id_for_tool_rejects_page_id_slug_mismatch(
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "inconsistent_identifier"
+    assert result.error_code == "not_found"
 
 
 def test_resolve_workspace_id_for_tool_allows_page_id_slug_match(
@@ -407,7 +407,20 @@ def test_resolve_workspace_id_for_tool_rejects_workspace_id_page_id_mismatch(
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "inconsistent_identifier"
+    assert result.error_code == "not_found"
+    # A page ownership mismatch must not be conflated with two explicit
+    # workspace locators disagreeing. Reuse the same two-workspace fixture;
+    # syntax-only parser tests cannot observe this router error boundary.
+    workspace_conflict = resolve_workspace_id_for_tool(
+        tool_name="upload_image",
+        payload={
+            "workspace_id": str(workspace_a_id),
+            "workspace_slug": "fix6-explicit-b",
+            "page_id": str(page_b.id),
+        },
+        session_factory=session_factory,
+    )
+    assert workspace_conflict.error_code == "inconsistent_identifier"
 
 
 def test_resolve_workspace_id_for_tool_rejects_page_id_mismatch_for_begin_context_edit(
@@ -438,7 +451,7 @@ def test_resolve_workspace_id_for_tool_rejects_page_id_mismatch_for_begin_contex
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "inconsistent_identifier"
+    assert result.error_code == "not_found"
 
 
 def test_resolve_workspace_id_for_tool_uses_page_id_alone_for_discard_context_edit(
@@ -470,7 +483,7 @@ def test_resolve_target_actor_propagates_inconsistent_identifier(
     session_factory,
     page_service,
 ):
-    """Fix-6 Task 1.1: dispatcher must surface `inconsistent_identifier`
+    """Fix-6 Task 1.1: dispatcher must surface `not_found`
     rather than silently treating the call as actor-only."""
     user_id = uuid4()
     with session_factory.begin() as session:
@@ -520,7 +533,7 @@ def test_resolve_target_actor_propagates_inconsistent_identifier(
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "inconsistent_identifier"
+    assert result.error_code == "not_found"
 
 
 def test_upload_image_rejects_workspace_page_mismatch_before_handler(
@@ -569,7 +582,7 @@ def test_upload_image_rejects_workspace_page_mismatch_before_handler(
     )
 
     assert isinstance(result, PolicyRejection)
-    assert result.error_code == "inconsistent_identifier"
+    assert result.error_code == "not_found"
 
 
 def test_dispatch_unknown_tool_returns_unknown_tool_envelope(page_service):

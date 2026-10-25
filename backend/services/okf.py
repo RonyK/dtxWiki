@@ -31,6 +31,7 @@ from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
+from backend.services.context_links import link_markdown
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.entity_ref import (  # canonical (G0-1)
     context_concept_path,
@@ -159,11 +160,13 @@ def render_context_concept(
     version: ContextPageVersion | None,
     *,
     workspace_slug: str,
+    resource_url: str | None = None,
 ) -> str:
     """Full OKF concept document: YAML frontmatter + Markdown body."""
-    frontmatter = render_frontmatter(
-        project_context_frontmatter(page, version, workspace_slug=workspace_slug)
-    )
+    fields = project_context_frontmatter(page, version, workspace_slug=workspace_slug)
+    if resource_url is not None:
+        fields["resource"] = resource_url
+    frontmatter = render_frontmatter(fields)
     # A-2: editor-saved bodies carry an embedded frontmatter block (the page
     # editor upserts one); strip it so the rendered concept has exactly ONE
     # frontmatter block — the OKF projection above.
@@ -220,6 +223,7 @@ def build_workspace_index(
             actor=actor,
             workspace_slug=workspace_slug,
             sections=sections,
+            include_stable_links=True,
         )
     return build_routing_index(
         session,
@@ -239,6 +243,7 @@ def render_export_manifest(
     actor: ActorContext | None,
     workspace_slug: str,
     sections: tuple[str, ...] = ("context", "library"),
+    include_stable_links: bool = False,
 ) -> str:
     """Complete flat catalog — the export/bundle contract (never truncated).
 
@@ -249,7 +254,10 @@ def render_export_manifest(
     if "context" in sections:
         blocks.append("## Context")
         blocks.extend(
-            _context_index_lines(session, workspace_id, actor) or ["_(none)_"]
+            _context_index_lines(
+                session, workspace_id, actor, include_stable_links=include_stable_links
+            )
+            or ["_(none)_"]
         )
         blocks.append("")
     if "library" in sections:
@@ -262,7 +270,11 @@ def render_export_manifest(
 
 
 def _context_index_lines(
-    session: Session, workspace_id: UUID, actor: ActorContext | None
+    session: Session,
+    workspace_id: UUID,
+    actor: ActorContext | None,
+    *,
+    include_stable_links: bool = False,
 ) -> list[str]:
     pages = session.scalars(
         select(ContextPage)
@@ -300,10 +312,15 @@ def _context_index_lines(
         description = descriptions.get(version_id) or ""
         suffix = " *(draft)*" if is_draft else ""
         path = context_concept_path(page.slug)
+        line = (
+            "* " + link_markdown(workspace_id, page.id, page.title)
+            if include_stable_links
+            else f"* [{page.title}]({path})"
+        )
         if description:
-            lines.append(f"* [{page.title}]({path}) — {description}{suffix}")
-        else:
-            lines.append(f"* [{page.title}]({path}){suffix}")
+            line += f" — {description}"
+        line += suffix
+        lines.append(line)
     return lines
 
 

@@ -92,7 +92,7 @@ def test_begin_context_edit_idempotently_resumes_own_open_session(
         "begin_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(created.id),
+            "page_id": f"/p/{workspace_id}/{created.id}",
             "idempotency_key": "begin-resume-1",
         },
         actor=actor,
@@ -187,7 +187,7 @@ def test_discard_context_edit_archives_a_never_published_page(page_service, acto
         "discard_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(created.id),
+            "page_id": f"/p/{workspace_id}/{created.id}",
             "version_id": str(created.version_id),
             "idempotency_key": "discard-1",
         },

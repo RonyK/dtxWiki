@@ -195,10 +195,10 @@ def test_render_context_concept_has_frontmatter_and_body(session_factory):
 def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _add_context_page(
+        pub = _add_context_page(
             session, workspace_id, slug="pub", title="Published", body="Pub body."
         )
-        _add_context_page(
+        draft = _add_context_page(
             session,
             workspace_id,
             slug="draft",
@@ -221,12 +221,12 @@ def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
             workspace_slug="default",
         )
 
-    assert "[Published](/context/pub.md)" in editor_index
-    assert "[Draftive](/context/draft.md)" in editor_index
+    assert f"[Published](/p/{workspace_id}/{pub.id})" in editor_index
+    assert f"[Draftive](/p/{workspace_id}/{draft.id})" in editor_index
     assert "*(draft)*" in editor_index
     # Viewer sees the published concept but not the draft-only one.
-    assert "[Published](/context/pub.md)" in viewer_index
-    assert "/context/draft.md" not in viewer_index
+    assert f"[Published](/p/{workspace_id}/{pub.id})" in viewer_index
+    assert f"/p/{workspace_id}/{draft.id}" not in viewer_index
 
 
 def test_index_restricted_library_filtered_by_actor(session_factory):
@@ -328,5 +328,5 @@ def test_draft_capable_actor_reads_draft_head_over_published(session_factory):
 
     assert editor_version.body_md == "Draft body."
     assert viewer_version.body_md == "Published body."
-    assert "[Dual Head](/context/dual-head.md)" in editor_index
+    assert f"[Dual Head](/p/{workspace_id}/{page.id})" in editor_index
     assert "*(draft)*" in editor_index
