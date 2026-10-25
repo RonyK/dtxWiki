@@ -54,6 +54,8 @@ import { useTranslation } from "react-i18next";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
+import { classifyContextLink, formatContextPageUrl, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
   contextMediaAssetIdFromReference,
@@ -75,19 +77,19 @@ type MarkdownViewProps = {
   comments?: PageInlineComment[];
   stripLeadingHeading?: string;
   wikilinkPages?: Array<{
+    id?: string;
     aliases?: string[];
     slug: string;
     title: string;
   }>;
+  linkTargets?: ContextLinkTarget[];
   wikilinkTargets?: Array<{
     target_slug: string;
     target_page_id: string | null;
     current_slug: string | null;
   }>;
-  // "internal" uses /context?target=<page-id> when the server supplied an
-  // actor-visible target ID, and /pages/{slug} only as a compatibility fallback.
-  // plain text with no anchor — used by the unauthenticated public reader so it
-  // never emits in-app links and never enumerates private targets (T16 27-f).
+  // Authenticated readers use scoped permanent links. Public readers use only
+  // public URLs confirmed in linkTargets; every other internal link is text.
   wikilinkMode?: "internal" | "plain";
   // When true (editor split preview), stamp data-source-line on top-level
   // blocks so the editor can line-anchor its scroll sync, and skip the leading
@@ -105,10 +107,8 @@ type MarkdownViewProps = {
   // drops raw HTML and ambient resource URLs, and keeps every link as text so
   // untrusted content cannot create a navigation control.
   renderPolicy?: "page" | "untrusted-preview";
-  // P10.1: workspace id for the canonical `/workspaces/{id}/context/pages/{id}`
-  // wikilink permalink. Only needed in "internal" mode; a caller that omits it
-  // still gets a working query-param link when the target has a resolved page
-  // id, matching pre-P10.1 behavior.
+  // The source document/editor workspace supplies authority for short links.
+  // Never infer it from whichever workspace the reader most recently selected.
   workspaceId?: string | null;
 };
 
@@ -166,6 +166,7 @@ export function MarkdownView({
   stripLeadingHeading,
   wikilinkPages = [],
   wikilinkTargets = [],
+  linkTargets,
   wikilinkMode = "internal",
   sourceLineNumbers = false,
   deletedSources = [],
@@ -173,6 +174,7 @@ export function MarkdownView({
   renderPolicy = "page",
   workspaceId,
 }: MarkdownViewProps) {
+  const { t } = useTranslation("pages");
   const articleRef = useRef<HTMLElement | null>(null);
   const pageSourceLineNumbers = renderPolicy === "page" && sourceLineNumbers;
   const parsedBody = renderPolicy === "page" ? parsePageDocument(body).body : body;
@@ -197,7 +199,6 @@ export function MarkdownView({
         wikilinkPages,
         wikilinkTargets,
       ),
-      plainWikilinks: wikilinkMode === "plain",
       resolveDeletedSource: buildDeletedSourceResolver(deletedSources),
       sourceLineNumbers: pageSourceLineNumbers,
       workspaceId,
@@ -205,12 +206,17 @@ export function MarkdownView({
     [
       wikilinkPages,
       wikilinkTargets,
-      wikilinkMode,
       deletedSources,
       pageSourceLineNumbers,
       workspaceId,
     ],
   );
+  const contextLinkPluginOptions = useMemo(() => ({
+    targets: linkTargets,
+    workspaceId,
+    publicReader: wikilinkMode === "plain",
+    unavailableTitle: t("reader.unavailableLink", { defaultValue: "Unavailable page" }),
+  }), [linkTargets, workspaceId, wikilinkMode, t]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -270,6 +276,7 @@ export function MarkdownView({
           renderPolicy === "page"
             ? [
                 rehypeRaw,
+                [rehypeResolveContextLinks, contextLinkPluginOptions],
                 [rehypeResolveContextMedia, contextMediaPluginOptions],
                 rehypeConstrainPageImageSources,
                 rehypeSlug,
@@ -355,6 +362,64 @@ function rehypeConstrainPageImageSources() {
   return (tree: HastRoot) => {
     constrainPageImageSources(tree);
   };
+}
+
+type ContextLinkResolverOptions = {
+  targets?: ContextLinkTarget[];
+  workspaceId?: string | null;
+  publicReader: boolean;
+  unavailableTitle: string;
+};
+
+function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
+  const targets = new Map((options.targets ?? []).map((target) => [target.locator, target]));
+  const withFragmentPrefix = (href: string) => {
+    const index = href.indexOf("#");
+    if (index < 0 || index === href.length - 1 || href.slice(index + 1).startsWith(CLOBBER_PREFIX)) return href;
+    return `${href.slice(0, index + 1)}${CLOBBER_PREFIX}${href.slice(index + 1)}`;
+  };
+  function resolve(parent: HastParent) {
+    parent.children = parent.children.flatMap((child): HastNode[] => {
+      if (!isHastElement(child)) return [child];
+      resolve(child);
+      if (child.tagName !== "a") return [child];
+      const props = child.properties;
+      if (props.dataTag || props["data-tag"]) return [child];
+      const href = typeof props.href === "string" ? props.href : "";
+      const rawLocator = props.dataContextLinkLocator ?? props["data-context-link-locator"];
+      const locator = typeof rawLocator === "string" ? rawLocator : href;
+      const target = targets.get(locator);
+      const classification = classifyContextLink(locator, { workspaceId: options.workspaceId });
+      const wikilink = typeof rawLocator === "string";
+      const internal = target || wikilink || !["external", "public_reader", "local", "media"].includes(classification.kind);
+      if (!internal) return [child];
+      delete props.dataContextLinkLocator;
+      delete props["data-context-link-locator"];
+      const legacyPageId = props.dataInternalPageId ?? props["data-internal-page-id"];
+      const resolvedHref = target?.state === "ok" ? target.href
+        : target ? null
+        : wikilink && classification.lookup === "" && href.startsWith("#") && href !== "#" ? href
+        : options.publicReader ? null
+        : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
+      if (options.publicReader && !resolvedHref) return child.children;
+      if (resolvedHref) {
+        props.href = withFragmentPrefix(resolvedHref);
+        const pageId = target?.target_page_id ?? classification.pageId ?? legacyPageId;
+        if (!options.publicReader && pageId) props.dataInternalPageId = pageId;
+        if (options.publicReader) {
+          delete props.dataInternalPageId;
+          delete props["data-internal-page-id"];
+        }
+        return [child];
+      }
+      props.href = "#";
+      props.ariaDisabled = "true";
+      props.title = options.unavailableTitle;
+      props.className = ["wikilink", "wikilink-broken"];
+      return [child];
+    }) as HastParent["children"];
+  }
+  return (tree: HastRoot) => resolve(tree);
 }
 
 function constrainPageImageSources(parent: HastParent) {
@@ -489,9 +554,6 @@ type DtxInline = {
 
 type DtxTokenOptions = {
   resolveWikilinkTarget?: (rawTarget: string) => WikilinkResolution;
-  // When true, render [[wikilinks]] as plain text (no anchor). Used by the
-  // public reader so it never emits in-app links or probes private targets.
-  plainWikilinks?: boolean;
   // Maps an `@cite{...}` slug to a tombstone label when its source was deleted.
   resolveDeletedSource?: (sourceId: string) => string | undefined;
   sourceLineNumbers?: boolean;
@@ -690,17 +752,7 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
       nodes.push(textNode(node.value.slice(cursor, tokenStart)));
     }
     if (match[1]) {
-      // Public reader (plainWikilinks): emit the link text as plain text only.
-      // We do NOT resolve targets here — resolving publicness per link would
-      // require an authenticated lookup and could enumerate private slugs/titles
-      // (T16 27-f). Future: resolve to /w/{ws}/pages/{slug} only for targets the
-      // public read endpoint confirms are public, without a private list fetch.
-      if (options.plainWikilinks) {
-        const plainText = (match[2] || match[1]).trim() || "Untitled link";
-        nodes.push(textNode(plainText));
-      } else {
-        nodes.push(wikilinkNode(match[1], match[2], options));
-      }
+      nodes.push(wikilinkNode(match[1], match[2], options, match[0]));
     } else if (match[3]) {
       nodes.push(citationNode(match[3], options));
     } else if (match[4]) {
@@ -720,7 +772,7 @@ function tokenizeTextNode(node: Text, options: DtxTokenOptions): DtxNode[] {
   return nodes;
 }
 
-function wikilinkNode(rawTarget: string, alias: string | undefined, options: DtxTokenOptions): DtxInline {
+function wikilinkNode(rawTarget: string, alias: string | undefined, options: DtxTokenOptions, locator: string): DtxInline {
   const target = parseWikilinkTarget(rawTarget);
   const resolution = target.pageTarget
     ? options.resolveWikilinkTarget?.(target.pageTarget) ?? {
@@ -739,6 +791,8 @@ function wikilinkNode(rawTarget: string, alias: string | undefined, options: Dtx
         href,
         className: href !== "#" ? ["wikilink"] : ["wikilink", "wikilink-broken"],
         "data-internal": "true",
+        "data-context-link-locator": locator,
+        ...(resolution.pageId ? { "data-internal-page-id": resolution.pageId } : {}),
       },
     },
     children: [textNode(title || "Untitled link")],
@@ -762,6 +816,7 @@ function buildWikilinkResolver(
     ),
   );
   const knownSlugs = new Set<string>();
+  const pageIdBySlug = new Map(pages.filter((page) => page.id).map((page) => [page.slug, page.id!]));
   const aliasToSlug = new Map<string, string>();
   for (const page of pages) {
     if (!page.slug) {
@@ -781,12 +836,10 @@ function buildWikilinkResolver(
       return pinnedTargets.get(slugCandidate) ?? { pageId: null, slug: "" };
     }
     if (knownSlugs.has(slugCandidate)) {
-      return { pageId: null, slug: slugCandidate };
+      return { pageId: pageIdBySlug.get(slugCandidate) ?? null, slug: slugCandidate };
     }
-    return {
-      pageId: null,
-      slug: aliasToSlug.get(wikilinkAliasKey(rawTarget)) ?? slugCandidate,
-    };
+    const slug = aliasToSlug.get(wikilinkAliasKey(rawTarget)) ?? slugCandidate;
+    return { pageId: pageIdBySlug.get(slug) ?? null, slug };
   };
 }
 
@@ -806,10 +859,9 @@ function wikilinkHref(
   if (pageId) {
     const hash = headingSlug ? `#${CLOBBER_PREFIX}${headingSlug}` : "";
     if (workspaceId) {
-      return `/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}${hash}`;
+      return formatContextPageUrl(workspaceId, pageId, hash);
     }
-    const target = new URLSearchParams({ target: pageId }).toString();
-    return `/context?${target}${hash}`;
+    return "#";
   }
   // P10.1: /pages/{slug} (the old slug-only compatibility fallback) is gone.
   // A non-empty `slug` here means the wikilink named a cross-page target the
@@ -902,13 +954,7 @@ function textNode(value: string): Text {
 }
 
 function slugifyHeadingAnchor(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+  return normalizeContextHeading(value);
 }
 
 function sanitizeTokenAttribute(value?: string) {
@@ -941,6 +987,9 @@ function MarkdownLink({
     "aria-label": props["aria-label"] ?? linkedImageFallbackLabel(children, t),
   };
   const renderLink = (linkChildren: ReactNode) => {
+    if (props["aria-disabled"] === true || props["aria-disabled"] === "true") {
+      return <a {...accessibleProps} className={className} href={href} onClick={(event) => event.preventDefault()}>{linkChildren}</a>;
+    }
     if (!href) {
       return <a {...accessibleProps} className={className}>{linkChildren}</a>;
     }
@@ -2507,6 +2556,9 @@ const markdownSanitizeSchema = {
       "data-internal",
       "data-tag",
       "dataInternal",
+      "dataInternalPageId",
+      "data-internal-page-id",
+      "ariaDisabled",
       "dataTag",
       "target",
       "rel",

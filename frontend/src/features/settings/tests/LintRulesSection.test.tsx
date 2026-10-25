@@ -101,6 +101,16 @@ describe("LintRulesSection", () => {
         value: true,
       }),
     );
+    // Link mode and approval are independent settings with different value
+    // types; extending this policy control case avoids another UI fixture.
+    const mode = screen.getByRole("combobox", { name: /Fix internal links/ });
+    expect(mode).toHaveValue("auto");
+    const approval = screen.getByRole("checkbox", { name: /Automatically approve safe link fixes/ });
+    expect(approval).toBeChecked();
+    await user.selectOptions(mode, "suggest");
+    expect(updateSettingsPolicy).toHaveBeenCalledWith("ws-1", { group: "lint", key: "link_fix_mode", value: "suggest" });
+    await user.click(approval);
+    expect(updateSettingsPolicy).toHaveBeenCalledWith("ws-1", { group: "lint", key: "auto_approve_link_fixes", value: false });
   });
 
   it("still renders the rules list when the policies fetch fails (I10)", async () => {

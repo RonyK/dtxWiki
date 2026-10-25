@@ -40,7 +40,6 @@ from backend.api.middleware.security_headers import (
     SecurityHeadersMiddleware,
 )
 from backend.api.oauth import router as oauth_router
-from backend.api.page_location import router as page_location_router
 from backend.api.public import router as public_router
 from backend.api.read import router as read_router
 from backend.api.users import router as users_router
@@ -334,7 +333,6 @@ def create_app(
     app.include_router(workspace_members_router, prefix="/api/v1")
     app.include_router(workspace_access_router, prefix="/api/v1")
     app.include_router(context_pages_router, prefix="/api/v1")
-    app.include_router(page_location_router, prefix="/api/v1")
     app.include_router(context_media_router, prefix="/api/v1")
     app.include_router(agent_bundles_router, prefix="/api/v1")
     # Unauthenticated public read surface (T16) — structurally RBAC-isolated.

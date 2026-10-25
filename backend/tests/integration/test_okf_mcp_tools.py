@@ -94,10 +94,10 @@ def test_get_index_tool_filters_drafts_by_role(session_factory):
     viewer = get_index(payload, _ctx(_actor(wsid, "viewer"), session_factory))
 
     assert editor.envelope.result_status == "succeeded"
-    assert "/context/pub.md" in editor.index
-    assert "/context/wip.md" in editor.index  # editor sees the draft-only concept
-    assert "/context/pub.md" in viewer.index
-    assert "/context/wip.md" not in viewer.index  # viewer does not
+    assert f"[Pub](/p/{wsid}/" in editor.index
+    assert f"[Wip](/p/{wsid}/" in editor.index  # editor sees the draft-only concept
+    assert f"[Pub](/p/{wsid}/" in viewer.index
+    assert "[Wip](" not in viewer.index  # viewer does not
 
 
 def test_read_concept_tool_returns_frontmatter_and_body(session_factory):

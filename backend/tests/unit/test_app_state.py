@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from starlette.datastructures import State
 
 from backend.app import state as app_state
+from backend.app.settings import Settings
 from backend.app.state import (
     get_page_service_from_app,
     get_session_factory_from_app,
@@ -15,7 +16,7 @@ from backend.app.state import (
 
 def _request():
     app = SimpleNamespace(state=State())
-    app.state.settings = object()
+    app.state.settings = Settings(auto_bootstrap=False)
     return SimpleNamespace(app=app)
 
 
@@ -81,6 +82,7 @@ def test_page_service_built_once_under_concurrent_cold_start(monkeypatch):
     # get_session_factory_from_app while holding the lock (reentrancy), and
     # both memoizations stay single-shot.
     assert len(calls) == 1
+    assert len(results) == 8
     assert all(result is results[0] for result in results)
     assert request.app.state.page_service is results[0]
     assert request.app.state.session_factory is results[0].session_factory

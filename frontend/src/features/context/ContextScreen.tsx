@@ -28,6 +28,8 @@ import {
   useSearchParams,
 } from "react-router-dom";
 
+import { formatCanonicalContextUrl, formatContextPageUrl } from "../../shared/lib/contextLinks";
+
 import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
@@ -234,11 +236,8 @@ export function ContextScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  // P10.1: the canonical `/workspaces/:workspaceId/context/pages/:pageId`
-  // entry route. The query param stays the source of truth for in-screen
-  // tree navigation (setSearchParams below), so it wins when both are
-  // present; the route param only supplies the initial target on direct
-  // entry via the canonical URL.
+  // Direct links use the page identity; legacy ?target entries also accept
+  // tree nodes so existing folder and page links remain readable.
   const { pageId: routedPageId, workspaceId: routedWorkspaceId } = useParams();
   const [contextPublishNotice] = useState(() =>
     readContextPublishNotice(location.state),
@@ -246,9 +245,14 @@ export function ContextScreen() {
   const [publishArrivalPath] = useState(
     () => `${location.pathname}${location.search}`,
   );
+  const [publishArrivalPageId] = useState(() => routedPageId ?? searchParams.get(TREE_TARGET_PARAM));
+  const publishNoticeConsumedRef = useRef(false);
   const requestedTargetId =
-    searchParams.get(TREE_TARGET_PARAM) ?? routedPageId ?? null;
-  const previousSearchRef = useRef(location.search);
+    routedPageId ?? searchParams.get(TREE_TARGET_PARAM) ?? null;
+  const committedSearchRef = useRef(location.search);
+  const committedPathRef = useRef(location.pathname);
+  const syncedWorkspaceRouteRef = useRef<string | null>(null);
+  const [routeUnavailable, setRouteUnavailable] = useState(false);
   const searchChangedRef = useRef(false);
   const expansionWorkspaceRef = useRef<string | null>(null);
   const routeRevealKeyRef = useRef<string | null>(null);
@@ -257,60 +261,41 @@ export function ContextScreen() {
   // coordinated transition so the intermediate render does not mistake the
   // just-deleted target for an invalid deep link.
   const unavailableTargetIdRef = useRef<string | null>(null);
-  const replaceContextRouteTarget = useCallback(
-    (targetId: string | null) => {
-      const nextParams = updateTreeSearchParams(searchParams, { targetId });
-      nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
-      nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
-      if (targetId === null && routedPageId) {
-        const query = nextParams.toString();
-        void navigate(
-          { pathname: "/context", search: query ? `?${query}` : "" },
-          { replace: true },
-        );
-        return;
-      }
-      setSearchParams(nextParams, { replace: true });
-    },
-    [navigate, routedPageId, searchParams, setSearchParams],
-  );
   useEffect(() => {
-    if (!contextPublishNotice) {
+    if (routedPageId && searchParams.has(TREE_TARGET_PARAM)) {
+      const next = new URLSearchParams(searchParams);
+      next.delete(TREE_TARGET_PARAM);
+      setSearchParams(next, { replace: true });
+    }
+  }, [routedPageId, searchParams, setSearchParams]);
+  useEffect(() => {
+    if (!contextPublishNotice || publishNoticeConsumedRef.current) {
       return;
     }
+    publishNoticeConsumedRef.current = true;
     void navigate(publishArrivalPath, { replace: true, state: null });
   }, [contextPublishNotice, navigate, publishArrivalPath]);
-  // P10.1: resolve a URL-embedded workspace id against the ambient
-  // WorkspaceContext, silently (no confirmation dialog) so a direct link
-  // just works. Only resync when the routed id is already a member of the
-  // session's loaded workspace list — an id the session has no membership
-  // record for is left alone and falls through to the ordinary
-  // not-found/no-access handling below instead of granting a new access
-  // surface. The backend remains the real authorization boundary either way.
+  // A canonical entry selects its known workspace once. Repeating this when
+  // ambient selection changes would undo an explicit workspace switch. Reads
+  // still use the route's workspace and keep authorization on the scoped API.
   const ambientSelectedId = workspaceContext?.selectedId ?? null;
   const ambientWorkspaces = workspaceContext?.workspaces;
   const selectAmbientWorkspaceId = workspaceContext?.selectWorkspaceId;
   useEffect(() => {
-    if (
-      !routedWorkspaceId ||
-      !selectAmbientWorkspaceId ||
-      routedWorkspaceId === ambientSelectedId
-    ) {
+    const routeKey = routedWorkspaceId && routedPageId
+      ? `${routedWorkspaceId}:${routedPageId}` : null;
+    if (!routeKey) {
+      syncedWorkspaceRouteRef.current = null;
       return;
     }
-    const isMember = ambientWorkspaces?.some(
+    if (syncedWorkspaceRouteRef.current === routeKey || !selectAmbientWorkspaceId) return;
+    if (!ambientWorkspaces?.length) return;
+    syncedWorkspaceRouteRef.current = routeKey;
+    if (ambientSelectedId !== routedWorkspaceId && ambientWorkspaces.some(
       (workspace) => workspace.id === routedWorkspaceId,
-    );
-    if (!isMember) {
-      return;
-    }
-    selectAmbientWorkspaceId(routedWorkspaceId);
-  }, [
-    routedWorkspaceId,
-    ambientSelectedId,
-    ambientWorkspaces,
-    selectAmbientWorkspaceId,
-  ]);
+    )) selectAmbientWorkspaceId(routedWorkspaceId!);
+  }, [routedWorkspaceId, routedPageId, ambientSelectedId, ambientWorkspaces, selectAmbientWorkspaceId]);
+  useEffect(() => { setRouteUnavailable(false); }, [routedWorkspaceId, routedPageId]);
   const {
     data: state,
     error,
@@ -318,7 +303,7 @@ export function ContextScreen() {
     setError,
   } = useAsyncLoad<ContextState>(
     async () => {
-      const workspaceId = await getCurrentWorkspaceId();
+      const workspaceId = routedWorkspaceId ?? await getCurrentWorkspaceId();
       if (!workspaceId) {
         throw new Error(
           t("errors.workspaceNotFound", {
@@ -352,6 +337,9 @@ export function ContextScreen() {
           listContextChanges(workspaceId, selectedPageId),
           loadGraphNeighbors(workspaceId, selectedPageId),
         ]);
+        if (routedWorkspaceId && nextDetail.workspace_id !== routedWorkspaceId) {
+          throw new ApiError(404, { error_code: "not_found", message: "Page not found.", request_id: "", warnings: [] });
+        }
         detail = nextDetail;
         history = nextHistory;
         neighbors = neighborResult.data;
@@ -373,16 +361,17 @@ export function ContextScreen() {
         tombstones,
       };
     },
-    // ambientSelectedId: reload once the workspace-resync effect above
-    // switches ambient workspace state on a canonical direct entry — the
-    // first render's getCurrentWorkspaceId() call can race that resync and
-    // resolve the prior workspace otherwise.
+    // A known foreign-workspace entry updates ambient selection once above;
+    // that selection change reloads this workspace-scoped state.
     [pageSize, draftFilter, ambientSelectedId],
     {
       errorMessage: t("errors.load", {
         defaultValue: "Failed to load Context",
       }),
       formatError: (caught, fallback) => {
+        if (routedPageId && caught instanceof ApiError && [403, 404, 422].includes(caught.status)) {
+          setRouteUnavailable(true);
+        }
         const workspaceNotFound = t("errors.workspaceNotFound", {
           defaultValue: "Workspace not found",
         });
@@ -431,6 +420,29 @@ export function ContextScreen() {
   );
 
   const workspaceId = state?.workspaceId ?? "";
+  const replaceContextRouteTarget = useCallback(
+    (targetId: string | null, nodes = state?.tree ?? []) => {
+      const pageId = selectedPageIdForNode(nodes, [], targetId);
+      const nextParams = updateTreeSearchParams(
+        new URLSearchParams(committedSearchRef.current),
+        { targetId: pageId ? null : targetId },
+      );
+      nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
+      nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
+      const query = nextParams.toString();
+      void navigate(
+        {
+          pathname: pageId
+            ? formatCanonicalContextUrl(workspaceId, pageId)
+            : "/context",
+          search: query ? `?${query}` : "",
+        },
+        { replace: true },
+      );
+    },
+    [navigate, state?.tree, workspaceId],
+  );
+
   // The loader fetches page 1 (state.pages); these accumulate the appended
   // pages on top of it. Keyed on the base page so a fresh first page (page-size
   // change / reload) drops the appended tail. Derived synchronously so Load
@@ -532,25 +544,32 @@ export function ContextScreen() {
     }
   }
 
-  function selectPage(pageId: string, nodeId?: string | null) {
+  function selectPage(pageId: string) {
     if (!state) {
       return;
     }
     setError(null);
     const nextParams = updateTreeSearchParams(searchParams, {
-      targetId: nodeId ?? nodeIdForPage(state.tree, pageId) ?? pageId,
+      targetId: null,
     });
     nextParams.delete("tab");
     nextParams.delete("compareFrom");
     nextParams.delete("compareTo");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
-    setSearchParams(nextParams, { replace: true });
+    const query = nextParams.toString();
+    void navigate(
+      {
+        pathname: formatCanonicalContextUrl(workspaceId, pageId),
+        search: query ? `?${query}` : "",
+      },
+      { replace: true },
+    );
   }
 
   function selectNode(node: TreeNodePayload) {
     if (node.target_kind === "context_page" && node.target_id) {
-      selectPage(node.target_id, node.id);
+      selectPage(node.target_id);
       return;
     }
     const nextParams = updateTreeSearchParams(searchParams, {
@@ -561,7 +580,11 @@ export function ContextScreen() {
     nextParams.delete("compareTo");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
-    setSearchParams(nextParams, { replace: true });
+    const query = nextParams.toString();
+    void navigate(
+      { pathname: "/context", search: query ? `?${query}` : "" },
+      { replace: true },
+    );
   }
 
   async function createFolder(input: {
@@ -592,7 +615,11 @@ export function ContextScreen() {
     nextParams.delete("compareTo");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
-    setSearchParams(nextParams, { replace: true });
+    const query = nextParams.toString();
+    void navigate(
+      { pathname: "/context", search: query ? `?${query}` : "" },
+      { replace: true },
+    );
     setState((current) =>
       current
         ? {
@@ -684,7 +711,7 @@ export function ContextScreen() {
     // the actor deliberately collapsed. Selection-changing operations pass an
     // explicit target (or clearSelection) and still update the route.
     if (options.clearSelection === true || options.targetNodeId !== undefined) {
-      replaceContextRouteTarget(selectedNodeId);
+      replaceContextRouteTarget(selectedNodeId, treeData.nodes);
     }
   }
 
@@ -892,21 +919,24 @@ export function ContextScreen() {
           }
         : current,
     );
-    // One mutation, computed from the params as they are NOW. Reconciliation
-    // used to close by deleting `reconcile` and then call this reload, which
+    // One URL mutation keeps the page identity and clears reconciliation.
+    // Reconciliation used to delete `reconcile` and then call this reload, which
     // rebuilt the URL from a `searchParams` snapshot captured before that
     // delete -- putting `reconcile` straight back and re-opening the workbench
     // on a branch the user had just consumed. Clearing it here means the close
     // and the reload cannot disagree about which URL is current.
-    setSearchParams(
-      (current) => {
-        const nextParams = updateTreeSearchParams(current, {
-          targetId: targetNodeId,
-        });
-        nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
-        nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
-        nextParams.delete("reconcile");
-        return nextParams;
+    const nextParams = updateTreeSearchParams(
+      new URLSearchParams(committedSearchRef.current),
+      { targetId: null },
+    );
+    nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
+    nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
+    nextParams.delete("reconcile");
+    const query = nextParams.toString();
+    void navigate(
+      {
+        pathname: formatCanonicalContextUrl(workspaceId, pageId),
+        search: query ? `?${query}` : "",
       },
       { replace: true },
     );
@@ -918,7 +948,7 @@ export function ContextScreen() {
     });
     const path =
       node.target_kind === "context_page" && node.target_id
-        ? `/workspaces/${workspaceId}/context/pages/${node.target_id}`
+        ? formatContextPageUrl(workspaceId, node.target_id)
         : `/context?${params.toString()}`;
     const href =
       typeof window === "undefined" ? path : `${window.location.origin}${path}`;
@@ -931,9 +961,10 @@ export function ContextScreen() {
   }
 
   useEffect(() => {
-    searchChangedRef.current = previousSearchRef.current !== location.search;
-    previousSearchRef.current = location.search;
-  }, [location.search]);
+    searchChangedRef.current = committedSearchRef.current !== location.search || committedPathRef.current !== location.pathname;
+    committedSearchRef.current = location.search;
+    committedPathRef.current = location.pathname;
+  }, [location.search, location.pathname]);
 
   useEffect(() => {
     if (
@@ -1060,7 +1091,8 @@ export function ContextScreen() {
         if (cancelled) {
           return;
         }
-        if (exc instanceof ApiError && exc.status === 404) {
+        if (exc instanceof ApiError && [403, 404, 422].includes(exc.status)) {
+          if (routedPageId) { setRouteUnavailable(true); return; }
           unavailableTargetIdRef.current = requestedTargetId ?? selectedPageId;
           setAppended((current) => ({
             ...current,
@@ -1113,6 +1145,7 @@ export function ContextScreen() {
     };
   }, [
     requestedTargetId,
+    routedPageId,
     replaceContextRouteTarget,
     searchParams,
     setError,
@@ -1136,10 +1169,18 @@ export function ContextScreen() {
 
   useDocumentTitle(state?.detail?.title ?? null, " - ");
 
+  if (routeUnavailable) return <NotFoundScreen />;
   if (!state) {
     return (
       <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />
     );
+  }
+  if (routedWorkspaceId && state.workspaceId && routedWorkspaceId !== state.workspaceId) {
+    // A route transition must never show a previous workspace's cached page.
+    // Known memberships will settle through the scoped loader after selection.
+    return ambientWorkspaces?.some((workspace) => workspace.id === routedWorkspaceId)
+      ? <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />
+      : <NotFoundScreen />;
   }
   if (
     requestedTargetId &&
@@ -1298,7 +1339,7 @@ export function ContextScreen() {
                 ) : null}
               </div>
             ) : null}
-            {contextPublishNotice ? (
+            {contextPublishNotice && state.detail?.id === publishArrivalPageId ? (
               <StatusBanner
                 tone={
                   contextPublishNotice.kind === "review_failed" ? "warning" : "info"
@@ -2651,7 +2692,7 @@ function ContextReader({
           {canEdit ? (
             <Link
               className="context-reader-header-action context-reader-edit-action icon-button text-button"
-              to={`/workspaces/${workspaceId}/context/pages/${detail.id}/edit`}
+              to={`${formatCanonicalContextUrl(workspaceId ?? detail.workspace_id, detail.id)}/edit`}
             >
               <Edit size={16} aria-hidden="true" />
               <span>{t("actions.edit", { defaultValue: "Edit" })}</span>
@@ -2878,6 +2919,7 @@ function ContextReader({
               stripLeadingHeading={detail.title}
               deletedSources={deletedSources}
               wikilinkTargets={detail.wikilink_targets}
+              linkTargets={detail.link_targets}
               workspaceId={workspaceId}
             />
           ) : (
@@ -3014,7 +3056,7 @@ function ContextShareDialog({
   const [copyFeedback, setCopyFeedback] = useState<CopyTextDetailedResult | null>(null);
   const [savingPublicAccess, setSavingPublicAccess] = useState(false);
   const workspaceLinkRef = useRef<HTMLElement | null>(null);
-  const workspacePath = `/workspaces/${workspaceId}/context/pages/${detail.id}`;
+  const workspacePath = formatContextPageUrl(workspaceId ?? detail.workspace_id, detail.id);
   const workspaceUrl =
     typeof window === "undefined"
       ? workspacePath

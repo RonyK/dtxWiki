@@ -54,7 +54,7 @@ def _update(page_service, actor, workspace_id, base, body_md, key):
         "update_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(base.id),
+            "page_id": f"/p/{workspace_id}/{base.id}",
             "title": base.title,
             "body_md": body_md,
             "base_version_id": str(base.version_id),
@@ -72,7 +72,7 @@ def _patch(page_service, actor, workspace_id, base, operations, key):
         "patch_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(base.id),
+            "page_id": f"/p/{base.id}",
             "version_id": str(base.version_id),
             "expected_editing_revision": base.editing_revision,
             "operations": operations,
@@ -86,7 +86,10 @@ def _patch(page_service, actor, workspace_id, base, operations, key):
 def _structure_map(page_service, actor, workspace_id, page_id):
     response = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page_id)}},
+        {
+            "workspace_id": str(workspace_id),
+            "target": {"page_id": f"/p/{workspace_id}/{page_id}"},
+        },
         actor=actor,
         page_service=page_service,
     )
@@ -123,7 +126,7 @@ def _save(page_service, actor, workspace_id, page_id, body_md, revision, key, **
         "update_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(page_id),
+            "page_id": f"/p/{workspace_id}/{page_id}",
             "body_md": body_md,
             "expected_editing_revision": revision,
             "idempotency_key": key,
@@ -157,13 +160,17 @@ def _stored(page_service, version_id) -> ContextPageVersion:
 def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create(page_service, actor, workspace_id, "# Hello\n\nInitial body.")
+    short_link = f"/p/{created.id}"
+    full_link = f"/p/{workspace_id}/{created.id}"
 
     first = _update(
-        page_service, actor, workspace_id, created, "# Hello\n\nFirst save.", "u-1"
+        page_service, actor, workspace_id, created,
+        f"# Hello\n\nFirst save. [Self]({short_link})", "u-1"
     )
     assert first.envelope.result_status == "succeeded", first.envelope
     second = _update(
-        page_service, actor, workspace_id, first.data, "# Hello\n\nSecond save.", "u-2"
+        page_service, actor, workspace_id, first.data,
+        f"# Hello\n\nSecond save. [Self]({short_link})", "u-2"
     )
     assert second.envelope.result_status == "succeeded", second.envelope
 
@@ -175,12 +182,17 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert _review_statuses_for_page(page_service, created.id) == []
     assert second.data.review_item_id is None
 
+    operations = [{
+        "op": "replace_text",
+        "old_text": f"Second save. [Self]({full_link})",
+        "new_text": f"Patched. [Self]({short_link})",
+    }]
     patched = _patch(
         page_service,
         actor,
         workspace_id,
         second.data,
-        [{"op": "replace_text", "old_text": "Second save.", "new_text": "Patched."}],
+        operations,
         "p-1",
     )
     assert patched.envelope.result_status == "succeeded", patched.envelope
@@ -189,20 +201,60 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     for response in (first, second, patched):
         assert response.data.history_status == "current_editing"
         assert response.data.inconsistency_reasons == []
+        assert response.data.lint_report == {
+            "fixes": [{
+                "module_id": "links", "rule_id": "link.internal-noncanonical",
+                "before": short_link, "after": full_link, "category": "format",
+            }],
+            "findings": [],
+        }
+
+    # Existing session fixture covers three persistence boundaries: MCP update,
+    # typed patch, and browser autosave. Parser/preparer units cannot prove that
+    # the final block map, response report and idempotency ledger agree.
+    patch_replay = _patch(
+        page_service, actor, workspace_id, second.data, operations, "p-1"
+    )
+    assert patch_replay.data == patched.data
+    structure = _structure_map(page_service, actor, workspace_id, created.id)
+    stored = _stored(page_service, created.version_id)
+    assert not structure.document.map_repaired
+    assert (
+        structure.document.root_hash == patched.data.content_hash == stored.content_hash
+    )
+    assert {block["id"]: block["hash"] for block in stored.block_map} == {
+        block.id: block.hash for block in structure.blocks
+    }
+    assert stored.body_md == f"# Hello\n\nPatched. [Self]({full_link})"
+    save_args = dict(
+        page_id=created.id, workspace_id=workspace_id,
+        body_md=f"# Hello\n\nAutosave. [Self]({short_link})",
+        title=created.title, actor_kind=actor.actor_kind, actor_id=actor.actor_id,
+        actor_provenance="browser_session", base_version_id=created.version_id,
+        base_content_hash=patched.data.content_hash,
+        expected_editing_revision=patched.data.editing_revision,
+        idempotency_key="browser-link-report", with_edit_receipt=True,
+    )
+    saved = page_service.autosave_page(**save_args)
+    replayed = page_service.autosave_page(**save_args)
+    assert saved.lint_report == patched.data.lint_report == replayed.lint_report
+    assert saved._edit_receipt == replayed._edit_receipt
+    assert saved.body_md == f"# Hello\n\nAutosave. [Self]({full_link})"
 
     submitted = dispatch(
         "submit_context_edit_for_review",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(created.id),
+            "page_id": f"/p/{created.id}",
             "version_id": str(created.version_id),
-            "expected_editing_revision": patched.data.editing_revision,
+            "expected_editing_revision": saved.editing_revision,
             "idempotency_key": "s-1",
         },
         actor=actor,
         page_service=page_service,
     )
     assert submitted.envelope.result_status == "succeeded", submitted.envelope
+    assert submitted.data.lint_report == {"fixes": [], "findings": []}
     assert _review_statuses_for_page(page_service, created.id) == ["pending"]
 
 

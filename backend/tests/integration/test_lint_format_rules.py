@@ -197,11 +197,8 @@ def test_unresolved_wikilink_is_flagged(session_factory):
     rule = LintRegistry.builtin().rule("link.unresolved")
     with session_factory.begin() as session:
         wsid = _ws(session)
-        session.add(
-            ContextPage(
-                workspace_id=wsid, slug="real-target", title="RT", page_type="concept"
-            )
-        )
+        target = _seed_page(session, wsid, "# Real Target\n")
+        target.slug = "real-target"
         session.flush()
         src = _seed_page(session, wsid, "See [[real-target]] and [[ghost-page]].\n")
         findings = findings_for_target(rule, src, LintContext(session, wsid, page=src))
@@ -209,16 +206,16 @@ def test_unresolved_wikilink_is_flagged(session_factory):
     assert findings[0].rule_id == "link.unresolved"
     # M6/DEC-2: advisory warning, not a gating error (forward-ref false positives).
     assert findings[0].severity == "warning"
-    assert "ghost-page" in findings[0].suggested_action
+    assert findings[0].message_args["written_slug"] == "ghost-page"
+    assert findings[0].suggested_action
 
 
 def test_internal_link_all_resolve_no_findings(session_factory):
     rule = LintRegistry.builtin().rule("link.unresolved")
     with session_factory.begin() as session:
         wsid = _ws(session)
-        session.add(
-            ContextPage(workspace_id=wsid, slug="alpha", title="A", page_type="concept")
-        )
+        target = _seed_page(session, wsid, "# Alpha\n")
+        target.slug = "alpha"
         session.flush()
         src = _seed_page(session, wsid, "Link to [[alpha]] only.\n")
         findings = findings_for_target(rule, src, LintContext(session, wsid, page=src))

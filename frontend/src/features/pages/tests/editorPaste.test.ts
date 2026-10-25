@@ -77,14 +77,29 @@ describe("editor paste conversion", () => {
 
   it("converts internal links and tables", () => {
     const markdown = htmlToMarkdown(`
-      <p><a data-internal-slug="release-notes" href="/pages/release-notes">Release Notes</a></p>
+      <p><a data-internal-slug="release-notes" data-internal-page-id="22222222-2222-4222-8222-222222222222" href="/pages/release-notes">Release Notes</a></p>
+      <p><a href="https://wiki.example/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit#details">Editor target</a></p>
+      <p><a data-internal-page-id="22222222-2222-4222-8222-222222222222" data-internal-slug="external" href="https://external.example/p/22222222-2222-4222-8222-222222222222">External</a></p>
+      <p><a data-internal-page-id="22222222-2222-4222-8222-222222222222" href="/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222">Foreign Wiki</a></p>
       <table>
         <tr><th>Name</th><th>Status</th></tr>
         <tr><td>API</td><td>Ready</td></tr>
       </table>
-    `);
+    `, { workspaceId: "11111111-1111-4111-8111-111111111111", selfOrigins: ["https://wiki.example"] });
 
-    expect(markdown).toContain("[[release-notes|Release Notes]]");
+    expect(markdown).toContain("[Release Notes](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222)");
+    expect(markdown).toContain("[Editor target](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#details)");
+    expect(markdown).toContain("[External](https://external.example/p/22222222-2222-4222-8222-222222222222)");
+    // A full copied href carries authority even when legacy page metadata exists.
+    expect(markdown).toContain("[Foreign Wiki](/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222)");
+    // Budget exception: plain short URLs, full URLs with explicit workspace,
+    // folder navigation, and unknown origins exercise separate paste branches.
+    const clipboard = (plain: string) => ({ getData: (type: string) => type === "text/plain" ? plain : "" });
+    const options = { workspaceId: "11111111-1111-4111-8111-111111111111", selfOrigins: ["https://wiki.example"] };
+    expect(markdownFromClipboard(clipboard("https://wiki.example/p/22222222-2222-4222-8222-222222222222"), options)).toBe("[https://wiki.example/p/22222222-2222-4222-8222-222222222222](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222)");
+    expect(markdownFromClipboard(clipboard("/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222"), options)).toBe("[/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222](/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222)");
+    expect(markdownFromClipboard(clipboard("/context?target=22222222-2222-4222-8222-222222222222"), options)).toBeNull();
+    expect(markdownFromClipboard(clipboard("https://external.example/p/22222222-2222-4222-8222-222222222222"), options)).toBeNull();
     expect(markdown).toContain("| Name | Status |");
     expect(markdown).toContain("| --- | --- |");
     expect(markdown).toContain("| API | Ready |");

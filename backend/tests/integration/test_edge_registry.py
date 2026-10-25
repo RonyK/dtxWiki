@@ -327,6 +327,7 @@ def test_rebuild_edge_projection_projects_all_relations_idempotently(
                 workspace_id=workspace.id,
                 source_page_id=page_a.id,
                 source_version_id=version_a.id,
+                locator_key="wikilink:" + page_b.slug,
                 target_slug=page_b.slug,
                 target_page_id=page_b.id,
             )

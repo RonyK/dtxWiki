@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -20,6 +20,7 @@ from backend.schemas.context_ingress import ContextPageType
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.input_policy import InputRequest
 from backend.schemas.read import (
+    ContextLinkTarget,
     PendingReviewInfo,
     PublishedVersionInfo,
     TreePathEntry,
@@ -50,19 +51,6 @@ CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD = Field(
         "Generate and hold it before the first send."
     ),
 )
-
-
-class ContextPageLocation(BaseModel):
-    workspace_id: UUID
-    page_id: UUID
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ContextPageLocationResponse(RESTResponseBase):
-    data: ContextPageLocation
-
-    model_config = ConfigDict(extra="forbid")
 
 
 class PageSummary(BaseModel):
@@ -105,7 +93,7 @@ class PageSummary(BaseModel):
 
 
 class PagePayload(PageSummary):
-    # Authenticated stable permalinks (`/p/{page_id}`) can be opened while a
+    # Authenticated permalinks (`/p/{workspace_id}/{page_id}`) can open while a
     # different Workspace is selected. The authorized read response therefore
     # carries the owning Workspace identity so the client can switch before
     # resolving the page in that Workspace's Context tree. Public payloads do
@@ -138,6 +126,10 @@ class PagePayload(PageSummary):
     # stable reason, whether it is an everyday autosave, a workflow draft, or a
     # body with an objective format defect.
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
+    lint_report: dict[str, Any] = Field(
+        default_factory=lambda: {"fixes": [], "findings": []},
+        description="Save-time fixes and findings for the final stored body.",
+    )
     # What the write that produced this payload changed. Set by the MCP edit
     # commands and read by their handlers; a private attribute, so the REST
     # payload stays unchanged. The command ledger retains it separately for
@@ -162,6 +154,7 @@ class PublicPagePayload(BaseModel):
     body_md: str
     updated_at: datetime
     exposure_scope: Literal["indexed_web", "unlisted_web"]
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -675,6 +668,7 @@ class ContextPageDetail(PagePayload):
     children_count: int = 0
     backlink_count: int = 0
     wikilink_targets: list[WikilinkTarget] = Field(default_factory=list)
+    link_targets: list[ContextLinkTarget] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     pending_draft_version_id: UUID | None = None
     pending_draft_warnings: list[str] = Field(default_factory=list)

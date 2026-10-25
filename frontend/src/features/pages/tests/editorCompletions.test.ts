@@ -1,10 +1,22 @@
-import type { CompletionContext } from "@codemirror/autocomplete";
+import {
+  acceptCompletion,
+  autocompletion,
+  closeBrackets,
+  insertBracket,
+  pickedCompletion,
+  currentCompletions,
+  startCompletion,
+  type CompletionContext,
+} from "@codemirror/autocomplete";
+import { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { createEditorCompletionSource, isLikelyUuid } from "../editorCompletions";
 
 describe("editor completions", () => {
-  it("suggests canonical wikilinks from loaded pages and keeps slugs searchable", () => {
+  it("suggests stable page links from loaded pages and keeps slugs searchable", () => {
     const source = createEditorCompletionSource(
       {
         current: [
@@ -22,6 +34,7 @@ describe("editor completions", () => {
         ],
       },
       { current: [] },
+      { current: "workspace-1" },
     );
 
     const result = source(completionContext("[[release"));
@@ -29,12 +42,75 @@ describe("editor completions", () => {
     expect(result?.from).toBe(2);
     expect(result?.options).toContainEqual(
       expect.objectContaining({
-        apply: "release-notes|Roadmap]]",
+        apply: expect.any(Function),
         displayLabel: "Roadmap",
         detail: "release-notes",
         label: "Roadmap release-notes",
       }),
     );
+  });
+
+  it("accepts a typed slug completion and replaces the whole trigger with a literal-title permalink", async () => {
+    const title = 'Road[map] \\ *draft* _note_ `code` <x> ! &amp; ~old~';
+    const source = createEditorCompletionSource(
+      {
+        current: [
+          {
+            id: "p1",
+            slug: "release-notes",
+            title,
+            page_type: "overview",
+            lifecycle_status: "active",
+            aliases: [],
+            current_version_id: "v1",
+            updated_at: "2026-05-20T00:00:00Z",
+            is_public: false,
+          },
+        ],
+      },
+      { current: [] },
+      { current: "workspace-1" },
+    );
+    const doc = "See ";
+    let pickedLabel: string | undefined;
+    const view = new EditorView({
+      parent: document.body,
+      state: EditorState.create({
+        doc,
+        selection: { anchor: doc.length },
+        extensions: [
+          closeBrackets(),
+          autocompletion({ override: [source], interactionDelay: 0 }),
+          EditorView.updateListener.of(({ transactions }) => {
+            pickedLabel = transactions[0]?.annotation(pickedCompletion)?.displayLabel ?? pickedLabel;
+          }),
+        ],
+      }),
+    });
+    try {
+      view.dispatch(insertBracket(view.state, "[")!);
+      view.dispatch(insertBracket(view.state, "[")!);
+      expect(view.state.doc.toString()).toBe("See [[]]");
+      expect(startCompletion(view)).toBe(true);
+      await waitFor(() => expect(currentCompletions(view.state)).toHaveLength(1));
+      const queryStart = view.state.selection.main.head;
+      view.dispatch({
+        changes: { from: queryStart, insert: "release" },
+        selection: { anchor: queryStart + "release".length },
+        userEvent: "input.type",
+      });
+      expect(currentCompletions(view.state)).toHaveLength(1);
+      expect(acceptCompletion(view)).toBe(true);
+      expect(pickedLabel).toBe(title);
+      expect(view.state.doc.toString()).toBe(
+        'See [Road\\[map\\] \\\\ \\*draft\\* \\_note\\_ \\`code\\` \\<x\\> \\! \\&amp; \\~old\\~](/p/workspace-1/p1)',
+      );
+      // The picker does not intercept hand-authored legacy wikilinks.
+      expect(source(completionContext("[[release-notes|Legacy]]"))).toBeNull();
+    } finally {
+      view.destroy();
+      view.dom.remove();
+    }
   });
 
   it("suggests readable citation references and inserts source ids", () => {

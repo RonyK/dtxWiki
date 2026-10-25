@@ -73,3 +73,8 @@ TOOL_ACTIONS = {
     "read_context_outline": "read",
     "read_structure_map": "read",
 }
+MCP_CONTEXT_LINK_GUIDANCE = (
+    "Link to another dtxWiki document with the result's link_markdown. "
+    "For a Context page input, pass its stable_url or page_id unchanged. "
+    "Never use concept_path or resource_uri as a link."
+)

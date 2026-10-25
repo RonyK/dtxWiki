@@ -54,7 +54,11 @@ def test_get_policies_includes_lint_card_default_empty(session_factory):
         )
     assert policies.lint.name == "lint"
     # Rule toggles are empty by default; the auto-fix mode flag defaults to off.
-    assert policies.lint.policy == {"auto_fix": False}
+    assert policies.lint.policy == {
+        "auto_fix": False,
+        "link_fix_mode": "auto",
+        "auto_approve_link_fixes": True,
+    }
 
 
 def test_auto_fix_toggle_via_lint_settings(session_factory):

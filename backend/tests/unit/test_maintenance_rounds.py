@@ -302,7 +302,7 @@ def test_task_target_visible_gates_coverage_gap_with_restricted_candidate(
                     "id": str(item.id),
                     "kind": "library_item",
                     "title": "Restricted Candidate",
-                    "concept_path": "",
+                    "page": "",
                     "match_reason": "trigram",
                 }
             ],
@@ -366,7 +366,7 @@ def test_coverage_candidate_dangling_agent_fails_closed(session_factory):
                     "id": str(uuid4()),  # no such agent page (deleted)
                     "kind": "agent_page",
                     "title": "Deleted Secret Persona",
-                    "concept_path": "",
+                    "page": "",
                     "match_reason": "trigram",
                 }
             ],
@@ -1336,7 +1336,7 @@ def test_generated_answer_string_limits_match_wire_schema_contract():
                 "queries": [
                     {
                         "query": "q" * 2049,
-                        "expected_concept_path": "/context/page.md",
+                        "expected_page": "/context/page.md",
                     }
                 ]
             }
@@ -1349,7 +1349,7 @@ def test_generated_answer_string_limits_match_wire_schema_contract():
                 "queries": [
                     {
                         "query": "valid query",
-                        "expected_concept_path": "/" + "p" * 512,
+                        "expected_page": "/" + "p" * 512,
                     }
                 ]
             }

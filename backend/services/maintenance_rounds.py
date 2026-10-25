@@ -28,6 +28,12 @@ from backend.services.actor_visible_read import (
     context_page_visible,
 )
 from backend.services.client_round_state import ClientRoundStateCodec
+from backend.services.context_links import (
+    LinkContext,
+    format_stable_url,
+    parse_page_input,
+    resolve_page_input,
+)
 from backend.services.coverage_service import coverage_candidate_visible
 from backend.services.delegated_tasks import (
     expire_stale_leases,
@@ -37,6 +43,7 @@ from backend.services.library_canonical import (
     get_canonical_library_version,
     get_canonical_markdown_artifact,
 )
+from backend.services.mcp_context_projection import context_record, page_links
 from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
 
 if TYPE_CHECKING:
@@ -546,7 +553,22 @@ def _build_coverage_gap_card(
         "query_norm": gap.query_norm,
         "surface": gap.surface,
         "nearest_candidates": (
-            raw_candidates[:3] if isinstance(raw_candidates, list) else []
+            [
+                context_record(
+                    candidate,
+                    task.workspace_id,
+                    UUID(str(candidate["id"])),
+                    candidate["title"],
+                )
+                if candidate.get("kind") == "context_page"
+                else {
+                    ("path" if key == "concept_path" else key): value
+                    for key, value in candidate.items()
+                }
+                for candidate in raw_candidates[:3]
+            ]
+            if isinstance(raw_candidates, list)
+            else []
         ),
     }
     return _card(
@@ -554,6 +576,7 @@ def _build_coverage_gap_card(
         instruction=(
             "Classify this unresolved knowledge query as a new compile candidate, "
             "an augmentation to existing content, or a dismissal. Explain the reason."
+            " For augment_existing, set page to the target's stable_url or page_id."
         ),
         untrusted_context=(
             f"{UNTRUSTED_CONTEXT_NOTICE}\n"
@@ -575,7 +598,7 @@ def _build_coverage_gap_card(
                     "required": ["title", "outline"],
                     "additionalProperties": False,
                 },
-                "concept_path": {"type": ["string", "null"]},
+                "page": {"type": ["string", "null"]},
             },
             "required": ["verdict", "rationale"],
             "additionalProperties": False,
@@ -960,7 +983,7 @@ def _visible_golden_samples(
             {
                 "page_id": str(page.id),
                 "title": page.title,
-                "concept_path": f"/context/{page.slug}.md",
+                **page_links(workspace_id, page.id, page.title),
                 "citation_count": sample.get("citation_count"),
             }
         )
@@ -985,7 +1008,8 @@ def _build_golden_query_card(
     return _payload_card(
         task,
         instruction=(
-            "Propose retrieval evaluation queries and expected concept paths. "
+            "Propose retrieval evaluation queries and expected_page targets "
+            "using each page's stable_url or page_id. "
             "Return candidates only; never modify the golden-set file."
         ),
         context=payload,
@@ -1003,13 +1027,13 @@ def _build_golden_query_card(
                                 "minLength": 1,
                                 "maxLength": SEARCH_QUERY_MAX_LENGTH,
                             },
-                            "expected_concept_path": {
+                            "expected_page": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 512,
                             },
                         },
-                        "required": ["query", "expected_concept_path"],
+                        "required": ["query", "expected_page"],
                         "additionalProperties": False,
                     },
                 }
@@ -1038,7 +1062,7 @@ def _validate_folder_nav_summary(answer: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def _validate_coverage_gap(answer: dict[str, Any]) -> dict[str, Any] | None:
-    if set(answer) - {"verdict", "rationale", "proposal", "concept_path"}:
+    if set(answer) - {"verdict", "rationale", "proposal", "page"}:
         return None
     verdict = answer.get("verdict")
     rationale = answer.get("rationale")
@@ -1052,16 +1076,21 @@ def _validate_coverage_gap(answer: dict[str, Any]) -> dict[str, Any] | None:
             return None
         if not all(isinstance(proposal[key], str) for key in ("title", "outline")):
             return None
-    concept_path = answer.get("concept_path")
-    if concept_path is not None and not isinstance(concept_path, str):
+    page = answer.get("page")
+    if page is not None and not isinstance(page, str):
         return None
-    if verdict == "augment_existing" and not concept_path:
+    if verdict == "augment_existing" and not page:
         return None
+    if page:
+        try:
+            parse_page_input(page)
+        except ValueError:
+            return None
     return {
         "verdict": verdict,
         "rationale": rationale,
         "proposal": proposal,
-        **({"concept_path": concept_path} if concept_path is not None else {}),
+        **({"page": page} if page is not None else {}),
     }
 
 
@@ -1193,22 +1222,26 @@ def _validate_golden_queries(answer: dict[str, Any]) -> dict[str, Any] | None:
     for candidate in answer["queries"]:
         if not isinstance(candidate, dict) or set(candidate) != {
             "query",
-            "expected_concept_path",
+            "expected_page",
         }:
             return None
         if (
             not isinstance(candidate["query"], str)
             or not candidate["query"].strip()
             or len(candidate["query"].strip()) > SEARCH_QUERY_MAX_LENGTH
-            or not isinstance(candidate["expected_concept_path"], str)
-            or not candidate["expected_concept_path"].strip()
-            or len(candidate["expected_concept_path"].strip()) > 512
+            or not isinstance(candidate["expected_page"], str)
+            or not candidate["expected_page"].strip()
+            or len(candidate["expected_page"].strip()) > 512
         ):
+            return None
+        try:
+            parse_page_input(candidate["expected_page"].strip())
+        except ValueError:
             return None
         normalized.append(
             {
                 "query": candidate["query"].strip(),
-                "expected_concept_path": candidate["expected_concept_path"].strip(),
+                "expected_page": candidate["expected_page"].strip(),
             }
         )
     return {"queries": normalized}
@@ -1251,6 +1284,11 @@ def _stage_coverage_gap_verdict(
     )
     if gap is None:
         raise ValueError("coverage gap not found")
+    if answer.get("page"):
+        page_id = resolve_page_input(
+            answer["page"], LinkContext(session, task.workspace_id)
+        )
+        answer = {**answer, "page": format_stable_url(task.workspace_id, page_id)}
     if answer["verdict"] == "dismiss":
         gap.status = "dismissed"
         gap.resolved_at = now
@@ -1428,6 +1466,21 @@ def _stage_golden_queries(
     actor_id: str,
     now: datetime,
 ) -> LintFinding:
+    answer = {
+        "queries": [
+            {
+                **candidate,
+                "expected_page": format_stable_url(
+                    task.workspace_id,
+                    resolve_page_input(
+                        candidate["expected_page"],
+                        LinkContext(session, task.workspace_id),
+                    ),
+                ),
+            }
+            for candidate in answer["queries"]
+        ]
+    }
     return _stage_finding(
         session,
         lint_run=lint_run,

@@ -173,7 +173,7 @@ def large_workspace_clone(large_workspace_db):
 
 
 def test_small_workspace_stays_flat(session_factory, page_service):
-    page_service.write_page(
+    page = page_service.write_page(
         workspace_slug="default",
         slug="flat-page",
         title="Flat Page",
@@ -189,7 +189,8 @@ def test_small_workspace_stays_flat(session_factory, page_service):
     # flat mode: full catalog sections, no routing node headers
     assert "## Context" in index
     assert "(node:" not in index
-    assert "/context/flat-page.md" in index
+    assert f"[Flat Page](/p/{page.workspace_id}/{page.id})" in index
+    assert "/context/flat-page.md" not in index
 
 
 def test_large_workspace_routes_and_descends(large_workspace):
@@ -222,6 +223,14 @@ def test_large_workspace_routes_and_descends(large_workspace):
         assert "…and 10 more" in node_index
         # entries carry write-time nav descriptions
         assert "body paragraph." in node_index
+        page = session.scalar(
+            select(ContextPage).where(
+                ContextPage.workspace_id == workspace_id,
+                ContextPage.slug == "pay-000",
+            )
+        )
+        assert f"[Payment Doc 000](/p/{workspace_id}/{page.id})" in node_index
+        assert "stable_url:" not in node_index
 
 
 def test_stored_nav_summary_beats_heuristic(large_workspace_clone):
@@ -268,6 +277,8 @@ def test_export_manifest_is_never_truncated(large_workspace):
     for i in range(150):
         assert f"/context/gen-{i:03d}.md" in manifest
     assert "…and" not in manifest
+    # File exports keep their own relative concept paths, not MCP web hints.
+    assert "stable_url:" not in manifest
 
 
 def test_unknown_node_raises_not_found(session_factory):

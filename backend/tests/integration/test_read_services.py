@@ -462,6 +462,11 @@ def test_workspace_read_service_lists_details_and_guide_payload():
         "fetch a search result, or use read_concept/read for direct navigation",
         "cite before a sourced write",
         (
+            "Link to another dtxWiki document with the result's link_markdown. "
+            "For a Context page input, pass its stable_url or page_id unchanged. "
+            "Never use concept_path or resource_uri as a link."
+        ),
+        (
             "for an image: upload_image first; store data.markdown or "
             "data.logical_ref, never data.content_url or an /api/v1 transport URL; "
             "upload_image always requires an existing page_id and your own open "

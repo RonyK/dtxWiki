@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from threading import Lock
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
@@ -334,7 +333,7 @@ class ServiceRegistry:
     """Container-owned domain services (R1′ — replaces module singletons).
 
     Services receive sessions or a routed provider per call. Container-owned
-    state, such as the permalink request budget, persists across requests.
+    state persists across requests.
     The registry is the single rebinding point an overlay swaps instead of
     monkeypatching module globals. Imports stay lazy so importing the
     container never drags the service graph in.
@@ -346,22 +345,10 @@ class ServiceRegistry:
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
     context_media_session_for: object | None = None
-    _page_locations_lock = Lock()
 
     @cached_property
     def workspace_directory(self) -> WorkspaceDirectory:
         return WorkspaceDirectory()
-
-    @property
-    def page_locations(self):
-        # This service owns request budgets, so concurrent first requests
-        # must share one instance. Keep the existing dictionary override seam.
-        with self._page_locations_lock:
-            if "page_locations" not in self.__dict__:
-                from backend.services.page_location import PageLocationService
-
-                self.__dict__["page_locations"] = PageLocationService()
-            return self.__dict__["page_locations"]
 
     @cached_property
     def tree_read(self):
@@ -389,12 +376,14 @@ class ServiceRegistry:
 
     @cached_property
     def domain_read(self):
+        from backend.services.context_links import configured_self_origins
         from backend.services.domain_read import DomainReadService
 
         return DomainReadService(
             self.tree_read,
             library_blob_repository_factory=self.library_blob_repository_factory,
             lint_registry=self.lint_registry,
+            context_link_origins=configured_self_origins(self.settings),
         )
 
     @cached_property
@@ -957,8 +946,12 @@ class ServiceRegistry:
     @cached_property
     def body_preparer(self):
         from backend.services.body_preparer import BodyPreparer
+        from backend.services.context_links import configured_self_origins
 
-        return BodyPreparer(registry=self.lint_registry)
+        return BodyPreparer(
+            registry=self.lint_registry,
+            self_origins=configured_self_origins(self.settings),
+        )
 
     @cached_property
     def lint_registry(self):
@@ -969,9 +962,15 @@ class ServiceRegistry:
 
     @cached_property
     def lint(self):
+        from backend.services.context_links import configured_self_origins
         from backend.services.lint_service import LintService
 
-        return LintService(job_queue=self.job_queue, lint_registry=self.lint_registry)
+        return LintService(
+            job_queue=self.job_queue,
+            lint_registry=self.lint_registry,
+            context_media_repository_factory=self.context_media_repository_factory,
+            self_origins=configured_self_origins(self.settings),
+        )
 
     @cached_property
     def job_queue(self):
@@ -1044,6 +1043,11 @@ class AppContainer:
     search_service: object | None = None
     ask_service: object | None = None
     services: ServiceRegistry = field(default_factory=ServiceRegistry)
+
+    def __post_init__(self) -> None:
+        # Bind settings before any cached service can be constructed, including
+        # get_page_service() callers that have not requested get_services() yet.
+        self.services.settings = self.settings
 
     def get_page_service(self):
         if self.page_service is None:

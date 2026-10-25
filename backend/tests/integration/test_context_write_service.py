@@ -87,6 +87,28 @@ def _workspace(session):
     return session.scalar(select(Workspace).where(Workspace.slug == "default"))
 
 
+def _publish_link_target(session, page):
+    """A resolvable link target needs a real visible head, not just a slug."""
+    body = f"# {page.title}\n"
+    version = ContextPageVersion(
+        workspace_id=page.workspace_id,
+        page_id=page.id,
+        version_no=1,
+        body_md=body,
+        content_hash=calculate_content_hash(body),
+        actor_type="human",
+        created_by_actor_kind="human",
+        created_by_actor_id=ACTOR_ID,
+        version_status="published_snapshot",
+    )
+    session.add(version)
+    session.flush()
+    page.current_version_id = version.id
+    page.current_published_version_id = version.id
+    page.lifecycle_status = "published"
+    session.flush()
+
+
 def _open_editing_version(session, page, *, actor_id=ACTOR_ID):
     """Open a second, page-first-style "editing" version for ``page``.
 
@@ -444,6 +466,7 @@ def test_write_draft_creates_reviewable_context_rows(
         )
         session.add(target_page)
         session.flush()
+        _publish_link_target(session, target_page)
         result = service.write_draft(
             session=session,
             workspace_id=workspace.id,
@@ -703,6 +726,7 @@ def test_update_draft_requires_latest_base_hash(session_factory):
         )
         session.add(target_page)
         session.flush()
+        _publish_link_target(session, target_page)
         created = service.write_draft(
             session=session,
             workspace_id=workspace.id,
@@ -2737,6 +2761,8 @@ def test_draft_update_preserves_published_pagelinks_until_publish(session_factor
         )
         session.add_all([old_target, new_target])
         session.flush()
+        _publish_link_target(session, old_target)
+        _publish_link_target(session, new_target)
         created = service.write_draft(
             session=session,
             workspace_id=workspace.id,

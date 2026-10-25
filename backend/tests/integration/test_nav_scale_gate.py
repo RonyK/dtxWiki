@@ -6,6 +6,8 @@ are reachable within 3 hops from the section root with each intermediate
 folder present in its parent's render, ③ fanout truncation is honest.
 """
 
+from uuid import UUID
+
 import pytest
 from sqlalchemy import select
 
@@ -36,7 +38,7 @@ def _workspace_id(session):
 def scale_workspace(session_factory_module):
     session_factory = session_factory_module
     tree = TreeService()
-    golden: list[tuple[str, list[str]]] = []
+    golden: list[tuple[UUID, str, list[str]]] = []
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         root = session.scalar(
@@ -124,7 +126,8 @@ def scale_workspace(session_factory_module):
                     if p == 0:
                         golden.append(
                             (
-                                slug,
+                                page.id,
+                                page.title,
                                 [
                                     "/context",
                                     f"/context/domain-{d1}",
@@ -214,7 +217,7 @@ def test_golden_pages_reachable_within_three_hops(
                 )
             return renders[node_ref]
 
-        for slug, hops in scale_workspace["golden"]:
+        for page_id, title, hops in scale_workspace["golden"]:
             assert len(hops) <= 3
             # each hop's folder appears in the parent hop's render
             for parent_ref, child_ref in zip(hops, hops[1:], strict=False):
@@ -224,7 +227,7 @@ def test_golden_pages_reachable_within_three_hops(
                 )
             # the page itself appears in the leaf render
             leaf_render = render(hops[-1])
-            assert f"/context/{slug}.md" in leaf_render
+            assert f"* [{title}](/p/{workspace_id}/{page_id}) — " in leaf_render
 
 
 def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):

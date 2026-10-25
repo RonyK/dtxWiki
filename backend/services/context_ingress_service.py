@@ -496,7 +496,10 @@ class ContextIngressService:
         page.current_version_id = page.current_version_id or version.id
         page.latest_draft_version_id = version.id
         page.page_type = request.final_page_type or page.page_type
-        refresh_page_links(session, page=page, version=version)
+        refresh_page_links(
+            session, page=page, version=version,
+            self_origins=self.body_preparer.self_origins,
+        )
         session.add(
             ChangeOperation(
                 workspace_id=change_set.workspace_id,

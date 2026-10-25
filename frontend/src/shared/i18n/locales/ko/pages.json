@@ -50,7 +50,8 @@
     "visibilityOpenLiveSnapshot": "공개 페이지 열기",
     "scrollableCode": "스크롤 가능한 {{language}} 코드",
     "taskComplete": "완료된 작업",
-    "taskIncomplete": "미완료 작업"
+    "taskIncomplete": "미완료 작업",
+    "unavailableLink": "열 수 없는 문서"
   },
   "publicReader": {
     "ariaLabel": "게시된 페이지",

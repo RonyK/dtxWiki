@@ -131,7 +131,6 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { TreePickerDropdown } from "../../shared/components/TreePickerDropdown";
 import { TreeRail } from "../../shared/components/TreeRail";
 import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
-import { TREE_TARGET_PARAM } from "../../shared/components/treeRouteState";
 import { useMobileModalFocus } from "../../shared/components/useMobileModalFocus";
 import { isAbortError } from "../../shared/lib/abortError";
 import type { ContextPublishNotice } from "../../shared/lib/contextPublishNavigation";
@@ -167,6 +166,7 @@ import {
   filterBlockEntries,
 } from "./editorBlocks";
 import type { BlockMenuEntry } from "./editorBlocks";
+import { formatCanonicalContextUrl } from "../../shared/lib/contextLinks";
 import { createEditorCompletionSource } from "./editorCompletions";
 import {
   EDITOR_COMMANDS,
@@ -687,6 +687,7 @@ export function PageEditor({
   }, []);
   const closeContextRail = useCallback(() => setContextRailOpen(false), []);
   const imageUploadOptions = useMemo<EditorPasteOptions>(() => ({
+    getWorkspaceId: () => workspaceIdRef.current,
     getUploadBatchCapabilities() {
       return contextMediaCapabilitiesRef.current;
     },
@@ -965,7 +966,7 @@ export function PageEditor({
         base: markdownLanguage,
       }),
       autocompletion({
-        override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef)],
+        override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef, workspaceIdRef)],
       }),
       createEditorPasteHandlers(imageUploadOptions),
       // CodeMirror's parsed `Mod-/` key descriptor is not dispatched by
@@ -2695,9 +2696,8 @@ export function PageEditor({
       );
       return;
     }
-    const params = new URLSearchParams({ [TREE_TARGET_PARAM]: pageId });
     navigationConfirmedRef.current = true;
-    navigate(`/context?${params.toString()}`, {
+    navigate(formatCanonicalContextUrl(workspaceIdRef.current ?? workspaceId ?? "", pageId), {
       replace: true,
       state: { contextPublishNotice: notice },
     });
@@ -3660,8 +3660,9 @@ export function PageEditor({
       navigate(-1);
       return;
     }
-    const contextTarget = contextActiveNodeId ?? page?.id ?? null;
-    navigate(contextTarget ? `/context?${TREE_TARGET_PARAM}=${contextTarget}` : "/context");
+    navigate(page?.id && workspaceId
+      ? formatCanonicalContextUrl(workspaceId, page.id)
+      : "/context");
   }
 
   function selectContextTreeNode(node: TreeNodePayload) {
@@ -5345,6 +5346,7 @@ export function PageEditor({
                 sourceLineNumbers
                 stripLeadingHeading={title}
                 wikilinkPages={pages}
+                workspaceId={workspaceId}
               />
             </div>
           ) : null}

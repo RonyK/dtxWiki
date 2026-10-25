@@ -117,6 +117,7 @@ function renderWithRouter(initialEntry: string, routes: ReactNode) {
     <>
       {routes}
       <Route path="/context" element={<PublishedContextDestination />} />
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<PublishedContextDestination />} />
     </>,
   ), {
     initialEntries: [initialEntry],
@@ -778,8 +779,8 @@ describe("PageEditor", () => {
     // description of the code rather than a literal translation of it.
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/workspace-1/context/pages/p1",
+        search: "",
         state: { contextPublishNotice: { kind: "published_with_findings" } },
       });
     });
@@ -986,8 +987,8 @@ describe("PageEditor", () => {
     );
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/workspace-1/context/pages/p1",
+        search: "",
       });
       expect(router.state.historyAction).toBe("REPLACE");
     });
@@ -1034,8 +1035,8 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/workspace-1/context/pages/p1",
+        search: "",
       });
       expect(router.state.historyAction).toBe("REPLACE");
     });
@@ -1067,8 +1068,8 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/workspace-1/context/pages/p1",
+        search: "",
       });
     });
   });
@@ -1665,8 +1666,8 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/workspace-1/context/pages/p1",
+        search: "",
         state: { contextPublishNotice: { kind: "review_completed" } },
       });
     });
@@ -3938,12 +3939,12 @@ describe("PageEditor", () => {
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
-        pathname: "/context",
-        search: "?target=p1",
+        pathname: "/workspaces/workspace-1/context/pages/p1",
+        search: "",
       });
     });
     expect(await screen.findByTestId("published-context-destination")).toHaveTextContent(
-      "/context?target=p1",
+      "/workspaces/workspace-1/context/pages/p1",
     );
   });
 
@@ -5973,7 +5974,9 @@ describe("PageEditor", () => {
     });
 
     await waitFor(() => {
-      expect(editor.textContent).toContain("**Pasted** [[hello|Hello]]");
+      // A copied slug alone cannot supply permanent page identity. Preserve
+      // its href and rich formatting until the shared save pipeline resolves it.
+      expect(editor.textContent).toContain("**Pasted** [Hello](/pages/hello)");
     });
   });
 

@@ -38,12 +38,15 @@ class LintContext:
     body_analysis: dict[tuple[str, str], object] = field(
         default_factory=dict, repr=False, compare=False
     )
+    stage: LintStage | None = None
+    self_origins: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
 class FixResult:
     body: str
     fixes: tuple[str, ...] = ()
+    details: tuple[dict, ...] = ()
 
 
 class LintFixer(Protocol):
@@ -88,6 +91,8 @@ class LintModule:
     rules: tuple[LintRule, ...]
     fixer: LintFixer | None = None
     fix_on_save_setting: str | None = None
+    fix_existing_setting: str | None = None
+    auto_approve_setting: str | None = None
 
 
 class LintPolicy:
@@ -109,4 +114,19 @@ class LintPolicy:
     def fix_on_save(self, module: LintModule) -> bool:
         if module.fix_on_save_setting == "auto_fix":
             return bool(getattr(self.workspace, "auto_fix_enabled", False))
+        if module.fix_on_save_setting == "link_fix_mode":
+            return self._overrides.get("link_fix_mode", "auto") == "auto"
         return bool(self._overrides.get(module.fix_on_save_setting, False))
+
+    def fix_existing(self, module: LintModule) -> bool:
+        return bool(module.fix_existing_setting) and self.fix_on_save(module)
+
+    def auto_approve(self, module: LintModule) -> bool:
+        if module.module_id == "format":
+            return self.fix_on_save(module)
+        if module.auto_approve_setting == "auto_approve_link_fixes":
+            return self._overrides.get("auto_approve_link_fixes", True) is True
+        return bool(
+            module.auto_approve_setting
+            and self._overrides.get(module.auto_approve_setting, False)
+        )

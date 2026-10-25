@@ -312,6 +312,12 @@
             "title": "Is Visible Head",
             "type": "boolean"
           },
+          "lint_report": {
+            "additionalProperties": true,
+            "description": "Save-time fixes and findings for the final stored body.",
+            "title": "Lint Report",
+            "type": "object"
+          },
           "page_type": {
             "default": "overview",
             "enum": [

@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   MemoryRouter,
   Route,
@@ -480,7 +480,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockDecisionLogRoutes(options);
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     expect(
@@ -517,16 +517,17 @@ describe("ContextScreen", () => {
       <MemoryRouter
         initialEntries={[
           {
-            pathname: "/context",
-            search: `?target=${PAGE_ID}`,
+            pathname: `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`,
+            search: "",
             state: {
               contextPublishNotice: { kind: "published_with_findings" },
             },
           },
         ]}
       >
-        <ContextScreen />
+        <ContextTestRoutes />
         <LocationStateProbe />
+        <ContextOverviewButton />
       </MemoryRouter>,
     );
 
@@ -536,6 +537,9 @@ describe("ContextScreen", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location-state")).toHaveTextContent("null");
     });
+    await userEvent.click(screen.getByRole("button", { name: "Open Context overview" }));
+    await waitFor(() => expect(screen.queryByText("Needle body")).not.toBeInTheDocument());
+    expect(screen.queryByText("Published, but a formatting issue was found.")).not.toBeInTheDocument();
   });
 
   it("says a displayed draft is unpublished and names the reader-visible head", async () => {
@@ -599,7 +603,7 @@ describe("ContextScreen", () => {
         ]}
       >
         <SearchProbe onSearch={(search) => searches.push(search)} />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -634,7 +638,7 @@ describe("ContextScreen", () => {
       >
         <HistoryButtons />
         <SearchProbe onSearch={(search) => searches.push(search)} />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -672,7 +676,7 @@ describe("ContextScreen", () => {
         ]}
       >
         <SearchProbe onSearch={(search) => searches.push(search)} />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -694,7 +698,7 @@ describe("ContextScreen", () => {
         initialIndex={1}
       >
         <BackButton />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -818,7 +822,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -847,7 +851,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockDecisionLogRoutes();
     render(
       <MemoryRouter initialEntries={["/context?target=hidden-page"]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -865,13 +869,25 @@ describe("ContextScreen", () => {
 
   it("renders selected markdown with page actions and copy link", async () => {
     const writeText = installClipboardStub();
-    await renderDecisionLog();
+    mockDecisionLogRoutes();
+    render(
+      <MemoryRouter
+        initialEntries={["/context?target=ancestor-0&expanded=ancestor-0&view=reader"]}
+      >
+        <ContextTestRoutes />
+        <ContextLocationProbe />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("treeitem", { name: "Decision Log" });
 
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Decision Log" }),
     );
 
     expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    expect(screen.getByTestId("context-location")).toHaveTextContent(
+      `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?expanded=ancestor-0&view=reader`,
+    );
     await waitFor(() => expect(document.title).toBe("Decision Log - dtxWiki"));
     const editAction = screen.getByRole("link", { name: /^Edit$/ });
     const moreAction = screen.getByRole("button", {
@@ -896,11 +912,19 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
     expect(writeText).toHaveBeenCalledWith(
-      expect.stringMatching(
-        new RegExp(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}$`),
-      ),
+      `${window.location.origin}/p/${WORKSPACE_ID}/${PAGE_ID}`,
     );
     expect(screen.getByText("Link copied")).toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    expect(writeText).toHaveBeenLastCalledWith(
+      `${window.location.origin}/p/${WORKSPACE_ID}/${PAGE_ID}`,
+    );
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Inbox" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    expect(writeText).toHaveBeenLastCalledWith(
+      `${window.location.origin}/context?target=ancestor-0`,
+    );
     const readerTabs = within(
       screen.getByRole("tablist", { name: "Context reader views" }),
     );
@@ -908,6 +932,18 @@ describe("ContextScreen", () => {
       readerTabs.getAllByRole("tab").map((tab) => tab.textContent),
     ).toEqual(["View", "History1", "GraphPreview", "Activity1"]);
     expect(readerTabs.queryByRole("tab", { name: "Bundle" })).toBeNull();
+    await userEvent.click(
+      screen.getByRole("treeitem", { name: "Architecture Notes" }),
+    );
+    await screen.findByText("Selected second page");
+    expect(screen.getByTestId("context-location")).toHaveTextContent(
+      `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}?expanded=ancestor-0&view=reader`,
+    );
+    await userEvent.click(screen.getByRole("treeitem", { name: "Inbox" }));
+    await screen.findByRole("heading", { name: "Inbox" });
+    expect(screen.getByTestId("context-location")).toHaveTextContent(
+      "/context?expanded=ancestor-0&view=reader&target=ancestor-0",
+    );
   });
 
   it("marks the Graph tab as a localized Preview surface still in development", async () => {
@@ -956,7 +992,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -1003,7 +1039,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockDecisionLogRoutes({ activityNextCursor: cursor });
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -1115,7 +1151,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -1441,9 +1477,7 @@ describe("ContextScreen", () => {
       within(dialog).getByRole("button", { name: "Copy workspace link" }),
     );
     expect(writeText).toHaveBeenCalledWith(
-      expect.stringMatching(
-        new RegExp(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}$`),
-      ),
+      `${window.location.origin}/p/${WORKSPACE_ID}/${PAGE_ID}`,
     );
 
     await userEvent.click(
@@ -1629,7 +1663,7 @@ describe("ContextScreen", () => {
     });
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -1806,7 +1840,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -1869,7 +1903,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -1929,7 +1963,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2069,7 +2103,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2178,7 +2212,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2192,15 +2226,8 @@ describe("ContextScreen", () => {
       }),
     );
 
-    expect(
-      await screen.findByText(
-        "That Context page is no longer available. It was removed from the list.",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
     expect(screen.queryByText("Deleted elsewhere")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "We couldn't find that page" }),
-    ).not.toBeInTheDocument();
   });
 
   it("filters the live Context overview by unpublished draft state", async () => {
@@ -2256,7 +2283,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2338,7 +2365,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2391,7 +2418,7 @@ describe("ContextScreen", () => {
 
     const viewerView = render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2407,7 +2434,7 @@ describe("ContextScreen", () => {
     ctxWorkspace.current = { selectedWorkspace: { role: "owner" } };
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2457,7 +2484,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2524,7 +2551,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2564,7 +2591,7 @@ describe("ContextScreen", () => {
     mockDecisionLogRoutes({ nestedSecondPage: true });
     render(
       <MemoryRouter initialEntries={[`/context?target=${SECOND_PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -2593,6 +2620,8 @@ describe("ContextScreen", () => {
 
   it("compares and restores Context history versions in a diff modal", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const restoredTree = deferredResponse();
+    let restoreStarted = false;
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input, init) => {
@@ -2614,6 +2643,9 @@ describe("ContextScreen", () => {
           url ===
           `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`
         ) {
+          if (restoreStarted) {
+            return restoredTree.promise;
+          }
           return jsonResponse({
             data: treeResponse("context", [
               treeNode("node-1", PAGE_ID, "Decision Log"),
@@ -2695,6 +2727,7 @@ describe("ContextScreen", () => {
           url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore` &&
           init?.method === "POST"
         ) {
+          restoreStarted = true;
           expect(JSON.parse(String(init.body))).toEqual({
             version_id: "version-1",
           });
@@ -2714,7 +2747,9 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
+        <ContextLocationProbe />
+        <ContextQueryButton />
       </MemoryRouter>,
     );
 
@@ -2792,6 +2827,20 @@ describe("ContextScreen", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore`,
       expect.objectContaining({ method: "POST" }),
+    );
+
+    // A newer route query must survive the asynchronous post-restore reload.
+    await userEvent.click(screen.getByRole("button", { name: "Change query while restoring" }));
+    await act(async () => {
+      restoredTree.resolve(jsonResponse({
+        data: treeResponse("context", [treeNode("node-1", PAGE_ID, "Decision Log")]),
+      }));
+    });
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Restore this version" }),
+    ).toBeEnabled());
+    expect(screen.getByTestId("context-location")).toHaveTextContent(
+      `/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?tab=history&expanded=node-1&view=updated`,
     );
 
     await waitFor(() => {
@@ -2923,7 +2972,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(await screen.findByRole("tab", { name: /History/ }));
@@ -3074,7 +3123,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(await screen.findByRole("tab", { name: /History/ }));
@@ -3158,7 +3207,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3289,7 +3338,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3328,7 +3377,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3391,7 +3440,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3446,7 +3495,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3498,7 +3547,7 @@ describe("ContextScreen", () => {
         initialEntries={["/context?target=folder-root&childrenPage=2"]}
       >
         <SearchProbe onSearch={(search) => searches.push(search)} />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3543,7 +3592,7 @@ describe("ContextScreen", () => {
 
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3781,7 +3830,7 @@ describe("ContextScreen", () => {
     mockFetch(pendingReviewFetch());
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -3828,7 +3877,7 @@ describe("ContextScreen", () => {
     mockFetch(pendingReviewFetch());
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3941,7 +3990,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter>
         <SearchProbe onSearch={(search) => searches.push(search)} />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3974,7 +4023,7 @@ describe("ContextScreen", () => {
           `/context?target=${PAGE_ID}&tab=history&compareFrom=empty&compareTo=version-1`,
         ]}
       >
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -3996,7 +4045,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter initialEntries={[`/context${reversed}`]}>
         <SearchProbe onSearch={(search) => searches.push(search)} />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4015,7 +4064,7 @@ describe("ContextScreen", () => {
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}&tab=history`]}>
         <BackButton />
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4039,7 +4088,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockFetch(comparisonHistoryFetch());
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4120,7 +4169,7 @@ describe("ContextScreen", () => {
     mockFetch(comparisonHistoryFetch());
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4184,7 +4233,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockFetch(responses);
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4232,7 +4281,7 @@ describe("ContextScreen", () => {
     const fetchMock = mockFetch(responses);
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4261,7 +4310,7 @@ describe("ContextScreen", () => {
     mockFetch(comparisonHistoryFetch(true));
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4300,7 +4349,7 @@ describe("ContextScreen", () => {
       <MemoryRouter
         initialEntries={[`/context?target=${PAGE_ID}&tab=history`]}
       >
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4364,7 +4413,7 @@ describe("ContextScreen", () => {
       <MemoryRouter
         initialEntries={[`/context?target=${PAGE_ID}&tab=history`]}
       >
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4396,7 +4445,7 @@ describe("ContextScreen", () => {
     mockFetch(responses);
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4418,7 +4467,7 @@ describe("ContextScreen", () => {
     mockFetch(comparisonHistoryFetch());
     render(
       <MemoryRouter initialEntries={[`/context?target=${PAGE_ID}`]}>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4452,7 +4501,7 @@ describe("ContextScreen", () => {
     mockFetch(pendingReviewFetch());
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -4488,7 +4537,7 @@ describe("ContextScreen", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -4526,7 +4575,7 @@ describe("ContextScreen", () => {
     mockFetch(pendingReviewFetch());
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
     await userEvent.click(
@@ -4560,7 +4609,7 @@ describe("ContextScreen", () => {
       mockFetch(pendingReviewFetch(earlierCount));
       render(
         <MemoryRouter>
-          <ContextScreen />
+          <ContextTestRoutes />
         </MemoryRouter>,
       );
 
@@ -4588,7 +4637,7 @@ describe("ContextScreen", () => {
     mockFetch(pendingReviewFetch(0));
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4615,7 +4664,7 @@ describe("ContextScreen", () => {
     mockFetch(pendingReviewFetch(2, "changes_requested"));
     render(
       <MemoryRouter>
-        <ContextScreen />
+        <ContextTestRoutes />
       </MemoryRouter>,
     );
 
@@ -4637,11 +4686,12 @@ describe("ContextScreen", () => {
     function renderAtCanonicalRoute(path: string) {
       return render(
         <MemoryRouter initialEntries={[path]}>
+          <ContextMismatchButton />
           <Routes>
             <Route path="/context" element={<div>Context overview route</div>} />
             <Route
               path="/workspaces/:workspaceId/context/pages/:pageId"
-              element={<ContextScreen />}
+              element={<ContextTestRoutes />}
             />
           </Routes>
         </MemoryRouter>,
@@ -4649,20 +4699,36 @@ describe("ContextScreen", () => {
     }
 
     it("resolves the initial target from the canonical route's :pageId", async () => {
+      // Independent route regression: Shell Context navigation changes only the
+      // pathname; the selected page must clear even when search stays empty.
       mockDecisionLogRoutes();
-      renderAtCanonicalRoute(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`);
-
+      render(
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+          <ContextTestRoutes />
+          <ContextOverviewButton />
+        </MemoryRouter>,
+      );
       expect(await screen.findByText("Needle body")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Open Context overview" }));
+      await waitFor(() => expect(screen.queryByText("Needle body")).not.toBeInTheDocument());
+      expect(screen.getByRole("heading", { name: "Context" })).toBeInTheDocument();
     });
 
-    it("prefers the ?target= query param over the route's :pageId when both are present", async () => {
+    it("keeps the canonical page identity when a legacy target query is also present", async () => {
       mockDecisionLogRoutes();
-      renderAtCanonicalRoute(
+      const view = renderAtCanonicalRoute(
         `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}?target=${PAGE_ID}`,
       );
 
-      expect(await screen.findByText("Needle body")).toBeInTheDocument();
+      expect(await screen.findByText("Selected second page")).toBeInTheDocument();
+      expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Open mismatched workspace" }));
+      expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
       expect(screen.queryByText("Selected second page")).not.toBeInTheDocument();
+      view.unmount();
+      // A valid legacy query cannot make a missing canonical page appear valid.
+      renderAtCanonicalRoute(`/workspaces/${WORKSPACE_ID}/context/pages/foreign-page?target=${PAGE_ID}`);
+      expect(await screen.findByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
     });
 
     it("leaves a deleted canonical page route instead of retaining its stale :pageId", async () => {
@@ -4723,19 +4789,38 @@ describe("ContextScreen", () => {
     });
 
     it("silently resyncs the ambient workspace when the routed id is already a member", async () => {
+      // Independent state regression: initial deep-link synchronization is one
+      // entry action, not permission to undo a later explicit workspace choice.
       const selectWorkspaceId = vi.fn();
-      ctxWorkspace.current = {
-        selectedWorkspace: { role: "owner", visibility: "public" },
-        workspaceSlug: "demo",
-        selectedId: "ambient-workspace",
-        workspaces: [{ id: WORKSPACE_ID }, { id: "ambient-workspace" }],
-        selectWorkspaceId,
-      };
+      function WorkspaceSwitchHarness() {
+        const [selectedId, setSelectedId] = useState("ambient-workspace");
+        const select = useCallback((id: string) => {
+          selectWorkspaceId(id);
+          setSelectedId(id);
+        }, []);
+        ctxWorkspace.current = {
+          selectedWorkspace: { role: "owner", visibility: "public" },
+          workspaceSlug: "demo", selectedId,
+          workspaces: [{ id: WORKSPACE_ID }, { id: "ambient-workspace" }],
+          selectWorkspaceId: select,
+        };
+        return <>
+          <button onClick={() => select("ambient-workspace")} type="button">Select another workspace</button>
+          <output data-testid="selected-workspace">{selectedId}</output>
+          <ContextTestRoutes />
+        </>;
+      }
       mockDecisionLogRoutes();
-      renderAtCanonicalRoute(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`);
-
+      render(
+        <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+          <WorkspaceSwitchHarness />
+        </MemoryRouter>,
+      );
       await screen.findByText("Needle body");
-      expect(selectWorkspaceId).toHaveBeenCalledWith(WORKSPACE_ID);
+      expect(screen.getByTestId("selected-workspace")).toHaveTextContent(WORKSPACE_ID);
+      await userEvent.click(screen.getByRole("button", { name: "Select another workspace" }));
+      await waitFor(() => expect(screen.getByTestId("selected-workspace")).toHaveTextContent("ambient-workspace"));
+      expect(selectWorkspaceId).toHaveBeenLastCalledWith("ambient-workspace");
     });
 
     it("does not touch ambient workspace state when the routed id is not a known member", async () => {
@@ -4747,15 +4832,17 @@ describe("ContextScreen", () => {
         workspaces: [{ id: "ambient-workspace" }],
         selectWorkspaceId,
       };
-      mockDecisionLogRoutes();
+      const fetchMock = mockDecisionLogRoutes();
+      const original = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (input, init) => String(input).includes("/workspaces/unknown-workspace/")
+        ? jsonResponse({ error_code: "not_found", message: "Page not found.", warnings: [] }, 404)
+        : original(input, init));
       renderAtCanonicalRoute(
         `/workspaces/unknown-workspace/context/pages/${PAGE_ID}`,
       );
 
-      // The fixture's fetch mocks only answer for WORKSPACE_ID, so the load
-      // still resolves via the untouched ambient workspace — the point under
-      // test is that the unknown routed id never reaches selectWorkspaceId.
-      await screen.findByText("Needle body");
+      await screen.findByRole("heading", { name: "We couldn't find that page" });
+      expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
       expect(selectWorkspaceId).not.toHaveBeenCalled();
     });
   });
@@ -4897,6 +4984,56 @@ function setMobileViewport(matches: boolean, width?: number) {
       dispatchEvent: vi.fn(),
     })),
   });
+}
+
+function ContextTestRoutes() {
+  return (
+    <Routes>
+      <Route
+        path="/workspaces/:workspaceId/context/pages/:pageId"
+        element={<ContextScreen />}
+      />
+      <Route path="*" element={<ContextScreen />} />
+    </Routes>
+  );
+}
+
+function ContextMismatchButton() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return <button onClick={() => void navigate(`/workspaces/foreign-workspace/context/pages/${location.pathname.split("/").at(-1)}`)} type="button">Open mismatched workspace</button>;
+}
+
+function ContextOverviewButton() {
+  const navigate = useNavigate();
+  return <button onClick={() => void navigate("/context")} type="button">Open Context overview</button>;
+}
+
+function ContextQueryButton() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <button
+      onClick={() => {
+        const params = new URLSearchParams(location.search);
+        params.set("expanded", "node-1");
+        params.set("view", "updated");
+        void navigate({ search: `?${params.toString()}` });
+      }}
+      type="button"
+    >
+      Change query while restoring
+    </button>
+  );
+}
+
+function ContextLocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="context-location">
+      {location.pathname}{location.search}
+    </output>
+  );
 }
 
 function SearchProbe({ onSearch }: { onSearch: (search: string) => void }) {

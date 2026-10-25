@@ -1,3 +1,4 @@
+import { formatCanonicalContextUrl } from "./contextLinks";
 export type SearchResultLinkInput = {
   id: string;
   type: string;
@@ -76,7 +77,7 @@ function sourceRefHref(
 // keeps using the query-param form (see treeBreadcrumbs.ts).
 function contextPageHref(pageId: string, workspaceId?: string | null): SearchResultLink {
   if (workspaceId) {
-    return { href: `/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}`, destination: "context" };
+    return { href: formatCanonicalContextUrl(workspaceId, pageId), destination: "context" };
   }
   return { href: `/context?target=${encodeURIComponent(pageId)}`, destination: "context" };
 }

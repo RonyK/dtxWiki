@@ -29,6 +29,7 @@ from backend.policy.rbac import (
     require_workspace_role,
 )
 from backend.policy.trust_boundaries import actor_with_target_workspace_scope
+from backend.services.context_links import PageLocatorNotFound
 from backend.services.mcp_read_projection import (
     capture_served_reads,
     finish_served_read,
@@ -157,7 +158,15 @@ def dispatch(
         ),
     )
     with capture_served_reads() as snapshots:
-        response = handler(payload, ctx)
+        try:
+            normalized_payload = _normalize_page_inputs(tool_name, payload, ctx)
+        except ReadServiceError as exc:
+            return MCPErrorResponse(envelope=error_envelope(actor, exc.error_code))
+        except PageLocatorNotFound:
+            return MCPErrorResponse(envelope=error_envelope(actor, "not_found"))
+        except ValueError:
+            return MCPErrorResponse(envelope=error_envelope(actor, "validation_failed"))
+        response = handler(normalized_payload, ctx)
     # An internal attribute deliberately bypasses the wire schema. The runner
     # passes it separately to trace persistence; model_dump never includes it.
     object.__setattr__(
@@ -166,6 +175,43 @@ def dispatch(
         finish_served_read(tool_name, payload, snapshots),
     )
     return response
+
+
+def _normalize_page_inputs(tool_name: str, payload: dict, ctx: ToolCallContext) -> dict:
+    from backend.services.context_links import (
+        LinkContext,
+        parse_page_input,
+        resolve_page_input,
+    )
+
+    result = dict(payload)
+    field = None
+    if tool_name in _PAGE_ID_CONSISTENCY_TOOLS:
+        field = "page_id"
+    elif tool_name == "cite":
+        field = "target_page_id"
+    elif tool_name == "fetch" and payload.get("type") == "context_page":
+        field = "id"
+    elif (
+        tool_name in {"read", "list_changes", "submit_feedback"}
+        and payload.get("target_type") == "context_page"
+    ):
+        field = "target_id"
+    if field is not None and payload.get(field) is not None:
+        locator = parse_page_input(payload[field])
+        if (
+            locator.workspace_id is not None
+            and locator.workspace_id != ctx.workspace_id
+        ):
+            raise PageLocatorNotFound("Context page not found")
+        if locator.page_id is not None:
+            result[field] = locator.page_id
+        else:
+            with ctx.session_factory() as session:
+                result[field] = resolve_page_input(
+                    payload[field], LinkContext(session, ctx.workspace_id, ctx.actor)
+                )
+    return result
 
 
 def resolve_target_actor(
@@ -262,7 +308,15 @@ def resolve_workspace_id_for_tool(
         raw_page_id = payload.get("page_id")
         if raw_page_id is not None:
             try:
-                page_id = UUID(str(raw_page_id))
+                from backend.services.context_links import parse_page_input
+                locator = parse_page_input(raw_page_id)
+                page_id = locator.page_id
+                if (
+                    locator.workspace_id is not None
+                    and explicit_workspace_id is not None
+                    and locator.workspace_id != explicit_workspace_id
+                ):
+                    return PolicyRejection("not_found")
             except ValueError:
                 return None
 
@@ -286,14 +340,19 @@ def resolve_workspace_id_for_tool(
                 session, page_id
             )
 
-    # Conflict detection: any two resolved identifiers must agree.
-    resolved_ids = [
-        identifier
-        for identifier in (explicit_workspace_id, slug_workspace_id, page_workspace_id)
-        if identifier is not None
-    ]
-    if len(set(resolved_ids)) > 1:
+    # A page mismatch is indistinguishable from a missing page. Only two
+    # conflicting workspace locators remain a malformed identifier pair.
+    if (
+        explicit_workspace_id is not None and slug_workspace_id is not None
+        and explicit_workspace_id != slug_workspace_id
+    ):
         return PolicyRejection("inconsistent_identifier")
+    target_workspace_id = explicit_workspace_id or slug_workspace_id
+    if (
+        target_workspace_id is not None and page_workspace_id is not None
+        and target_workspace_id != page_workspace_id
+    ):
+        return PolicyRejection("not_found")
 
     # Priority: explicit workspace_id > page_id > workspace_slug
     if explicit_workspace_id is not None:

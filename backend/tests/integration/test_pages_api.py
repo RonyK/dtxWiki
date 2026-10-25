@@ -2718,7 +2718,7 @@ def test_pages_api_lists_wikilink_backlinks(page_service):
         tags=["links"],
         slug="source-page",
     )
-    create_published_page(
+    unrelated = create_published_page(
         client,
         page_service,
         title="Unrelated Page",
@@ -2773,6 +2773,50 @@ def test_pages_api_lists_wikilink_backlinks(page_service):
             == []
         )
     assert "type:" not in data[0]["snippet"]
+
+    # The original single-locator source cannot detect LIMIT displacement.
+    # Reuse both source pages with two locator kinds on the newest source:
+    # row-level LIMIT would return it twice and hide the other source entirely.
+    with page_service.session_factory.begin() as session:
+        source_page = session.get(ContextPage, UUID(source["id"]))
+        published = session.get(
+            ContextPageVersion, source_page.current_published_version_id
+        )
+        published.created_at = datetime(2100, 1, 1, tzinfo=UTC)
+        session.add_all([
+            PageLink(
+                workspace_id=source_page.workspace_id,
+                source_page_id=source_page.id,
+                source_version_id=UUID(updated_source.json()["data"]["version_id"]),
+                locator_key=f"page_id:{target['id']}", target_slug=None,
+                target_page_id=UUID(target["id"]), occurrence_count=1,
+                first_snippet="A stable URL",
+            ),
+            PageLink(
+                workspace_id=source_page.workspace_id,
+                source_page_id=source_page.id,
+                source_version_id=UUID(updated_source.json()["data"]["version_id"]),
+                locator_key="concept_path:target-page", target_slug="target-page",
+                target_page_id=UUID(target["id"]), occurrence_count=1,
+                first_snippet="A legacy URL",
+            ),
+            PageLink(
+                workspace_id=source_page.workspace_id,
+                source_page_id=UUID(unrelated["id"]),
+                source_version_id=UUID(unrelated["version_id"]),
+                locator_key=f"page_id:{target['id']}", target_slug=None,
+                target_page_id=UUID(target["id"]), occurrence_count=1,
+                first_snippet="Another source",
+            ),
+        ])
+    limited = client.get(f"{pages_url(page_service)}/{target['id']}/backlinks?limit=2")
+    assert limited.status_code == 200
+    assert [row["id"] for row in limited.json()["data"]] == [
+        source["id"], unrelated["id"]
+    ]
+    assert limited.json()["data"][0]["occurrence_count"] == 2
+    target_read = client.get(f"{pages_url(page_service)}/{target['id']}")
+    assert target_read.json()["data"]["backlink_count"] == 2
 
 
 def test_pages_api_ignores_wikilinks_inside_code_regions(page_service):
@@ -2912,6 +2956,7 @@ def test_backlinks_include_latest_draft_projection_for_draft_actor(page_service)
                 workspace_id=source_page.workspace_id,
                 source_page_id=source_page.id,
                 source_version_id=draft_version.id,
+                locator_key="wikilink:" + target.slug,
                 target_slug=target.slug,
                 target_page_id=target.id,
                 occurrence_count=1,

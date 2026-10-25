@@ -1,6 +1,8 @@
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import { EditorView } from "@codemirror/view";
 
+import { classifyContextLink, formatContextPageMarkdown, isContextId, type ContextLinkOptions } from "../../shared/lib/contextLinks";
+
 import { apiErrorMessage } from "../../shared/api/client";
 import { contextMediaAssetIdFromReference } from "../../shared/api/contextMedia";
 import { ImageUploadApiError } from "../../shared/api/uploads";
@@ -79,6 +81,8 @@ export type UploadTargetSnapshot = Readonly<{
 }>;
 
 export type EditorPasteOptions = {
+  getWorkspaceId?: () => string | null;
+  selfOrigins?: readonly string[];
   createUploadTargetSnapshot?: (
     file: File,
     operationId: string,
@@ -242,7 +246,7 @@ export function createEditorPasteHandlers(options: EditorPasteOptions = {}) {
         }
         return true;
       }
-      const text = markdownFromClipboard(event.clipboardData);
+      const text = markdownFromClipboard(event.clipboardData, { workspaceId: options.getWorkspaceId?.(), selfOrigins: options.selfOrigins });
       if (!text) {
         return false;
       }
@@ -282,10 +286,13 @@ export function createEditorPasteHandlers(options: EditorPasteOptions = {}) {
   ];
 }
 
-export function markdownFromClipboard(data: ClipboardLike | null) {
+export function markdownFromClipboard(data: ClipboardLike | null, linkOptions: ContextLinkOptions = {}) {
   if (!data) {
     return null;
   }
+  const plain = data.getData("text/plain");
+  const plainLink = contextLinkMarkdown(plain, plain, linkOptions);
+  if (plainLink) return plainLink;
   const html = data.getData("text/html");
   if (!html.trim()) {
     return null;
@@ -296,11 +303,10 @@ export function markdownFromClipboard(data: ClipboardLike | null) {
   // (Slack, Word, code editor) and bypass HTML→markdown conversion. Otherwise
   // the trip through htmlToMarkdown turns harmless text into noisy escapes.
   // Review C2.14.
-  const plain = data.getData("text/plain");
   if (plain && !htmlAddsStructure(html, plain)) {
     return null;
   }
-  const markdown = htmlToMarkdown(html).trim();
+  const markdown = htmlToMarkdown(html, linkOptions).trim();
   return markdown ? `${markdown}\n` : null;
 }
 
@@ -322,10 +328,10 @@ function normalizeWhitespaceForCompare(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-export function htmlToMarkdown(html: string) {
+export function htmlToMarkdown(html: string, linkOptions: ContextLinkOptions = {}) {
   const parser = new DOMParser();
   const document = parser.parseFromString(html, "text/html");
-  return normalizeBlankLines(renderChildren(document.body));
+  return normalizeBlankLines(renderChildren(document.body, { linkOptions }));
 }
 
 function insertAtSelection(view: EditorViewType, text: string) {
@@ -1200,6 +1206,7 @@ function renderChildren(parent: ParentNode, context: RenderContext = {}) {
 }
 
 type RenderContext = {
+  linkOptions?: ContextLinkOptions;
   inPre?: boolean;
   listDepth?: number;
 };
@@ -1224,7 +1231,7 @@ function renderNode(node: ChildNode, context: RenderContext): string {
   }
   if (/^h[1-6]$/.test(tag)) {
     const level = Number(tag.slice(1));
-    return block(`${"#".repeat(level)} ${inlineText(node)}`);
+    return block(`${"#".repeat(level)} ${inlineText(node, context)}`);
   }
   if (tag === "p" || tag === "div" || tag === "section" || tag === "article") {
     return block(renderChildren(node, context).trim());
@@ -1250,7 +1257,7 @@ function renderNode(node: ChildNode, context: RenderContext): string {
     return fencedCodeBlock(code?.textContent ?? node.textContent ?? "", language);
   }
   if (tag === "a") {
-    return renderLink(node);
+    return renderLink(node, context);
   }
   if (tag === "img") {
     return renderImage(node);
@@ -1262,17 +1269,29 @@ function renderNode(node: ChildNode, context: RenderContext): string {
     return renderBlockquote(node, context);
   }
   if (tag === "table") {
-    return renderTable(node);
+    return renderTable(node, context);
   }
   return renderChildren(node, context);
 }
 
-function renderLink(node: HTMLElement) {
+function contextLinkMarkdown(label: string, href: string, options: ContextLinkOptions): string | null {
+  const link = classifyContextLink(href, options);
+  const workspaceId = link.workspaceId ?? options.workspaceId;
+  return ["stable_full", "stable_short", "canonical_route"].includes(link.kind) && link.pageId && workspaceId
+    ? formatContextPageMarkdown(label, workspaceId, link.pageId, link.fragment)
+    : null;
+}
+
+function renderLink(node: HTMLElement, context: RenderContext) {
   const rawText = normalizeInline(node.textContent ?? "") || node.getAttribute("href") || "";
   const text = escapeBracketText(rawText);
-  const internalSlug = node.getAttribute("data-internal-slug");
-  if (internalSlug) {
-    return `[[${sanitizeInternalSlug(internalSlug)}|${text}]]`;
+  const converted = contextLinkMarkdown(rawText, node.getAttribute("href") ?? "", context.linkOptions ?? {});
+  if (converted) return converted;
+  const internalPageId = node.getAttribute("data-internal-page-id");
+  const locator = classifyContextLink(node.getAttribute("href") ?? "", context.linkOptions);
+  if (internalPageId && isContextId(internalPageId) && context.linkOptions?.workspaceId &&
+      ["concept_path", "slug", "nav_target", "wikilink"].includes(locator.kind)) {
+    return formatContextPageMarkdown(rawText, context.linkOptions.workspaceId, internalPageId, locator.fragment);
   }
   const href = safeMarkdownDestination(node.getAttribute("href") ?? "", "link");
   if (!href) {
@@ -1316,11 +1335,11 @@ function renderBlockquote(node: HTMLElement, context: RenderContext) {
   return `\n\n${content.split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
 }
 
-function renderTable(table: HTMLElement) {
+function renderTable(table: HTMLElement, context: RenderContext) {
   const rows = Array.from(table.querySelectorAll("tr")).map((row) =>
     Array.from(row.children)
       .filter((cell): cell is HTMLElement => cell instanceof HTMLElement)
-      .map((cell) => inlineText(cell)),
+      .map((cell) => inlineText(cell, context)),
   ).filter((row) => row.length > 0);
   if (rows.length === 0) {
     return "";
@@ -1336,8 +1355,8 @@ function padRow(row: string[], columnCount: number) {
   return [...row, ...Array(Math.max(0, columnCount - row.length)).fill("")];
 }
 
-function inlineText(node: ParentNode) {
-  return normalizeInline(renderChildren(node).trim());
+function inlineText(node: ParentNode, context: RenderContext) {
+  return normalizeInline(renderChildren(node, context).trim());
 }
 
 function block(content: string) {
@@ -1419,13 +1438,6 @@ function escapeMarkdownText(text: string) {
     .replace(/\{/g, "\\{")
     .replace(/\}/g, "\\}")
     .replace(/\|/g, "\\|");
-}
-
-function sanitizeInternalSlug(value: string) {
-  return value
-    .trim()
-    .replace(/[\]\n\r|]/g, "")
-    .slice(0, 120);
 }
 
 function safeMarkdownDestination(value: string, kind: "image" | "link") {

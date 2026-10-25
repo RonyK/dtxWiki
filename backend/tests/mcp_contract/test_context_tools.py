@@ -637,7 +637,7 @@ def test_mcp_submit_feedback_creates_feedback(page_service, actor):
         {
             "workspace_id": str(workspace_id),
             "target_type": "context_page",
-            "target_id": str(created.page_id),
+            "target_id": f"/p/{workspace_id}/{created.page_id}",
             "body": "Needs better citation.",
             "severity": "major",
         },
@@ -651,6 +651,19 @@ def test_mcp_submit_feedback_creates_feedback(page_service, actor):
     assert response.envelope.result_status == "succeeded"
     assert response.data.next_action == "agent_resolution_queued"
     assert feedback.target_id == created.page_id
+    # Reuse the feedback target to verify cite's optional page field is wired
+    # to the same syntax adapter. No second database scenario is introduced.
+    # A schema-only check cannot catch rebuilding a UUID-only CiteRequest.
+    cited = dispatch(
+        "cite",
+        {
+            "workspace_id": str(workspace_id),
+            "target_page_id": f"/p/{created.page_id}",
+            "claim_text": "Body",
+        },
+        actor=actor, page_service=page_service,
+    )
+    assert cited.envelope.result_status == "succeeded"
 
 
 def _read_context_page(page_service, page_id):

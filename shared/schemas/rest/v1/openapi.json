@@ -3972,6 +3972,52 @@
         "title": "ContextIngressRejectRequest",
         "type": "object"
       },
+      "ContextLinkTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Page Id"
+          }
+        },
+        "required": [
+          "locator",
+          "state"
+        ],
+        "title": "ContextLinkTarget",
+        "type": "object"
+      },
       "ContextMediaAssetListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4960,6 +5006,19 @@
             ],
             "title": "Latest Draft Version Id"
           },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
+          "lint_report": {
+            "additionalProperties": true,
+            "description": "Save-time fixes and findings for the final stored body.",
+            "title": "Lint Report",
+            "type": "object"
+          },
           "next_reconciliation_version_id": {
             "anyOf": [
               {
@@ -5252,43 +5311,6 @@
           "data"
         ],
         "title": "ContextPageListResponse",
-        "type": "object"
-      },
-      "ContextPageLocation": {
-        "additionalProperties": false,
-        "properties": {
-          "page_id": {
-            "format": "uuid",
-            "title": "Page Id",
-            "type": "string"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "workspace_id",
-          "page_id"
-        ],
-        "title": "ContextPageLocation",
-        "type": "object"
-      },
-      "ContextPageLocationResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ContextPageLocation"
-          },
-          "envelope": {
-            "$ref": "#/components/schemas/RESTResultEnvelope"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "ContextPageLocationResponse",
         "type": "object"
       },
       "ContextPageSummary": {
@@ -14840,6 +14862,13 @@
             "title": "Id",
             "type": "string"
           },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -23111,97 +23140,6 @@
         "summary": "Delete Revoked Api Token",
         "tags": [
           "auth"
-        ]
-      }
-    },
-    "/api/v1/context/pages/{page_id}/location": {
-      "get": {
-        "operationId": "read_page_location_api_v1_context_pages__page_id__location_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "page_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Page Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContextPageLocationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          },
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Read Page Location",
-        "tags": [
-          "context-pages"
         ]
       }
     },

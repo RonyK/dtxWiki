@@ -655,6 +655,14 @@ class ContextWriteService:
         self.media_installer_factory = media_installer_factory
         self.body_preparer = body_preparer or BodyPreparer()
 
+    def _refresh_page_links(
+        self, session: Session, *, page: ContextPage, version: ContextPageVersion
+    ) -> None:
+        refresh_page_links(
+            session, page=page, version=version,
+            self_origins=self.body_preparer.self_origins,
+        )
+
     def _prepare_body(
         self,
         markdown: str,
@@ -717,9 +725,10 @@ class ContextWriteService:
         actor_provenance: str,
     ) -> bool:
         try:
-            return (
-                self._prepare_body(
-                    base_version.body_md,
+            return self.body_preparer.auto_approval_matches(
+                base_version.body_md,
+                new_body,
+                WriteContext(
                     workspace=workspace,
                     session=session,
                     page=page,
@@ -727,10 +736,9 @@ class ContextWriteService:
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     actor_provenance=actor_provenance,
-                ).body
-                == new_body
+                ),
             )
-        except (InputPolicyError, RejectedByPolicyError):
+        except (InputPolicyError, RejectedByPolicyError, MarkdownMediaPolicyError):
             # Historical invalid bytes can still be repaired by a valid new
             # write. They cannot establish a format-only auto-approval proof.
             return False
@@ -1005,7 +1013,7 @@ class ContextWriteService:
                 },
             )
             session.flush()
-            refresh_page_links(session, page=page, version=version)
+            self._refresh_page_links(session, page=page, version=version)
             self._enqueue_embed(session, page=page, version=version, marker="draft")
             return WriteDraftResult(
                 page_id=page.id,
@@ -2658,7 +2666,7 @@ class ContextWriteService:
             branch_version_id=version.id,
             review_item_id=review.id,
         )
-        refresh_page_links(session, page=page, version=version)
+        self._refresh_page_links(session, page=page, version=version)
         self._enqueue_embed(session, page=page, version=version, marker="draft")
         return UpdateDraftResult(
             draft_version_id=version.id,
@@ -2973,8 +2981,7 @@ class ContextWriteService:
             "review_required_from_risk", "low"
         )
         format_only = (
-            workspace.auto_fix_enabled
-            and classification.format_only_eligible
+            classification.format_only_eligible
             and not metadata_patch
             and not citations
             and bool(new_body)
@@ -3177,7 +3184,7 @@ class ContextWriteService:
             },
         )
         session.flush()
-        refresh_page_links(session, page=page, version=version)
+        self._refresh_page_links(session, page=page, version=version)
         self._enqueue_embed(session, page=page, version=version, marker="draft")
         return UpdateDraftResult(
             draft_version_id=version.id,
@@ -3547,7 +3554,7 @@ class ContextWriteService:
                 },
             )
             session.flush()
-            refresh_page_links(session, page=page, version=version)
+            self._refresh_page_links(session, page=page, version=version)
             process_page_publish_maintenance(
                 session,
                 page=page,

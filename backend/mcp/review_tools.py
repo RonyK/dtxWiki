@@ -26,6 +26,7 @@ from backend.services.mcp_chat_service import (
     resolve_effective_principal,
 )
 from backend.services.mcp_client_service import resolve_trace_mcp_client
+from backend.services.mcp_context_projection import page_links
 from backend.services.read_errors import ReadServiceError
 
 
@@ -72,6 +73,13 @@ def list_requested_changes(
         return ListRequestedChangesOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
+    for item in data.items:
+        if item.target is not None and item.target.target_type == "context_page":
+            links = page_links(
+                ctx.workspace_id, item.target.target_id, item.target.title or ""
+            )
+            item.target.stable_url = links["stable_url"]
+            item.target.link_markdown = links["link_markdown"]
     return ListRequestedChangesOutput(envelope=ok_envelope(actor), data=data)
 
 
