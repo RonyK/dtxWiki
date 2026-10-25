@@ -308,7 +308,10 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
 
       const reviewFavorite = fixtures[5];
       const focusedRow = treeRow(rail, reviewFavorite.id);
-      await focusedRow.focus();
+      // Switch from the earlier pointer expansion to real keyboard navigation;
+      // programmatic focus alone does not establish keyboard tooltip ownership.
+      await focusedRow.press("ArrowUp");
+      await page.keyboard.press("ArrowDown");
       await expect(focusedRow).toBeFocused();
       await expect(focusedRow).toHaveAccessibleDescription(/Pending review.*Review requested.*My favorite/);
       const tooltip = page.getByRole("tooltip").filter({ hasText: reviewFavorite.title });
