@@ -356,7 +356,7 @@ DTXWIKI_PUBLIC_BASE_URL=https://wiki.example.com
 DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=true
 ```
 
-`auth-providers.toml`은 `[[providers]]` 목록입니다. 아래 issuer·client ID·도메인은
+`auth-providers.toml`은 `[[providers]]` 목록입니다. 아래 issuer·client ID는
 실제 IdP 등록 값으로 바꾸고, client secret은 서비스 계정이 읽을 수 있는 별도 파일에
 보관합니다. `env:COMPANY_OIDC_CLIENT_SECRET` 형태의 환경변수 참조도 지원합니다.
 
@@ -369,7 +369,6 @@ issuer = "https://idp.example.com/tenant"
 client_id = "dtxwiki"
 client_secret_ref = "file:/etc/dtxwiki/oidc-client-secret"
 jit_provisioning = true
-allowed_email_domains = ["example.com"]
 link_policy = "confirm"
 trust_email_verified = false
 ```
