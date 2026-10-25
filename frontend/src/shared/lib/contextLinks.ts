@@ -66,7 +66,7 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   const wiki = /^\[\[([^\]|\n]+)(?:\|[^\]\n]*)?\]\]$/.exec(value);
   if (wiki) {
     const [lookup, heading = ""] = wiki[1].split("#", 2);
-    return result("wikilink", {
+    return result(lookup.trim() ? "wikilink" : "local", {
       lookup: lookup.normalize("NFKC").trim().toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 80),
       fragment: normalizeContextHeading(heading) || null,

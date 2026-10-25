@@ -534,9 +534,17 @@
             "title": "Changed At",
             "type": "string"
           },
-          "concept_path": {
-            "title": "Concept Path",
-            "type": "string"
+          "link_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Markdown page link, null when archived.",
+            "title": "Link Markdown"
           },
           "page_id": {
             "format": "uuid",
@@ -568,6 +576,18 @@
             "default": null,
             "title": "Reason"
           },
+          "stable_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Permanent page link, null when archived.",
+            "title": "Stable Url"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -587,8 +607,9 @@
           }
         },
         "required": [
-          "concept_path",
           "title",
+          "stable_url",
+          "link_markdown",
           "change_kind",
           "page_id",
           "changed_at",

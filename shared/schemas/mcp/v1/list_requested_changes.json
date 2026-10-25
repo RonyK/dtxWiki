@@ -608,6 +608,18 @@
       "RequestedChangeTarget": {
         "additionalProperties": false,
         "properties": {
+          "link_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Link Markdown"
+          },
           "slug": {
             "anyOf": [
               {
@@ -619,6 +631,18 @@
             ],
             "default": null,
             "title": "Slug"
+          },
+          "stable_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stable Url"
           },
           "target_id": {
             "format": "uuid",

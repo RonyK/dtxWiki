@@ -5974,7 +5974,9 @@ describe("PageEditor", () => {
     });
 
     await waitFor(() => {
-      expect(editor.textContent).toContain("**Pasted** [[hello|Hello]]");
+      // A copied slug alone cannot supply permanent page identity. Preserve
+      // its href and rich formatting until the shared save pipeline resolves it.
+      expect(editor.textContent).toContain("**Pasted** [Hello](/pages/hello)");
     });
   });
 

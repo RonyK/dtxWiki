@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Advance the MCP tool contract to revision 16. Context results use
+  `/p/<workspace_id>/<page_id>` links and no longer expose `concept_path` or
+  `resource_uri`; Library lookup paths remain available. Clients using an older
+  revision must refresh `tools/list` and cached output schemas. Use `stable_url`
+  or `page_id` for page inputs and `link_markdown` for document links.
+- Store and render workspace-scoped Context links across editors, readers,
+  backlinks, and lint. Safe link fixes run through the shared save pipeline;
+  scheduled lint can repair published pages without active edits or reviews.
+  After upgrading, run `dtxwiki reindex` with the deployment's database and
+  environment to rebuild live link projections without changing document bytes.
+  Downgrading removes non-wikilink projections and their pins; reindex after
+  upgrading again to recreate those projections.
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin

@@ -45,6 +45,7 @@
         "type": "boolean"
       },
       "path": {
+        "description": "Context page UUID or stable_url; Library reads use /library/<id>.md.",
         "maxLength": 512,
         "minLength": 1,
         "title": "Path",
@@ -121,43 +122,6 @@
           }
         },
         "title": "ConceptNeighbors",
-        "type": "object"
-      },
-      "DisambiguationCandidate": {
-        "additionalProperties": false,
-        "properties": {
-          "concept_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Concept Path"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "match_reason": {
-            "title": "Match Reason",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "match_reason"
-        ],
-        "title": "DisambiguationCandidate",
         "type": "object"
       },
       "EnvelopeWarning": {
@@ -238,6 +202,41 @@
           "id"
         ],
         "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPContextCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "link_markdown": {
+            "title": "Link Markdown",
+            "type": "string"
+          },
+          "match_reason": {
+            "title": "Match Reason",
+            "type": "string"
+          },
+          "stable_url": {
+            "title": "Stable Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "match_reason",
+          "stable_url",
+          "link_markdown"
+        ],
+        "title": "MCPContextCandidate",
         "type": "object"
       },
       "MCPErrorDetail": {
@@ -583,6 +582,18 @@
             "title": "Kind",
             "type": "string"
           },
+          "link_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Link Markdown"
+          },
           "path": {
             "anyOf": [
               {
@@ -594,6 +605,18 @@
             ],
             "default": null,
             "title": "Path"
+          },
+          "stable_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stable Url"
           },
           "title": {
             "title": "Title",
@@ -688,22 +711,10 @@
       },
       "candidates": {
         "items": {
-          "$ref": "#/$defs/DisambiguationCandidate"
+          "$ref": "#/$defs/MCPContextCandidate"
         },
         "title": "Candidates",
         "type": "array"
-      },
-      "canonical_path": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Canonical Path"
       },
       "content": {
         "anyOf": [
@@ -732,6 +743,19 @@
         ],
         "default": null,
         "title": "Frontmatter"
+      },
+      "link_markdown": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Copyable Markdown link to the Context page.",
+        "title": "Link Markdown"
       },
       "mermaid": {
         "anyOf": [
@@ -781,7 +805,7 @@
         "default": null,
         "title": "Path"
       },
-      "redirect_target_path": {
+      "stable_url": {
         "anyOf": [
           {
             "type": "string"
@@ -791,7 +815,8 @@
           }
         ],
         "default": null,
-        "title": "Redirect Target Path"
+        "description": "Permanent Context page URL: /p/<workspace_id>/<page_id>.",
+        "title": "Stable Url"
       },
       "status": {
         "anyOf": [

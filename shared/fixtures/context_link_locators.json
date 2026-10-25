@@ -183,6 +183,16 @@
       "fragment": null,
       "stable_url": null,
       "reason": "Retired reader paths still resolve within the owning workspace."
+    },
+    {
+      "name": "local_wiki_heading",
+      "input": "[[#Details]]",
+      "kind": "local",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": "details",
+      "stable_url": null,
+      "reason": "An empty wiki page target is a local heading and must not become an unavailable document."
     }
   ],
   "format_cases": [

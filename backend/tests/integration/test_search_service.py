@@ -921,10 +921,44 @@ def test_search_service_claim_search_keeps_published_claim_with_pending_draft():
     # Claims have their own identity; the MCP web link must address the parent
     # page, while the shared search result keeps its retriever concept_path.
     from backend.services.mcp_context_projection import search_payload
+
     projected = search_payload(results, workspace.id)["ranked_results"][0]
     assert projected["stable_url"] == f"/p/{workspace.id}/{created.id}"
     assert "concept_path" not in projected
     assert hit.concept_path == "/context/claim-version-parent.md"
+
+    # Workflow rows can carry a Context identity even though the result itself
+    # is not a Context page/claim. Reuse this payload to isolate that projection
+    # boundary without adding another database or collected test case.
+    context_ref = {
+        "kind": "context_page",
+        "id": str(created.id),
+        "version_id": str(created.version_id),
+        "concept_path": hit.concept_path,
+        "resource_uri": (
+            f"dtxwiki://workspaces/{workspace.id}/context/pages/claim-version-parent"
+        ),
+    }
+    feedback = hit.model_copy(
+        update={
+            "id": uuid4(),
+            "type": "feedback",
+            "concept_path": None,
+            "source_ref": context_ref,
+            "entity_ref": context_ref,
+        }
+    )
+    workflow = search_payload(
+        results.model_copy(update={"ranked_results": [feedback]}), workspace.id
+    )["ranked_results"][0]
+    for field in ("source_ref", "entity_ref"):
+        assert workflow[field] == {
+            "kind": "context_page",
+            "id": str(created.id),
+            "version_id": str(created.version_id),
+            "stable_url": f"/p/{workspace.id}/{created.id}",
+        }
+    assert feedback.source_ref == context_ref
 
 
 def test_keyword_search_uses_shared_visibility_for_pending_drafts():
