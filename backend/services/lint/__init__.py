@@ -30,6 +30,9 @@ def page_format_warnings_for_body(
     *,
     registry: LintRegistry,
     policy: dict | None = None,
+    actor: object | None = None,
+    version: object | None = None,
+    self_origins: frozenset[str] | None = None,
 ) -> list[str]:
     """Non-blocking format-layer lint messages for a SPECIFIC body of ``page``.
 
@@ -42,7 +45,15 @@ def page_format_warnings_for_body(
     if not body:
         return []
     messages: list[str] = []
-    ctx = LintContext(session, workspace_id, page=page)
+    ctx = LintContext(
+        session,
+        workspace_id,
+        actor=actor,
+        page=page,
+        version=version,
+        stage=LintStage.READ,
+        self_origins=self_origins,
+    )
     for rule in registry.rules_for(LintStage.READ, policy, target_type="context_page"):
         for draft in rule.check_body(body, ctx):
             messages.append(draft.suggested_action or draft.rule_id)

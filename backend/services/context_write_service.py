@@ -725,9 +725,10 @@ class ContextWriteService:
         actor_provenance: str,
     ) -> bool:
         try:
-            return (
-                self._prepare_body(
-                    base_version.body_md,
+            return self.body_preparer.auto_approval_matches(
+                base_version.body_md,
+                new_body,
+                WriteContext(
                     workspace=workspace,
                     session=session,
                     page=page,
@@ -2980,8 +2981,7 @@ class ContextWriteService:
             "review_required_from_risk", "low"
         )
         format_only = (
-            workspace.auto_fix_enabled
-            and classification.format_only_eligible
+            classification.format_only_eligible
             and not metadata_patch
             and not citations
             and bool(new_body)

@@ -4,9 +4,13 @@ import pytest
 from sqlalchemy import select
 
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
+from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
+from backend.policy.auth import ActorContext
+from backend.schemas.lint import LintRunCreateRequest
 from backend.services.lint import LintContext, LintRegistry
 from backend.services.lint.scopes import findings_for_target
+from backend.services.lint_service import LintService
 from backend.services.page_service import refresh_page_links
 
 pytestmark = pytest.mark.integration
@@ -64,9 +68,64 @@ def test_unresolved_and_healthy_links(session_factory):
         assert [finding.message_args["written_slug"] for finding in unresolved] == [
             "missing-target"
         ]
-        assert _check(session, "link.broken-slug", broken) == []
+        assert _check(session, "link.internal-noncanonical", broken) == []
         assert _check(session, "link.unresolved", healthy) == []
-        assert _check(session, "link.broken-slug", healthy) == []
+        assert _check(session, "link.internal-noncanonical", healthy) == []
+
+        # Queued RUN has an internal editor's shared-draft visibility, while
+        # a caller-supplied interactive actor retains its narrower authority.
+        # The same existing fixture distinguishes unpublished from hidden
+        # targets without adding another collected database scenario.
+        shared_target, shared_version = _page(
+            session, workspace_id, "shared-draft-target", "Draft.\n"
+        )
+        private_target, private_version = _page(
+            session, workspace_id, "private-edit-target", "Private.\n"
+        )
+        for target, version, status in (
+            (shared_target, shared_version, "draft"),
+            (private_target, private_version, "editing"),
+        ):
+            target.current_published_version_id = None
+            target.current_version_id = version.id
+            target.latest_draft_version_id = version.id
+            version.version_status = status
+        source, _ = _page(
+            session, workspace_id, "unpublished-source",
+            "[[shared-draft-target]] [[private-edit-target]]\n",
+        )
+        session.get(Workspace, workspace_id).lint_policy = {"link_fix_mode": "suggest"}
+        lint = LintService()
+        queued = lint.execute_queued_run(
+            session, workspace_id=workspace_id, run_id=None,
+            trigger_type="manual", actor_kind="human", actor_id="test",
+        )
+        findings = list(session.scalars(select(LintFinding).where(
+            LintFinding.target_id == source.id, LintFinding.status == "open",
+            LintFinding.lint_run_id == queued.id,
+            LintFinding.rule_id.startswith("link."),
+        )))
+        assert {(finding.rule_id, finding.message_args["written_slug"])
+                for finding in findings} == {
+            ("link.target-unpublished", "shared-draft-target"),
+            ("link.unresolved", "private-edit-target"),
+        }
+        viewer = ActorContext(
+            actor_kind="human", actor_id="viewer", workspace_id=workspace_id,
+            workspace_role="viewer", role="viewer",
+        )
+        lint.run_lint(
+            session, workspace_id, LintRunCreateRequest(trigger_type="manual"),
+            "human", "viewer", actor=viewer,
+        )
+        assert {(finding.rule_id, finding.message_args["written_slug"])
+                for finding in session.scalars(select(LintFinding).where(
+                    LintFinding.target_id == source.id, LintFinding.status == "open",
+                    LintFinding.rule_id.startswith("link."),
+                ))} == {
+            ("link.unresolved", "shared-draft-target"),
+            ("link.unresolved", "private-edit-target"),
+        }
 
 
 def test_renamed_pinned_link_is_broken_slug_not_unresolved(session_factory):
@@ -78,11 +137,13 @@ def test_renamed_pinned_link_is_broken_slug_not_unresolved(session_factory):
         session.flush()
 
         assert _check(session, "link.unresolved", source) == []
-        findings = _check(session, "link.broken-slug", source)
+        findings = _check(session, "link.internal-noncanonical", source)
         assert len(findings) == 1
         assert findings[0].message_args == {
             "written_slug": "old-target",
-            "current_slug": "new-target",
+            "locator_kind": "wikilink",
+            "locator": "[[old-target]]",
+            "replacement": f"/p/{workspace_id}/{target.id}",
             # LEAK-01: link findings now carry provenance like format findings,
             # so list_findings can hide a draft-only finding from a viewer.
             # This fixture only sets current_published_version_id.
@@ -158,7 +219,7 @@ def test_link_finding_body_scopes_track_which_body_the_defect_is_in(session_fact
         target.slug = "private-new"
         session.flush()
         assert _check(session, "link.unresolved", private_source) == []
-        assert _check(session, "link.broken-slug", private_source) == []
+        assert _check(session, "link.internal-noncanonical", private_source) == []
 
 
 def test_rebuild_coalesces_two_repaired_slugs_without_losing_pin(session_factory):

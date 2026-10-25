@@ -106,10 +106,13 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             actor_provenance="browser_session",
         )
         _assert_stored(session_factory, first.version_id, expected, f"W1 {suffix}")
+        expected_fixes = [{"module_id": "format", "count": 1}] if enabled else []
+        assert first.lint_report["fixes"] == expected_fixes
 
         # W2: legacy slug writer; W3: explicit page update.
         written = _published(page_service, f"w2-{suffix}", RAW)
         _assert_stored(session_factory, written.version_id, expected, f"W2 {suffix}")
+        assert written.lint_report["fixes"] == expected_fixes
         base = _published(page_service, f"w3-{suffix}")
         updated = page_service.update_page(
             page_id=base.id,
@@ -122,6 +125,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             base_content_hash=base.content_hash,
         )
         _assert_stored(session_factory, updated.version_id, expected, f"W3 {suffix}")
+        assert updated.lint_report["fixes"] == expected_fixes
 
         # Whitespace-insensitive content hashes intentionally collide for these
         # bodies, but a Markdown hard break is a real authored byte change.
@@ -207,6 +211,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 with_edit_receipt=True,
             )
             saved = page_service.autosave_page(**autosave_args)
+            assert saved.lint_report["fixes"] == expected_fixes
             _assert_stored(
                 session_factory,
                 saved.version_id,
@@ -220,6 +225,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 assert replay.version_id == saved.version_id
                 assert replay.body_md == saved.body_md
                 assert replay.editing_revision == saved.editing_revision
+                assert replay.lint_report == saved.lint_report
 
         # W5: both stale-base alternative paths use the same Workspace policy.
         for writer in ("update", "autosave"):
@@ -273,6 +279,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             idempotency_key=f"w6-{suffix}",
         )
         _assert_stored(session_factory, patched.version_id, expected, f"W6 {suffix}")
+        assert patched.lint_report["fixes"] == expected_fixes
 
         # W7: Context draft creation.
         with session_factory.begin() as session:
@@ -582,6 +589,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             idempotency_key=f"copy-edit-{suffix}",
         )
         _assert_stored(session_factory, copied.version_id, RAW, f"begin copy {suffix}")
+        assert copied.lint_report["fixes"] == []
         _advance(page_service, to_restore)
         restored = page_service.restore_version(
             page_id=to_restore.id,
@@ -593,3 +601,4 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
         _assert_stored(
             session_factory, restored.version_id, RAW, f"restore copy {suffix}"
         )
+        assert restored.lint_report["fixes"] == []

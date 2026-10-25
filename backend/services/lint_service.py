@@ -72,12 +72,20 @@ class LintService:
         job_queue: JobQueueService | None = None,
         *,
         lint_registry: LintRegistry | None = None,
+        context_media_repository_factory=None,
+        self_origins: frozenset[str] | None = None,
     ) -> None:
         self.lint_registry = (
             lint_registry if lint_registry is not None else LintRegistry.builtin()
         )
         self.audit_service = audit_service or AuditService()
         self.job_queue = job_queue or JobQueueService()
+        self.context_media_repository_factory = context_media_repository_factory
+        from backend.services.context_links import configured_self_origins
+
+        self.self_origins = (
+            configured_self_origins() if self_origins is None else self_origins
+        )
 
     def list_findings(
         self,
@@ -265,6 +273,7 @@ class LintService:
         policy: dict[str, bool] | None = None,
         rules: list | None = None,
         run: LintRun | None = None,
+        actor: ActorContext | None = None,
     ) -> LintRunRead:
         """Execute the enabled lint rules over the scope's targets and persist a
         run + its findings. ``policy`` is the workspace ``lint`` toggle map
@@ -339,13 +348,17 @@ class LintService:
         counts: dict[str, int] = {}
         produced_keys: set[tuple[UUID | None, str]] = set()
         for target_type, target, target_id in targets:
-            ctx = LintContext(session, workspace_id, page=target)
+            ctx = LintContext(
+                session,
+                workspace_id,
+                actor=actor,
+                page=target,
+                self_origins=self.self_origins,
+            )
             for rule in registry.rules_for(
                 LintStage.RUN, policy, target_type=target_type
             ):
-                for draft in findings_for_target(
-                    rule, target, ctx
-                ):
+                for draft in findings_for_target(rule, target, ctx):
                     tid = draft.target_id if draft.target_id is not None else target_id
                     key = (tid, draft.fingerprint)
                     produced_keys.add(key)

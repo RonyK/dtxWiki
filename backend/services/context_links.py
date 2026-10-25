@@ -775,3 +775,150 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
             )
         )
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class LinkDecision:
+    action: str
+    href: str | None = None
+    finding: str | None = None
+    severity: str = "warning"
+
+
+def decide(
+    locator: Locator,
+    resolution: Resolution,
+    *,
+    context_workspace_id: UUID | None = None,
+    source_is_published: bool = False,
+) -> LinkDecision:
+    if resolution.state == "ignored":
+        return LinkDecision("keep")
+    if resolution.state == "foreign":
+        if locator.kind == "resource_uri":
+            return LinkDecision("finding", finding="link.foreign")
+        if (
+            locator.kind == "canonical_route"
+            and locator.workspace_id
+            and locator.page_id
+        ):
+            return LinkDecision(
+                "fix",
+                format_stable_url(
+                    locator.workspace_id, locator.page_id, locator.fragment
+                ),
+                "link.internal-noncanonical",
+            )
+        if locator.kind == "stable_full":
+            return LinkDecision(
+                "fix" if locator.absolute else "keep",
+                format_stable_url(
+                    locator.workspace_id, locator.page_id, locator.fragment
+                )
+                if locator.absolute
+                else None,
+                "link.internal-noncanonical" if locator.absolute else None,
+            )
+        return LinkDecision("keep")
+    if resolution.state != "ok":
+        return LinkDecision("finding", finding="link.unresolved")
+    if source_is_published and not resolution.published:
+        return LinkDecision(
+            "finding", finding="link.target-unpublished", severity="info"
+        )
+    noncanonical = (
+        locator.kind not in {"stable_full", "wikilink", "page_id"} or locator.absolute
+    )
+    if locator.kind == "wikilink" and locator.slug != resolution.target_slug:
+        noncanonical = True
+    if noncanonical:
+        return LinkDecision("fix", resolution.href, "link.internal-noncanonical")
+    if source_is_published and not resolution.published:
+        return LinkDecision(
+            "finding", finding="link.target-unpublished", severity="info"
+        )
+    return LinkDecision("keep")
+
+
+def rewrite_links_with_report(
+    body: str, ctx: LinkContext
+) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+    """Apply only proved destination edits; all other source bytes are reused."""
+    changes = []
+    details = []
+    for occurrence in extract_links(body):
+        locator = classify(occurrence.href, ctx.self_origins)
+        resolution = resolve(locator, ctx)
+        decision = decide(
+            locator,
+            resolution,
+            context_workspace_id=ctx.workspace_id,
+            source_is_published=ctx.source_is_published,
+        )
+        if decision.action != "fix" or not decision.href:
+            continue
+        # A draft-only destination cannot be newly disclosed by a published
+        # source; retain its written bytes and let the info finding explain it.
+        if (
+            ctx.source_is_published
+            and resolution.state == "ok"
+            and not resolution.published
+        ):
+            continue
+        replacement = decision.href
+        if occurrence.kind in {"wikilink", "autolink", "literal_autolink"}:
+            # A new [ immediately after ! would turn a visible link into an
+            # image. Keep the source and finding when this span is not safe.
+            if (
+                occurrence.span.char_start
+                and body[occurrence.span.char_start - 1] == "!"
+            ):
+                continue
+            label = occurrence.label or occurrence.slug or occurrence.href
+            replacement = f"[{escape_link_label(label)}]({decision.href})"
+        after_locator = classify(decision.href, ctx.self_origins)
+        if locator.kind == "canonical_route" and resolution.state == "foreign":
+            same_target = (
+                after_locator.page_id == locator.page_id
+                and after_locator.workspace_id == locator.workspace_id
+            )
+        elif resolution.state == "foreign":
+            same_target = (
+                after_locator.page_id == locator.page_id
+                and after_locator.workspace_id == locator.workspace_id
+            )
+        else:
+            after = resolve(after_locator, ctx)
+            same_target = after.state == "ok" and after.page_id == resolution.page_id
+        if same_target:
+            changes.append((occurrence.span, replacement))
+            details.append(
+                {
+                    "module_id": "links",
+                    "rule_id": "link.internal-noncanonical",
+                    "before": occurrence.href,
+                    "after": decision.href,
+                    "category": "format"
+                    if locator.kind
+                    in {"stable_full", "stable_short", "canonical_route", "wikilink"}
+                    else "repair",
+                }
+            )
+    parts = []
+    cursor = 0
+    for span, replacement in changes:
+        if span.char_start < cursor:
+            return body, (), ()
+        parts.extend((body[cursor : span.char_start], replacement))
+        cursor = span.char_end
+    parts.append(body[cursor:])
+    return (
+        "".join(parts),
+        tuple("link.internal-noncanonical" for _ in changes),
+        tuple(details),
+    )
+
+
+def rewrite_links(body: str, ctx: LinkContext) -> tuple[str, tuple[str, ...]]:
+    rewritten, fixes, _ = rewrite_links_with_report(body, ctx)
+    return rewritten, fixes

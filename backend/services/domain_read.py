@@ -1022,6 +1022,9 @@ class DomainReadService:
                 version.body_md if version is not None else None,
                 registry=self.lint_registry,
                 policy=lint_policy,
+                actor=actor,
+                version=version,
+                self_origins=self.context_link_origins,
             )
             # F1: surface the open review for this page's CURRENT pending draft so
             # it can be acted on inline. Scoped to latest_draft_version_id via the
@@ -1074,6 +1077,9 @@ class DomainReadService:
                         draft_version.body_md,
                         registry=self.lint_registry,
                         policy=lint_policy,
+                        actor=actor,
+                        version=draft_version,
+                        self_origins=self.context_link_origins,
                     )
         return {
             "published_version_info": (

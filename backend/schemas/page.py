@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -126,6 +126,10 @@ class PagePayload(PageSummary):
     # stable reason, whether it is an everyday autosave, a workflow draft, or a
     # body with an objective format defect.
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
+    lint_report: dict[str, Any] = Field(
+        default_factory=lambda: {"fixes": [], "findings": []},
+        description="Save-time fixes and findings for the final stored body.",
+    )
     # What the write that produced this payload changed. Set by the MCP edit
     # commands and read by their handlers; a private attribute, so the REST
     # payload stays unchanged. The command ledger retains it separately for

@@ -1335,7 +1335,19 @@ class PageService:
                 result.published_version_id,
             )
             return PagePublishResult(
-                page=self._payload_from_page(session, page, version),
+                page=self._payload_from_page(
+                    session,
+                    page,
+                    version,
+                    prepared=self._inspect_saved_body(
+                        session,
+                        page,
+                        version,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        actor_provenance=actor_provenance,
+                    ),
+                ),
                 findings=result.findings,
             )
 
@@ -1443,7 +1455,19 @@ class PageService:
             target = self._require_page_version(session, page, version_id)
             current = self._require_page_version(session, page, page.current_version_id)
             if target.id == current.id:
-                return self._payload_from_page(session, page, target)
+                return self._payload_from_page(
+                    session,
+                    page,
+                    target,
+                    prepared=self._inspect_saved_body(
+                        session,
+                        page,
+                        target,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        actor_provenance=actor_provenance,
+                    ),
+                )
 
             parsed = parse_page_frontmatter(target.body_md)
             title = title_from_markdown_heading(parsed.body) or page.title
@@ -1543,6 +1567,14 @@ class PageService:
                 change_set_id=result.change_set_id,
                 review_item_id=result.review_item_id,
                 superseded_review_count=superseded_review_count,
+                prepared=self._inspect_saved_body(
+                    session,
+                    page,
+                    version,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                ),
             )
 
     def list_inline_comments(
@@ -1760,6 +1792,7 @@ class PageService:
                 page,
                 version,
                 current_version_id_override=version.id,
+                prepared=prepared,
             )
 
     def begin_context_edit(
@@ -1812,6 +1845,14 @@ class PageService:
                         page,
                         existing,
                         current_version_id_override=existing.id,
+                        prepared=self._inspect_saved_body(
+                            session,
+                            page,
+                            existing,
+                            actor_kind=actor_kind,
+                            actor_id=actor_id,
+                            actor_provenance=actor_provenance,
+                        ),
                     )
                 base_id = page.current_published_version_id or page.current_version_id
                 base = (
@@ -1874,6 +1915,14 @@ class PageService:
                     page,
                     version,
                     current_version_id_override=version.id,
+                    prepared=self._inspect_saved_body(
+                        session,
+                        page,
+                        version,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        actor_provenance=actor_provenance,
+                    ),
                 )
 
             return execute_idempotent_write(
@@ -2021,6 +2070,14 @@ class PageService:
                     review_item_id=result.review_item_id,
                     change_set_id=result.change_set_id,
                     current_version_id_override=version.id,
+                    prepared=self._inspect_saved_body(
+                        session,
+                        page,
+                        version,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        actor_provenance=actor_provenance,
+                    ),
                 )
 
             return execute_idempotent_write(
@@ -2445,6 +2502,7 @@ class PageService:
                     page,
                     version,
                     current_version_id_override=version.id,
+                    prepared=prepared,
                 )
                 payload._edit_receipt = build_edit_receipt(
                     edit_mode="patch",
@@ -2635,7 +2693,9 @@ class PageService:
                     self._process_publish_maintenance(
                         session, page, version, reason="page.create"
                     )
-                return self._payload_from_page(session, page, version)
+                return self._payload_from_page(
+                    session, page, version, prepared=prepared
+                )
 
             # Not actor-scoped: `write_page`'s upsert-by-slug write always
             # targets the page's own shared head, same as before P8.1 -- it
@@ -2744,7 +2804,9 @@ class PageService:
                             patch=metadata_patch,
                         )
                     self._refresh_page_links(session, page=page, version=current)
-                return self._payload_from_page(session, page, current)
+                return self._payload_from_page(
+                    session, page, current, prepared=prepared
+                )
 
             version = self._insert_version(
                 session,
@@ -2837,6 +2899,7 @@ class PageService:
                 page,
                 version,
                 superseded_review_count=superseded_review_count,
+                prepared=prepared,
             )
 
     def update_page(
@@ -3062,7 +3125,9 @@ class PageService:
                         )
                     if title_changed or metadata_changed:
                         self._refresh_page_links(session, page=page, version=current)
-                return self._payload_from_page(session, page, current)
+                return self._payload_from_page(
+                    session, page, current, prepared=prepared
+                )
 
             was_archived = page.lifecycle_status == "archived"
             version = self._insert_version(
@@ -3168,6 +3233,7 @@ class PageService:
                 page,
                 version,
                 superseded_review_count=superseded_review_count,
+                prepared=prepared,
             )
 
     def _refresh_page_links(
@@ -3487,7 +3553,9 @@ class PageService:
                         "editing",
                         "draft",
                     ):
-                        return self._payload_from_page(session, page, current)
+                        return self._payload_from_page(
+                            session, page, current, prepared=prepared
+                        )
 
                 # An AI client saving its OWN open "editing" row is the P8
                 # editing state machine: private working state, reviewed once
@@ -3897,6 +3965,7 @@ class PageService:
                 session_operation.change_set_id if opened_session_ledger else None
             ),
             superseded_review_count=superseded_review_count,
+            prepared=prepared,
         )
 
     @staticmethod
@@ -4037,6 +4106,7 @@ class PageService:
             change_set_id=result.change_set_id,
             review_item_id=result.review_item_id,
             superseded_review_count=superseded_review_count,
+            prepared=prepared,
         )
 
     @staticmethod
@@ -4226,6 +4296,7 @@ class PageService:
             preserved_as_alternative=True,
             visible_version_id=safe_current_id,
             current_version_id_override=safe_current_id,
+            prepared=prepared,
         )
 
     def _supersede_unresolved_context_reviews_for_version(
@@ -4998,6 +5069,29 @@ class PageService:
             is_public=page.is_public,
         )
 
+    def _inspect_saved_body(
+        self,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+        *,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+    ) -> PreparedBody:
+        return self.body_preparer.inspect(
+            version.body_md,
+            WriteContext(
+                workspace=self._workspace_for(session, page.workspace_id),
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                page=page,
+                version=version,
+                session=session,
+            ),
+        )
+
     def _payload_from_page(
         self,
         session: Session,
@@ -5012,6 +5106,7 @@ class PageService:
         can_read_drafts: bool = True,
         parent_visibility_actor: ActorContext | None = None,
         current_version_id_override: UUID | None | object = _UNSET,
+        prepared: PreparedBody | None = None,
     ) -> PagePayload:
         title, page_type, tags, aliases = effective_metadata_for_payload(
             session,
@@ -5096,6 +5191,10 @@ class PageService:
             ),
             publish_blocked_reasons=_publish_blocked_reasons(
                 session, page, version, registry=self.lint_registry
+            ),
+            lint_report=(
+                prepared.lint_report if prepared is not None
+                else {"fixes": [], "findings": []}
             ),
         )
 

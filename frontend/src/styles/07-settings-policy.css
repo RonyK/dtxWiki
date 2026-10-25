@@ -2638,6 +2638,18 @@ button.history-card {
   border-bottom: 1px solid var(--border-strong);
 }
 
+/* A mode selector needs a full track, unlike a per-rule checkbox. */
+.lint-rules-card .lint-link-fix-policy {
+  display: grid;
+  gap: 8px;
+  padding-left: calc(var(--checkbox-size) + 10px);
+}
+
+.lint-rules-card .lint-link-fix-policy select {
+  width: 100%;
+  max-width: 280px;
+}
+
 /* F-9: the High auto-approval "danger noted" acknowledgement, warning-toned. */
 .review-high-danger-ack {
   margin-top: 0.5rem;
