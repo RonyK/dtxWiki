@@ -202,14 +202,21 @@ export const appRoutes = createRoutesFromElements(
           </RequireAuth>
         }
       />
-      {/* P10.1: canonical Context page permalink — the only workspace-in-path
-          URL in this SPA. Mounts the same ContextScreen; its requestedTargetId
-          derivation reads :pageId as a fallback under the query-param target. */}
+      {/* Canonical page identity is authoritative; query parameters retain
+          tree expansion and reader tab state on the same Context screen. */}
       <Route
         path="/workspaces/:workspaceId/context/pages/:pageId"
         element={
           <RequireAuth>
             <ContextScreen />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/p/:workspaceId/:pageId"
+        element={
+          <RequireAuth>
+            <PagePermalinkRedirect />
           </RequireAuth>
         }
       />
