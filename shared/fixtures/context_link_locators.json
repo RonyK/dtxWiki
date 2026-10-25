@@ -1,0 +1,199 @@
+{
+  "workspace_id": "11111111-1111-4111-8111-111111111111",
+  "self_origins": [
+    "https://wiki.example"
+  ],
+  "cases": [
+    {
+      "name": "full_fragment",
+      "input": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#heading",
+      "kind": "stable_full",
+      "workspace_id": "11111111-1111-4111-8111-111111111111",
+      "page_id": "22222222-2222-4222-8222-222222222222",
+      "fragment": "heading",
+      "stable_url": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#heading",
+      "reason": "Explicit workspace and fragment prevent shard/heading loss."
+    },
+    {
+      "name": "short",
+      "input": "/p/22222222-2222-4222-8222-222222222222",
+      "kind": "stable_short",
+      "workspace_id": null,
+      "page_id": "22222222-2222-4222-8222-222222222222",
+      "fragment": null,
+      "stable_url": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "reason": "Short input inherits only its document workspace."
+    },
+    {
+      "name": "canonical_edit",
+      "input": "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
+      "kind": "canonical_route",
+      "workspace_id": "11111111-1111-4111-8111-111111111111",
+      "page_id": "22222222-2222-4222-8222-222222222222",
+      "fragment": null,
+      "stable_url": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "reason": "Editor routes must retain page identity rather than node identity."
+    },
+    {
+      "name": "navigation",
+      "input": "/context?target=22222222-2222-4222-8222-222222222222",
+      "kind": "nav_target",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Navigation targets may name folders; classification cannot invent a page."
+    },
+    {
+      "name": "concept",
+      "input": "/context/plan/decision-log.md",
+      "kind": "concept_path",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Legacy nested locators look up the leaf slug only."
+    },
+    {
+      "name": "foreign_resource",
+      "input": "dtxwiki://workspaces/33333333-3333-4333-8333-333333333333/context/pages/decision-log",
+      "kind": "resource_uri",
+      "workspace_id": "33333333-3333-4333-8333-333333333333",
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Foreign slug resources must never trigger a cross-workspace lookup."
+    },
+    {
+      "name": "wikilink",
+      "input": "[[decision-log|Decision]]",
+      "kind": "wikilink",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Legacy labels and pin keys must survive formatting changes."
+    },
+    {
+      "name": "self_origin",
+      "input": "https://wiki.example/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "kind": "stable_full",
+      "workspace_id": "11111111-1111-4111-8111-111111111111",
+      "page_id": "22222222-2222-4222-8222-222222222222",
+      "fragment": null,
+      "stable_url": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "reason": "Configured origins canonicalize; request Host is not authority."
+    },
+    {
+      "name": "external_origin",
+      "input": "https://external.example/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "kind": "external",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "An external site with matching route shape remains external."
+    },
+    {
+      "name": "public",
+      "input": "/w/wiki/pages/decision-log",
+      "kind": "public_reader",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Anonymous sharing has its own unchanged contract."
+    },
+    {
+      "name": "fragment",
+      "input": "#heading",
+      "kind": "local",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": "heading",
+      "stable_url": null,
+      "reason": "Local headings must not become page references."
+    },
+    {
+      "name": "media",
+      "input": "/api/v1/uploads/legacy.png",
+      "kind": "media",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Media destinations are outside page identity."
+    },
+    {
+      "name": "encoded_separator",
+      "input": "/p/11111111-1111-4111-8111-111111111111%2f22222222-2222-4222-8222-222222222222",
+      "kind": "unknown",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Encoded separators cannot smuggle a different route."
+    },
+    {
+      "name": "protocol_relative",
+      "input": "//wiki.example/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "kind": "unknown",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Protocol-relative authorities cannot inherit trust."
+    },
+    {
+      "name": "dot_segment",
+      "input": "/p/../11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "kind": "unknown",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Dot segments cannot be normalized into an authorized locator."
+    },
+    {
+      "name": "credentials",
+      "input": "https://user@wiki.example/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "kind": "unknown",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Credential-bearing self URLs are refused rather than rewritten."
+    },
+    {
+      "name": "uuid",
+      "input": "22222222-2222-4222-8222-222222222222",
+      "kind": "page_id",
+      "workspace_id": null,
+      "page_id": "22222222-2222-4222-8222-222222222222",
+      "fragment": null,
+      "stable_url": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "reason": "Typed MCP page UUIDs must not fall back to Library identifiers."
+    },
+    {
+      "name": "legacy_page",
+      "input": "/pages/decision-log",
+      "kind": "slug",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": null,
+      "stable_url": null,
+      "reason": "Retired reader paths still resolve within the owning workspace."
+    }
+  ],
+  "format_cases": [
+    {
+      "title": "Plan [A] \\ *draft* <tag> &amp; ~old~",
+      "workspace_id": "11111111-1111-4111-8111-111111111111",
+      "page_id": "22222222-2222-4222-8222-222222222222",
+      "fragment": "heading",
+      "stable_url": "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#heading",
+      "link_markdown": "[Plan \\[A\\] \\\\ \\*draft\\* \\<tag\\> \\&amp; \\~old\\~](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#heading)",
+      "reason": "Literal label escaping and fragment encoding are a separate cross-language failure path from URL classification."
+    }
+  ]
+}
