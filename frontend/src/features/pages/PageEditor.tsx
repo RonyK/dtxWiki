@@ -687,6 +687,7 @@ export function PageEditor({
   }, []);
   const closeContextRail = useCallback(() => setContextRailOpen(false), []);
   const imageUploadOptions = useMemo<EditorPasteOptions>(() => ({
+    getWorkspaceId: () => workspaceIdRef.current,
     getUploadBatchCapabilities() {
       return contextMediaCapabilitiesRef.current;
     },
