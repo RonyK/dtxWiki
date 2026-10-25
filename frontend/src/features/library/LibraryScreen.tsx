@@ -1,3 +1,4 @@
+import { formatCanonicalContextUrl } from "../../shared/lib/contextLinks";
 import {
   BookOpen,
   Download,
@@ -1681,7 +1682,7 @@ function LibraryDeleteDialog({
             <ul className="library-reference-list">
               {references!.map((reference) => (
                 <li key={reference.id}>
-                  <Link to={`/workspaces/${workspaceId}/context/pages/${reference.id}`}>
+                  <Link to={formatCanonicalContextUrl(workspaceId, reference.id)}>
                     {reference.title ?? reference.slug}
                   </Link>
                 </li>

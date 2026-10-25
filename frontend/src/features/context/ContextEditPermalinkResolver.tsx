@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
 
@@ -28,6 +28,7 @@ export function ContextEditPermalinkResolver() {
   const selectWorkspaceId = workspaceContext?.selectWorkspaceId;
   const ambientSelectedId = workspaceContext?.selectedId ?? null;
   const ambientWorkspaces = workspaceContext?.workspaces;
+  const syncedRouteRef = useRef<string | null>(null);
   const [slug, setSlug] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +40,7 @@ export function ContextEditPermalinkResolver() {
     if (
       !routedWorkspaceId ||
       !selectWorkspaceId ||
-      routedWorkspaceId === ambientSelectedId
+      syncedRouteRef.current === `${routedWorkspaceId}:${pageId}`
     ) {
       return;
     }
@@ -49,8 +50,9 @@ export function ContextEditPermalinkResolver() {
     if (!isMember) {
       return;
     }
-    selectWorkspaceId(routedWorkspaceId);
-  }, [routedWorkspaceId, ambientSelectedId, ambientWorkspaces, selectWorkspaceId]);
+    syncedRouteRef.current = `${routedWorkspaceId}:${pageId}`;
+    if (routedWorkspaceId !== ambientSelectedId) selectWorkspaceId(routedWorkspaceId);
+  }, [routedWorkspaceId, pageId, ambientSelectedId, ambientWorkspaces, selectWorkspaceId]);
 
   useEffect(() => {
     let cancelled = false;

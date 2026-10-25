@@ -1,3 +1,4 @@
+import { formatCanonicalContextUrl } from "../lib/contextLinks";
 import type { TreeNodePayload } from "../api/workspace";
 import type { BreadcrumbItem } from "./Breadcrumbs";
 import { TREE_TARGET_PARAM } from "./treeRouteState";
@@ -61,7 +62,7 @@ function treeNodeHref(
   nodeId: string,
 ) {
   if (workspaceId && node?.target_kind === "context_page" && node.target_id) {
-    return `/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(node.target_id)}`;
+    return formatCanonicalContextUrl(workspaceId, node.target_id);
   }
   if (!basePath) {
     return undefined;
