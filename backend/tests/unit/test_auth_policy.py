@@ -24,7 +24,9 @@ def personal_workspace_slug(client: TestClient) -> str:
     assert response.status_code == 200
     workspaces = response.json()["data"]["workspaces"]
     assert len(workspaces) == 1
-    assert workspaces[0]["title"] == "Personal Workspace"
+    assert workspaces[0]["title"] == (
+        f"{workspaces[0]['owner_display_name']}'s Personal Workspace"
+    )
     return str(workspaces[0]["slug"])
 
 

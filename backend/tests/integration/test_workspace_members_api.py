@@ -123,15 +123,13 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
         assert persisted_workspace.owner_user_id == owner.id
         assert persisted_workspace.visibility == "private"
         assert persisted_workspace.join_policy == "invite_only"
-        assert persisted_workspace.title == "Personal Workspace"
+        assert persisted_workspace.title == f"{owner.display_name}'s Personal Workspace"
 
 
 def test_shared_personal_workspace_summary_carries_owner_display_name(page_service):
-    # WS-09: every Personal workspace defaults to the exact same title
-    # ("Personal Workspace"). Once shared, the member's own `GET
-    # /workspaces` list contains two rows with identical titles (their own
-    # Personal workspace and the owner's) unless something disambiguates
-    # them — owner_display_name is that something.
+    # Shared Personal workspaces retain the owner's display name alongside
+    # their initial owner-prefixed title. This projection also disambiguates
+    # older or customized workspaces whose titles can still be identical.
     owner_client, member_client = _client_pair(page_service)
     owner, member, workspace = _users_and_owner_workspace(page_service)
     added = owner_client.post(
@@ -147,7 +145,8 @@ def test_shared_personal_workspace_summary_carries_owner_display_name(page_servi
     }
     shared_row = rows[str(workspace.id)]
     own_personal_row = rows[str(member.personal_workspace_id)]
-    assert shared_row["title"] == own_personal_row["title"] == "Personal Workspace"
+    assert shared_row["title"] == f"{owner.display_name}'s Personal Workspace"
+    assert own_personal_row["title"] == f"{member.display_name}'s Personal Workspace"
     assert shared_row["owner_display_name"] == owner.display_name
     # The member's own Personal workspace must not claim an owner other than
     # (or in addition to) the obvious — this pins the field is populated

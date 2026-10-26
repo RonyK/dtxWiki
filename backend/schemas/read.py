@@ -38,10 +38,9 @@ class WorkspaceSummary(BaseModel):
     join_policy: str = "invite_only"
     member_count: int = 0
     role: str | None = None
-    # WS-09: every Personal workspace defaults to the same title
-    # ("Personal Workspace"), and since 5130b614 a viewer can be a member of
-    # someone else's shared Personal workspace, not only their own. Without
-    # an owner name, two such rows in the switcher are pixel-identical.
+    # Show the live owner independently of the workspace title. Older or
+    # customized Personal workspaces can share a title, and display names
+    # can change after the initial owner-prefixed title is created.
     owner_display_name: str | None = None
 
     model_config = ConfigDict(extra="forbid")

@@ -110,7 +110,7 @@ def test_signup_creates_user_and_session_without_plaintext_password(
         assert user.default_workspace_id == user.personal_workspace_id
         personal = session.get(Workspace, user.personal_workspace_id)
         assert personal is not None
-        assert personal.title == "Personal Workspace"
+        assert personal.title == "Example User's Personal Workspace"
         assert personal.visibility == "private"
         assert personal.join_policy == "invite_only"
 

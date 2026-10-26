@@ -1009,6 +1009,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await signUp(ownerContext.request, ownerEmail);
             const ownerBefore = await workspaceList(ownerContext);
             expect(ownerBefore.workspaces).toHaveLength(1);
+            const ownerPersonalTitle = ownerBefore.workspaces[0].title;
             expect(ownerBefore.default_workspace_id).toBe(
               ownerBefore.personal_workspace_id,
             );
@@ -1102,11 +1103,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             });
             const personalRow = picker
               .locator(".workspace-menu-row")
-              .filter({ hasText: "Personal Workspace" });
+              .filter({ hasText: ownerPersonalTitle });
             await personalRow.locator("button.workspace-menu-item").click();
             await expect(
               ownerPage.getByRole("button", {
-                name: "Switch workspace, current: Personal Workspace",
+                name: `Switch workspace, current: ${ownerPersonalTitle}`,
               }),
             ).toBeVisible();
             await ownerPage.goto("/settings?section=members");

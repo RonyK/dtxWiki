@@ -1,6 +1,7 @@
+import re
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
-from uuid import uuid4, uuid5
+from uuid import uuid5
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -16,6 +17,7 @@ from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.policy.rbac import grant_workspace_membership
 from backend.services.personal_workspace_service import (
     PERSONAL_WORKSPACE_NAMESPACE,
+    _personal_workspace_slug,
     ensure_personal_workspace,
 )
 
@@ -57,8 +59,8 @@ def test_personal_workspace_is_ordinary_private_owner_anchor(session_factory):
         assert workspace is not None
         assert user.personal_workspace_id == workspace_id
         assert user.default_workspace_id == workspace_id
-        assert workspace.title == "Personal Workspace"
-        assert workspace.name == "Personal Workspace"
+        assert workspace.title == "Owner Name's Personal Workspace"
+        assert workspace.name == "Owner Name's Personal Workspace"
         assert workspace.visibility == "private"
         assert workspace.join_policy == "invite_only"
         assert workspace.owner_user_id == user_id
@@ -81,7 +83,7 @@ def test_personal_workspace_is_ordinary_private_owner_anchor(session_factory):
             )
             is None
         )
-        assert "owner" not in workspace.slug
+        assert workspace.slug == "personal-owner-name"
         assert "example" not in workspace.slug
 
 
@@ -118,6 +120,8 @@ def test_personal_workspace_reensure_preserves_owner_customization(session_facto
         workspace = ensure_personal_workspace(session, user=user)
         workspace.title = "Research Commons"
         workspace.name = "Research Commons"
+        original_slug = workspace.slug
+        user.display_name = "Renamed Owner"
         workspace.visibility = "public"
         workspace.join_policy = "request"
         session.flush()
@@ -127,6 +131,7 @@ def test_personal_workspace_reensure_preserves_owner_customization(session_facto
         assert ensured.id == workspace.id
         assert ensured.title == "Research Commons"
         assert ensured.name == "Research Commons"
+        assert ensured.slug == original_slug
         assert ensured.visibility == "public"
         assert ensured.join_policy == "request"
         assert ensured.owner_user_id == user.id
@@ -181,26 +186,70 @@ def test_concurrent_personal_ensure_converges_on_one_anchor(tmp_path):
     engine.dispose()
 
 
-def test_personal_workspace_slug_collision_uses_stable_uuid_suffix(session_factory):
+def test_personal_workspace_slug_collision_uses_number_without_changing_id(
+    session_factory,
+):
     with session_factory.begin() as session:
+        namesake = _user(session, email="namesake@example.com")
+        namesake.display_name = "김민아"
+        occupied = ensure_personal_workspace(session, user=namesake)
+        assert occupied.slug == "personal-user"
+
         user = _user(session, email="collision@example.com")
+        user.display_name = "김민아"
         first_candidate_id = uuid5(PERSONAL_WORKSPACE_NAMESPACE, str(user.id))
-        session.add(
-            Workspace(
-                id=uuid4(),
-                slug=f"personal-{first_candidate_id.hex}",
-                title="Occupied",
-                name="Occupied",
-            )
+
+        personal = ensure_personal_workspace(session, user=user)
+
+        assert personal.id == first_candidate_id
+        assert personal.title == "김민아's Personal Workspace"
+        assert personal.name == personal.title
+        assert personal.slug == "personal-user-2"
+        assert "collision" not in personal.slug
+
+        # Freeing the base must not create a second workspace when recovering
+        # an existing numbered candidate whose anchor pointer was lost.
+        user.personal_workspace_id = None
+        occupied.slug = "renamed-workspace"
+        session.flush()
+
+        recovered = ensure_personal_workspace(session, user=user)
+
+        assert recovered.id == first_candidate_id
+        assert recovered.slug == "personal-user-2"
+
+
+def test_personal_workspace_slug_bounds_unicode_lowercase_expansion():
+    slug = _personal_workspace_slug("İ" * 32)
+
+    assert len(slug) <= 80
+    assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug)
+    assert slug.startswith("personal-i-i-")
+    assert len(slug) <= len("personal-") + 32
+
+
+def test_personal_workspace_recovers_legacy_candidate_without_renaming(session_factory):
+    with session_factory.begin() as session:
+        user = _user(session)
+        workspace_id = uuid5(PERSONAL_WORKSPACE_NAMESPACE, str(user.id))
+        legacy = Workspace(
+            id=workspace_id,
+            slug=f"personal-{workspace_id.hex}",
+            title="Personal Workspace",
+            name="Personal Workspace",
+            visibility="public",
+            owner_user_id=user.id,
         )
+        session.add(legacy)
         session.flush()
 
         personal = ensure_personal_workspace(session, user=user)
 
-        assert personal.id != first_candidate_id
-        assert personal.slug.startswith("personal-")
-        assert personal.slug == f"personal-{personal.id.hex}"
-        assert "collision" not in personal.slug
+        assert personal.id == workspace_id
+        assert user.personal_workspace_id == workspace_id
+        assert personal.slug == f"personal-{workspace_id.hex}"
+        assert personal.title == personal.name == "Personal Workspace"
+        assert personal.visibility == "public"
 
 
 def test_personal_workspace_preserves_accessible_explicit_default(session_factory):
