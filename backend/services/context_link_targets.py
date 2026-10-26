@@ -115,6 +115,11 @@ def context_link_targets(
                 )
             )
             continue
+        # A locator outside the supported URL grammar is opaque authored text,
+        # not a failed internal destination. In particular, do not probe the
+        # source workspace for unknown/custom paths or protocols.
+        if locator.kind == "unknown":
+            continue
         resolution = resolve(locator, context)
         if resolution.state == "ignored":
             continue
@@ -293,8 +298,6 @@ def _server_navigation_target(
     """Confirm non-Context browser destinations in their proven source workspace."""
     reference = _parse_workspace_navigation_reference(href, self_origins=self_origins)
     if reference is None:
-        if _looks_like_workspace_navigation(href, self_origins=self_origins):
-            return True, None
         return False, None
     section, kind, target_id, explicit_workspace_id = reference
     if explicit_workspace_id is not None and explicit_workspace_id != workspace_id:
@@ -687,34 +690,6 @@ def _parse_workspace_navigation_reference(
             return "lint", "item", UUID(match[5]), UUID(match[4])
     except (ValueError, UnicodeError):
         return None
-
-
-def _looks_like_workspace_navigation(
-    href: str, *, self_origins: frozenset[str]
-) -> bool:
-    """Recognize malformed internal route references without probing targets."""
-    try:
-        locator = _classify_context_navigation(href, self_origins)
-        if locator.kind in {"canonical_route", "stable_full", "stable_short"}:
-            # Valid Context page links belong to the established Context
-            # resolver, which preserves pin, publication, and foreign-link
-            # handling. This guard only catches malformed product routes.
-            return False
-        parts = urlsplit(href)
-        if parts.scheme or parts.netloc:
-            if not classify(href, self_origins).absolute:
-                return False
-            path = parts.path
-        else:
-            path = parts.path
-        return (
-            path in {"/context", "/library", "/agent", "/review", "/ask", "/lint"}
-            or path == "/chats"
-            or path.startswith("/chats/")
-            or path.startswith("/workspaces/")
-        )
-    except ValueError:
-        return False
 
 
 def _tree_node_visible(

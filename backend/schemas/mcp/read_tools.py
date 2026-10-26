@@ -175,8 +175,9 @@ class GetIndexInput(MCPConversationInput):
     # OKF navigational catalog (Tier-1 retrieval): returns an index.md the agent
     # surveys before READing concepts. Per-actor filtered (restricted/drafts).
     # Small workspaces render one flat catalog; larger ones render routing
-    # nodes — pass ``node`` (a "node:" link target from a prior response:
-    # slash path like "/context/payments", or a node UUID) to descend.
+    # nodes — pass the exact emitted ``node:/context/payments`` or
+    # ``node:/library/research`` link target to descend. Bare slash paths and
+    # node UUIDs remain accepted as well. The workspace_id always scopes lookup.
     workspace_id: UUID
     sections: list[Literal["context", "library"]] = Field(
         default_factory=lambda: ["context", "library"]

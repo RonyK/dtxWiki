@@ -252,7 +252,7 @@ export function FolderSummaryCard({
       {isFolder && loadIndexPreview ? (
         <AdvancedSection
           label={t("navSummary.previewTitle", {
-            defaultValue: "Index preview (how agents see this folder)",
+            defaultValue: "Index preview",
           })}
           onOpenChange={setPreviewOpen}
           open={previewOpen}

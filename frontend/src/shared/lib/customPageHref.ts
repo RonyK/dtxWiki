@@ -1,18 +1,13 @@
-const URI_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const FORBIDDEN_EXECUTION_SCHEMES = new Set(["javascript", "vbscript", "data"]);
 
 /**
- * Whether an authored page anchor href can retain its URI scheme through the
- * page renderer's sanitizer. This deliberately validates only the scheme and
- * unsafe characters; it does not parse, normalize, or rewrite the URI.
+ * Preserve every authored href format except known executable schemes. The
+ * browser strips leading C0/space and embedded ASCII tabs/newlines before
+ * interpreting a scheme; check that view without changing the authored href.
+ * Unrecognized syntax is not evidence that an address should be removed.
  */
 export function canPreservePageHref(value: string): boolean {
-  if (!value || value !== value.trim() || /[\u0000-\u0020\u007f\\]/.test(value)) {
-    return false;
-  }
-
-  const match = URI_SCHEME.exec(value);
-  if (!match) return false;
-
-  return !FORBIDDEN_EXECUTION_SCHEMES.has(match[0].slice(0, -1).toLowerCase());
+  const browserPrefix = value.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+/, "");
+  const scheme = /^([^:/?#]*):/.exec(browserPrefix)?.[1].toLowerCase();
+  return !scheme || !FORBIDDEN_EXECUTION_SCHEMES.has(scheme);
 }

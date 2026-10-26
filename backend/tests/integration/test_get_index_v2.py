@@ -1,5 +1,6 @@
 """get_index v2: auto 2-mode, fanout 50, export contract split (C2-T3)."""
 
+import re
 import sqlite3
 
 import pytest
@@ -202,6 +203,10 @@ def test_large_workspace_routes_and_descends(large_workspace):
         )
         # routing root: folder line with subtree count + node link
         assert "📁 [Payments/](node:/context/payments) (60)" in root_index
+        emitted_node_href = re.search(
+            r"\]\((node:/context/payments)\)", root_index
+        )
+        assert emitted_node_href is not None
         # fanout: root has 150+ direct pages -> truncated with honest tail
         assert "…and" in root_index and "more — narrow via a child folder" in (
             root_index
@@ -210,13 +215,24 @@ def test_large_workspace_routes_and_descends(large_workspace):
         assert "includes Payment Doc 000" in root_index
         assert "mostly concept" in root_index
 
+        # Budget exception: this additional database traversal joins a link
+        # emitted from the actual tree projection to the next index response;
+        # a pure parser test cannot prove that generator-to-consumer contract.
         node_index = build_workspace_index(
+            session,
+            workspace_id,
+            actor=None,
+            workspace_slug="default",
+            node=emitted_node_href.group(1),
+        )
+        bare_node_index = build_workspace_index(
             session,
             workspace_id,
             actor=None,
             workspace_slug="default",
             node="/context/payments",
         )
+        assert node_index == bare_node_index
         assert "(node: /context/payments)" in node_index
         # 60 children -> exactly 50 entries + "…and 10 more"
         assert node_index.count("* [Payment Doc") == 50
@@ -285,10 +301,11 @@ def test_unknown_node_raises_not_found(session_factory):
     from backend.services.okf_index import IndexNodeNotFoundError
 
     with session_factory() as session:
+        workspace_id = _workspace_id(session)
         with pytest.raises(IndexNodeNotFoundError):
             build_workspace_index(
                 session,
-                _workspace_id(session),
+                workspace_id,
                 actor=None,
                 workspace_slug="default",
                 node="/context/does-not-exist",

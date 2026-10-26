@@ -423,7 +423,9 @@ function pageUrlTransform(
   key: string,
   node: Readonly<HastElement>,
 ) {
-  if (node.tagName === "a" && key === "href" && canPreservePageHref(value)) return value;
+  if (node.tagName === "a" && key === "href") {
+    return canPreservePageHref(value) ? value : undefined;
+  }
   return node.tagName === "img" && key === "src"
     ? trustedPageImageSource(value)
     : defaultUrlTransform(value);
@@ -449,7 +451,7 @@ function rehypeConstrainPageImageSources() {
   };
 }
 
-// Preserve authored navigation schemes without widening sanitizer protocols
+// Preserve authored hrefs without widening sanitizer protocols
 // for images, MathML or other URL-bearing elements. Raw HTML attributes cannot
 // create node.data; only this transform can carry an href past sanitization.
 function transformPageAnchorHrefs(tree: HastRoot, restore: boolean) {
@@ -590,10 +592,15 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       }
       const classification = classifyContextLink(locator, {
         workspaceId: options.workspaceId,
-        allowWorkspaceNavigation: options.allowWorkspaceNavigation,
+        allowWorkspaceNavigation: true,
       });
       const wikilink = reference?.wikilink === true;
-      const internal = target || wikilink || !["external", "public_reader", "local", "media"].includes(classification.kind);
+      // An unrecognized href belongs to its author. Only a positively known
+      // app locator or a server-resolved target can acquire internal policy.
+      const internal = target || wikilink || [
+        "page_id", "stable_full", "stable_short", "canonical_route",
+        "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
+      ].includes(classification.kind);
       if (!internal) return [child];
       delete props.dataContextLinkLocator;
       delete props["data-context-link-locator"];
@@ -602,6 +609,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         : target ? null
         : wikilink && classification.lookup === "" && href.startsWith("#") && href !== "#" ? href
         : options.publicReader ? null
+        : classification.kind === "workspace_navigation" && !options.allowWorkspaceNavigation ? null
         : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
       if (options.publicReader && !resolvedHref) return unavailable();
       if (resolvedHref) {
@@ -1273,7 +1281,7 @@ function MarkdownLink({
     "aria-label": props["aria-label"] ?? linkedImageFallbackLabel(children, t),
   };
   const renderLink = (linkChildren: ReactNode) => {
-    if (!href) {
+    if (href == null) {
       return <a {...accessibleProps} className={className}>{linkChildren}</a>;
     }
     if (href.startsWith("#")) {
@@ -1287,7 +1295,12 @@ function MarkdownLink({
       ? referenceNavigationHref(href, behavior.sourceWorkspaceId)
       : null;
     const renderedHref = navigationHref ?? href;
-    if (renderedHref.startsWith("/") && !renderedHref.startsWith("//")) {
+    const knownNavigation = classifyContextLink(renderedHref, {
+      workspaceId: behavior?.sourceWorkspaceId,
+      allowWorkspaceNavigation: true,
+    });
+    if (renderedHref.startsWith("/") && !renderedHref.startsWith("//") &&
+        (navigationHref || ["stable_full", "stable_short", "canonical_route", "workspace_navigation", "public_reader"].includes(knownNavigation.kind))) {
       const returnState = navigationHref && routeState
         ? createReferenceReturnState(routeState.sourceHref)
         : undefined;

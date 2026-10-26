@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
+import pytest
+
 from backend.services.context_link_targets import (
     _server_navigation_target,
     ask_context_link_targets,
@@ -21,6 +23,7 @@ from backend.services.context_links import (
     resolve,
     rewrite_links_with_report,
 )
+from backend.services.okf_index import IndexNodeNotFoundError, _resolve_node_ref
 from backend.services.tree_projection import TreeProjectionService
 from backend.spi.types import ActorContext
 
@@ -67,6 +70,50 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
             )
             == case["link_markdown"]
         )
+
+    # Budget exception: these four inputs exercise independent rejection
+    # gates for the emitted node URI wrapper (authority, query, traversal and
+    # encoded path). The guard must run before any workspace/tree lookup.
+    for invalid_node_uri in (
+        "node://other-host/context/payments",
+        "node:/context/payments?target=other",
+        "node:/context/../payments",
+        "node:/context/%70ayments",
+    ):
+        with pytest.raises(IndexNodeNotFoundError):
+            _resolve_node_ref(None, workspace_id, None, invalid_node_uri)
+
+    # Budget exception: a valid URI must still stay inside the requested
+    # section projection. Syntax-rejection cases cannot reach this guard;
+    # stub the root lookup to exercise it without another DB traversal.
+    with monkeypatch.context() as scope:
+        outside_root = SimpleNamespace(
+            id=UUID("99999999-9999-4999-8999-999999999999")
+        )
+        scope.setattr(
+            "backend.services.tree_service.section_root_node",
+            lambda *_args: outside_root,
+        )
+        with pytest.raises(IndexNodeNotFoundError):
+            _resolve_node_ref(
+                None, workspace_id, SimpleNamespace(nodes={}), "node:/context"
+            )
+        # Budget exception: the generator uses the UUID path segment when an
+        # older folder has no slug. This roundtrip is independent of the URI
+        # wrapper and section guard; a tiny projection avoids another DB case.
+        legacy_folder = SimpleNamespace(
+            id=UUID("88888888-8888-4888-8888-888888888888"),
+            node_kind="folder",
+            slug=None,
+        )
+        projection = SimpleNamespace(
+            nodes={outside_root.id: outside_root, legacy_folder.id: legacy_folder},
+            is_visible=lambda _node_id: True,
+            visible_children=lambda _node_id: [legacy_folder],
+        )
+        assert _resolve_node_ref(
+            None, workspace_id, projection, f"node:/context/{legacy_folder.id}"
+        ) is legacy_folder
 
     # Independent exclusions: code/fence/math/frontmatter/raw HTML/image,
     # shared references and split text nodes have different parser mechanisms.
@@ -271,7 +318,7 @@ def test_workspace_navigation_projection_respects_source_scope_and_route_identit
         f"/workspaces/{source_workspace}/context?target={target}",
         workspace_id=source_workspace,
         actor=None,
-    ) == (True, None)
+    ) == (False, None)
     # Additional logical unit input: the foreign-workspace rejection above
     # cannot exercise dispatcher collisions with valid Context routes sharing
     # /workspaces/. Keep this separate failure path off the DB/transport lane;
@@ -330,6 +377,51 @@ def test_workspace_navigation_projection_respects_source_scope_and_route_identit
     assert _server_navigation_target(
         object(), agent_edit_href, workspace_id=source_workspace, actor=editor
     ) == (True, agent_edit_href)
+
+    # Budget exception: these opaque URL forms reach separate parser gates
+    # (network-path authority, relative traversal, unsupported same-origin
+    # route, and dtxwiki query grammar). One mixed authored body also includes
+    # a recognized but missing Context route to ensure fail-closed metadata is
+    # retained for a genuine internal target while unknown hrefs are omitted.
+    opaque_hrefs = (
+        "//cdn.example/assets/manual",
+        "../relative/manual",
+        "https://self.test/unsupported-widget?mode=compact",
+        f"dtxwiki://workspaces/{source_workspace}/context/pages/manual?view=history",
+    )
+    missing_context_href = (
+        f"/workspaces/{source_workspace}/context/pages/{target}"
+    )
+    resolution_calls = []
+
+    def resolve_missing(locator, _context):
+        resolution_calls.append(locator.kind)
+        assert locator.kind == "canonical_route"
+        return Resolution("unavailable")
+
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.resolve", resolve_missing
+    )
+    mixed_links = context_link_targets(
+        object(),
+        page=SimpleNamespace(
+            id=UUID("66666666-6666-4666-8666-666666666666"),
+            workspace_id=source_workspace,
+            current_published_version_id=None,
+        ),
+        version=SimpleNamespace(
+            id=UUID("77777777-7777-4777-8777-777777777777"),
+            body_md="\n".join(
+                f"[link]({href})" for href in (*opaque_hrefs, missing_context_href)
+            ),
+        ),
+        actor=None,
+        self_origins=frozenset({"https://self.test"}),
+    )
+    assert [link.locator for link in mixed_links] == [missing_context_href]
+    assert mixed_links[0].state == "unavailable"
+    assert mixed_links[0].href is None
+    assert resolution_calls == ["canonical_route"]
 
 
 def test_preview_artifact_link_can_precede_ready_head(monkeypatch):

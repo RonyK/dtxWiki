@@ -32,6 +32,7 @@ import { formatContextPageUrl } from "../../shared/lib/contextLinks";
 
 import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { MarkdownView } from "../pages/MarkdownView";
+import { RoutingIndexPreview } from "../pages/RoutingIndexPreview";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
 import { ContextReconciliationWorkbench } from "./ContextReconciliationWorkbench";
 import { citationKeyForSource } from "../pages/editorCompletions";
@@ -1443,7 +1444,11 @@ export function ContextScreen() {
                 }
                 onSelectNode={selectNode}
                 renderMarkdown={(markdown) => (
-                  <MarkdownView body={markdown} unresolvedLinksAsText wikilinkMode="plain" />
+                  <RoutingIndexPreview
+                    body={markdown}
+                    nodes={state.tree}
+                    workspaceId={routeWorkspaceId}
+                  />
                 )}
               />
             ) : contextRoot ? (
@@ -1460,7 +1465,11 @@ export function ContextScreen() {
                   nodes={state.tree}
                   onSelectNode={selectNode}
                   renderMarkdown={(markdown) => (
-                    <MarkdownView body={markdown} unresolvedLinksAsText wikilinkMode="plain" />
+                    <RoutingIndexPreview
+                      body={markdown}
+                      nodes={state.tree}
+                      workspaceId={routeWorkspaceId}
+                    />
                   )}
                 />
                 <RecentItemsList

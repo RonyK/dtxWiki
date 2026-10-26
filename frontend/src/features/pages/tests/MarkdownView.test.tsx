@@ -520,6 +520,14 @@ describe("MarkdownView", () => {
             '<a href="node:/context/raw-notes">Raw node protocol</a> <a href="s://service/raw" onclick="alert(1)">Raw custom protocol</a>',
             '[Script link](javascript:alert(1)) [VB script link](vbscript:msgbox(1)) [Data link](data:text/html,unsafe)',
             '<a href="java&#x73;cript:alert(1)">Entity script link</a> <a href="java&#x0a;script:alert(1)">Control script link</a>',
+            '',
+            '[Parent relative](../manual/topic?view=print#raw-anchor)',
+            '[Unrecognized root](/unregistered/path?x=1#raw-anchor)',
+            '[Unrecognized own URI](dtxwiki://different-namespace/topic?x=1#raw-anchor)',
+            '[Encoded path](/unregistered/%2e%2e/topic)',
+            '<a href="odd format:value with spaces">Opaque syntax</a>',
+            '',
+            '[Empty href]()',
           ].join("\n")}
         />
       </MemoryRouter>,
@@ -545,7 +553,7 @@ describe("MarkdownView", () => {
       .toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "External" }))
       .toHaveAttribute("rel", "noopener noreferrer");
-    // URI schemes are not an allowlist: authored navigation survives both
+    // Address formats are not an allowlist: authored navigation survives both
     // sanitizer and ReactMarkdown. Executable schemes remain blocked after
     // HTML entity/control decoding, and restored hrefs cannot restore events.
     for (const [name, href] of [
@@ -553,19 +561,25 @@ describe("MarkdownView", () => {
       ["Custom protocol", "s://service/reference"],
       ["Raw node protocol", "node:/context/raw-notes"],
       ["Raw custom protocol", "s://service/raw"],
+      ["Protocol", "//example.com"],
+      ["Parent relative", "../manual/topic?view=print#raw-anchor"],
+      ["Unrecognized root", "/unregistered/path?x=1#raw-anchor"],
+      ["Unrecognized own URI", "dtxwiki://different-namespace/topic?x=1#raw-anchor"],
+      ["Encoded path", "/unregistered/%2e%2e/topic"],
+      ["Opaque syntax", "odd format:value with spaces"],
     ]) {
       const link = screen.getByRole("link", { name });
       expect(link).toHaveAttribute("href", href);
       expect(link).not.toHaveAttribute("onclick");
       expect(link.querySelector(".workspace-link-badge")).toBeNull();
     }
+    expect(screen.getByText("Empty href").closest("a")).toHaveAttribute("href", "");
     for (const name of ["Script link", "VB script link", "Data link", "Entity script link", "Control script link"]) {
       expect(screen.queryByRole("link", { name })).toBeNull();
       expect(screen.getByText(name)).toBeInTheDocument();
     }
     // Budget exception: legacy destination pins, short preview inheritance,
     // reference links, and unavailable navigation are distinct render paths.
-    expect(screen.queryByRole("link", { name: "Protocol" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Missing" })).not.toBeInTheDocument();
     const missing = screen.getByRole("button", { name: "Missing" });
     expect(missing).toHaveAttribute("aria-haspopup", "dialog");
@@ -1076,10 +1090,12 @@ describe("MarkdownView", () => {
     );
 
     expect(screen.getByRole("link", { name: /Library item/ })).toHaveAttribute("href", itemHref);
-    expect(screen.queryByRole("link", { name: "Spoofed target" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Spoofed target" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Unknown route" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Unknown route" })).toBeInTheDocument();
+    // Out-of-contract addresses keep their href; the destination router owns
+    // rejecting an invalid route or identity query when it is actually opened.
+    expect(screen.getByRole("link", { name: "Spoofed target" })).toHaveAttribute("href", `${itemHref}&target=other`);
+    expect(screen.getByRole("link", { name: "Unknown route" })).toHaveAttribute("href", `/workspaces/${workspaceId}/admin`);
+    expect(screen.queryByRole("button", { name: "Spoofed target" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Unknown route" })).not.toBeInTheDocument();
     const absoluteItem = screen.getByRole("link", { name: /Absolute item/ });
     expect(absoluteItem).toHaveAttribute("href", `${itemHref}#user-content-details`);
     expect(absoluteItem).not.toHaveAttribute("target");
@@ -1149,6 +1165,7 @@ describe("MarkdownView", () => {
     );
     expect(screen.getByText("Library item")).toBeInTheDocument();
     expect(screen.getByText("Concept")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Concept" })).toHaveAttribute("href", `/library/${itemId}.md`);
     expect(screen.getByRole("link", { name: "Node folder" })).toHaveAttribute("href", "node:/context/notes");
     expect(screen.queryByRole("button", { name: /Library item|Concept/ })).toBeNull();
     expect(document.querySelector(".unavailable-reference")).toBeNull();

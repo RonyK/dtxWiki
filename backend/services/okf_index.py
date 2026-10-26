@@ -118,34 +118,60 @@ def _resolve_node_ref(
     """Resolve a node reference: UUID or a slash path of folder slugs rooted
     at the section root (e.g. ``/context/payments/gateway``)."""
 
+    original_ref = ref
+    if ref.startswith("node:"):
+        # Routing indexes emit links in this exact URI form. Keep the URI
+        # wrapper deliberately narrow: these paths are scoped by the
+        # workspace_id supplied to get_index, and must not be URL-decoded or
+        # normalized before the tree lookup.
+        if not ref.startswith("node:/") or ref.startswith("node://"):
+            raise IndexNodeNotFoundError(original_ref)
+        path = ref[len("node:") :]
+        if (
+            path.startswith("//")
+            or any(char in path for char in "?#%\\")
+            or any(ord(char) <= 32 or ord(char) == 127 for char in path)
+        ):
+            raise IndexNodeNotFoundError(original_ref)
+        parts = path[1:].split("/")
+        if (
+            not parts
+            or parts[0] not in {"context", "library"}
+            or any(not part or part in {".", ".."} for part in parts)
+        ):
+            raise IndexNodeNotFoundError(original_ref)
+        ref = path
+
     node_id = parse_uuid_or_none(ref)
     if node_id is not None:
         node = projection.nodes.get(node_id)
         if node is None or not projection.is_visible(node.id):
-            raise IndexNodeNotFoundError(ref)
+            raise IndexNodeNotFoundError(original_ref)
         return node
 
     parts = [part for part in ref.strip().strip("/").split("/") if part]
     if not parts:
-        raise IndexNodeNotFoundError(ref)
+        raise IndexNodeNotFoundError(original_ref)
     from backend.services.tree_service import section_root_node
 
     section = parts[0]
     try:
         current = section_root_node(session, workspace_id, section)
     except Exception as exc:
-        raise IndexNodeNotFoundError(ref) from exc
+        raise IndexNodeNotFoundError(original_ref) from exc
+    if current.id not in projection.nodes or not projection.is_visible(current.id):
+        raise IndexNodeNotFoundError(original_ref)
     for slug in parts[1:]:
         match = next(
             (
                 child
                 for child in projection.visible_children(current.id)
-                if child.node_kind == "folder" and child.slug == slug
+                if child.node_kind == "folder" and (child.slug or str(child.id)) == slug
             ),
             None,
         )
         if match is None:
-            raise IndexNodeNotFoundError(ref)
+            raise IndexNodeNotFoundError(original_ref)
         current = match
     return current
 

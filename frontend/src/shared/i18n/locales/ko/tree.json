@@ -140,7 +140,7 @@
     "placeholder": "이 폴더로 와야 하는 질의와, 오면 안 되는 질의('~는 X 참조')를 쓰세요.",
     "autoBadge": "자동 생성",
     "saveError": "폴더 요약을 저장하지 못했습니다.",
-    "previewTitle": "인덱스 미리보기 (에이전트에게 보이는 모습)",
+    "previewTitle": "인덱스 미리보기",
     "previewLoading": "불러오는 중…",
     "previewError": "인덱스 미리보기를 불러오지 못했습니다."
   },

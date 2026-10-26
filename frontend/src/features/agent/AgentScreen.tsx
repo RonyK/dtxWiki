@@ -120,6 +120,7 @@ import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
 import { ArtifactChatsSection } from "../mcp-chats/ArtifactChatsSection";
 import { MarkdownView } from "../pages/MarkdownView";
+import { RoutingIndexPreview } from "../pages/RoutingIndexPreview";
 import {
   AGENT_TEMPLATES,
   BLANK_TEMPLATE_ID,
@@ -1479,7 +1480,11 @@ export function AgentScreen() {
                 }
                 onSelectNode={selectNode}
                 renderMarkdown={(markdown) => (
-                  <MarkdownView body={markdown} unresolvedLinksAsText wikilinkMode="plain" />
+                  <RoutingIndexPreview
+                    body={markdown}
+                    nodes={state.tree}
+                    workspaceId={routeWorkspaceId}
+                  />
                 )}
               />
             ) : (

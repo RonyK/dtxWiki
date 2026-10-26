@@ -140,7 +140,7 @@
     "placeholder": "Describe which queries belong in this folder — and which do not ('see X for ~').",
     "autoBadge": "auto",
     "saveError": "Could not save the folder summary.",
-    "previewTitle": "Index preview (how agents see this folder)",
+    "previewTitle": "Index preview",
     "previewLoading": "Loading…",
     "previewError": "Could not load the index preview."
   },
