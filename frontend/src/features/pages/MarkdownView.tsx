@@ -119,6 +119,10 @@ type MarkdownViewProps = {
   // Trusted authored previews/readers may activate only syntactically valid,
   // explicit workspace routes; public readers and untrusted previews stay closed.
   allowWorkspaceNavigationLinks?: boolean;
+  // Server-generated folder index previews carry agent-facing locators
+  // (node:, /library/<id>.md), not authored references. Their unresolved
+  // links stay plain text instead of claiming the target is unavailable.
+  unresolvedLinksAsText?: boolean;
 };
 
 type DeletedSourceMark = {
@@ -212,6 +216,7 @@ export function MarkdownView({
   renderPolicy = "page",
   workspaceId,
   allowWorkspaceNavigationLinks = false,
+  unresolvedLinksAsText = false,
 }: MarkdownViewProps) {
   const articleRef = useRef<HTMLElement | null>(null);
   const inRouter = useInRouterContext();
@@ -257,7 +262,8 @@ export function MarkdownView({
     confirmedOnly: renderPolicy === "confirmed-links",
     allowWorkspaceNavigation:
       renderPolicy === "page" && wikilinkMode === "internal" && allowWorkspaceNavigationLinks,
-  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks]);
+    unresolvedLinksAsText,
+  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks, unresolvedLinksAsText]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -445,6 +451,7 @@ type ContextLinkResolverOptions = {
   publicReader: boolean;
   confirmedOnly?: boolean;
   allowWorkspaceNavigation?: boolean;
+  unresolvedLinksAsText?: boolean;
 };
 
 function rehypeWrapRegisteredReferences() {
@@ -518,7 +525,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       const locator = reference?.locator ?? href;
       const target = targets.get(locator);
       const unavailable = (): HastNode[] => {
-        if (!reference) return child.children;
+        if (!reference || options.unresolvedLinksAsText) return child.children;
         delete props.href;
         delete props.title;
         delete props.ariaDisabled;

@@ -321,8 +321,10 @@ export function PagePublicShareControl({
               <article className="published-version-preview-body">
                 <h1>{previewPage.title}</h1>
                 <MarkdownView
+                  allowWorkspaceNavigationLinks
                   body={previewPage.body_md}
                   stripLeadingHeading={previewPage.title}
+                  workspaceId={workspaceId}
                 />
               </article>
             ) : null}

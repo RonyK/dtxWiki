@@ -1443,7 +1443,7 @@ export function ContextScreen() {
                 }
                 onSelectNode={selectNode}
                 renderMarkdown={(markdown) => (
-                  <MarkdownView body={markdown} wikilinkMode="plain" />
+                  <MarkdownView body={markdown} unresolvedLinksAsText wikilinkMode="plain" />
                 )}
               />
             ) : contextRoot ? (
@@ -1460,7 +1460,7 @@ export function ContextScreen() {
                   nodes={state.tree}
                   onSelectNode={selectNode}
                   renderMarkdown={(markdown) => (
-                    <MarkdownView body={markdown} wikilinkMode="plain" />
+                    <MarkdownView body={markdown} unresolvedLinksAsText wikilinkMode="plain" />
                   )}
                 />
                 <RecentItemsList

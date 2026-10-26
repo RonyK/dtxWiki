@@ -1479,7 +1479,7 @@ export function AgentScreen() {
                 }
                 onSelectNode={selectNode}
                 renderMarkdown={(markdown) => (
-                  <MarkdownView body={markdown} wikilinkMode="plain" />
+                  <MarkdownView body={markdown} unresolvedLinksAsText wikilinkMode="plain" />
                 )}
               />
             ) : (
