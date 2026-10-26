@@ -65,6 +65,26 @@
       "reason": "Foreign slug resources must never trigger a cross-workspace lookup."
     },
     {
+      "name": "resource_query",
+      "input": "dtxwiki://workspaces/33333333-3333-4333-8333-333333333333/context/pages/decision-log?view=history#section",
+      "kind": "unknown",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": "section",
+      "stable_url": null,
+      "reason": "Context resource URIs have no query contract; retain the locator as unsupported."
+    },
+    {
+      "name": "resource_empty_query",
+      "input": "dtxwiki://workspaces/33333333-3333-4333-8333-333333333333/context/pages/decision-log?#section",
+      "kind": "unknown",
+      "workspace_id": null,
+      "page_id": null,
+      "fragment": "section",
+      "stable_url": null,
+      "reason": "Even an empty query delimiter is unsupported and must not be silently removed."
+    },
+    {
       "name": "wikilink",
       "input": "[[decision-log#Breaking Changes|Decision]]",
       "kind": "wikilink",

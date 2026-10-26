@@ -175,6 +175,11 @@ def classify(href: str, self_origins=()) -> Locator:
         if decoded.startswith(("/api/", "/uploads/")):
             return Locator("media", **base)
         if parts.scheme == "dtxwiki":
+            # Context resource URIs have no query contract. Preserve the
+            # authored URI for diagnosis instead of resolving by slug and
+            # silently dropping an unsupported query during canonicalization.
+            if "?" in href.split("#", 1)[0]:
+                return Locator("unknown", **base)
             match = re.fullmatch(rf"/({_UUID})/context/pages/([^/]+)", decoded)
             if parts.netloc == "workspaces" and match:
                 return Locator(
@@ -795,30 +800,12 @@ def decide(
     if resolution.state == "ignored":
         return LinkDecision("keep")
     if resolution.state == "foreign":
+        # Foreign slug resources are not stable identities, so retain their
+        # existing diagnostic. Full UUID links are already explicit and must
+        # remain untouched without claiming that an unread foreign target is
+        # broken or noncanonical.
         if locator.kind == "resource_uri":
             return LinkDecision("finding", finding="link.foreign")
-        if (
-            locator.kind == "canonical_route"
-            and locator.workspace_id
-            and locator.page_id
-        ):
-            return LinkDecision(
-                "fix",
-                format_stable_url(
-                    locator.workspace_id, locator.page_id, locator.fragment
-                ),
-                "link.internal-noncanonical",
-            )
-        if locator.kind == "stable_full":
-            return LinkDecision(
-                "fix" if locator.absolute else "keep",
-                format_stable_url(
-                    locator.workspace_id, locator.page_id, locator.fragment
-                )
-                if locator.absolute
-                else None,
-                "link.internal-noncanonical" if locator.absolute else None,
-            )
         return LinkDecision("keep")
     if resolution.state != "ok":
         return LinkDecision("finding", finding="link.unresolved")

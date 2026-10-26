@@ -173,6 +173,9 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   const queryAt = withoutHash.indexOf("?");
   let pathname = queryAt < 0 ? withoutHash : withoutHash.slice(0, queryAt);
   const query = queryAt < 0 ? "" : withoutHash.slice(queryAt + 1);
+  if (/^dtxwiki:\/\//i.test(input) && queryAt >= 0) {
+    return result("unknown", { fragment });
+  }
   if (/%(?:2f|5c|2e|25|00)/i.test(pathname) || /%(?![0-9a-fA-F]{2})/.test(pathname)) return empty;
   try { pathname = decodeURIComponent(pathname); } catch { return empty; }
   if (pathname.split("/").some((part) => part === "." || part === "..") ||

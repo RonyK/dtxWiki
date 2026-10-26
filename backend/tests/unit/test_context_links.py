@@ -123,6 +123,74 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
     result = resolve(foreign, LinkContext(NoDatabaseReads(), workspace_id))
     assert result.state == "foreign"
     assert decide(foreign, result).action == "keep"
+    assert decide(foreign, result).finding is None
+    foreign_resource_case = next(
+        case for case in fixture["cases"] if case["name"] == "foreign_resource"
+    )
+    foreign_resource = classify(foreign_resource_case["input"])
+    foreign_resource_resolution = resolve(
+        foreign_resource, LinkContext(NoDatabaseReads(), workspace_id)
+    )
+    assert foreign_resource_resolution.state == "foreign"
+    assert (
+        decide(foreign_resource, foreign_resource_resolution).finding
+        == "link.foreign"
+    )
+
+    # Budget exception: canonical and absolute stable foreign URLs formerly
+    # took separate rewrite branches in decide(); they must both preserve
+    # bytes without probing or incorrectly diagnosing a valid full UUID link.
+    foreign_workspace_id = UUID("33333333-3333-4333-8333-333333333333")
+    foreign_hrefs = (
+        f"/workspaces/{foreign_workspace_id}/context/pages/{page_id}",
+        f"https://self.test/p/{foreign_workspace_id}/{page_id}",
+    )
+    for foreign_href in foreign_hrefs:
+        foreign_locator = classify(foreign_href, {"https://self.test"})
+        foreign_resolution = resolve(
+            foreign_locator,
+            LinkContext(
+                NoDatabaseReads(),
+                workspace_id,
+                self_origins=frozenset({"https://self.test"}),
+            ),
+        )
+        assert foreign_resolution.state == "foreign"
+        foreign_decision = decide(foreign_locator, foreign_resolution)
+        assert foreign_decision.action == "keep"
+        assert foreign_decision.finding is None
+        assert foreign_decision.href is None
+        foreign_body = f"[Foreign]({foreign_href})"
+        rewritten, fixes, _ = rewrite_links_with_report(
+            foreign_body,
+            LinkContext(
+                NoDatabaseReads(),
+                workspace_id,
+                self_origins=frozenset({"https://self.test"}),
+            ),
+        )
+        assert rewritten == foreign_body
+        assert fixes == ()
+
+    # Budget exception: populated and empty query delimiters are independent
+    # parser cases recorded in the cross-language fixture; neither has a
+    # resource-URI meaning, so formatting must preserve the source bytes.
+    for case in fixture["cases"]:
+        if case["name"] not in {"resource_query", "resource_empty_query"}:
+            continue
+        queried_resource = case["input"]
+        queried_locator = classify(queried_resource)
+        assert queried_locator.kind == "unknown"
+        queried_resolution = resolve(
+            queried_locator, LinkContext(NoDatabaseReads(), workspace_id)
+        )
+        assert decide(queried_locator, queried_resolution).finding == "link.unresolved"
+        queried_body = f"[Query]({queried_resource})"
+        rewritten, fixes, _ = rewrite_links_with_report(
+            queried_body, LinkContext(NoDatabaseReads(), workspace_id)
+        )
+        assert rewritten == queried_body
+        assert fixes == ()
 
     # An autolink following ! is a link, but a replacement starting with [
     # would become an image. This source-boundary failure is independent of

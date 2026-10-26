@@ -515,6 +515,11 @@ describe("MarkdownView", () => {
             "[Internal](/pages/release-notes), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
             '[![Linked image](https://images.example.test/linked.png)](/context/missing-image.md)',
             '<div><a href="https://raw-html.example.test"data-dtx-unavailable-reference="true" data-dtx-reference-wikilink="true" data-dtx-reference-locator="/context/missing.md">Raw HTML link</a></div>',
+            '',
+            '[Node protocol](node:/context/notes) [Custom protocol](s://service/reference)',
+            '<a href="node:/context/raw-notes">Raw node protocol</a> <a href="s://service/raw" onclick="alert(1)">Raw custom protocol</a>',
+            '[Script link](javascript:alert(1)) [VB script link](vbscript:msgbox(1)) [Data link](data:text/html,unsafe)',
+            '<a href="java&#x73;cript:alert(1)">Entity script link</a> <a href="java&#x0a;script:alert(1)">Control script link</a>',
           ].join("\n")}
         />
       </MemoryRouter>,
@@ -540,6 +545,24 @@ describe("MarkdownView", () => {
       .toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "External" }))
       .toHaveAttribute("rel", "noopener noreferrer");
+    // URI schemes are not an allowlist: authored navigation survives both
+    // sanitizer and ReactMarkdown. Executable schemes remain blocked after
+    // HTML entity/control decoding, and restored hrefs cannot restore events.
+    for (const [name, href] of [
+      ["Node protocol", "node:/context/notes"],
+      ["Custom protocol", "s://service/reference"],
+      ["Raw node protocol", "node:/context/raw-notes"],
+      ["Raw custom protocol", "s://service/raw"],
+    ]) {
+      const link = screen.getByRole("link", { name });
+      expect(link).toHaveAttribute("href", href);
+      expect(link).not.toHaveAttribute("onclick");
+      expect(link.querySelector(".workspace-link-badge")).toBeNull();
+    }
+    for (const name of ["Script link", "VB script link", "Data link", "Entity script link", "Control script link"]) {
+      expect(screen.queryByRole("link", { name })).toBeNull();
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
     // Budget exception: legacy destination pins, short preview inheritance,
     // reference links, and unavailable navigation are distinct render paths.
     expect(screen.queryByRole("link", { name: "Protocol" })).not.toBeInTheDocument();
@@ -920,6 +943,8 @@ describe("MarkdownView", () => {
             "",
             "[Unsafe link](javascript:alert(1))",
             "",
+            "[Custom protocol](s://service/reference)",
+            "",
             "GFM autolink: https://autolink.example/guide",
           ].join("\n")}
           renderPolicy="untrusted-preview"
@@ -937,6 +962,7 @@ describe("MarkdownView", () => {
     expect(screen.getByText("Same-origin guide")).toBeInTheDocument();
     expect(screen.getByText("External documentation")).toBeInTheDocument();
     expect(screen.getByText("Unsafe link")).toBeInTheDocument();
+    expect(screen.getByText("Custom protocol")).toBeInTheDocument();
     expect(screen.getByText(/^GFM autolink:/))
       .toHaveTextContent("GFM autolink: https://autolink.example/guide");
     expect(document.querySelector("a")).not.toBeInTheDocument();
@@ -976,7 +1002,7 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
-          body={'[Confirmed](/pages/known) [External](https://example.test) ![Image](/x.png) <a href="/raw">Raw</a>'}
+          body={'[Confirmed](/pages/known) [External](https://example.test) [Custom](s://service/reference) ![Image](/x.png) <a href="/raw">Raw</a>'}
           linkTargets={[{
             locator: "/pages/known",
             href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
@@ -995,6 +1021,8 @@ describe("MarkdownView", () => {
       "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
     );
     expect(document.querySelector('a[href="https://example.test"]')).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="s://service/reference"]')).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Custom" })).toBeInTheDocument();
     expect(document.querySelector(".markdown-body")?.textContent).toContain("Image");
     expect(document.querySelector("img")).not.toBeInTheDocument();
     expect(document.querySelector('a[href="/raw"]')).not.toBeInTheDocument();
@@ -1113,7 +1141,7 @@ describe("MarkdownView", () => {
     rerender(
       <MemoryRouter>
         <MarkdownView
-          body={`* [Library item](${itemHref})\n* [Concept](/library/${itemId}.md)`}
+          body={`* [Library item](${itemHref})\n* [Concept](/library/${itemId}.md)\n* [Node folder](node:/context/notes)`}
           unresolvedLinksAsText
           wikilinkMode="plain"
         />
@@ -1121,6 +1149,7 @@ describe("MarkdownView", () => {
     );
     expect(screen.getByText("Library item")).toBeInTheDocument();
     expect(screen.getByText("Concept")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Node folder" })).toHaveAttribute("href", "node:/context/notes");
     expect(screen.queryByRole("button", { name: /Library item|Concept/ })).toBeNull();
     expect(document.querySelector(".unavailable-reference")).toBeNull();
   });

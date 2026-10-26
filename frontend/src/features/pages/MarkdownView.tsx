@@ -57,6 +57,7 @@ import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
 import { classifyContextLink, formatContextPageUrl, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { canPreservePageHref } from "../../shared/lib/customPageHref";
 import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
 import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
 
@@ -332,7 +333,9 @@ export function MarkdownView({
               [rehypeAutolinkHeadings, { behavior: "wrap" }],
               rehypePrefixFragmentHrefs,
               rehypeTableAlignment,
+              rehypePreservePageAnchorHrefs,
               [rehypeSanitize, markdownSanitizeSchema],
+              rehypeRestorePageAnchorHrefs,
               // Sanitize authored Markdown before KaTeX emits its trusted
               // layout spans. KaTeX needs generated styles to render fractions.
               rehypeKatex,
@@ -420,6 +423,7 @@ function pageUrlTransform(
   key: string,
   node: Readonly<HastElement>,
 ) {
+  if (node.tagName === "a" && key === "href" && canPreservePageHref(value)) return value;
   return node.tagName === "img" && key === "src"
     ? trustedPageImageSource(value)
     : defaultUrlTransform(value);
@@ -443,6 +447,42 @@ function rehypeConstrainPageImageSources() {
   return (tree: HastRoot) => {
     constrainPageImageSources(tree);
   };
+}
+
+// Preserve authored navigation schemes without widening sanitizer protocols
+// for images, MathML or other URL-bearing elements. Raw HTML attributes cannot
+// create node.data; only this transform can carry an href past sanitization.
+function transformPageAnchorHrefs(tree: HastRoot, restore: boolean) {
+  function visit(parent: HastParent) {
+    for (const child of parent.children) {
+      if (!isHastElement(child)) continue;
+      visit(child);
+      if (child.tagName !== "a") continue;
+      if (restore) {
+        const data = child.data as Record<string, unknown> | undefined;
+        const original = data?.dtxPreservedPageHref;
+        if (typeof original === "string" && canPreservePageHref(original)) {
+          child.properties.href = original;
+        }
+        if (data) delete data.dtxPreservedPageHref;
+      } else {
+        const href = child.properties.href;
+        if (typeof href === "string" && canPreservePageHref(href)) {
+          child.data = Object.assign({}, child.data, { dtxPreservedPageHref: href });
+          child.properties.href = "/";
+        }
+      }
+    }
+  }
+  visit(tree);
+}
+
+function rehypePreservePageAnchorHrefs() {
+  return (tree: HastRoot) => transformPageAnchorHrefs(tree, false);
+}
+
+function rehypeRestorePageAnchorHrefs() {
+  return (tree: HastRoot) => transformPageAnchorHrefs(tree, true);
 }
 
 type ContextLinkResolverOptions = {
