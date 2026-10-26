@@ -32,6 +32,7 @@ import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import {
   formatGroupHeader,
@@ -113,10 +114,30 @@ export function ChatsListScreen() {
     ],
     {
       errorMessage: t("errors.loadFailed"),
+      onSuccess: () => {
+        paginationGenerationRef.current += 1;
+        inFlightCursorRef.current = null;
+        autoAdvanceRef.current = { key: "", hops: 0, seen: new Set<string>() };
+        setLoadingMore(false);
+        setLoadMoreError(null);
+        setAutoAdvancePaused(false);
+      },
       formatError: (caught, fallback) =>
         safeChatErrorMessage(caught, fallback, [t("errors.workspaceNotFound")]),
     },
   );
+  useScreenEntryRefresh("/chats", reload, {
+    readArrivalNotice: readArchiveSuccess,
+    queryDeps: [
+      filters.q,
+      filters.client,
+      filters.period,
+      filters.writes_only,
+      filters.archived,
+      filters.sort,
+    ],
+  });
+
   const continuationKey = `${queryKey}\u001e${data?.workspaceId ?? ""}`;
   const previousContinuationKeyRef = useRef(continuationKey);
   useLayoutEffect(() => {

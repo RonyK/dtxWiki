@@ -50,6 +50,7 @@ import { StatusPill } from "../../shared/components/StatusPill";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { WorkspacePanelChrome } from "../../shared/components/WorkspacePanelChrome";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import {
   formatRelativeTimestamp,
   formatVersionTimestamp,
@@ -201,6 +202,7 @@ export function ReviewScreen() {
   const {
     data: state,
     error,
+    reload,
     setData: setState,
     setError,
   } = useAsyncLoad<ReviewState>(loadReviews, [
@@ -211,6 +213,10 @@ export function ReviewScreen() {
   ], {
     errorMessage: t("errors.load", { defaultValue: "Failed to load Review" }),
     formatError: reviewErrorMessage,
+    onSuccess: () => {
+      loadMoreGenerationRef.current += 1;
+      setLoadingMore(false);
+    },
     fallbackData: {
       workspaceId: "",
       reviews: [],
@@ -222,6 +228,11 @@ export function ReviewScreen() {
       counts: EMPTY_REVIEW_COUNTS,
       reviewPolicy: DEFAULT_REVIEW_POLICY_SUMMARY,
     },
+  });
+
+  useScreenEntryRefresh("/review", reload, {
+    isHome: !searchParams.has("review"),
+    queryDeps: [activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations],
   });
 
   // Reset the typed decision reason on every selected-review change — covers row
@@ -354,6 +365,7 @@ export function ReviewScreen() {
 
   // All selection commands update the parameter; the effect above owns state.
   function setReviewParam(reviewId: string | null) {
+    if (searchParams.get("review") === reviewId) return;
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -444,6 +456,7 @@ export function ReviewScreen() {
     }
     const generation = loadMoreGenerationRef.current;
     const cursor = state.nextCursor;
+    const reviews = state.reviews;
     setLoadingMore(true);
     try {
       const nextPage = await listReviews(state.workspaceId, {
@@ -456,7 +469,7 @@ export function ReviewScreen() {
       // The cursor must still match too: a decision/refresh reload replaces
       // the list without changing filters, and this page belongs to the old one.
       setState((current) =>
-        current && current.nextCursor === cursor
+        current && current.reviews === reviews && current.nextCursor === cursor
           ? {
               ...current,
               reviews: [...current.reviews, ...nextPage.items],
