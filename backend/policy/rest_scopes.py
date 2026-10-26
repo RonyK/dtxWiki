@@ -464,6 +464,8 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
 # callers still pass through workspace/role checks below. DEC-018 keeps
 # AgentPage activation out of MCP/PAT/OAuth scope surfaces entirely.
 REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/api/v1/users/me/deletion-policy"),
+    ("DELETE", "/api/v1/users/me"),
     ("PATCH", "/api/v1/users/me/default-workspace"),
     # PURGE_AUTHZ_PLAN S-1: workspace deletion (and the purge it can trigger)
     # is reachable only by the owner's own browser session -- no PAT/OAuth

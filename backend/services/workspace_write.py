@@ -280,6 +280,62 @@ class WorkspaceWriteService:
         return workspace_id
 
     @staticmethod
+    def purge_personal_workspace_for_deleted_user(
+        *,
+        session: Session,
+        user: User,
+    ) -> UUID | None:
+        """Purge the retained Personal scope of a deletion-pending account.
+
+        The account lifecycle service owns authorization, due-date validation,
+        and the durable post-commit blob-purge intent. This narrow worker path
+        must never broaden into deleting an arbitrary shared workspace.
+        """
+
+        if user.status != "deletion_pending":
+            raise RuntimeError("account_deletion_pending_required")
+        workspace_id = user.personal_workspace_id
+        if workspace_id is None:
+            return None
+        acquire_write_intent(session)
+        intent = WorkspaceWriteService._lock_media_delete_intent(
+            session=session, workspace_id=workspace_id
+        )
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.id == workspace_id).with_for_update()
+        )
+        anchor = session.execute(
+            select(User.personal_workspace_id, User.status)
+            .where(User.id == user.id)
+            .with_for_update()
+            .execution_options(autoflush=False)
+        ).one_or_none()
+        if (
+            anchor is None
+            or anchor.personal_workspace_id != workspace_id
+            or anchor.status != "deletion_pending"
+        ):
+            raise RuntimeError("personal_workspace_anchor_mismatch")
+        if workspace is None:
+            user.personal_workspace_id = None
+            return None
+        # Membership changes can move the owner projection during retention.
+        # The account's unique Personal pointer is the durable ownership
+        # anchor; a different current owner must not strand its deletion.
+        if intent is None:
+            raise RuntimeError("workspace_media_intent_not_configured")
+        media_intent = WorkspaceWriteService._begin_media_delete(
+            session=session, workspace_id=workspace_id
+        )
+        purge_workspace_data(session, workspace_id)
+        WorkspaceWriteService._delete_seed_workspace(
+            session=session,
+            workspace_id=workspace_id,
+            media_intent=media_intent,
+        )
+        return workspace_id
+
+    @staticmethod
     def require_delete_authorization(
         *,
         session: Session,

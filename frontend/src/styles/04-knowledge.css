@@ -2552,6 +2552,20 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   align-content: start;
 }
 
+.account-deletion-panel {
+  grid-column: 1 / -1;
+}
+
+.account-deletion-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.account-deletion-form {
+  display: grid;
+  gap: 12px;
+}
+
 .account-panel-hint {
   margin: 0;
   color: var(--ink-soft);

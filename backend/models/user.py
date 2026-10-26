@@ -51,6 +51,9 @@ class User(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         default=0,
     )
     email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    purge_after: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True)
+    deletion_retention_days: Mapped[int | None] = mapped_column(Integer)
     default_workspace_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("workspace.id", ondelete="SET NULL"),

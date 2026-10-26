@@ -53,7 +53,8 @@ export function AuthScreen() {
   // banner appeared.
   const credentialFailureRef = useRef(false);
   const [status, setStatus] = useState<string | null>(() =>
-    searchParams.get("reset") === "complete" ? t("status.passwordReset") : null,
+    searchParams.get("reset") === "complete" ? t("status.passwordReset")
+      : searchParams.get("account") === "deletion-pending" ? t("deletion.accepted") : null,
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

@@ -212,6 +212,9 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "terminal-failure notification email does. The factory is passed to "
         "sweep_due whole rather than opened here, so no provider send ever "
         "runs inside a transaction (MAIL-01)."
+        " Account deletion additionally calls the control factory only after "
+        "requiring declared single_database topology: cleanup spans identity "
+        "and workspace resources atomically and is disabled on split providers."
     ),
     "backend/worker/runtime.py": (
         "Fan-out only, Phase 6a: dispatch_once_with_session_factory's claim/"
@@ -568,6 +571,9 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "default_workspace (backend/services/workspace_write.py), which "
         "writes User.default_workspace_id after a WorkspaceMembership check "
         "-- identity-plane."
+        " Account withdrawal is session-only, with password confirmation; its "
+        "cleanup service requires declared single_database topology before "
+        "touching identity and workspace resources in one transaction."
     ),
     "backend/api/workspace_access.py": (
         "Workspace visibility/join-policy settings and join-request "
@@ -596,6 +602,9 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "actual per-workspace reads/writes, with SessionFactoryDep in the "
         "orphans endpoint reserved for the identity-plane uploader-name "
         "lookup only -- same split as backend/api/read.py's twin endpoint."
+        " Account deletion policy is identity-plane AppMetadata. Scheduling "
+        "account deletion requires declared single_database topology for its "
+        "atomic credential and workspace-resource revocation."
     ),
 }
 

@@ -14,7 +14,13 @@ from sqlalchemy import select
 
 from backend.app.bootstrap import DatabaseNotCurrentError, verify_database_current
 from backend.app.bootstrap import bootstrap_core as bootstrap_app
-from backend.app.container import BlobStoreProvider, DatabaseProvider
+from backend.app.container import (
+    SINGLE_DATABASE_TOPOLOGY,
+    BlobStoreProvider,
+    DatabaseProvider,
+    ServiceRegistry,
+    declared_storage_topology,
+)
 from backend.app.runtime_resources import RuntimeResources
 from backend.app.settings import Settings
 from backend.models.workspace import Workspace
@@ -23,6 +29,7 @@ from backend.services.context_media_policy import resolve_context_media_policy
 from backend.services.job_queue import JobQueueService
 from backend.services.mail_delivery import EmailDeliveryService
 from backend.services.ops import runtime_lock
+from backend.services.user_deletion_service import UserDeletionService
 from backend.worker.runtime import OneShotWorker, WorkerShutdownRequested
 from backend.worker.tick import seed_jobs_for_workspace, tick_schedules
 
@@ -32,6 +39,7 @@ app = typer.Typer(no_args_is_help=True, help="Run dtxWiki background worker jobs
 
 _DISPATCH_ERROR_BACKOFF_CAP_SECONDS = 30.0
 _EMAIL_SWEEP_MIN_INTERVAL_SECONDS = 1.0
+_USER_DELETION_SWEEP_INTERVAL_SECONDS = 60.0
 #: The database is not this code's schema, or was written by a newer release.
 DATABASE_NOT_CURRENT_EXIT_CODE = 3
 #: ``dtxwiki update``/``rollback``/``migrate-data`` holds the runtime lock.
@@ -232,6 +240,7 @@ def run_once(
         # test_worker_run_once_does_not_seed_periodic_jobs) this creates no
         # work; it only finishes work that is already queued and due.
         _sweep_email_outbox(database_provider, settings)
+        _sweep_user_deletions(database_provider, blob_store_provider)
         if shutdown.requested:
             typer.echo(shutdown.stopped_payload())
             return
@@ -381,9 +390,11 @@ def _run_loop(
     # for accepting jobs. In particular, SMTP must not delay the ready packet.
     _seed_due_jobs(database_provider, settings)
     _sweep_email_outbox(database_provider, settings)
+    _sweep_user_deletions(database_provider, blob_store_provider)
     last_reclaim_monotonic = time.monotonic()
     last_full_sweep_monotonic = time.monotonic()
     last_email_sweep_monotonic = time.monotonic()
+    last_user_deletion_sweep_monotonic = time.monotonic()
     consecutive_dispatch_errors = 0
 
     while True:
@@ -412,6 +423,12 @@ def _run_loop(
         # idx_email_outbox_claim that returns nothing when the outbox is
         # idle, strictly cheaper than the INSERT + workspace-plane claim +
         # hint write the deleted Job cost per email.
+        if (
+            time.monotonic() - last_user_deletion_sweep_monotonic
+            >= _USER_DELETION_SWEEP_INTERVAL_SECONDS
+        ):
+            _sweep_user_deletions(database_provider, blob_store_provider)
+            last_user_deletion_sweep_monotonic = time.monotonic()
         if (
             time.monotonic() - last_email_sweep_monotonic
             >= _EMAIL_SWEEP_MIN_INTERVAL_SECONDS
@@ -523,6 +540,22 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
             logger.exception(
                 "periodic job seeding failed for workspace %s", workspace_id
             )
+
+
+def _sweep_user_deletions(
+    database_provider: DatabaseProvider, blob_store_provider: BlobStoreProvider
+) -> None:
+    if declared_storage_topology(database_provider) != SINGLE_DATABASE_TOPOLOGY:
+        return
+    try:
+        UserDeletionService(
+            session_factory=database_provider.control_session_factory(),
+            context_media_repository_factory=(
+                ServiceRegistry().context_media_repository_factory
+            ),
+        ).purge_due(blob_store_provider=blob_store_provider)
+    except Exception:
+        logger.exception("user deletion sweep failed")
 
 
 def _sweep_email_outbox(

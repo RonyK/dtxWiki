@@ -18,7 +18,7 @@ from backend.models.search_index import include_non_fts5_object
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 INITIAL_REVISION = "bd62193d5cf6"
-HEAD_REVISION = "ef53a0a7061c"
+HEAD_REVISION = "eb86fdacb1bb"
 CORE_REVISION = "efcbcf724889"
 
 

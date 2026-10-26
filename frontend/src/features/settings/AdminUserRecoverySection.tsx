@@ -27,7 +27,9 @@ import {
   type AdminUser,
 } from "../../shared/api/adminUsers";
 import { getAuthCapabilities, reauthenticate } from "../../shared/api/auth";
+import { deleteUserAccount, getUserDeletionPolicy } from "../../shared/api/userDeletion";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
@@ -37,6 +39,7 @@ import {
 } from "./SettingsPaneParts";
 import { writeTextToClipboard } from "../../shared/lib/clipboard";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
+import { UserDeletionPolicyCard } from "./UserDeletionPolicyCard";
 
 type IssuedLink = {
   email: string;
@@ -55,6 +58,7 @@ type RecoveryCapabilityState = {
 
 export function AdminUserRecoverySection() {
   const { t } = useTranslation("settings");
+  const auth = useOptionalAuth();
   const [directoryUnlocked, setDirectoryUnlocked] = useState(false);
   const [reauthenticatedUntil, setReauthenticatedUntil] = useState<
     string | null
@@ -80,6 +84,7 @@ export function AdminUserRecoverySection() {
   const [issueError, setIssueError] = useState<string | null>(null);
   const [issuedLink, setIssuedLink] = useState<IssuedLink | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [recoveryCapability, setRecoveryCapability] =
     useState<RecoveryCapabilityState>({
       emailReady: false,
@@ -158,6 +163,7 @@ export function AdminUserRecoverySection() {
     setSearchError(null);
     setSearchValidation(null);
     setTarget(null);
+    setDeleteTarget(null);
   }
 
   async function onSearch(event: FormEvent<HTMLFormElement>) {
@@ -437,6 +443,7 @@ export function AdminUserRecoverySection() {
         </form>
       ) : (
         <>
+          <UserDeletionPolicyCard />
           <StatusBanner tone="info">
             {t("userRecovery.unlock.unlocked", {
               defaultValue: "Protected user search is unlocked until {{date}}.",
@@ -529,7 +536,9 @@ export function AdminUserRecoverySection() {
                           <StatusPill
                             compact
                             label={
-                              user.status === "active"
+                              user.status === "deletion_pending"
+                                ? t("userDeletion.pending")
+                                : user.status === "active"
                                 ? t("userRecovery.status.active", {
                                     defaultValue: "Active",
                                   })
@@ -538,7 +547,7 @@ export function AdminUserRecoverySection() {
                                   })
                             }
                             status={user.status}
-                            tone={user.status === "active" ? "ok" : "muted"}
+                            tone={user.status === "active" ? "ok" : user.status === "deletion_pending" ? "warn" : "muted"}
                           />
                           <StatusPill
                             compact
@@ -572,7 +581,10 @@ export function AdminUserRecoverySection() {
                                 defaultValue: "No workspace memberships",
                               })}
                         </p>
-                        {user.status !== "active" ? (
+                        {user.status === "deletion_pending" && user.purge_after ? (
+                          <p className="meta-line">{t("userDeletion.scheduled", { date: formatVersionTimestamp(user.purge_after) })}</p>
+                        ) : null}
+                        {user.status !== "active" && user.status !== "deletion_pending" ? (
                           <p className="meta-line">
                             {t("userRecovery.inactiveHint", {
                               defaultValue:
@@ -611,6 +623,12 @@ export function AdminUserRecoverySection() {
                             defaultValue: "Issue one-time link",
                           })}
                         </button>
+                        <button
+                          className="icon-button danger-action admin-user-recovery-action"
+                          disabled={user.status === "deletion_pending" || user.status === "deleted"}
+                          onClick={() => { setDeleteTarget(user); setSuccessNotice(null); }}
+                          type="button"
+                        >{t("userDeletion.action")}</button>
                         {user.status === "active" && !user.email_verified_at ? (
                           <p className="meta-line">
                             {t("userRecovery.emailUnverifiedActionHint", {
@@ -693,10 +711,94 @@ export function AdminUserRecoverySection() {
           target={target}
         />
       ) : null}
+      {deleteTarget ? (
+        <UserDeletionDialog
+          target={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={async (purgeAfter) => {
+            setDeleteTarget(null);
+            if (auth?.user?.user_id === deleteTarget.user_id) {
+              await auth.signOut();
+              window.location.assign("/login?account=deletion-pending");
+              return;
+            }
+            setSuccessNotice(t("userDeletion.success", { email: deleteTarget.email, date: formatVersionTimestamp(purgeAfter) }));
+            void loadUsers(submittedQuery, offset);
+          }}
+        />
+      ) : null}
       {issuedLink ? (
         <OneTimeLinkDialog link={issuedLink} onClose={dismissIssuedLink} />
       ) : null}
     </section>
+  );
+}
+
+function UserDeletionDialog({ target, onClose, onDeleted }: {
+  target: AdminUser;
+  onClose: () => void;
+  onDeleted: (purgeAfter: string) => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [confirmationEmail, setConfirmationEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [retentionDays, setRetentionDays] = useState<number | null>(null);
+  const [policyAttempt, setPolicyAttempt] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setRetentionDays(null);
+    setError(null);
+    void getUserDeletionPolicy(true).then((policy) => {
+      if (active) setRetentionDays(policy.retention_days);
+    }).catch((caught) => {
+      if (active) setError(apiErrorMessage(caught, t("userDeletion.policy.loadFailed")));
+    });
+    return () => { active = false; };
+  }, [policyAttempt, t]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || retentionDays === null || confirmationEmail !== target.email) return;
+    try { validateAccountPassword(password); }
+    catch (caught) { setError(t((caught as Error).message, { ns: "auth" })); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await reauthenticate({ current_password: password });
+      const result = await deleteUserAccount(target.user_id, confirmationEmail, retentionDays);
+      onDeleted(result.purge_after);
+    } catch (caught) {
+      setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+        || apiErrorMessage(caught, t("userDeletion.failed")));
+      setBusy(false);
+    } finally {
+      setPassword("");
+    }
+  }
+
+  return (
+    <AccessibleDialog busy={busy} labelledBy="admin-user-deletion-title" onCancel={onClose}>
+      <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
+        <h2 id="admin-user-deletion-title">{t("userDeletion.confirmTitle")}</h2>
+        <p>{t("userDeletion.confirmDescription", { email: target.email })}</p>
+        {retentionDays !== null ? <StatusBanner tone="warning">{t("userDeletion.retention", { count: retentionDays })}</StatusBanner> : null}
+        <p className="meta-line">{t("userDeletion.sharedContent")}</p>
+        {error ? <><StatusBanner tone="warning">{error}</StatusBanner><button className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("userDeletion.reloadPolicy")}</button></> : null}
+        <label className="field-stack" htmlFor="admin-user-deletion-email"><span>{t("userDeletion.confirmEmail", { email: target.email })}</span>
+          <input id="admin-user-deletion-email" autoComplete="off" disabled={busy} onChange={(event) => setConfirmationEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={confirmationEmail} />
+        </label>
+        <label className="field-stack" htmlFor="admin-user-deletion-password"><span>{t("userDeletion.currentPassword")}</span>
+          <input id="admin-user-deletion-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
+        </label>
+        <div className="modal-actions">
+          <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
+          <button className="icon-button danger-action" disabled={busy || retentionDays === null || confirmationEmail !== target.email || !password} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
+        </div>
+      </form>
+    </AccessibleDialog>
   );
 }
 

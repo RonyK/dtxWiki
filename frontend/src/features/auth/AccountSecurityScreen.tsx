@@ -39,6 +39,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { AccountDeletionPanel } from "./AccountDeletionPanel";
 
 type AccountOverview = {
   workspaces: WorkspaceListData | null;
@@ -453,6 +454,7 @@ export function AccountSecurityScreen() {
                 </Link>
               </div>
             </section>
+            <AccountDeletionPanel email={user.email} key={user.user_id} />
           </div>
         ) : (
           <section

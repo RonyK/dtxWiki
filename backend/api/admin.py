@@ -30,6 +30,7 @@ from backend.api.deps import (
     WorkspaceSessionFactoryDep,
 )
 from backend.api.health import _ready_payload as health_ready_payload
+from backend.api.users import user_deletion_error_response, user_deletion_service
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import oauth_token_lifetime_report
 from backend.mcp.envelope import advisory_warnings
@@ -54,6 +55,12 @@ from backend.schemas.jobs import (
     JobQueueSummaryResponse,
     JobRetryResponse,
     JobStatus,
+)
+from backend.schemas.user_deletion import (
+    AdminUserDeletionRequest,
+    UserDeletionPolicyData,
+    UserDeletionPolicyResponse,
+    UserDeletionResponse,
 )
 from backend.services import deployment as deployment_service
 from backend.services import update_check_service
@@ -83,6 +90,10 @@ from backend.services.session_service import (
     AuthenticatedUser,
     VerifiedRecentReauthentication,
 )
+from backend.services.user_deletion_service import (
+    UserDeletionError,
+    UserDeletionService,
+)
 from backend.utils.actor_display import resolve_actor_display_names
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -93,6 +104,88 @@ REST_ERROR_RESPONSES = {
     404: {"model": RESTErrorBody},
     422: {"model": RESTErrorBody},
 }
+USER_DELETION_ERROR_RESPONSES = {
+    **REST_ERROR_RESPONSES,
+    409: {"model": RESTErrorBody},
+    503: {"model": RESTErrorBody},
+}
+
+
+@router.get(
+    "/user-deletion-policy",
+    response_model=UserDeletionPolicyResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_get_user_deletion_policy(
+    response: Response,
+    session_factory: SessionFactoryDep,
+    _: Annotated[AuthenticatedUser, Depends(require_server_admin)],
+):
+    try:
+        days = UserDeletionService(session_factory=session_factory).get_policy()
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": {"retention_days": days}}
+
+
+@router.patch(
+    "/user-deletion-policy",
+    response_model=UserDeletionPolicyResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_set_user_deletion_policy(
+    request_body: UserDeletionPolicyData,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        days = UserDeletionService(session_factory=session_factory).set_policy(
+            actor_user_id=admin.user_id,
+            retention_days=request_body.retention_days,
+            expected_actor_session_generation=admin.session_generation,
+        )
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": {"retention_days": days}}
+
+
+@router.delete(
+    "/users/{user_id}",
+    response_model=UserDeletionResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_delete_user(
+    user_id: UUID,
+    request_body: AdminUserDeletionRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = user_deletion_service(
+            session_factory, database_provider
+        ).request_deletion(
+            user_id=user_id,
+            actor_user_id=admin.user_id,
+            admin_request=True,
+            expected_actor_session_generation=admin.session_generation,
+            confirmation_email=request_body.confirmation_email,
+            expected_retention_days=request_body.expected_retention_days,
+        )
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": result}
 
 
 def deployment_status_data(request: Request, session_factory) -> dict:
@@ -246,6 +339,8 @@ def admin_search_users(
                     "display_name": record.user.display_name,
                     "status": record.user.status,
                     "email_verified_at": record.user.email_verified_at,
+                    "deletion_requested_at": record.user.deletion_requested_at,
+                    "purge_after": record.user.purge_after,
                     "workspaces": [
                         {
                             "workspace_id": membership.workspace_id,

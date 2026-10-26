@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
+from backend.services.db_write_intent import acquire_write_intent
 from backend.services.oauth_service import revoke_live_token_grant_families
 from backend.services.personal_workspace_service import ensure_personal_workspace
 from backend.services.session_service import (
@@ -99,11 +100,15 @@ class UserAdminService:
 
         normalized_email = normalize_email(email)
         with self.session_factory.begin() as session:
-            user = session.scalar(select(User).where(User.email == normalized_email))
+            acquire_write_intent(session)
+            user = session.scalar(
+                select(User).where(User.email == normalized_email).with_for_update()
+            )
             if user is None:
                 raise InvalidCredentialsError("user not found")
             changed = user.status == "active"
-            user.status = "disabled"
+            if user.status != "deletion_pending":
+                user.status = "disabled"
             revoke_live_token_grant_families(
                 session,
                 user_id=user.id,

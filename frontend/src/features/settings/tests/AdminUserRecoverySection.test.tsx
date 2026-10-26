@@ -29,6 +29,49 @@ describe("AdminUserRecoverySection", () => {
     setLocale("en", { persist: false });
   });
 
+  it("requires the target email and fresh admin verification before scheduling deletion", async () => {
+    const mutations: string[] = [];
+    let deleted = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/auth/capabilities`) return jsonResponse(authCapabilities());
+      if (url === `${BASE}/api/v1/auth/reauthenticate`) {
+        mutations.push("reauthenticate");
+        return jsonResponse(reauthResponse());
+      }
+      if (url === `${BASE}/api/v1/admin/user-deletion-policy`) {
+        return jsonResponse({ data: { retention_days: 30 } });
+      }
+      if (url.startsWith(`${BASE}/api/v1/admin/users?`)) {
+        const response = userSearchResponse(true);
+        if (deleted) Object.assign(response.data.items[0], { status: "deletion_pending", purge_after: "2026-11-26T00:00:00Z" });
+        return jsonResponse(response);
+      }
+      if (url === `${BASE}/api/v1/admin/users/${USER_ID}` && init?.method === "DELETE") {
+        mutations.push("delete");
+        expect(JSON.parse(String(init.body))).toEqual({ confirmation_email: "alex@example.com", expected_retention_days: 30 });
+        deleted = true;
+        return jsonResponse({ data: { user_id: USER_ID, status: "deletion_pending", requested_at: "2026-10-27T00:00:00Z", purge_after: "2026-11-26T00:00:00Z", retention_days: 30 } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const user = userEvent.setup();
+    render(<AdminUserRecoverySection />);
+    await searchForUser(user, "alex@example.com");
+    await user.click(screen.getByRole("button", { name: "Delete account" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete this user account?" });
+    const scoped = within(dialog);
+    expect(await scoped.findByText(/retained for 30 days/)).toBeInTheDocument();
+    await user.type(scoped.getByLabelText("Your current password"), "admin-current-password");
+    expect(scoped.getByRole("button", { name: "Confirm account deletion" })).toBeDisabled();
+    await user.type(scoped.getByLabelText("Type alex@example.com to confirm"), "alex@example.com");
+    await user.click(scoped.getByRole("button", { name: "Confirm account deletion" }));
+    expect(await screen.findByText("Deletion pending")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete account" })).toBeDisabled();
+    expect(mutations).toEqual(["reauthenticate", "reauthenticate", "delete"]);
+    expect(fetchMock.mock.calls.some(([input, init]) => input.toString().endsWith("/password-reset") && init?.method === "POST")).toBe(false);
+  });
+
   it("shows shared progress only while checking server recovery availability", async () => {
     let rejectCapabilities!: (reason: Error) => void;
     const pendingCapabilities = new Promise<Response>((_resolve, reject) => {

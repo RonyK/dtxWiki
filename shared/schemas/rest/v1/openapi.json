@@ -1091,6 +1091,18 @@
       "AdminUserData": {
         "additionalProperties": false,
         "properties": {
+          "deletion_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Requested At"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -1110,6 +1122,18 @@
               }
             ],
             "title": "Email Verified At"
+          },
+          "purge_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge After"
           },
           "status": {
             "title": "Status",
@@ -1136,6 +1160,30 @@
           "workspaces"
         ],
         "title": "AdminUserData",
+        "type": "object"
+      },
+      "AdminUserDeletionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_email": {
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+            "title": "Confirmation Email",
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
+          },
+          "expected_retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Expected Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confirmation_email",
+          "expected_retention_days"
+        ],
+        "title": "AdminUserDeletionRequest",
         "type": "object"
       },
       "AdminUserListData": {
@@ -17202,6 +17250,37 @@
         "title": "SearchResponse",
         "type": "object"
       },
+      "SelfUserDeletionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_email": {
+            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+            "title": "Confirmation Email",
+            "type": "string",
+            "x-localPart-maxBytes": 64,
+            "x-normalized-maxBytes": 254
+          },
+          "current_password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "expected_retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Expected Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confirmation_email",
+          "expected_retention_days",
+          "current_password"
+        ],
+        "title": "SelfUserDeletionRequest",
+        "type": "object"
+      },
       "ServerNameAtom": {
         "additionalProperties": false,
         "properties": {
@@ -18420,6 +18499,92 @@
           "allow_page_as_parent"
         ],
         "title": "TreeSectionPolicyPayload",
+        "type": "object"
+      },
+      "UserDeletionData": {
+        "additionalProperties": false,
+        "properties": {
+          "purge_after": {
+            "format": "date-time",
+            "title": "Purge After",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "status": {
+            "const": "deletion_pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "status",
+          "requested_at",
+          "purge_after",
+          "retention_days"
+        ],
+        "title": "UserDeletionData",
+        "type": "object"
+      },
+      "UserDeletionPolicyData": {
+        "additionalProperties": false,
+        "properties": {
+          "retention_days": {
+            "maximum": 36500.0,
+            "minimum": 0.0,
+            "title": "Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "retention_days"
+        ],
+        "title": "UserDeletionPolicyData",
+        "type": "object"
+      },
+      "UserDeletionPolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserDeletionPolicyData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "UserDeletionPolicyResponse",
+        "type": "object"
+      },
+      "UserDeletionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserDeletionData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "UserDeletionResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -21057,6 +21222,187 @@
         ]
       }
     },
+    "/api/v1/admin/user-deletion-policy": {
+      "get": {
+        "operationId": "admin_get_user_deletion_policy_api_v1_admin_user_deletion_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Get User Deletion Policy",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "operationId": "admin_set_user_deletion_policy_api_v1_admin_user_deletion_policy_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserDeletionPolicyData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "RecentReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Set User Deletion Policy",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/users": {
       "get": {
         "operationId": "admin_search_users_api_v1_admin_users_get",
@@ -21155,6 +21501,115 @@
           }
         ],
         "summary": "Admin Search Users",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}": {
+      "delete": {
+        "operationId": "admin_delete_user_api_v1_admin_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserDeletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "RecentReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Delete User",
         "tags": [
           "admin"
         ]
@@ -23475,6 +23930,112 @@
         ]
       }
     },
+    "/api/v1/users/me": {
+      "delete": {
+        "operationId": "delete_my_account_api_v1_users_me_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfUserDeletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Delete My Account",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/v1/users/me/default-workspace": {
       "patch": {
         "operationId": "update_my_default_workspace_api_v1_users_me_default_workspace_patch",
@@ -23556,6 +24117,102 @@
           }
         ],
         "summary": "Update My Default Workspace",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/deletion-policy": {
+      "get": {
+        "operationId": "my_deletion_policy_api_v1_users_me_deletion_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDeletionPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "My Deletion Policy",
         "tags": [
           "users"
         ]

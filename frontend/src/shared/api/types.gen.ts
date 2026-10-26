@@ -239,6 +239,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/user-deletion-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Get User Deletion Policy */
+        get: operations["admin_get_user_deletion_policy_api_v1_admin_user_deletion_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Admin Set User Deletion Policy */
+        patch: operations["admin_set_user_deletion_policy_api_v1_admin_user_deletion_policy_patch"];
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -251,6 +269,23 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Admin Delete User */
+        delete: operations["admin_delete_user_api_v1_admin_users__user_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -635,6 +670,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete My Account */
+        delete: operations["delete_my_account_api_v1_users_me_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me/default-workspace": {
         parameters: {
             query?: never;
@@ -650,6 +702,23 @@ export interface paths {
         head?: never;
         /** Update My Default Workspace */
         patch: operations["update_my_default_workspace_api_v1_users_me_default_workspace_patch"];
+        trace?: never;
+    };
+    "/api/v1/users/me/deletion-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Deletion Policy */
+        get: operations["my_deletion_policy_api_v1_users_me_deletion_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/workspace-directory": {
@@ -3212,12 +3281,16 @@ export interface components {
         };
         /** AdminUserData */
         AdminUserData: {
+            /** Deletion Requested At */
+            deletion_requested_at?: string | null;
             /** Display Name */
             display_name: string;
             /** Email */
             email: string;
             /** Email Verified At */
             email_verified_at?: string | null;
+            /** Purge After */
+            purge_after?: string | null;
             /** Status */
             status: string;
             /**
@@ -3227,6 +3300,16 @@ export interface components {
             user_id: string;
             /** Workspaces */
             workspaces: components["schemas"]["AdminUserWorkspaceData"][];
+        };
+        /** AdminUserDeletionRequest */
+        AdminUserDeletionRequest: {
+            /**
+             * Confirmation Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
+            confirmation_email: string;
+            /** Expected Retention Days */
+            expected_retention_days: number;
         };
         /** AdminUserListData */
         AdminUserListData: {
@@ -9041,6 +9124,18 @@ export interface components {
             data: components["schemas"]["SearchPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** SelfUserDeletionRequest */
+        SelfUserDeletionRequest: {
+            /**
+             * Confirmation Email
+             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
+             */
+            confirmation_email: string;
+            /** Current Password */
+            current_password: string;
+            /** Expected Retention Days */
+            expected_retention_days: number;
+        };
         /** ServerNameAtom */
         ServerNameAtom: {
             /**
@@ -9514,6 +9609,46 @@ export interface components {
             allow_page_as_parent: boolean;
             /** Allow User Folder Create */
             allow_user_folder_create: boolean;
+        };
+        /** UserDeletionData */
+        UserDeletionData: {
+            /**
+             * Purge After
+             * Format: date-time
+             */
+            purge_after: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Retention Days */
+            retention_days: number;
+            /**
+             * Status
+             * @constant
+             */
+            status: "deletion_pending";
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** UserDeletionPolicyData */
+        UserDeletionPolicyData: {
+            /** Retention Days */
+            retention_days: number;
+        };
+        /** UserDeletionPolicyResponse */
+        UserDeletionPolicyResponse: {
+            data: components["schemas"]["UserDeletionPolicyData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** UserDeletionResponse */
+        UserDeletionResponse: {
+            data: components["schemas"]["UserDeletionData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ValidationError */
         ValidationError: {
@@ -10771,6 +10906,158 @@ export interface operations {
             };
         };
     };
+    admin_get_user_deletion_policy_api_v1_admin_user_deletion_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionPolicyResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_set_user_deletion_policy_api_v1_admin_user_deletion_policy_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserDeletionPolicyData"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionPolicyResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     admin_search_users_api_v1_admin_users_get: {
         parameters: {
             query?: {
@@ -10822,6 +11109,86 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_delete_user_api_v1_admin_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12632,6 +12999,93 @@ export interface operations {
             };
         };
     };
+    delete_my_account_api_v1_users_me_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelfUserDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     update_my_default_workspace_api_v1_users_me_default_workspace_patch: {
         parameters: {
             query?: never;
@@ -12692,6 +13146,89 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    my_deletion_policy_api_v1_users_me_deletion_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionPolicyResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

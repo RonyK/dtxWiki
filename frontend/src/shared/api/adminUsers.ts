@@ -13,6 +13,8 @@ export type AdminUser = {
   display_name: string;
   status: string;
   email_verified_at: string | null;
+  deletion_requested_at: string | null;
+  purge_after: string | null;
   workspaces: AdminUserWorkspace[];
 };
 

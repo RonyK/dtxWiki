@@ -150,6 +150,21 @@ to load the new permissions.
 A server-admin manages the instance. Sharing documents still requires adding
 people to the workspace and assigning their roles.
 
+Users can withdraw from **Account** after confirming their password and email.
+Server admins can schedule account deletion and set the retention period in
+**Settings > User accounts** after password reauthentication. The default is
+30 days; 0 days makes the request immediately eligible for cleanup. Each request
+keeps its original deadline when the policy changes. Access is revoked at once;
+the worker removes the personal workspace, credentials, personal preferences,
+private unsubmitted edits, and stored files after the deadline, retrying failed
+file cleanup. Unreferenced uploads in shared workspaces use the existing media
+garbage collection flow. Shared
+workspace documents and append-only audit history remain, with author names
+falling back to a generic label after account removal. The last active shared
+workspace owner or server admin must transfer those responsibilities first.
+`dtxwiki` starts the worker automatically; `make backend-dev` requires a separate
+worker as described in [DEVELOPMENT.md](DEVELOPMENT.md).
+
 <a id="server-access"></a>
 
 ### 3. Access from other devices
