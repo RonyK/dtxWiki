@@ -67,16 +67,16 @@ test("reads review evidence, approves a document group and a single review, and 
       target: expect.objectContaining({ target_kind: "review_item", target_id: decided.id }),
     }) }),
   ]));
+  // This journey also records the group approval. Inspect the latest decision
+  // row; the API assertion above identifies the exact single-review decision.
   const decisionRow = page.getByRole("article").filter({
     has: page.getByText("Review decision", { exact: true }),
-  });
-  await expect(decisionRow).toHaveCount(1);
+  }).first();
   await expect(decisionRow).toBeVisible();
   await decisionRow.getByRole("link", { name: "View activity list", exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/activity/history"
     && url.searchParams.get("period") === "all" && url.searchParams.get("kind") === "all"
     && url.searchParams.get("subtype") === "all" && url.searchParams.get("group_reads") === "1");
-  await expect(decisionRow).toHaveCount(1);
   await expect(decisionRow).toBeVisible();
 });
 

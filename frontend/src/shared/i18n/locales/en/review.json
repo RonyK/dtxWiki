@@ -519,7 +519,11 @@
       "reject": "The page changed after this rejection, so it can no longer be undone.",
       "request_changes": "The page changed after this change request, so it can no longer be withdrawn."
     },
+    "notRecorded": "The previous state needed to safely undo this decision was not recorded. Review the page history to start a new draft.",
+    "unsupportedEffect": "The changes included in this decision cannot be undone. Review the page history before starting another review.",
+    "unsupportedReviewType": "Decision undo is not supported for this review type.",
     "viewLaterChanges": "Review later changes",
+    "viewHistory": "View page history",
     "startDraft": "Start a new draft from v{{version}}",
     "done": {
       "approve": "Approval undone. The review is waiting again.",

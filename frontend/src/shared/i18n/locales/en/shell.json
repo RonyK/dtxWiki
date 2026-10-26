@@ -224,6 +224,7 @@
     "review_already_claimed": "Another reviewer is already working on this item.",
     "review_decision_undo_unavailable": "This decision can no longer be undone. Refresh the review to see its current state.",
     "review_decision_id_conflict": "This decision request conflicts with an earlier request. Refresh the review before trying again.",
+    "legacy_media_cutover_conflict": "Attachments changed. Refresh the draft before publishing.",
     "settings_policy_update_rejected": "This policy value is not allowed.",
     "signup_disabled": "Account registration is disabled.",
     "system_tree_node_protected": "System folders cannot be changed.",

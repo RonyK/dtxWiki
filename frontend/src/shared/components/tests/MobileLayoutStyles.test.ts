@@ -301,10 +301,9 @@ describe("mobile layout regression styles", () => {
     // `.topbar` carries no min-width:0/overflow firewall and `.topbar-actions`
     // floors itself at max-content, so a bare 1fr let intrinsic width push the
     // shell past the viewport, where overflow:hidden clipped it silently.
-    // The mobile override must cover the higher-specificity collapsed shell
-    // too; reading its last selector captures the shared declaration block.
-    expect(workspaceStyles).toMatch(/\.app-shell,\s*\.app-shell\[data-sidebar-collapsed="true"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
-    expect(ruleBody('.app-shell[data-sidebar-collapsed="true"]', workspaceStyles)).toContain(
+    // Collapsed-shell overrides are confined to desktop media queries below;
+    // every mobile shell therefore uses this common, shrinkable track.
+    expect(ruleBody(".app-shell", workspaceStyles)).toContain(
       "grid-template-columns: minmax(0, 1fr)",
     );
     const mobileStart = workspaceStyles.indexOf("@media (max-width: 1024px)");

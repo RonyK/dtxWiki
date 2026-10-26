@@ -1737,7 +1737,7 @@ describe("AgentScreen", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Start a new draft from this version" }));
 
     expect(confirm).toHaveBeenCalledWith(
-      "Restore Agent v2 as a new draft? The active version stays unchanged.",
+      "Create a new draft from Agent v2? The active version stays unchanged.",
     );
     const restoreCalls = () =>
       fetchMock.mock.calls.filter(
@@ -1757,7 +1757,7 @@ describe("AgentScreen", () => {
     expect(within(dialog).getByRole("combobox", { name: "Earlier version" })).toBeDisabled();
     fireEvent.change(later, { target: { value: "version-3" } });
     expect(dialog).toHaveAccessibleName("Changes in v2 since the previous version, v1");
-    expect(within(dialog).getByRole("button", { name: "Restoring" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Creating draft" })).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Close diff" })).toBeDisabled();
 
     restoreResponse.resolve(

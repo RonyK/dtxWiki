@@ -924,7 +924,7 @@ describe("ReviewScreen", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Reject" }));
     dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
-    expect(await within(dialog).findByText("Could not recheck the rejection impact")).toBeVisible();
+    expect(await within(dialog).findByText(i18n.t("review:errors.restore"))).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
     expect(decisionBodies).toHaveLength(0);
     await user.click(within(dialog).getByRole("button", { name: "Check again" }));
@@ -2089,7 +2089,7 @@ describe("ReviewScreen", () => {
     expect(fetchMock.mock.calls.filter(([input]) => input.toString().endsWith("/reviews/review-99"))).toHaveLength(1);
   });
 
-  it("loads selected capabilities once per revision and ignores a late previous selection", async () => {
+  it("refreshes selected capabilities explicitly and ignores a late previous selection", async () => {
     const user = userEvent.setup();
     const first = reviewItem({ targetTitle: "First detail" });
     const second = reviewItem({ id: "second", targetTitle: "Second detail", targetId: "second-page" });
@@ -2113,11 +2113,11 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh reviews" })).toBeEnabled());
     const reads = () => fetchMock.mock.calls.filter(([input]) => input.toString().endsWith("/reviews/second"));
-    expect(reads()).toHaveLength(1);
+    expect(reads()).toHaveLength(2);
     second.updated_at = "2026-10-22T12:00:00Z";
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
-    expect(reads()).toHaveLength(2);
+    expect(reads()).toHaveLength(3);
   });
 
   it("keeps a resolved deep link separate from the pending rail", async () => {
@@ -3118,7 +3118,7 @@ describe("ReviewScreen", () => {
     expect(await screen.findByText("Exact candidate body")).toBeVisible();
     expect(pagesApi.readPage).toHaveBeenCalledTimes(2); // failed exact read plus explicit retry
     await user.click(approve);
-    expect(await screen.findByText("Media cutover changed. Refresh this draft before publishing.")).toBeVisible();
+    expect(await screen.findByText(i18n.t("shell:apiErrors.legacy_media_cutover_conflict"))).toBeVisible();
     await waitFor(() => expect(approve).toBeEnabled());
     current.review_type = "inline_comment";
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
@@ -3206,6 +3206,7 @@ describe("ReviewScreen", () => {
         return jsonResponse({ data: { items: [next], next_cursor: null } });
       }
       if (isReviewCountsUrl(url)) return jsonResponse({ data: reviewCounts({ pending: saved ? 1 : 2, resolved: saved ? 1 : 0 }) });
+      if (saved && url.endsWith("/reviews/review-1")) return jsonResponse({ data: { ...current, status: "approved" } });
       return undefined;
     });
     render(<AuthProvider><MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /><AuthIdentity /><LocationDisplay /></MemoryRouter></AuthProvider>);

@@ -8909,8 +8909,10 @@ export interface components {
          * ReviewDecisionUndo
          * @description Undo of the review's latest decision, for an actor who may undo it.
          *
-         *     Absent for decisions recorded before undo existed, and for actors other
-         *     than the decider (any editor may undo an automatic approval).
+         *     The decider or an owner may undo a decision; any editor may undo an
+         *     automatic approval. Absent for actors without that permission. Decisions
+         *     without a recorded effect return available=False with not_recorded;
+         *     recorded effects that cannot be reversed use unsupported_effect.
          */
         ReviewDecisionUndo: {
             /** Available */
@@ -8925,7 +8927,7 @@ export interface components {
             /** Page Id */
             page_id?: string | null;
             /** Reason Code */
-            reason_code?: "later_changes" | null;
+            reason_code?: ("later_changes" | "not_recorded" | "unsupported_effect") | null;
             /** Restore Version Id */
             restore_version_id?: string | null;
             /** Restore Version No */

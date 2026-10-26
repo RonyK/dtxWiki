@@ -299,7 +299,7 @@ def test_undo_requires_the_unchanged_result_of_a_recorded_decision(session_facto
         with pytest.raises(ReviewDecisionUndoUnavailableError):
             _undo(session, workspace.id, draft.review_item_id, decision_id)
 
-        # A decision recorded before undo existed is never offered.
+        # A decision recorded before undo existed explains why undo is unavailable.
         legacy = _seed_review(
             session,
             workspace.id,
@@ -319,12 +319,18 @@ def test_undo_requires_the_unchanged_result_of_a_recorded_decision(session_facto
             )
         )
         session.flush()
-        assert _detail(session, workspace.id, legacy.id).undo is None
+        unavailable = _detail(session, workspace.id, legacy.id).undo
+        assert (unavailable.available, unavailable.reason_code) == (
+            False, "not_recorded"
+        )
 
         # Publishing revives an archived page; undo would not re-archive it.
         _, archived, revived = _published_page_with_draft(session, "Undo archived")
         session.get(ContextPage, archived.page_id).lifecycle_status = "archived"
-        assert _approve(session, workspace.id, revived.review_item_id).undo is None
+        unavailable = _approve(session, workspace.id, revived.review_item_id).undo
+        assert (unavailable.available, unavailable.reason_code) == (
+            False, "not_recorded"
+        )
 
 
 def test_undoing_a_change_request_withdraws_it(session_factory):

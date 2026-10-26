@@ -91,7 +91,7 @@ def review_candidate_versions(
                 ],
             ).with_only_columns(
                 ChangeOperation.change_set_id, ChangeOperation.diff_ref
-            )
+            ).order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
         ).all()
     }
     versions = {
@@ -639,16 +639,27 @@ class ReviewSelectionService:
                             )
                         )
                         internal_settled.update(preflight.superseded_review_ids)
+                        sibling_versions = review_candidate_versions(
+                            session, workspace_id,
+                            list(preflight.visible_superseded_review_ids),
+                        )
                         for sibling_id in preflight.visible_superseded_review_ids:
                             if sibling_id not in auto_settled:
                                 auto_settled.add(sibling_id)
+                                sibling = sibling_versions.get(sibling_id)
                                 outcomes.append(
                                     ReviewBulkItemOutcome(
                                         id=sibling_id,
                                         outcome="auto_settled",
                                         reason_code="superseded_by_approved_publish",
                                         reason="Settled with the approved version.",
-                                        **metadata,
+                                        target_title=preflight.target_title,
+                                        target_version_no=(
+                                            sibling[1]
+                                            if sibling is not None
+                                            and sibling[0] == preflight.page_id
+                                            else None
+                                        ),
                                     )
                                 )
             except ReviewSelectionError:

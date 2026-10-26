@@ -2787,7 +2787,7 @@ describe("ContextScreen", () => {
     );
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      "Restore v1 as a new draft? The published version stays unchanged.",
+      "Create a new draft from v1? The published version stays unchanged.",
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore`,

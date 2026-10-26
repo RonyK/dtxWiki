@@ -1664,7 +1664,7 @@ class ReviewService:
             from backend.services.context_media_legacy_cutover import (
                 require_no_visible_legacy_media,
             )
-            from backend.services.lint.rules_format import body_error_findings
+            from backend.services.lint import publish_floor_findings
 
             try:
                 assert_context_publish_candidate(
@@ -1678,7 +1678,9 @@ class ReviewService:
                 return "stale_candidate"
             if not publication_checks:
                 return None
-            if body_error_findings(version.body_md):
+            if publish_floor_findings(
+                version.body_md, registry=self.body_preparer.registry
+            ):
                 return "publication_blocked"
             try:
                 require_no_visible_legacy_media(
@@ -2987,6 +2989,38 @@ class ReviewService:
                 return None
         return None
 
+    @staticmethod
+    def _may_undo_decision(
+        review: ReviewItem,
+        decision: ReviewDecision | None,
+        *,
+        actor_user_id: UUID | None,
+        actor_role: str | None,
+    ) -> bool:
+        """Whether the decision belongs to this actor's undo permissions.
+
+        The decider undoes their own decision (an owner anyone's); any editor
+        may undo an automatic approval.
+        """
+
+        if review.review_type != "context_update" or not role_allows(
+            actor_role or "none", "editor"
+        ):
+            return False
+        if (
+            decision is None
+            or decision.decision_type not in REVIEW_STATUS_BY_DECISION
+            or review.status != decision.resulting_review_status
+        ):
+            return False
+        if (
+            decision.actor_type != "system"
+            and decision.actor_id != actor_user_id
+            and not role_allows(actor_role or "none", "owner")
+        ):
+            return False
+        return True
+
     def _undo_candidate(
         self,
         session: Session,
@@ -2996,28 +3030,11 @@ class ReviewService:
         actor_user_id: UUID | None,
         actor_role: str | None,
     ) -> _UndoCandidate | None:
-        """The latest decision, if this actor may undo it.
-
-        The decider undoes their own decision (an owner anyone's); any editor
-        may undo an automatic approval.
-        """
-
-        if review.review_type != "context_update" or not role_allows(
-            actor_role or "none", "editor"
+        if not self._may_undo_decision(
+            review, decision, actor_user_id=actor_user_id, actor_role=actor_role
         ):
             return None
-        if (
-            decision is None
-            or decision.decision_type not in REVIEW_STATUS_BY_DECISION
-            or review.status != decision.resulting_review_status
-        ):
-            return None
-        if (
-            decision.actor_type != "system"
-            and decision.actor_id != actor_user_id
-            and not role_allows(actor_role or "none", "owner")
-        ):
-            return None
+        assert decision is not None
         effect = self._decision_effect(session, review, decision)
         if effect is None:
             return None
@@ -3047,13 +3064,56 @@ class ReviewService:
         *,
         actor_user_id: UUID | None,
         actor_role: str | None,
+        evidence: ReviewEvidencePayload | None,
     ) -> ReviewDecisionUndo | None:
         candidate = self._undo_candidate(
             session, review, decision,
             actor_user_id=actor_user_id, actor_role=actor_role,
         )
         if candidate is None:
-            return None
+            if not self._may_undo_decision(
+                review, decision, actor_user_id=actor_user_id, actor_role=actor_role
+            ):
+                return None
+            assert decision is not None
+            # A missing effect must not look like a missing feature. Recovery
+            # uses only the actor-visible, exact versions already projected in
+            # this review's evidence; a parent draft is not an old publication.
+            operations = [
+                operation
+                for operation in (evidence.operations if evidence else ())
+                if operation.document is not None
+                and operation.document.document_kind == "context"
+                and operation.document.document_id is not None
+            ]
+            page_ids = {operation.document.document_id for operation in operations}
+            page_id = next(iter(page_ids)) if len(page_ids) == 1 else None
+            versions = {
+                operation.content.candidate_version_id: operation.content
+                for operation in operations
+                if page_id is not None
+                and operation.content is not None
+                and operation.content.can_read
+                and operation.content.candidate_version_id is not None
+            }
+            restore = (
+                next(iter(versions.values()))
+                if decision.decision_type == "reject" and len(versions) == 1
+                else None
+            )
+            return ReviewDecisionUndo(
+                decision_id=decision.id,
+                decision_type=decision.decision_type,
+                available=False,
+                reason_code=(
+                    "not_recorded"
+                    if self._decision_effect(session, review, decision) is None
+                    else "unsupported_effect"
+                ),
+                page_id=page_id,
+                restore_version_id=restore.candidate_version_id if restore else None,
+                restore_version_no=restore.candidate_version_no if restore else None,
+            )
         effect = candidate.effect
         restore = (
             get_in_workspace(
@@ -4234,6 +4294,7 @@ class ReviewService:
                     decisions[0] if decisions else None,
                     actor_user_id=actor_user_id,
                     actor_role=actor_role,
+                    evidence=evidence,
                 )
                 if include_undo
                 else None

@@ -788,16 +788,21 @@ class ReviewSettlement(BaseModel):
 class ReviewDecisionUndo(BaseModel):
     """Undo of the review's latest decision, for an actor who may undo it.
 
-    Absent for decisions recorded before undo existed, and for actors other
-    than the decider (any editor may undo an automatic approval).
+    The decider or an owner may undo a decision; any editor may undo an
+    automatic approval. Absent for actors without that permission. Decisions
+    without a recorded effect return available=False with not_recorded;
+    recorded effects that cannot be reversed use unsupported_effect.
     """
 
     decision_id: UUID
     decision_type: str
     available: bool
     # later_changes: something changed after the decision, so undoing it would
-    # discard that work.
-    reason_code: Literal["later_changes"] | None = None
+    # discard that work. not_recorded and unsupported_effect explain why a
+    # decision cannot be reversed even when no later change occurred.
+    reason_code: Literal[
+        "later_changes", "not_recorded", "unsupported_effect"
+    ] | None = None
     # While unavailable: the version whose content a new draft can start from
     # instead (the version an approval replaced, or the rejected draft).
     restore_version_id: UUID | None = None

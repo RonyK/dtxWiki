@@ -235,7 +235,7 @@ export function ReviewScreen() {
   const [groupSnapshotTotals, setGroupSnapshotTotals] = useState<Record<string, number>>({});
   const [settledReviewStates, setSettledReviewStates] = useState<Record<string, string>>({});
   const [completedReview, setCompletedReview] = useState<ReviewItem | null>(null);
-  const [undoneDecision, setUndoneDecision] = useState<{ reviewId: string; decisionType: string } | null>(null);
+  const [undoneDecision, setUndoneDecision] = useState<{ reviewId: string; decisionId: string; decisionType: string } | null>(null);
   const [detachedReview, setDetachedReview] = useState<ReviewItem | null>(null);
   const [rejectDialogKey, setRejectDialogKey] = useState<{ reviewId: string; key: string } | null>(null);
   const onRejectDialogChange = useCallback((reviewId: string, key: string | null) => {
@@ -996,7 +996,18 @@ export function ReviewScreen() {
     try {
       const generation = loadMoreGenerationRef.current;
       if (uncertainDecision && draftKey && !await recoverDecision(uncertainDecision, draftKey, generation)) return;
-      await refreshQueueAfterBulk();
+      const receipt = completedReview?.id === reviewParam ? completedReview : null;
+      await refreshQueueAfterBulk(Boolean(receipt));
+      if (receipt && state?.workspaceId) {
+        const fresh = await getReview(state.workspaceId, receipt.id);
+        if (generation !== loadMoreGenerationRef.current) return;
+        const sameDecision = fresh.decisions[0]?.decision_id === receipt.decisions[0]?.decision_id;
+        setCompletedReview(fresh.status !== "pending" && fresh.decisions[0]?.decision_type !== "undo" && sameDecision ? fresh : null);
+        detailCacheRef.current.set(JSON.stringify([state.workspaceId, fresh.id, fresh.updated_at, fresh.status]), fresh);
+        if (selectedDetailKey) detailCacheRef.current.set(selectedDetailKey, fresh);
+        setDetachedReview(fresh);
+        if (selectedDetailKey) setSelectedDetail({ key: selectedDetailKey, review: fresh, error: null });
+      }
       setBulkResult(null);
       setUndoneDecision(null);
     } catch (exc) {
@@ -1196,7 +1207,7 @@ export function ReviewScreen() {
       detailCacheRef.current.clear();
       setSettledReviewStates({});
       setCompletedReview(null);
-      setUndoneDecision({ reviewId, decisionType });
+      setUndoneDecision({ reviewId, decisionId, decisionType });
       if (searchParamsRef.current.get("review") === reviewId) focusReviewRef.current = reviewId;
       setDetailReload((value) => value + 1);
       try {
@@ -1221,14 +1232,21 @@ export function ReviewScreen() {
   async function startDraftFrom(pageId: string, versionId: string) {
     if (!workspaceIsCurrent || !state?.workspaceId || busyId || bulkBusy) return;
     const workspaceId = state.workspaceId;
-    setBusyId(reviewParam);
+    const sourceReviewId = reviewParam;
+    const generation = loadMoreGenerationRef.current;
+    const isCurrent = () => mountedRef.current
+      && generation === loadMoreGenerationRef.current
+      && searchParamsRef.current.get("review") === sourceReviewId
+      && (!activeWorkspaceRef.current || activeWorkspaceRef.current === workspaceId);
+    setBusyId(sourceReviewId);
     setError(null);
     try {
       await restorePageVersion(workspaceId, pageId, versionId);
-      navigate(`/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}`);
+      if (isCurrent()) navigate(`/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}`);
     } catch (exc) {
-      setError(reviewErrorMessage(exc, t("undo.startDraftFailed")));
-      setBusyId(null);
+      if (isCurrent()) setError(reviewErrorMessage(exc, t("undo.startDraftFailed")));
+    } finally {
+      setBusyId((current) => current === sourceReviewId ? null : current);
     }
   }
 
@@ -1757,6 +1775,8 @@ export function ReviewScreen() {
             ) : undefined}>{error || t("workflow.decisionOutcomeUnknown")}</StatusBanner> : null}
             {selectedReview && detachedReview?.id === selectedReview.id && completedReview?.id !== selectedReview.id
               && !settledReviewStates[selectedReview.id]
+              && !bulkResult?.approved.includes(selectedReview.id)
+              && !bulkResult?.auto_settled_review_item_ids?.includes(selectedReview.id)
               && !reviewMatchesFilters(selectedReview, activeReviewStatus, riskFilter, activeScopeFilter, auth?.user?.user_id ?? null, state.canEditDirectly) ? (
               <StatusBanner tone="info">{t("workflow.outsideFilters")}</StatusBanner>
             ) : null}
@@ -1779,7 +1799,7 @@ export function ReviewScreen() {
                       "Approved {{approved}} reviews. Skipped {{skipped}}.",
                   })}
                 </span>
-                <ReviewBulkOutcomes key={bulkResultRun} result={bulkResult} onOpen={setReviewParam} onUndo={undoDecision} busy={Boolean(busyId) || bulkBusy} />
+                <ReviewBulkOutcomes key={bulkResultRun} result={bulkResult} onOpen={setReviewParam} onUndo={undoDecision} undoneDecisionId={undoneDecision?.decisionId ?? null} busy={Boolean(busyId) || bulkBusy} />
               </StatusBanner>
             ) : null}
             {bulkDiscardResult ? (
@@ -2939,22 +2959,27 @@ function ReviewDetail({
             <X size={15} aria-hidden="true" />
             <span>{t("actions.reject", { defaultValue: "Reject" })}</span>
           </button>
+          {review.undo?.available ? (
+            <button className="icon-button" disabled={busy} onClick={() => onUndo(review.undo!)} type="button">
+              <Undo2 size={15} aria-hidden="true" />{t(`undo.action.${review.undo.decision_type}`)}
+            </button>
+          ) : null}
           </div>
         ) : null}
-        {decisionSaved ? (
+        {decisionSaved || (isReadOnly && review.undo) ? (
           <div className="detail-heading-actions review-action-bar" role="status" ref={savedStatusRef} tabIndex={-1}>
-            <span className="reader-action-status">{t("workflow.savedDecision", { version: reviewTargetVersionNo(review) != null ? `v${reviewTargetVersionNo(review)}` : "", decision: t(`overview.decisionType.${review.decisions[0]?.decision_type ?? "approve"}`) })}</span>
+            {decisionSaved ? <span className="reader-action-status">{t("workflow.savedDecision", { version: reviewTargetVersionNo(review) != null ? `v${reviewTargetVersionNo(review)}` : "", decision: t(`overview.decisionType.${review.decisions[0]?.decision_type ?? "approve"}`) })}</span> : null}
             {review.undo?.available ? (
               <button className="icon-button" disabled={busy} onClick={() => onUndo(review.undo!)} type="button">
                 <Undo2 size={15} aria-hidden="true" />{t(`undo.action.${review.undo.decision_type}`)}
               </button>
             ) : null}
-            {noNextReview ? <span>{t("workflow.queueComplete")}</span> : <div className="review-next-action">
+            {decisionSaved ? noNextReview ? <span>{t("workflow.queueComplete")}</span> : <div className="review-next-action">
               <button className="icon-button primary" disabled={nextDisabled} onClick={onNextReview} ref={nextButtonRef} type="button">
                 {t("workflow.nextReview")}<ChevronRight size={15} aria-hidden="true" />
               </button>
               {nextLabel ? <span>{nextLabel}</span> : null}
-            </div>}
+            </div> : null}
             <a className="icon-button" href="#review-decision-history" onClick={(event) => {
               event.preventDefault();
               const history = document.getElementById("review-decision-history");
@@ -2963,8 +2988,10 @@ function ReviewDetail({
           </div>
         ) : null}
       </header>
-      {!decisionSaved && review.undo ? (
-        <ReviewUndoNotice busy={busy} onStartDraft={onStartDraft} onUndo={onUndo} undo={review.undo} workspaceId={workspaceId} />
+      {review.undo ? (
+        <ReviewUndoNotice busy={busy} onStartDraft={onStartDraft} undo={review.undo} workspaceId={workspaceId} />
+      ) : isResolved && review.review_type !== "context_update" ? (
+        <StatusBanner tone="info">{t("undo.unsupportedReviewType")}</StatusBanner>
       ) : null}
       {!isReadOnly && isReconciliation ? (
         <StatusBanner
@@ -3505,37 +3532,37 @@ function reviewPublicationTarget(review: ReviewItem): ReviewContentTarget | null
   return singleCandidate ? candidate.content! : null;
 }
 
-function ReviewUndoNotice({ undo, workspaceId, busy, onUndo, onStartDraft }: {
+function ReviewUndoNotice({ undo, workspaceId, busy, onStartDraft }: {
   undo: ReviewDecisionUndo;
   workspaceId: string;
   busy: boolean;
-  onUndo: (undo: ReviewDecisionUndo) => void;
   onStartDraft: (pageId: string, versionId: string) => void;
 }) {
   const { t } = useTranslation("review");
   if (undo.available) {
     return (
-      <StatusBanner tone="info" action={
-        <button className="icon-button" disabled={busy} onClick={() => onUndo(undo)} type="button">
-          <Undo2 size={15} aria-hidden="true" />{t(`undo.action.${undo.decision_type}`)}
-        </button>
-      }>{t(`undo.available.${undo.decision_type}`)}</StatusBanner>
+      <StatusBanner tone="info">{t(`undo.available.${undo.decision_type}`)}</StatusBanner>
     );
   }
   const historyHref = undo.page_id
     ? `/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(undo.page_id)}?tab=history`
     : null;
+  const unavailableMessage = undo.reason_code === "later_changes"
+    ? t(`undo.laterChanges.${undo.decision_type}`)
+    : undo.reason_code === "not_recorded"
+      ? t("undo.notRecorded")
+      : t("undo.unsupportedEffect");
   return (
     <StatusBanner tone="warning" action={
       <div className="review-recovery-actions">
-        {historyHref ? <Link className="icon-button" to={historyHref}>{t("undo.viewLaterChanges")}</Link> : null}
+        {historyHref ? <Link className="icon-button" to={historyHref}>{t(undo.reason_code === "later_changes" ? "undo.viewLaterChanges" : "undo.viewHistory")}</Link> : null}
         {undo.page_id && undo.restore_version_id ? (
           <button className="icon-button" disabled={busy} onClick={() => onStartDraft(undo.page_id!, undo.restore_version_id!)} type="button">
             {t("undo.startDraft", { version: undo.restore_version_no })}
           </button>
         ) : null}
       </div>
-    }>{t(`undo.laterChanges.${undo.decision_type}`)}</StatusBanner>
+    }>{unavailableMessage}</StatusBanner>
   );
 }
 
@@ -4029,21 +4056,31 @@ function ReviewRejectImpact({ review }: { review: ReviewItem }) {
   );
 }
 
-function ReviewBulkOutcomes({ result, onOpen, onUndo, busy }: {
+function ReviewBulkOutcomes({ result, onOpen, onUndo, undoneDecisionId, busy }: {
   result: ReviewBulkDecisionResult;
   onOpen: (id: string) => void;
   onUndo: (reviewId: string, decisionId: string, decisionType: string) => Promise<boolean>;
+  undoneDecisionId: string | null;
   busy: boolean;
 }) {
   const { t } = useTranslation("review");
   const [visible, setVisible] = useState(50);
   const [undone, setUndone] = useState<ReadonlySet<string>>(new Set());
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  useEffect(() => {
+    if (undoneDecisionId) setUndone((current) => new Set([...current, undoneDecisionId]));
+  }, [undoneDecisionId]);
   const outcomes = result.outcomes?.length ? result.outcomes : result.skipped.map((item) => ({
     id: item.id, outcome: "excluded" as const, reason: item.reason,
     reason_code: item.reason_code, target_title: null, target_version_no: null,
   }));
+  const hasUndoActions = outcomes.some((item) => item.outcome === "approved" && "decision_id" in item && item.decision_id);
   return (
-    <details className="review-bulk-outcomes" open={result.skipped.length > 0 || Boolean(result.requires_reconfirmation)}>
+    <details className="review-bulk-outcomes" open={hasUndoActions || result.skipped.length > 0 || Boolean(result.requires_reconfirmation)}>
       <summary>{t("workflow.itemResults", { processed: result.processed_count ?? result.approved.length, total: result.total ?? result.approved.length + result.skipped.length })}</summary>
       <ul className="review-bulk-outcome-list">
         {outcomes.slice(0, visible).map((item) => (
@@ -4057,7 +4094,9 @@ function ReviewBulkOutcomes({ result, onOpen, onUndo, busy }: {
             {item.outcome === "approved" && "decision_id" in item && item.decision_id ? (
               undone.has(item.decision_id) ? <span>{t("undo.undone")}</span> : (
                 <button className="icon-button" disabled={busy} onClick={() => void onUndo(item.id, item.decision_id!, "approve").then((ok) => {
+                  if (!mountedRef.current) return;
                   if (ok) setUndone((current) => new Set([...current, item.decision_id!]));
+                  else onOpen(item.id);
                 })} type="button">
                   <Undo2 size={15} aria-hidden="true" />{t("undo.action.approve")}
                 </button>

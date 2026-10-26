@@ -16686,7 +16686,7 @@
       },
       "ReviewDecisionUndo": {
         "additionalProperties": false,
-        "description": "Undo of the review's latest decision, for an actor who may undo it.\n\nAbsent for decisions recorded before undo existed, and for actors other\nthan the decider (any editor may undo an automatic approval).",
+        "description": "Undo of the review's latest decision, for an actor who may undo it.\n\nThe decider or an owner may undo a decision; any editor may undo an\nautomatic approval. Absent for actors without that permission. Decisions\nwithout a recorded effect return available=False with not_recorded;\nrecorded effects that cannot be reversed use unsupported_effect.",
         "properties": {
           "available": {
             "title": "Available",
@@ -16716,7 +16716,11 @@
           "reason_code": {
             "anyOf": [
               {
-                "const": "later_changes",
+                "enum": [
+                  "later_changes",
+                  "not_recorded",
+                  "unsupported_effect"
+                ],
                 "type": "string"
               },
               {
@@ -21254,7 +21258,7 @@
       "name": "AGPL-3.0-only OR Elastic-2.0"
     },
     "title": "dtxWiki",
-    "version": "0.1.2"
+    "version": "0.1.4"
   },
   "openapi": "3.1.0",
   "paths": {

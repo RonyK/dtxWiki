@@ -3105,8 +3105,7 @@ button.history-card {
      .topbar-actions floors itself at max-content, so a bare 1fr let the topbar's
      intrinsic width push the shell column past the viewport — clipped, not
      scrollable. The desktop rules above already use minmax(0, 1fr). */
-  .app-shell,
-  .app-shell[data-sidebar-collapsed="true"] {
+  .app-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "topbar"
