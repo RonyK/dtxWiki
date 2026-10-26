@@ -3824,32 +3824,6 @@ button.history-card {
   line-height: 1.4;
 }
 
-.workspace-member-add-action {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, 180px) auto;
-  align-items: end;
-  gap: 10px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface-subtle);
-  padding: 11px;
-}
-
-.workspace-member-add-action > div {
-  display: grid;
-  align-self: center;
-  gap: 3px;
-  min-width: 0;
-}
-
-.workspace-member-add-action span {
-  color: var(--ink-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
 .workspace-member-active-filter {
   min-height: 18px;
   color: var(--ink-muted);
@@ -4167,7 +4141,6 @@ button.history-card {
   }
 
   .workspace-member-lookup,
-  .workspace-member-add-action,
   .workspace-member-row,
   .workspace-access-policy-cards,
   .workspace-access-options,

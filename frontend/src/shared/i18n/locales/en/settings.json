@@ -122,23 +122,25 @@
       "owner": "Owner"
     },
     "add": {
-      "email": "Exact login email",
-      "emailPlaceholder": "person@example.com",
       "role": "Initial role",
       "action": "Add member",
       "adding": "Adding…",
-      "fromSearchTitle": "Add an exact account",
       "fromSearchReady": "Add account {{email}}.",
-      "fromSearchHint": "Enter an exact account UUID or native login email to add an existing account."
+      "fromSearchHint": "Enter an exact account UUID or native login email to add an existing account.",
+      "title": "Add a member",
+      "selector": "Account UUID or native login email",
+      "selectorPlaceholder": "Account UUID or person@example.com",
+      "identityHint": "Use an identifier shared by the person. An SSO profile email is not a native login email."
     },
     "filters": {
-      "query": "Find or add members",
-      "queryPlaceholder": "Name, account UUID, or native login email",
-      "queryHelp": "Search existing members. Add by exact account UUID or native login email.",
+      "query": "Search current members",
+      "queryPlaceholder": "Name, account UUID, or login email",
+      "queryHelp": "Filters people who already have access to this workspace.",
       "role": "Role filter",
       "search": "Search",
       "active": "Showing {{query}} · {{role}}",
-      "anyQuery": "all members"
+      "anyQuery": "all members",
+      "title": "Current members"
     },
     "empty": {
       "title": "No members match",
@@ -207,7 +209,11 @@
       "hint": "Search to find accounts in the company directory enabled for this workspace. The provider and account identifier distinguish the selected account.",
       "loading": "Searching company accounts…",
       "add": "Add {{name}}",
-      "refine": "More accounts match. Refine your search."
+      "refine": "More accounts match. Refine your search.",
+      "query": "Search company accounts",
+      "queryPlaceholder": "At least 2 characters",
+      "search": "Search directory",
+      "empty": "No company accounts match this search."
     }
   },
   "workspaceAccess": {
@@ -1068,7 +1074,7 @@
     "serverAdminOnlyNotice": "User search and account recovery are visible to server admins only.",
     "eyebrow": "Server administration",
     "title": "Account recovery",
-    "description": "Find an instance user and start a one-time recovery flow. You never choose or see the user's new password.",
+    "description": "Find an account, reconnect its SSO identity, or help the user reset a native password.",
     "serverAdminOnly": "Server admin only",
     "boundary": "A successful reset signs the user out of every browser session. PAT/MCP tokens are separate and are revoked only when selected below.",
     "unlock": {
@@ -1119,7 +1125,7 @@
     "mailUnavailableActionHint": "Email delivery is unavailable because server mail recovery is not ready.",
     "capabilityLoading": "Checking server recovery availability…",
     "capabilityError": "Recovery availability could not be confirmed. Reload before issuing a reset.",
-    "adminRecoveryUnavailable": "Admin-assisted recovery is unavailable until the canonical HTTPS public URL is ready.",
+    "adminRecoveryUnavailable": "Native password recovery links require the canonical HTTPS public URL. SSO identity reconnection remains available.",
     "emailQueued": "Recovery email queued for {{email}}.",
     "linkMissing": "The server did not return a recovery link. Issue a new reset.",
     "linkDismissed": "The one-time link was hidden. Issue a new reset if another link is needed.",
@@ -1169,7 +1175,7 @@
       "action": "Reconnect SSO identity",
       "title": "Reconnect this account’s SSO identity",
       "warning": "Verify the person and the new identity through your organization’s separate trusted process first. This changes the selected SSO identity, revokes existing sessions, and does not create a temporary login link or change a native email login.",
-      "noEmail": "This account uses SSO. Email recovery and temporary login links are unavailable without a native email login.",
+      "noEmail": "This account uses SSO and has no registered account email. Use identity recovery instead of email recovery.",
       "currentIdentity": "Current SSO identity",
       "provider": "New provider slug",
       "issuer": "New issuer",
@@ -1178,7 +1184,8 @@
       "confirmUser": "Type the target account UUID to confirm",
       "complete": "The selected SSO identity was reconnected. Existing sessions were revoked.",
       "failed": "The SSO identity could not be reconnected. Verify your administrator session and the identity details."
-    }
+    },
+    "optionsSummary": "Recovery options and session effects"
   },
   "jobs": {
     "serverAdminOnlyNotice": "The background job queue is visible to server admins only.",

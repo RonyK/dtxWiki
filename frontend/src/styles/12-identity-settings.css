@@ -1,0 +1,213 @@
+.identity-settings-scope-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.identity-settings-section-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.identity-settings-section-heading h4,
+.workspace-company-directory h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.identity-settings-section-heading p {
+  margin: 5px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workspace-member-add-panel {
+  display: grid;
+  gap: 12px;
+  margin-block: 18px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  padding: 16px;
+}
+
+.workspace-member-add-panel .field-stack,
+.workspace-member-add-panel .field-hint {
+  margin: 0;
+}
+
+.workspace-member-add-panel .identity-settings-section-heading > .field-stack {
+  flex: 0 0 130px;
+}
+
+.workspace-member-direct-add,
+.workspace-company-directory-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: end;
+  gap: 10px;
+}
+
+.workspace-member-direct-add > .field-stack,
+.workspace-company-directory-search > .field-stack {
+  min-width: 0;
+}
+
+.workspace-member-direct-add input,
+.workspace-company-directory-search input {
+  width: 100%;
+}
+
+.workspace-company-directory {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.workspace-company-candidates {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-company-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.workspace-company-candidate-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.workspace-company-candidate-identity > strong,
+.workspace-company-candidate-identity > code {
+  flex: 1 0 100%;
+  overflow-wrap: anywhere;
+}
+
+.workspace-company-candidate-identity > code,
+.workspace-company-candidate-evidence {
+  color: var(--ink-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-company-candidate-provider {
+  border-radius: 4px;
+  background: var(--context-soft);
+  color: var(--ink-muted);
+  padding: 2px 5px;
+  font-size: 11px;
+}
+
+.workspace-member-current-heading {
+  margin-bottom: 12px;
+}
+
+.admin-recovery-policy {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.admin-recovery-policy summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.admin-recovery-policy p {
+  max-width: 78ch;
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+
+.identity-settings-protection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.identity-settings-protection > svg {
+  flex: 0 0 auto;
+  color: var(--success, var(--ink-muted));
+}
+
+.identity-settings-protection p {
+  margin: 0;
+}
+
+.admin-user-search {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.admin-user-search-action {
+  min-height: 38px;
+  min-width: 100px;
+}
+
+.admin-user-recovery-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  width: min(100%, 390px);
+}
+
+.admin-user-recovery-actions .meta-line {
+  flex: 1 0 100%;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .identity-settings-section-heading {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .workspace-member-add-panel .identity-settings-section-heading > .field-stack {
+    flex: auto;
+    width: 100%;
+  }
+
+  .workspace-member-direct-add,
+  .workspace-company-directory-search,
+  .workspace-company-candidate,
+  .admin-user-search {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-company-candidate > .icon-button,
+  .admin-user-recovery-actions > .icon-button {
+    width: 100%;
+  }
+}

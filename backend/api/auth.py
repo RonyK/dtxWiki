@@ -1120,6 +1120,7 @@ def session_payload(result: SessionResult) -> dict:
 def user_payload(user: AuthenticatedUser) -> dict:
     return {
         "user_id": user.user_id,
+        "username": user.username,
         "email": user.email,
         "display_name": user.display_name,
         "status": user.status,

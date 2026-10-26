@@ -1,5 +1,7 @@
 """Account input contracts. Lengths count Unicode code points, except email bytes."""
 
+from uuid import UUID
+
 DISPLAY_NAME_MAX_LENGTH = 32
 EMAIL_MAX_BYTES = 254
 EMAIL_LOCAL_MAX_BYTES = 64
@@ -21,6 +23,11 @@ class EmailPolicyError(ValueError):
 
 class PasswordInputPolicyError(ValueError):
     pass
+
+
+def username_for_user_id(user_id: UUID) -> str:
+    """A stable unique public handle, independent of mutable profile names."""
+    return f"u_{user_id.hex}"
 
 
 def _invalid_scalar(value: str) -> bool:

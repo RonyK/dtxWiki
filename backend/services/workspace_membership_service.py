@@ -967,7 +967,7 @@ def _target_user_selector(
 ) -> ColumnElement[bool]:
     if (email is None) == (user_id is None):
         raise WorkspaceMemberSelectorInvalidError(
-            "provide exactly one of user_id or native email"
+            "provide exactly one of user_id or registered account email"
         )
     return (
         User.id == user_id

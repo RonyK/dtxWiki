@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
+from backend.domain.identity_policy import username_for_user_id
 from backend.models.user import User
 
 
@@ -17,6 +18,10 @@ class AuthenticatedUser:
     status: str
     email_verified_at: datetime | None = None
     has_password: bool = True
+
+    @property
+    def username(self) -> str:
+        return username_for_user_id(self.user_id)
 
 
 @dataclass(frozen=True)

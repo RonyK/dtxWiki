@@ -163,6 +163,7 @@ def test_signup_sets_session_cookie_and_me_returns_user(page_service):
     data = response.json()["data"]
     assert data["user"]["email"] == "user@example.com"
     assert data["user"]["display_name"] == "Example User"
+    assert data["user"]["username"] != data["user"]["display_name"]
     assert "session_token" not in data
 
     me = client.get("/api/v1/auth/me")
@@ -174,6 +175,7 @@ def test_signup_sets_session_cookie_and_me_returns_user(page_service):
     # is_server_admin) that the signup response leaves at schema defaults;
     # compare the user identity rather than the whole payload (merged I5).
     assert me_data["user_id"] == data["user"]["user_id"]
+    assert me_data["username"] == data["user"]["username"]
     assert me_data["email"] == data["user"]["email"]
     assert me_data["display_name"] == data["user"]["display_name"]
     assert me_data["status"] == data["user"]["status"]

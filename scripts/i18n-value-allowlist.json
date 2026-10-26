@@ -34,7 +34,6 @@
   "settings.json:setup.update.methods.pipx",
   "settings.json:setup.update.methods.uv",
   "settings.json:setup.update.pypi",
-  "settings.json:workspaceMembers.add.emailPlaceholder",
   "shell.json:topbar.language.en",
   "shell.json:topbar.language.ko",
   "tree.json:counts",

@@ -158,10 +158,10 @@ describe("Workspace Settings membership and access", () => {
     expect(
       await screen.findByRole("heading", { name: "Members" }),
     ).toBeInTheDocument();
-    const memberLookup = screen.getByRole("searchbox", {
-      name: "Find or add members",
+    const memberLookup = screen.getByRole("textbox", {
+      name: "Account UUID or native login email",
     });
-    expect(screen.getByText("Add an exact account")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Add a member" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
     fireEvent.change(memberLookup, { target: { value: "a".repeat(65) + "@example.test" } });
     expect(memberLookup).toHaveAccessibleDescription(/at most 254 UTF-8 bytes/);
@@ -270,16 +270,15 @@ describe("Workspace Settings membership and access", () => {
     render(<WorkspaceMembersSection />);
     await screen.findByRole("combobox", { name: "Role for Owner" });
     const memberLookup = screen.getByRole("searchbox", {
-      name: "Find or add members",
+      name: "Search current members",
     });
     await user.type(memberLookup, "Owner");
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(filteredReads).toBe(1));
 
-    // The draft can become an exact email while the applied search remains
-    // "Owner". The add result does not belong in that filtered result set.
-    await user.clear(memberLookup);
-    await user.type(memberLookup, "person@example.com");
+    // Adding a person does not change the current-member search. The add
+    // result does not belong in the filtered result set.
+    await user.type(screen.getByRole("textbox", { name: "Account UUID or native login email" }), "person@example.com");
     await user.click(screen.getByRole("button", { name: "Add member" }));
 
     await waitFor(() => {
@@ -362,7 +361,7 @@ describe("Workspace Settings membership and access", () => {
     await waitFor(() => expect(filteredReads).toBe(1));
 
     await user.type(
-      screen.getByRole("searchbox", { name: "Find or add members" }),
+      screen.getByRole("textbox", { name: "Account UUID or native login email" }),
       "viewer@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Add member" }));
@@ -481,7 +480,7 @@ describe("Workspace Settings membership and access", () => {
     expect(screen.getByText("26 members")).toBeInTheDocument();
 
     await user.type(
-      screen.getByRole("searchbox", { name: "Find or add members" }),
+      screen.getByRole("textbox", { name: "Account UUID or native login email" }),
       "added@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Add member" }));
@@ -550,7 +549,7 @@ describe("Workspace Settings membership and access", () => {
     render(<WorkspaceMembersSection />);
     await screen.findByRole("combobox", { name: "Role for Editor" });
     await user.type(
-      screen.getByRole("searchbox", { name: "Find or add members" }),
+      screen.getByRole("textbox", { name: "Account UUID or native login email" }),
       MEMBER_ID,
     );
     await user.selectOptions(screen.getByLabelText("Initial role"), "editor");

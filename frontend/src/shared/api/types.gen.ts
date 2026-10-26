@@ -4271,6 +4271,11 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+            /**
+             * Username
+             * @description Stable system-generated handle; display_name need not be unique.
+             */
+            username: string;
         };
         /**
          * BeginContextEditRequest

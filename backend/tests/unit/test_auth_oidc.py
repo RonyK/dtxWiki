@@ -10,6 +10,7 @@ import base64
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Event
 from urllib.parse import parse_qs
 
@@ -248,8 +249,13 @@ def test_oidc_code_flow_and_bounded_discovery_jwks_transport(monkeypatch):
     unavailable_documents = set()
     token_changes = {}
     signing_key = [private]
+    userinfo_endpoint = ISSUER + "/userinfo"
+    profile = {"sub": "other-subject"}
     documents = {
-        ISSUER + "/.well-known/openid-configuration": METADATA,
+        ISSUER + "/.well-known/openid-configuration": {
+            **METADATA,
+            "userinfo_endpoint": userinfo_endpoint,
+        },
         METADATA["jwks_uri"]: {"keys": [public]},
     }
 
@@ -273,16 +279,19 @@ def test_oidc_code_flow_and_bounded_discovery_jwks_transport(monkeypatch):
                             **_claims(),
                             "email": "person@example.test",
                             "email_verified": True,
+                            "name": "Signed Person",
                             **token_changes,
                         },
                         signing_key[0],
                         algorithm="RS256",
                         headers={"kid": "one"},
-                    )
+                    ),
+                    "access_token": "private-access-token",
                 },
             )
-        if str(request.url) == ISSUER + "/userinfo":
-            return httpx.Response(200, json={"sub": "other-subject"})
+        if str(request.url) == userinfo_endpoint:
+            assert request.headers["authorization"] == "Bearer private-access-token"
+            return httpx.Response(200, json=profile)
         return httpx.Response(200, json=documents[str(request.url)])
 
     transport = JsonTransport(transport=httpx.MockTransport(handler))
@@ -313,17 +322,50 @@ def test_oidc_code_flow_and_bounded_discovery_jwks_transport(monkeypatch):
         "transaction-nonce"
     ]
     assert params["code_challenge_method"] == ["S256"] and params["prompt"] == ["login"]
-    assertion = adapter.complete(
-        provider,
-        CallbackInput(
-            http_method="GET",
-            query={"code": "one-use-code"},
-            expected_nonce="transaction-nonce",
-            pkce_verifier="v" * 43,
-        ),
+    callback = CallbackInput(
+        http_method="GET",
+        query={"code": "one-use-code"},
+        expected_nonce="transaction-nonce",
+        pkce_verifier="v" * 43,
     )
+    assertion = adapter.complete(provider, callback)
     assert assertion.subject == "stable-subject" and assertion.nonce_verified
     assert assertion.email_verified and assertion.email == "person@example.test"
+    assert not any(str(request.url) == userinfo_endpoint for request in requests)
+
+    # Budget exception: extend the existing code flow, with no new collected
+    # case. These five inputs cover independent UserInfo boundaries: claim
+    # provenance, signed-email precedence, optional failure, subject mismatch,
+    # and consent scopes. A DB or browser adds no coverage for these RPC claims.
+    profile.update(
+        sub="stable-subject",
+        email="profile@example.test",
+        email_verified=False,
+        name="Profile Person",
+    )
+    token_changes.update(email=None, name=None)
+    enriched = adapter.complete(provider, callback)
+    assert enriched.email == "profile@example.test" and not enriched.email_verified
+    assert enriched.display_name == "Profile Person"
+    token_changes.update(email="person@example.test")
+    enriched = adapter.complete(provider, callback)
+    assert enriched.email == "person@example.test" and enriched.email_verified
+    assert enriched.display_name == "Profile Person"
+
+    token_changes.update(email=None)
+    unavailable_documents.add(userinfo_endpoint)
+    unavailable = adapter.complete(provider, callback)
+    assert unavailable.subject == "stable-subject"
+    assert unavailable.email is None and not unavailable.email_verified
+    unavailable_documents.clear()
+    profile["sub"] = "other-subject"
+    with pytest.raises(AuthMethodError, match="userinfo_subject_mismatch"):
+        adapter.complete(provider, callback)
+    before = len(requests)
+    identity_only = replace(provider, config={**provider.config, "scopes": ["openid"]})
+    assert adapter.complete(identity_only, callback).email is None
+    assert all(str(request.url) != userinfo_endpoint for request in requests[before:])
+    token_changes.clear()
 
     def callback_for(changes=None, key=None):
         def factory(redirect):
@@ -457,7 +499,7 @@ def test_oidc_code_flow_and_bounded_discovery_jwks_transport(monkeypatch):
     assert len(requests) == before + 2
     with pytest.raises(AuthMethodError):
         client.fetch_profile(
-            ISSUER + "/userinfo", "access-token", expected_subject="stable-subject"
+            userinfo_endpoint, "private-access-token", expected_subject="stable-subject"
         )
     for max_bytes, response in (
         (

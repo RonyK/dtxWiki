@@ -798,8 +798,8 @@ describe("AdminUserRecoverySection", () => {
     ssoOnly = true;
     render(<AdminUserRecoverySection />);
     await searchForUser(user, USER_ID);
-    expect(screen.getByRole("button", { name: "Send recovery email" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Issue one-time link" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send recovery email" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Issue one-time link" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reconnect SSO identity" }));
     const rebind = screen.getByRole("dialog", { name: "Reconnect this account’s SSO identity" });
     const save = within(rebind).getByRole("button", { name: "Reconnect SSO identity" });

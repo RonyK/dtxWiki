@@ -616,7 +616,7 @@ class SessionService:
         if password is not None:
             if normalized_email is None:
                 raise EmailInputPolicyError(
-                    "password credentials require a native email"
+                    "password credentials require a registered account email"
                 )
             validate_password(password)
         name = normalize_display_name(display_name, normalized_email)

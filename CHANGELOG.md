@@ -3,8 +3,13 @@
 ## Unreleased
 
 - External login plugins support immediate SSO signup without email, SMTP, or a
-  local password. External profile email stays separate from native login email;
-  accounts never merge automatically by email. Members can be added by user UUID,
+  local password. Trusted, IdP-verified addresses become unique account emails;
+  a matching existing account requires signing in and explicitly linking instead
+  of creating another account. Unverified profile addresses do not reserve account
+  emails, and accounts never merge automatically. Missing OIDC email/name claims
+  can be supplemented by subject-checked UserInfo within the requested scopes.
+  Users receive stable UUID-derived usernames separately from display names.
+  Members can be added by user UUID or registered account email,
   with an optional company directory restricted to a configured provider/tenant.
 - Sensitive account and server-admin actions accept a primary login or confirmation
   from the last 60 minutes by default. `DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS`

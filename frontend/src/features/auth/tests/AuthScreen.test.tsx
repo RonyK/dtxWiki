@@ -329,7 +329,7 @@ describe("AuthScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Sign up" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Signed out")).toBeInTheDocument();
+    expect(screen.getByText("Create an account to start working together.")).toBeInTheDocument();
     expect(
       screen.getByRole("checkbox", { name: /Keep me signed in/i }),
     ).toBeChecked();

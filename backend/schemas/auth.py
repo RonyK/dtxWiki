@@ -275,6 +275,9 @@ class ApiTokenUpdateRequest(BaseModel):
 
 class AuthUserData(BaseModel):
     user_id: UUID
+    username: str = Field(
+        description="Stable system-generated handle; display_name need not be unique."
+    )
     email: str | None
     display_name: str
     status: str

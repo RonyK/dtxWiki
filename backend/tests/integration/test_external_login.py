@@ -145,7 +145,7 @@ def deliver_confirmation(page_service, client, kind):
 def test_external_signup_mail_policy_and_browser_bound_confirmation(
     page_service, tmp_path, monkeypatch
 ):
-    """SSO profile claims never occupy the native email credential namespace."""
+    """Untrusted profile claims never reserve the account email namespace."""
     client, method, registry = setup_client(
         page_service, tmp_path, monkeypatch, trust_email_verified=False
     )
@@ -166,15 +166,40 @@ def test_external_signup_mail_policy_and_browser_bound_confirmation(
     other_id = client.get("/api/v1/auth/me").json()["data"]["user_id"]
     assert other_id != str(user_id)
     method.assertions["missing"] = replace(
-        method.assertions["valid"], subject="missing-email", email=None
+        method.assertions["valid"],
+        subject="missing-email",
+        email=None,
+        display_name=None,
     )
     assert (
         complete(client, begin(client), "missing").headers["location"] == "/dashboard"
     )
-    assert client.get("/api/v1/auth/me").json()["data"]["email"] is None
+    missing_user = client.get("/api/v1/auth/me").json()["data"]
+    assert missing_user["email"] is None and missing_user["display_name"] == "User"
+    # Extend this existing DB traversal for late ownership and its collision:
+    # untrusted profile duplicates must not reserve an address, and promoting
+    # one identity later must not stop another established identity's login.
+    provider = registry.get("company")
+    registry.providers["company"] = replace(
+        provider,
+        policy=provider.policy.model_copy(update={"trust_email_verified": True}),
+    )
+    method.assertions["missing"] = replace(
+        method.assertions["missing"], email="fake@example.test"
+    )
+    assert (
+        complete(client, begin(client), "missing").headers["location"] == "/dashboard"
+    )
+    promoted = client.get("/api/v1/auth/me").json()["data"]
+    assert promoted["user_id"] == missing_user["user_id"]
+    assert promoted["email"] == "fake@example.test"
+    assert promoted["email_verified_at"] is not None
 
-    # Native email enrollment is an explicit, same-session mailbox confirmation.
+    # A conflicting later claim remains profile-only. Mail enrollment is an
+    # explicit, same-session confirmation of another available account address.
     assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    unchanged = client.get("/api/v1/auth/me").json()["data"]
+    assert unchanged["user_id"] == str(user_id) and unchanged["email"] is None
     endpoint = "/api/v1/auth/email-verification/request"
     rejected = client.post(
         endpoint, json={"email": "native@example.test"}, headers={"Origin": ORIGIN}
@@ -224,7 +249,9 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
         "backend.services.session_service.AUTH_RATE_LIMIT_PER_EMAIL", 100
     )
 
-    client, method, registry = setup_client(page_service, tmp_path, monkeypatch)
+    client, method, registry = setup_client(
+        page_service, tmp_path, monkeypatch, trust_email_verified=False
+    )
     method.descriptor = replace(
         method.descriptor,
         capabilities=replace(method.descriptor.capabilities, reauthentication=False),
@@ -539,7 +566,8 @@ def test_browser_bound_login_replay_account_and_oauth_return(
         and "Secure" in success.headers["set-cookie"]
     )
     user = client.get("/api/v1/auth/me").json()["data"]
-    assert user["email"] is None and not user["has_password"]
+    assert user["email"] == "fake@example.test" and not user["has_password"]
+    assert user["email_verified_at"] is not None
     assert (
         user["session_method"] == "ext" and user["session_provider_slug"] == "company"
     )
@@ -572,7 +600,21 @@ def test_browser_bound_login_replay_account_and_oauth_return(
         method.assertions["valid"], email="changed@example.test", email_verified=False
     )
     assert complete(client, begin(client)).status_code == 302
-    assert client.get("/api/v1/auth/me").json()["data"]["email"] is None
+    unchanged = client.get("/api/v1/auth/me").json()["data"]
+    assert unchanged["user_id"] == user["user_id"]
+    assert unchanged["email"] == "fake@example.test"
+    # These two optional-profile inputs exercise missing and malformed claims;
+    # both retain the last address and its matching unverified status, rather
+    # than inheriting a verification flag from an absent/invalid new address.
+    for profile_email in (None, "not-an-email"):
+        method.assertions["valid"] = replace(
+            method.assertions["valid"], email=profile_email, email_verified=True
+        )
+        assert complete(client, begin(client)).headers["location"] == "/dashboard"
+        with page_service.session_factory() as session:
+            identity = session.scalar(select(UserIdentity))
+            assert identity.last_email == "changed@example.test"
+            assert not identity.last_email_verified
     with page_service.session_factory.begin() as session:
         identity = session.scalar(select(UserIdentity))
         assert (
@@ -954,21 +996,37 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     page_service, tmp_path, monkeypatch
 ):
     client, method, registry = setup_client(page_service, tmp_path, monkeypatch)
-    # The same email cannot connect a new IdP to an unverified existing account.
+    # A trusted IdP email cannot silently merge with a native account or create
+    # a second account. Ownership of the existing session is required to link.
     signup = client.post(
         "/api/v1/auth/signup",
         json={"email": "fake@example.test", "password": "password"},
     )
     assert signup.status_code == 201
     native_id = signup.json()["data"]["user"]["user_id"]
-    with page_service.session_factory.begin() as session:
-        session.get(User, UUID(native_id)).email_verified_at = datetime.now(UTC)
-    assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    rejected = complete(client, begin(client))
+    assert "account_link_required" in rejected.headers["location"]
     current = client.get("/api/v1/auth/me").json()["data"]
-    assert current["email"] is None and current["user_id"] != native_id
+    assert current["email"] == "fake@example.test" and current["user_id"] == native_id
     with page_service.session_factory() as session:
-        assert session.scalar(select(UserIdentity)).linked_via == "jit"
+        assert session.scalar(select(func.count()).select_from(UserIdentity)) == 0
         assert session.get(User, UUID(native_id)).email == "fake@example.test"
+        assert session.get(User, UUID(native_id)).email_verified_at is None
+    linked = client.post(
+        "/api/v1/auth/sso/company/link",
+        json={"return_to": "/account"},
+        headers={"Origin": ORIGIN},
+    )
+    assert linked.status_code == 200, linked.text
+    state = parse_qs(urlsplit(linked.json()["data"]["redirect_url"]).query)["state"][0]
+    assert complete(client, state).headers["location"] == "/account"
+    with page_service.session_factory() as session:
+        identity = session.scalar(select(UserIdentity))
+        assert (
+            identity.user_id == UUID(native_id) and identity.linked_via == "user_link"
+        )
+        assert session.get(User, UUID(native_id)).email_verified_at is not None
+    assert client.post("/api/v1/auth/logout").status_code == 200
     # Separate new identities exercise JIT, trust and domain gates.
     method.assertions["new"] = ExternalAssertion(
         issuer=FAKE_ISSUER, subject="new", email="new@example.test", email_verified=True
@@ -1059,6 +1117,7 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     assert complete(client, begin(client), "new").headers["location"] == "/dashboard"
     current = client.get("/api/v1/auth/me").json()["data"]
     assert current["display_name"] == "User"
+    assert current["email"] == "new@example.test"
     granted_user = UUID(current["user_id"])
     # Same-role requests are idempotent; a differing role preserves the existing
     # human grant and produces the explicit diagnostic instead of upgrading it.
@@ -1079,6 +1138,34 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
         )
         assert preserved.payload["requested_role"] == "editor"
         assert preserved.payload["existing_role"] == "viewer"
+    # Reuse this two-account traversal for the explicit-link collision: proving
+    # the new IdP is insufficient to claim another account's representative email.
+    registry.add(
+        {"slug": "backup", "method": "test_oidc", "trust_email_verified": True}
+    )
+    method.assertions["occupied"] = replace(
+        method.assertions["valid"], subject="unbound-email-collision"
+    )
+    linked = client.post(
+        "/api/v1/auth/sso/backup/link", json={}, headers={"Origin": ORIGIN}
+    )
+    assert linked.status_code == 200, linked.text
+    state = parse_qs(urlsplit(linked.json()["data"]["redirect_url"]).query)["state"][0]
+    rejected = client.get(
+        "/api/v1/auth/sso/backup/callback",
+        params={"state": state, "code": "occupied"},
+    )
+    assert "account_link_required" in rejected.headers["location"]
+    with page_service.session_factory() as session:
+        assert (
+            session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.subject == "unbound-email-collision"
+                )
+            )
+            is None
+        )
+        assert session.get(User, granted_user).email == "new@example.test"
 
 
 @pytest.mark.parametrize(

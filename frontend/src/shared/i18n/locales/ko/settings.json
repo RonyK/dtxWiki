@@ -122,23 +122,25 @@
       "owner": "소유자"
     },
     "add": {
-      "email": "정확한 로그인 이메일",
-      "emailPlaceholder": "person@example.com",
       "role": "초기 역할",
       "action": "멤버 추가",
       "adding": "추가 중…",
-      "fromSearchTitle": "정확한 계정 추가",
       "fromSearchReady": "{{email}} 계정을 추가합니다.",
-      "fromSearchHint": "기존 계정을 추가하려면 정확한 계정 UUID 또는 native 로그인 이메일을 입력하세요."
+      "fromSearchHint": "기존 계정을 추가하려면 정확한 계정 UUID 또는 native 로그인 이메일을 입력하세요.",
+      "title": "멤버 추가",
+      "selector": "계정 UUID 또는 이메일 로그인 주소",
+      "selectorPlaceholder": "계정 UUID 또는 person@example.com",
+      "identityHint": "상대방이 알려 준 계정 식별자를 사용하세요. SSO 프로필 이메일은 이메일 로그인 주소와 다릅니다."
     },
     "filters": {
-      "query": "멤버 찾기 또는 추가",
-      "queryPlaceholder": "이름, 계정 UUID 또는 native 로그인 이메일",
-      "queryHelp": "현재 멤버를 검색합니다. 정확한 계정 UUID 또는 native 로그인 이메일로 추가할 수 있습니다.",
+      "query": "현재 멤버 검색",
+      "queryPlaceholder": "이름, 계정 UUID 또는 로그인 이메일",
+      "queryHelp": "이미 이 워크스페이스에 접근할 수 있는 멤버를 검색합니다.",
       "role": "역할 필터",
       "search": "검색",
       "active": "표시 중: {{query}} · {{role}}",
-      "anyQuery": "모든 멤버"
+      "anyQuery": "모든 멤버",
+      "title": "현재 멤버"
     },
     "empty": {
       "title": "일치하는 멤버가 없습니다",
@@ -207,7 +209,11 @@
       "hint": "검색하면 이 워크스페이스에서 허용한 회사 디렉터리의 계정을 찾을 수 있습니다. 제공자와 계정 식별값을 확인해 대상을 선택하세요.",
       "loading": "회사 계정 검색 중…",
       "add": "{{name}} 추가",
-      "refine": "일치하는 계정이 더 있습니다. 검색 범위를 좁혀 주세요."
+      "refine": "일치하는 계정이 더 있습니다. 검색 범위를 좁혀 주세요.",
+      "query": "회사 계정 검색",
+      "queryPlaceholder": "2자 이상 입력",
+      "search": "디렉터리 검색",
+      "empty": "검색어와 일치하는 회사 계정이 없습니다."
     }
   },
   "workspaceAccess": {
@@ -1068,7 +1074,7 @@
     "serverAdminOnlyNotice": "사용자 검색과 계정 복구는 서버 관리자만 볼 수 있습니다.",
     "eyebrow": "서버 관리",
     "title": "계정 복구",
-    "description": "인스턴스 사용자를 찾아 일회용 복구 절차를 시작합니다. 관리자는 사용자의 새 비밀번호를 정하거나 볼 수 없습니다.",
+    "description": "계정을 찾아 SSO 계정을 다시 연결하거나 이메일 로그인 비밀번호 복구를 도와주세요.",
     "serverAdminOnly": "서버 관리자 전용",
     "boundary": "재설정이 완료되면 사용자의 모든 브라우저 세션이 종료됩니다. PAT/MCP 토큰은 별도 자격 증명이며 아래에서 선택한 경우에만 폐기됩니다.",
     "unlock": {
@@ -1119,7 +1125,7 @@
     "mailUnavailableActionHint": "서버의 메일 복구 준비가 완료되지 않아 이메일 전달을 사용할 수 없습니다.",
     "capabilityLoading": "서버 복구 가능 여부를 확인하는 중…",
     "capabilityError": "복구 가능 여부를 확인하지 못했습니다. 재설정을 발급하기 전에 페이지를 새로고침하세요.",
-    "adminRecoveryUnavailable": "공식 HTTPS 공개 URL이 준비될 때까지 관리자 지원 복구를 사용할 수 없습니다.",
+    "adminRecoveryUnavailable": "이메일 로그인 비밀번호 복구 링크에는 공식 HTTPS 공개 URL이 필요합니다. SSO 계정은 계속 다시 연결할 수 있습니다.",
     "emailQueued": "{{email}} 주소로 보낼 복구 메일을 대기열에 추가했습니다.",
     "linkMissing": "서버가 복구 링크를 반환하지 않았습니다. 새 재설정을 발급하세요.",
     "linkDismissed": "일회용 링크를 숨겼습니다. 다른 링크가 필요하면 새 재설정을 발급하세요.",
@@ -1169,7 +1175,7 @@
       "action": "SSO identity 다시 연결",
       "title": "선택한 계정의 SSO identity 다시 연결",
       "warning": "먼저 조직의 별도 신뢰할 수 있는 절차로 본인과 새 identity를 확인하세요. 선택한 SSO identity를 변경하고 기존 세션을 무효화합니다. 임시 로그인 링크를 만들거나 native 이메일 로그인을 변경하지 않습니다.",
-      "noEmail": "SSO를 사용하는 계정입니다. native 이메일 로그인이 없으면 이메일 복구와 임시 로그인 링크를 사용할 수 없습니다.",
+      "noEmail": "등록된 계정 이메일이 없는 SSO 계정입니다. 이메일 복구 대신 identity 재연결로 복구하세요.",
       "currentIdentity": "현재 SSO identity",
       "provider": "새 제공자 slug",
       "issuer": "새 issuer",
@@ -1178,7 +1184,8 @@
       "confirmUser": "확인하려면 대상 계정 UUID를 입력하세요",
       "complete": "선택한 SSO identity를 다시 연결하고 기존 세션을 무효화했습니다.",
       "failed": "SSO identity를 다시 연결하지 못했습니다. 관리자 본인 확인과 identity 정보를 확인하세요."
-    }
+    },
+    "optionsSummary": "복구 방법과 세션에 미치는 영향"
   },
   "jobs": {
     "serverAdminOnlyNotice": "백그라운드 작업 큐는 서버 관리자만 볼 수 있습니다.",

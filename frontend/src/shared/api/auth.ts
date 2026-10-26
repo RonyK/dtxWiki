@@ -9,6 +9,7 @@ import type { components } from "./types.gen";
 
 export type AuthUser = {
   user_id: string;
+  username?: string;
   email: string | null;
   display_name: string;
   status: string;

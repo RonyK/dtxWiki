@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from backend.domain.identity_policy import (
     DisplayNamePolicyError,
@@ -13,6 +14,7 @@ from backend.domain.identity_policy import (
 from backend.models.auth_identity import UserIdentity
 from backend.models.user import User
 from backend.services.auth.login_transactions import AuthFlowError
+from backend.utils.database_errors import is_single_column_unique_violation
 
 
 class ResolvedAccount(NamedTuple):
@@ -58,6 +60,37 @@ def assertion_display_name(assertion, email):
         return normalize_display_name(None, email)
 
 
+def accept_account_email(session, user, email, now, *, linking):
+    """Claim a trusted address without moving or blocking an established identity."""
+    if not email:
+        return
+    if user.email == email:
+        if user.email_verified_at is None:
+            user.email_verified_at = now
+        return
+    if user.email is not None and not linking:
+        return
+    owner_id = session.scalar(select(User.id).where(User.email == email))
+    if owner_id is not None and owner_id != user.id:
+        if linking:
+            raise AuthFlowError("account_link_required")
+        return
+    if user.email is not None:
+        return
+    try:
+        # Another account can claim the address after the lookup. Keep an
+        # existing identity usable when that unique constraint wins the race.
+        with session.begin_nested():
+            user.email = email
+            user.email_verified_at = now
+            session.flush()
+    except IntegrityError as exc:
+        if not is_single_column_unique_violation(exc, table="users", column="email"):
+            raise
+        if linking:
+            raise AuthFlowError("account_link_required") from None
+
+
 @dataclass
 class AccountResolver:
     sessions: object
@@ -89,6 +122,11 @@ class AccountResolver:
             .with_for_update()
         )
         email = assertion_email(assertion)
+        trusted_email = (
+            email
+            if provider.policy.trust_email_verified and assertion.email_verified is True
+            else None
+        )
         created = False
         linked = False
         if identity is not None:
@@ -117,10 +155,16 @@ class AccountResolver:
             linked = True
             via = "user_link"
         else:
+            if (
+                trusted_email
+                and session.scalar(select(User.id).where(User.email == trusted_email))
+                is not None
+            ):
+                raise AuthFlowError("account_link_required")
             if not provider.policy.jit_provisioning:
                 raise AuthFlowError("signup_not_allowed")
-            # Profile addresses never identify native accounts. Domain admission
-            # is an explicit policy and requires verified evidence from the IdP.
+            # Email never merges accounts. Domain admission and representative
+            # email ownership both require verified evidence trusted by policy.
             if provider.policy.allowed_email_domains and not (
                 email
                 and provider.policy.trust_email_verified
@@ -130,8 +174,9 @@ class AccountResolver:
                 raise AuthFlowError("signup_not_allowed")
             user = self.sessions.provision_user(
                 session,
-                email=None,
+                email=trusted_email,
                 display_name=assertion_display_name(assertion, None),
+                email_verified_at=now if trusted_email else None,
             )
             created = True
             via = "jit"
@@ -142,6 +187,14 @@ class AccountResolver:
             transaction.session_generation != user.session_generation
         ):
             raise AuthFlowError("sso_transaction_invalid")
+        if not created:
+            accept_account_email(
+                session,
+                user,
+                trusted_email,
+                now,
+                linking=transaction.purpose == "link",
+            )
         if linked:
             existing = session.scalar(
                 select(UserIdentity.id).where(
@@ -160,8 +213,9 @@ class AccountResolver:
                 linked_via=via,
             )
             session.add(identity)
-        identity.last_email = email
-        identity.last_email_verified = assertion.email_verified is True
+        if email is not None:
+            identity.last_email = email
+            identity.last_email_verified = assertion.email_verified is True
         identity.directory_tenant = (
             tenant if provider.policy.directory_enabled else None
         )

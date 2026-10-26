@@ -7,6 +7,7 @@ import {
   Mail,
   Search,
   ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import {
   type FormEvent,
@@ -366,18 +367,22 @@ export function AdminUserRecoverySection() {
         }
         description={t("userRecovery.description", {
           defaultValue:
-            "Find an instance user and start a one-time recovery flow. You never choose or see the user's new password.",
+            "Find an account, reconnect its SSO identity, or help the user reset a native password.",
         })}
         headingId="admin-user-recovery-heading"
         title={t("userRecovery.title", { defaultValue: "Account recovery" })}
       />
 
-      <StatusBanner tone="info">
-        {t("userRecovery.boundary", {
+      <details className="admin-recovery-policy">
+        <summary>{t("userRecovery.optionsSummary")}</summary>
+        <p>{t("userRecovery.boundary", {
           defaultValue:
             "A successful reset signs the user out of every browser session. PAT/MCP tokens are separate and are revoked only when selected below.",
-        })}
-      </StatusBanner>
+        })}</p>
+        {recoveryCapability.status === "ready" && !recoveryCapability.linkReady ? (
+          <p>{t("userRecovery.adminRecoveryUnavailable")}</p>
+        ) : null}
+      </details>
       {recoveryCapability.status === "loading" ? (
         <SettingsLoadingRow>
           {t("userRecovery.capabilityLoading", {
@@ -389,13 +394,6 @@ export function AdminUserRecoverySection() {
           {t("userRecovery.capabilityError", {
             defaultValue:
               "Recovery availability could not be confirmed. Reload before issuing a reset.",
-          })}
-        </StatusBanner>
-      ) : !recoveryCapability.linkReady ? (
-        <StatusBanner tone="warning">
-          {t("userRecovery.adminRecoveryUnavailable", {
-            defaultValue:
-              "Admin-assisted recovery is unavailable until the canonical HTTPS public URL is ready.",
           })}
         </StatusBanner>
       ) : null}
@@ -472,7 +470,9 @@ export function AdminUserRecoverySection() {
           }} />
       ) : (
         <>
-          <StatusBanner tone="info">
+          <div className="identity-settings-protection" role="status">
+            <ShieldCheck size={17} aria-hidden="true" />
+            <p>
             {currentSessionAccepted ? t("verification.sessionAccepted", { ns: "auth" }) : t("userRecovery.unlock.unlocked", {
               defaultValue: "Protected user search is unlocked until {{date}}.",
               date: reauthenticatedUntil
@@ -481,7 +481,8 @@ export function AdminUserRecoverySection() {
                     defaultValue: "the short verification window ends",
                   }),
             })}
-          </StatusBanner>
+            </p>
+          </div>
           {searchError ? (
             <StatusBanner tone="warning">{searchError}</StatusBanner>
           ) : null}
@@ -617,7 +618,13 @@ export function AdminUserRecoverySection() {
                         ) : null}
                       </div>
                       <div className="admin-user-recovery-actions">
-                        <button
+                        {user.status === "active" && (user.identities?.length ?? 0) > 0 ? (
+                          <button className={`icon-button${user.email ? "" : " primary"}`} type="button" onClick={() => setRebindTarget(user)}>
+                            <Link2 aria-hidden="true" size={16} />
+                            {t("userRecovery.rebind.action")}
+                          </button>
+                        ) : null}
+                        {user.email ? <button
                           className="icon-button primary admin-user-recovery-action"
                           disabled={
                             user.status !== "active" ||
@@ -632,8 +639,8 @@ export function AdminUserRecoverySection() {
                           {t("userRecovery.emailAction", {
                             defaultValue: "Send recovery email",
                           })}
-                        </button>
-                        <button
+                        </button> : null}
+                        {user.email ? <button
                           className="icon-button primary admin-user-recovery-action"
                           disabled={
                             user.status !== "active" ||
@@ -647,12 +654,7 @@ export function AdminUserRecoverySection() {
                           {t("userRecovery.linkAction", {
                             defaultValue: "Issue one-time link",
                           })}
-                        </button>
-                        {user.status === "active" && (user.identities?.length ?? 0) > 0 ? (
-                          <button className="icon-button" type="button" onClick={() => setRebindTarget(user)}>
-                            {t("userRecovery.rebind.action")}
-                          </button>
-                        ) : null}
+                        </button> : null}
                         {user.status === "active" && !user.email ? (
                           <p className="meta-line">{t("userRecovery.rebind.noEmail")}</p>
                         ) : user.status === "active" && !user.email_verified_at ? (

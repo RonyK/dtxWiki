@@ -16,3 +16,6 @@
 @import "./09-lint-findings-fixes.css"; /* Lint finding cards, actions, filters, and numeric pagination */
 @import "./10-library-policy-fixes.css"; /* Typed Library policy and effective-limit presentation */
 @import "./11-chats-filter-fixes.css"; /* Compact Chats filter disclosure */
+@import "./11-auth-identity.css";
+@import "./12-identity-settings.css";
+@import "./13-account-settings.css";

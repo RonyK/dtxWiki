@@ -1,4 +1,4 @@
-import { KeyRound, LogIn, UserPlus } from "lucide-react";
+import { ArrowUpRight, KeyRound, LogIn, ShieldCheck, UserPlus } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -8,10 +8,8 @@ import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
 import { isNonSpaAuthPath, safeNextPath } from "../../shared/auth/navigation";
 import { normalizeAccountEmail, normalizeAccountName, validateAccountPassword, rejectMultilinePaste, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
-import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { StatusPill } from "../../shared/components/StatusPill";
 import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
 import { SSO_ERROR_CODES } from "./ExternalAuthErrorBanner";
 
@@ -201,17 +199,11 @@ export function AuthScreen() {
   return (
     <div className="workspace-screen single-column auth-screen">
       <section className="feature-main auth-layout">
-        <Breadcrumbs items={[{ label: t("breadcrumb") }]} />
-        <div className="feature-header">
-          <div>
-            <p className="eyebrow">{t("eyebrow")}</p>
-            <h1>{mode === "signup" ? t("title.signup") : t("title.login")}</h1>
-          </div>
-          <StatusPill
-            status={currentUser ? currentUser.status : "signed out"}
-            label={currentUser ? undefined : t("pill.signedOut")}
-          />
-        </div>
+        <header className="auth-welcome">
+          <span className="auth-welcome-icon"><LogIn size={24} aria-hidden="true" /></span>
+          <h1>{mode === "signup" ? t("title.signup") : t("title.login")}</h1>
+          <p>{mode === "signup" ? t("welcome.signup") : t("welcome.login")}</p>
+        </header>
         {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
         {error ? <div id="auth-input-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
         {capabilitiesChecked && capabilitiesError ? (
@@ -222,26 +214,23 @@ export function AuthScreen() {
         ) : null}
         <section className="auth-panel" aria-label={t("panelLabel")}>
           {loginMethods.length > 0 ? (
-            <div className="auth-form" aria-label={t("sso.methods")}>
+            <div className="auth-provider-group" aria-label={t("sso.methods")}>
+              <p className="auth-section-label">{t("welcome.external")}</p>
               {loginMethods.map((method) => {
                 const query = new URLSearchParams({
                   next: safeNextPath(searchParams.get("next")),
                   remember_me: String(rememberMe),
                 });
-                return <a className="icon-button" key={method.slug} style={loginMethodStyle(method)}
+                return <a className="icon-button auth-provider-button" key={method.slug} style={loginMethodStyle(method)}
                   href={`${method.start_url}?${query.toString()}`}>
-                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : null}
-                  {loginMethodLabel(method, i18n.language)}
+                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : <ShieldCheck size={20} aria-hidden="true" />}
+                  <span>{loginMethodLabel(method, i18n.language)}</span>
+                  <ArrowUpRight size={16} aria-hidden="true" />
                 </a>;
               })}
             </div>
           ) : null}
-          {(!passwordLoginEnabled && loginMethods.length > 0) ? (
-            <label className="checkbox-field auth-remember">
-              <input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />
-              <span>{t("fields.remember")}</span>
-            </label>
-          ) : null}
+          {passwordLoginEnabled && loginMethods.length > 0 ? <div className="auth-method-divider"><span>{t("welcome.native")}</span></div> : null}
           {canSignup ? (
             <SegmentedControl
               compact
@@ -327,13 +316,8 @@ export function AuthScreen() {
                 {t("password.rule", { defaultValue: "8–128 characters." })}
               </p>
             ) : null}
-            <label className="checkbox-field auth-remember">
-              <input checked={rememberMe} onKeyDown={preventCompositionSubmit}
-                onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />
-              <span>{t("fields.remember")}</span>
-            </label>
             <div className="auth-actions">
-              <button className="icon-button primary" disabled={submitting} type="submit">
+              <button className="icon-button primary auth-submit" disabled={submitting} type="submit">
                 <KeyRound size={16} aria-hidden="true" />
                 <span>
                   {mode === "signup" ? t("actions.signup") : t("actions.login")}
@@ -357,7 +341,15 @@ export function AuthScreen() {
               </p>
             )}
           </form> : null}
+          {passwordLoginEnabled || loginMethods.length > 0 ? (
+            <label className="checkbox-field auth-remember">
+              <input checked={rememberMe} onKeyDown={preventCompositionSubmit}
+                onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />
+              <span>{t("fields.remember")}</span>
+            </label>
+          ) : null}
         </section>
+        {!passwordLoginEnabled && loginMethods.length > 0 ? <p className="auth-provider-help">{t("welcome.ssoOnly")}</p> : null}
       </section>
     </div>
   );

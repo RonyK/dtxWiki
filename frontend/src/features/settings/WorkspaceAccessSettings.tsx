@@ -1,6 +1,6 @@
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { normalizeAccountEmail } from "../../shared/auth/identityPolicy";
-import { Globe, Inbox, Users } from "lucide-react";
+import { Building2, Globe, Inbox, Plus, Search, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -104,6 +104,9 @@ export function WorkspaceMembersSection() {
   const [membersMoreBusy, setMembersMoreBusy] = useState(false);
   const [memberError, setMemberError] = useState<string | null>(null);
   const [queryDraft, setQueryDraft] = useState("");
+  const [addSelectorDraft, setAddSelectorDraft] = useState("");
+  const [directoryQueryDraft, setDirectoryQueryDraft] = useState("");
+  const [directorySearched, setDirectorySearched] = useState(false);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<WorkspaceMemberRole | "all">(
     "all",
@@ -134,17 +137,20 @@ export function WorkspaceMembersSection() {
   const [joinReloadKey, setJoinReloadKey] = useState(0);
   const joinGeneration = useRef(0);
   let exactLoginEmail = "";
-  try { exactLoginEmail = normalizeAccountEmail(queryDraft); } catch { /* Search may be a name rather than an email. */ }
+  try { exactLoginEmail = normalizeAccountEmail(addSelectorDraft); } catch { /* A selector may be a UUID rather than an email. */ }
   const canAddExactLoginEmail = looksLikeLoginEmail(exactLoginEmail);
-  const exactUserId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(queryDraft.trim()) ? queryDraft.trim() : "";
+  const exactUserId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(addSelectorDraft.trim()) ? addSelectorDraft.trim() : "";
   const exactSelector: WorkspaceMemberSelector | null = exactUserId ? { user_id: exactUserId } : canAddExactLoginEmail ? { email: exactLoginEmail } : null;
-  const invalidLoginEmail = queryDraft.includes("@") && !exactLoginEmail;
+  const invalidLoginEmail = addSelectorDraft.includes("@") && !exactLoginEmail;
 
   useEffect(() => {
     setDirectoryEnabled(false);
     setCandidates([]);
     setCandidatesLoading(false);
     setCandidateHasMore(false);
+    setDirectorySearched(false);
+    setDirectoryQueryDraft("");
+    setAddSelectorDraft("");
     candidateGeneration.current += 1;
     if (!target || !isOwner) return;
     const controller = new AbortController();
@@ -282,6 +288,15 @@ export function WorkspaceMembersSection() {
       query: nextQuery,
     };
     setQuery(nextQuery);
+  }
+
+  function onDirectorySearch(event: FormEvent) {
+    event.preventDefault();
+    const error = inputTextError(directoryQueryDraft, 320);
+    if (error) { setMemberError(error); return; }
+    const nextQuery = directoryQueryDraft.trim();
+    setMemberError(null);
+    setDirectorySearched(false);
     if (directoryEnabled && target && nextQuery.length >= 2) {
       const generation = ++candidateGeneration.current;
       setCandidatesLoading(true);
@@ -293,6 +308,7 @@ export function WorkspaceMembersSection() {
           setCandidates(result.items);
           setCandidateHasMore(result.has_more);
           setDirectoryEnabled(result.enabled);
+          setDirectorySearched(true);
         })
         .catch((caught) => { if (generation === candidateGeneration.current) setMemberError(apiErrorMessage(caught)); })
         .finally(() => { if (generation === candidateGeneration.current) setCandidatesLoading(false); });
@@ -304,8 +320,9 @@ export function WorkspaceMembersSection() {
     }
   }
 
-  function onAddMember() {
-    if (!exactSelector || !target) {
+  function onAddMember(event: FormEvent) {
+    event.preventDefault();
+    if (!exactSelector || !target || memberBusyId === "add") {
       return;
     }
     setMemberError(null);
@@ -588,45 +605,111 @@ export function WorkspaceMembersSection() {
         </div>
         <p>{t("workspaceMembers.description")}</p>
 
-        <StatusBanner tone="info">
+        <p className="identity-settings-scope-note">
           {t("workspaceMembers.wholeWorkspaceNotice")}
-        </StatusBanner>
+        </p>
         {memberError ? <StatusBanner tone="warning">{memberError}</StatusBanner> : null}
         {memberNotice ? <StatusBanner tone="info">{memberNotice}</StatusBanner> : null}
 
+        <section className="workspace-member-add-panel" aria-labelledby="workspace-member-add-heading">
+          <div className="identity-settings-section-heading">
+            <div>
+              <h4 id="workspace-member-add-heading"><Plus size={16} aria-hidden="true" />{t("workspaceMembers.add.title")}</h4>
+              <p>{t("workspaceMembers.add.fromSearchHint")}</p>
+            </div>
+            <label className="field-stack">
+              {t("workspaceMembers.add.role")}
+              <select disabled={memberBusyId === "add"} onChange={(event) => setAddRole(event.target.value as WorkspaceMemberInviteRole)} value={addRole}>
+                {addMemberRoleOptions(t)}
+              </select>
+            </label>
+          </div>
+          <form className="workspace-member-direct-add" onSubmit={onAddMember}>
+            <label className="field-stack">
+              <span>{t("workspaceMembers.add.selector")}</span>
+              <input
+                {...textInputLimit(320)}
+                aria-describedby="workspace-member-add-status"
+                aria-invalid={invalidLoginEmail || undefined}
+                autoComplete="off"
+                autoCapitalize="none"
+                onChange={(event) => setAddSelectorDraft(event.target.value)}
+                placeholder={t("workspaceMembers.add.selectorPlaceholder")}
+                spellCheck={false}
+                value={addSelectorDraft}
+              />
+            </label>
+            <button className="icon-button primary" disabled={memberBusyId === "add" || !exactSelector} type="submit">
+              <Plus size={16} aria-hidden="true" />
+              {memberBusyId === "add" ? t("workspaceMembers.add.adding") : t("workspaceMembers.add.action")}
+            </button>
+          </form>
+          <p className="field-hint" id="workspace-member-add-status" role="status">
+            {exactSelector ? t("workspaceMembers.add.fromSearchReady", { email: exactUserId || exactLoginEmail }) : invalidLoginEmail ? t("auth:validation.email") : t("workspaceMembers.add.identityHint")}
+          </p>
+          {directoryEnabled ? (
+            <div className="workspace-company-directory" aria-labelledby="workspace-company-directory-title">
+              <h4 id="workspace-company-directory-title"><Building2 size={16} aria-hidden="true" />{t("workspaceMembers.directory.title")}</h4>
+              <p className="field-hint">{t("workspaceMembers.directory.hint")}</p>
+              <form className="workspace-company-directory-search" onSubmit={onDirectorySearch}>
+                <label className="field-stack">
+                  <span>{t("workspaceMembers.directory.query")}</span>
+                  <input {...textInputLimit(320)} type="search" autoComplete="off" value={directoryQueryDraft}
+                    placeholder={t("workspaceMembers.directory.queryPlaceholder")}
+                    onChange={(event) => setDirectoryQueryDraft(event.target.value)} />
+                </label>
+                <button className="icon-button" type="submit" disabled={candidatesLoading || directoryQueryDraft.trim().length < 2}>
+                  <Search size={16} aria-hidden="true" />{t("workspaceMembers.directory.search")}
+                </button>
+              </form>
+              {candidatesLoading ? <p role="status">{t("workspaceMembers.directory.loading")}</p> : null}
+              {candidates.length > 0 ? (
+                <ul className="workspace-company-candidates">
+                  {candidates.map((candidate) => (
+                    <li key={candidate.user_id} className="workspace-company-candidate">
+                      <div className="workspace-company-candidate-identity">
+                        <strong>{candidate.display_name || candidate.user_id}</strong>
+                        <span className="workspace-company-candidate-provider">{candidate.provider_name}</span>
+                        <span className="workspace-company-candidate-evidence">{candidate.identity_label}</span>
+                        <code>{candidate.user_id}</code>
+                      </div>
+                      <button type="button" className="icon-button" disabled={memberBusyId !== null}
+                        onClick={() => void submitAddMember({ user_id: candidate.user_id }, addRole, false, candidate.display_name || candidate.user_id)}>
+                        <Plus size={16} aria-hidden="true" />{t("workspaceMembers.directory.add", { name: candidate.display_name || candidate.user_id })}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : directorySearched && !candidatesLoading ? <p className="field-hint" role="status">{t("workspaceMembers.directory.empty")}</p> : null}
+              {candidateHasMore ? <p className="field-hint">{t("workspaceMembers.directory.refine")}</p> : null}
+            </div>
+          ) : null}
+        </section>
+
+        <div className="identity-settings-section-heading workspace-member-current-heading">
+          <h4>{t("workspaceMembers.filters.title")}</h4>
+        </div>
         <form className="workspace-member-lookup" onSubmit={onMemberSearch}>
           <label className="field-stack workspace-member-search">
-            <span id="workspace-member-query-label">
-              {t("workspaceMembers.filters.query")}
-            </span>
+            <span id="workspace-member-query-label">{t("workspaceMembers.filters.query")}</span>
             <input
               {...textInputLimit(320)}
-              aria-describedby="workspace-member-query-help workspace-member-add-status"
-              aria-invalid={invalidLoginEmail || undefined}
+              aria-describedby="workspace-member-query-help"
               aria-labelledby="workspace-member-query-label"
               autoComplete="off"
-              autoCapitalize="none"
               onChange={(event) => setQueryDraft(event.target.value)}
               placeholder={t("workspaceMembers.filters.queryPlaceholder")}
-              spellCheck={false}
               type="search"
               value={queryDraft}
             />
-            <small id="workspace-member-query-help">
-              {t("workspaceMembers.filters.queryHelp")}
-            </small>
+            <small id="workspace-member-query-help">{t("workspaceMembers.filters.queryHelp")}</small>
           </label>
           <label className="field-stack">
             {t("workspaceMembers.filters.role")}
             <select
               onChange={(event) => {
-                const nextRoleFilter = event.target.value as
-                  | WorkspaceMemberRole
-                  | "all";
-                appliedMemberFilterRef.current = {
-                  ...appliedMemberFilterRef.current,
-                  roleFilter: nextRoleFilter,
-                };
+                const nextRoleFilter = event.target.value as WorkspaceMemberRole | "all";
+                appliedMemberFilterRef.current = { ...appliedMemberFilterRef.current, roleFilter: nextRoleFilter };
                 setRoleFilter(nextRoleFilter);
               }}
               value={roleFilter}
@@ -635,64 +718,8 @@ export function WorkspaceMembersSection() {
               {memberRoleOptions(t)}
             </select>
           </label>
-          <button className="icon-button text-button" type="submit">
-            {t("workspaceMembers.filters.search")}
-          </button>
-          <div className="workspace-member-add-action">
-            <div>
-              <strong>{t("workspaceMembers.add.fromSearchTitle")}</strong>
-              <span id="workspace-member-add-status">
-                {exactSelector
-                  ? t("workspaceMembers.add.fromSearchReady", {
-                      email: exactUserId || exactLoginEmail,
-                    })
-                  : invalidLoginEmail
-                    ? t("auth:validation.email")
-                    : t("workspaceMembers.add.fromSearchHint")}
-              </span>
-            </div>
-            <label className="field-stack">
-              {t("workspaceMembers.add.role")}
-              <select
-                disabled={memberBusyId === "add"}
-                onChange={(event) =>
-                  setAddRole(event.target.value as WorkspaceMemberInviteRole)
-                }
-                value={addRole}
-              >
-                {addMemberRoleOptions(t)}
-              </select>
-            </label>
-            <button
-              className="icon-button primary"
-              disabled={memberBusyId === "add" || !exactSelector}
-              onClick={onAddMember}
-              type="button"
-            >
-              {memberBusyId === "add"
-                ? t("workspaceMembers.add.adding")
-                : t("workspaceMembers.add.action")}
-            </button>
-          </div>
+          <button className="icon-button text-button" type="submit"><Search size={16} aria-hidden="true" />{t("workspaceMembers.filters.search")}</button>
         </form>
-
-        {directoryEnabled ? (
-          <div className="account-panel" aria-label={t("workspaceMembers.directory.title")}>
-            <p>{t("workspaceMembers.directory.hint")}</p>
-            {candidatesLoading ? <p role="status">{t("workspaceMembers.directory.loading")}</p> : null}
-            {candidates.length > 0 ? <ul className="workspace-member-list">
-              {candidates.map((candidate) => <li key={candidate.user_id}>
-                <strong>{candidate.display_name || candidate.user_id}</strong>
-                <span>{candidate.provider_name} · {candidate.identity_label}</span>
-                <button type="button" className="icon-button" disabled={memberBusyId !== null}
-                  onClick={() => void submitAddMember({ user_id: candidate.user_id }, addRole, false, candidate.display_name || candidate.user_id)}>
-                  {t("workspaceMembers.directory.add", { name: candidate.display_name || candidate.user_id })}
-                </button>
-              </li>)}
-            </ul> : null}
-            {candidateHasMore ? <p>{t("workspaceMembers.directory.refine")}</p> : null}
-          </div>
-        ) : null}
 
         <div className="workspace-member-active-filter" role="status">
           {query || roleFilter !== "all" ? (

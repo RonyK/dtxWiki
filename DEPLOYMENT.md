@@ -379,9 +379,14 @@ provider 설정에는 HTTPS 대표 URL이 필요하며, `solo_local`의 loopback
 설정만 예외입니다. 서버는 state·nonce·PKCE 거래와 사용자 연결, native 세션 발급을
 관리합니다. 새 계정 자동 생성은 `jit_provisioning = true`인 provider에서만
 허용됩니다. SSO 계정은 UUID와 검증된 `(issuer, subject)`로 즉시 생성하며 이메일·SMTP·
-로컬 비밀번호가 필요하지 않습니다. `users.email`은 native 로그인 주소 전용으로 NULL을
-허용합니다. IdP 이메일은 identity 프로필에만 기록하고 native 주소로 복사하거나 기존
-계정과 자동 연결하지 않습니다. `auto_verified_email` 설정은 시작 시 거부합니다.
+로컬 비밀번호가 필요하지 않습니다. `users.email`은 NULL 또는 중복 없는 대표 계정
+이메일입니다. `trust_email_verified = true`이고 IdP가 해당 주소를 검증했다고 반환하면
+SMTP 없이 대표 이메일로 등록합니다. 없거나 신뢰하지 않는 주소는 identity 프로필에만
+기록하며 대표 이메일을 선점하지 않습니다. 신뢰·검증된 주소가 이미 등록돼 있으면 새
+계정을 만들지 않고 기존 계정으로 로그인한 뒤 명시적으로 연결하도록 안내합니다.
+이메일만으로 계정을 병합하거나 기존 주소를 덮어쓰지 않습니다. `auto_verified_email`
+설정은 시작 시 거부합니다. 이미 연결된 identity의 프로필 주소 변경도 대표 이메일을
+자동 교체하지 않습니다.
 `allowed_email_domains`를 설정하면 `trust_email_verified = true`와 IdP의 검증된 이메일이
 필요합니다. 이 조건을 충족하지 못하는 provider는 해당 가입 제한과 함께 사용할 수 없습니다.
 기존 계정에 연결하려면 그 계정으로 로그인한 뒤 명시적인 연결 절차를 사용합니다.
@@ -401,15 +406,19 @@ SSO 왕복으로 확인할 수 있습니다. 이것은 IdP가 비밀번호나 MF
 아닙니다. IdP나 SMTP 장애를 더 약한 확인 방식으로 자동 전환하지 않습니다. 이메일
 확인 링크는 별도로 5분 후 만료하며 account/admin 목적과 안정적인 세션 ID에 묶입니다.
 
-멤버 추가는 정확한 사용자 UUID를 기본으로 지원합니다. 기존 native 이메일로 추가하는
-방식도 유지하며 SMTP가 없던 배포에 `email_verified_at`을 새 필수조건으로 요구하지
-않습니다. IdP 프로필 이메일은 멤버 검색·추가에 사용하지 않습니다. 회사 후보 검색은
+고유 사용자명 `username`은 UUID에서 `u_<UUID hex32>`로 자동 계산하며 표시 이름과
+구분합니다. 표시 이름은 동명이인을 허용하고 실제 계정·권한 식별은 계속 UUID입니다.
+사용자명 변경이나 사용자명을 이용한 비밀번호 로그인은 제공하지 않습니다.
+
+멤버 추가는 정확한 사용자 UUID를 기본으로 지원합니다. 등록된 대표 이메일로 추가하는
+방식도 지원하며 SMTP가 없던 기존 배포에 `email_verified_at`을 새 필수조건으로 요구하지
+않습니다. 검증되지 않은 IdP 프로필 주소는 멤버 검색·추가에 사용하지 않습니다. 회사 후보 검색은
 provider의 `directory_enabled = true`, `directory_tenant = "validated-tenant"`를 운영자가
 명시한 경우에만 켭니다. adapter가 검증해 반환한 tenant가 설정값과 일치해야 하며, 같은
 provider/tenant identity를 가진 소유자가 같은 범위의 후보만 검색합니다. 공개/social
 provider에는 기본적으로 끕니다. 후보의 이름은 표시용이며 UUID와 신뢰된 조직 표시를
-확인하고 선택합니다. 가입 후 선택적으로 native 이메일을 등록하려면 SMTP와 비밀번호
-로그인이 켜져 있어야 하고 기존 계정 세션에서 해당 주소의 확인을 완료해야 합니다.
+확인하고 선택합니다. IdP가 검증하지 않은 이메일을 가입 후 직접 등록하려면 SMTP와
+비밀번호 로그인이 켜져 있어야 하고 기존 계정 세션에서 해당 주소의 확인을 완료해야 합니다.
 
 이메일 없는 SSO 계정은 IdP에서 먼저 복구합니다. subject 변경 시에는 별도로 소유권을
 확인한 서버 관리자가 보호된 사용자 화면에서 UUID 기준 identity 재연결을 할 수 있습니다.

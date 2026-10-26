@@ -273,8 +273,8 @@ class OidcMethodBase:
             allow_private_network=config["allow_private_network"],
         )
 
-        def text_claim(name):
-            value = claims.get(name)
+        def text_claim(name, source=claims):
+            value = source.get(name)
             return value if isinstance(value, str) and len(value) <= 1024 else None
 
         def list_claim(name):
@@ -286,6 +286,35 @@ class OidcMethodBase:
                 and all(isinstance(item, str) and len(item) <= 255 for item in value)
                 else ()
             )
+
+        email = text_claim("email")
+        email_verified = bool(email) and claims.get("email_verified") is True
+        display_name = text_claim("name")
+        needs_email = "email" in config["scopes"] and not email
+        needs_name = "profile" in config["scopes"] and not display_name
+        endpoint = metadata.get("userinfo_endpoint")
+        access_token = tokens.get("access_token")
+        if (needs_email or needs_name) and endpoint and access_token:
+            try:
+                profile = self.client.fetch_profile(
+                    endpoint,
+                    access_token,
+                    expected_subject=claims["sub"],
+                    allow_private_network=config["allow_private_network"],
+                )
+            except AuthMethodError as exc:
+                # Optional profile availability cannot undo ID token validation.
+                # A different subject is an identity mismatch, not missing data.
+                if str(exc) == "oidc_userinfo_subject_mismatch":
+                    raise
+            else:
+                if needs_email:
+                    email = text_claim("email", profile)
+                    email_verified = (
+                        bool(email) and profile.get("email_verified") is True
+                    )
+                if needs_name:
+                    display_name = text_claim("name", profile)
 
         auth_time = claims.get("auth_time")
         try:
@@ -299,9 +328,9 @@ class OidcMethodBase:
         return ExternalAssertion(
             issuer=claims["iss"],
             subject=claims["sub"],
-            email=text_claim("email"),
-            email_verified=claims.get("email_verified") is True,
-            display_name=text_claim("name"),
+            email=email,
+            email_verified=email_verified,
+            display_name=display_name,
             authenticated_at=authenticated_at,
             amr=list_claim("amr"),
             idp_session_id=text_claim("sid"),
