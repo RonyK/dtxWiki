@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Suspense, startTransition, useState } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MarkdownView } from "../MarkdownView";
+import { i18n } from "../../../shared/i18n";
 
 const mermaidMock = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -512,7 +514,7 @@ describe("MarkdownView", () => {
             "",
             "[Internal](/pages/release-notes), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
             '[![Linked image](https://images.example.test/linked.png)](/context/missing-image.md)',
-            '<div><a href="https://raw-html.example.test"data-dtx-unavailable-reference="dtx-markdown-reference-0" data-dtx-reference-wikilink="true" data-dtx-reference-token="dtx-markdown-reference-0" data-context-link-locator="/context/missing.md">Raw HTML link</a></div>',
+            '<div><a href="https://raw-html.example.test"data-dtx-unavailable-reference="true" data-dtx-reference-wikilink="true" data-dtx-reference-locator="/context/missing.md">Raw HTML link</a></div>',
           ].join("\n")}
         />
       </MemoryRouter>,
@@ -573,7 +575,9 @@ describe("MarkdownView", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Raw HTML link" })).toHaveAttribute("href", "https://raw-html.example.test");
     expect(screen.queryByRole("button", { name: "Raw HTML link" })).not.toBeInTheDocument();
-    expect(document.querySelector('[data-dtx-reference-token="dtx-markdown-reference-0"]')).toBeNull();
+    expect(document.querySelector(
+      "[data-dtx-reference-token], [data-dtx-reference-locator], [data-dtx-reference-wikilink], [data-dtx-unavailable-reference]",
+    )).toBeNull();
     expect(screen.queryByRole("button", { name: "Raw HTML link" })).not.toBeInTheDocument();
     const linkedImage = screen.getByRole("img", { name: "Linked image" });
     fireEvent.error(linkedImage);
@@ -583,8 +587,37 @@ describe("MarkdownView", () => {
     expect(unavailableImageTrigger.querySelector("button, a")).toBeNull();
     expect(screen.getByRole("link", { name: "Open original image: Linked image" }))
       .not.toBe(unavailableImageTrigger);
+    await user.click(unavailableImageTrigger);
+    expect(screen.getByRole("dialog")).toHaveTextContent("/context/missing-image.md");
     expect(screen.getByRole("link", { name: "Short" })).toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#user-content-details");
     expect(screen.getByRole("link", { name: "Reference" })).toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222");
+  });
+
+  it("keeps the committed reference source while a transitioned Markdown render suspends", async () => {
+    const user = userEvent.setup();
+    const previousLanguage = i18n.language;
+    const nextBodyReachedSuspension = vi.fn();
+    await act(async () => { await i18n.changeLanguage("en"); });
+
+    render(
+      <MemoryRouter>
+        <TransitioningMarkdown nextBodyReachedSuspension={nextBodyReachedSuspension} />
+      </MemoryRouter>,
+    );
+
+    try {
+      await user.click(screen.getByRole("button", { name: "Render next body" }));
+      await waitFor(() => expect(nextBodyReachedSuspension).toHaveBeenCalled());
+      expect(screen.getByRole("button", { name: "Old reference" })).toBeInTheDocument();
+
+      await act(async () => { await i18n.changeLanguage("ko"); });
+      await user.click(screen.getByRole("button", { name: "Old reference" }));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toHaveTextContent("/context/old.md");
+      expect(dialog).not.toHaveTextContent("/context/new.md");
+    } finally {
+      await act(async () => { await i18n.changeLanguage(previousLanguage); });
+    }
   });
 
   it("clobber-prefixes raw HTML ids so authored anchors cannot hijack the app namespace", () => {
@@ -975,6 +1008,11 @@ describe("MarkdownView", () => {
     const workspaceId = "33333333-3333-4333-8333-333333333333";
     const itemId = "22222222-2222-4222-8222-222222222222";
     const itemHref = `/workspaces/${workspaceId}/library/items/${itemId}?page=2`;
+    const absoluteItemHref = `${window.location.origin}${itemHref}#details`;
+    const stableHref = `/p/${workspaceId}/${itemId}?tab=history#overview`;
+    const absoluteStableHref = `${window.location.origin}${stableHref}`;
+    const externalHref = `https://other.example${itemHref}`;
+    const publicHref = `${window.location.origin}/w/sales/pages/launch`;
     const sourceHref = `/workspaces/${sourceWorkspaceId}/context/pages/${sourcePageId}`;
     const { rerender } = render(
       <MemoryRouter initialEntries={[{
@@ -987,7 +1025,19 @@ describe("MarkdownView", () => {
             element={(
               <MarkdownView
                 allowWorkspaceNavigationLinks
-                body={`[Library item](${itemHref}) [Spoofed target](${itemHref}&target=other) [Unknown route](/workspaces/${workspaceId}/admin)`}
+                body={[
+                  `[Library item](${itemHref})`,
+                  `[Spoofed target](${itemHref}&target=other)`,
+                  `[Unknown route](/workspaces/${workspaceId}/admin)`,
+                  `[Absolute item](${absoluteItemHref})`,
+                  `[Absolute stable page](${absoluteStableHref})`,
+                  `[Other origin](${externalHref})`,
+                  `[Public reader](${publicHref})`,
+                ].join(" ")}
+                linkTargets={[
+                  { locator: absoluteItemHref, href: absoluteItemHref, target_page_id: null, state: "ok" },
+                  { locator: absoluteStableHref, href: absoluteStableHref, target_page_id: itemId, state: "ok" },
+                ]}
                 workspaceId={sourceWorkspaceId}
               />
             )}
@@ -1002,7 +1052,19 @@ describe("MarkdownView", () => {
     expect(screen.getByRole("button", { name: "Spoofed target" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Unknown route" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unknown route" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("link", { name: /Library item/ }));
+    const absoluteItem = screen.getByRole("link", { name: /Absolute item/ });
+    expect(absoluteItem).toHaveAttribute("href", `${itemHref}#user-content-details`);
+    expect(absoluteItem).not.toHaveAttribute("target");
+    expect(within(absoluteItem).getByText("Other workspace")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Absolute stable page/ }))
+      .toHaveAttribute("href", stableHref.replace("#overview", "#user-content-overview"));
+    for (const [name, href] of [["Other origin", externalHref], ["Public reader", publicHref]]) {
+      const link = screen.getByRole("link", { name });
+      expect(link).toHaveAttribute("href", href);
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link.querySelector(".workspace-link-badge")).toBeNull();
+    }
+    await userEvent.click(absoluteItem);
     expect(screen.getByTestId("markdown-location-state")).toHaveTextContent(
       JSON.stringify({ dtxwikiReferenceReturnTo: sourceHref }),
     );
@@ -1813,6 +1875,43 @@ type InlineCommentStatus = "exact" | "fuzzy" | "fuzzy_distant" | "orphan";
 function LocationStateProbe() {
   const location = useLocation();
   return <output data-testid="markdown-location-state">{JSON.stringify(location.state)}</output>;
+}
+
+const NEVER_RESOLVE = new Promise<never>(() => {});
+
+function TransitioningMarkdown({
+  nextBodyReachedSuspension,
+}: {
+  nextBodyReachedSuspension: () => void;
+}) {
+  const oldBody = "[Old reference](/context/old.md)";
+  const nextBody = "[New reference](/context/new.md)";
+  const [body, setBody] = useState(oldBody);
+  const isNextBody = body === nextBody;
+  return (
+    <>
+      <button
+        onClick={() => startTransition(() => setBody(nextBody))}
+        type="button"
+      >
+        Render next body
+      </button>
+      <Suspense fallback={<span>Waiting for next body</span>}>
+        <MarkdownView
+          body={body}
+          linkTargets={isNextBody
+            ? [{ locator: "/context/new.md", href: null, target_page_id: null, state: "unavailable" }]
+            : [{ locator: "/context/old.md", href: null, target_page_id: null, state: "unavailable" }]}
+        />
+        {isNextBody ? <SuspendAfterRender onRender={nextBodyReachedSuspension} /> : null}
+      </Suspense>
+    </>
+  );
+}
+
+function SuspendAfterRender({ onRender }: { onRender: () => void }): never {
+  onRender();
+  throw NEVER_RESOLVE;
 }
 
 function inlineComment(

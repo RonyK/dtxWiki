@@ -58,7 +58,7 @@ import "katex/dist/katex.min.css";
 
 import { classifyContextLink, formatContextPageUrl, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
 import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
-import { workspacePath } from "../../shared/lib/workspaceRoutes";
+import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
 
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
@@ -131,22 +131,13 @@ export const MARKDOWN_GEOMETRY_CHANGE_EVENT =
 
 type MarkdownAnchorProps = ComponentPropsWithoutRef<"a"> & {
   "data-internal"?: string;
-  "data-dtx-reference-token"?: string;
   "data-dtx-unavailable-reference"?: string;
-  "data-dtx-reference-wikilink"?: string;
   node?: unknown;
 };
 
 type MarkdownAuthoredReference = { locator: string; wikilink: boolean };
 
-type MarkdownReferenceRegistry = {
-  references: Map<string, MarkdownAuthoredReference>;
-  reset: () => void;
-  register: (locator: string, wikilink: boolean) => string;
-};
-
 type MarkdownLinkBehavior = {
-  registry: MarkdownReferenceRegistry;
   sourceWorkspaceId: string | null;
   authenticatedAuthored: boolean;
   infoMode: "ask" | "public" | null;
@@ -158,23 +149,6 @@ type MarkdownRouteState = {
 
 const MarkdownLinkBehaviorContext = createContext<MarkdownLinkBehavior | null>(null);
 const MarkdownRouteStateContext = createContext<MarkdownRouteState | null>(null);
-
-function createMarkdownReferenceRegistry(prefix: string): MarkdownReferenceRegistry {
-  const references = new Map<string, MarkdownAuthoredReference>();
-  let nextId = 0;
-  return {
-    references,
-    reset() {
-      references.clear();
-      nextId = 0;
-    },
-    register(locator, wikilink) {
-      const token = `${prefix}-${nextId++}`;
-      references.set(token, { locator, wikilink });
-      return token;
-    },
-  };
-}
 
 function MarkdownRouteStateProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -253,10 +227,6 @@ export function MarkdownView({
         ? parsedBody
         : stripDuplicateLeadingHeading(parsedBody, stripLeadingHeading)
       : body;
-  const referenceRegistry = useMemo(
-    () => createMarkdownReferenceRegistry("dtx-markdown-reference"),
-    [],
-  );
   const sourceLineCount = Math.max(1, markdownBody.split(/\r?\n/).length);
   const anchorPluginOptions = useMemo(
     () => ({ highlights: inlineCommentAnchorHighlights(comments, body) }),
@@ -271,7 +241,6 @@ export function MarkdownView({
       resolveDeletedSource: buildDeletedSourceResolver(deletedSources),
       sourceLineNumbers: pageSourceLineNumbers,
       workspaceId,
-      referenceRegistry,
     }),
     [
       wikilinkPages,
@@ -279,18 +248,16 @@ export function MarkdownView({
       deletedSources,
       pageSourceLineNumbers,
       workspaceId,
-      referenceRegistry,
     ],
   );
   const contextLinkPluginOptions = useMemo(() => ({
     targets: linkTargets,
     workspaceId,
-    referenceRegistry,
     publicReader: wikilinkMode === "plain",
     confirmedOnly: renderPolicy === "confirmed-links",
     allowWorkspaceNavigation:
       renderPolicy === "page" && wikilinkMode === "internal" && allowWorkspaceNavigationLinks,
-  }), [linkTargets, workspaceId, referenceRegistry, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks]);
+  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -302,7 +269,6 @@ export function MarkdownView({
   }, [markdownBody, pageSourceLineNumbers]);
 
   const linkBehavior = useMemo<MarkdownLinkBehavior>(() => ({
-    registry: referenceRegistry,
     sourceWorkspaceId: workspaceId ?? null,
     authenticatedAuthored: renderPolicy === "page" && wikilinkMode === "internal",
     infoMode: renderPolicy === "confirmed-links"
@@ -310,7 +276,7 @@ export function MarkdownView({
       : renderPolicy === "page" && wikilinkMode === "plain"
         ? "public"
         : null,
-  }), [referenceRegistry, workspaceId, renderPolicy, wikilinkMode]);
+  }), [workspaceId, renderPolicy, wikilinkMode]);
   const markdownContent = useMemo(() => (
     <ReactMarkdown
       components={
@@ -335,7 +301,7 @@ export function MarkdownView({
         renderPolicy === "page"
           ? [
               remarkGfm,
-              [remarkMarkMarkdownReferences, referenceRegistry],
+              remarkMarkMarkdownReferences,
               remarkMath,
               remarkGithubBlockquoteAlert,
               [remarkDtxTokens, tokenPluginOptions],
@@ -344,13 +310,13 @@ export function MarkdownView({
                 : []),
             ]
           : renderPolicy === "confirmed-links"
-            ? [remarkGfm, [remarkMarkMarkdownReferences, referenceRegistry]]
+            ? [remarkGfm, remarkMarkMarkdownReferences]
             : [remarkGfm]
       }
       rehypePlugins={
         renderPolicy === "page"
           ? [
-              [rehypeWrapRegisteredReferences, referenceRegistry],
+              rehypeWrapRegisteredReferences,
               [rehypeRaw, { passThrough: [TRUSTED_REFERENCE_NODE] }],
               [rehypeResolveContextLinks, contextLinkPluginOptions],
               [rehypeResolveContextMedia, contextMediaPluginOptions],
@@ -373,7 +339,7 @@ export function MarkdownView({
             ]
           : renderPolicy === "confirmed-links"
             ? [
-                [rehypeWrapRegisteredReferences, referenceRegistry],
+                rehypeWrapRegisteredReferences,
                 [rehypeResolveContextLinks, contextLinkPluginOptions],
                 [rehypeSanitize, markdownSanitizeSchema],
               ]
@@ -394,7 +360,6 @@ export function MarkdownView({
   ), [
     markdownBody,
     renderPolicy,
-    referenceRegistry,
     tokenPluginOptions,
     pageSourceLineNumbers,
     stripLeadingHeading,
@@ -477,23 +442,28 @@ function rehypeConstrainPageImageSources() {
 type ContextLinkResolverOptions = {
   targets?: ContextLinkTarget[];
   workspaceId?: string | null;
-  referenceRegistry: MarkdownReferenceRegistry;
   publicReader: boolean;
   confirmedOnly?: boolean;
   allowWorkspaceNavigation?: boolean;
 };
 
-function rehypeWrapRegisteredReferences(registry: MarkdownReferenceRegistry) {
+function rehypeWrapRegisteredReferences() {
   return (tree: HastRoot) => {
     const visit = (parent: HastParent) => {
       parent.children = parent.children.flatMap((child): HastNode[] => {
         if (!isHastElement(child)) return [child];
-        const rawToken = child.properties.dataDtxReferenceToken ??
-          child.properties["data-dtx-reference-token"];
-        if (child.tagName === "a" && typeof rawToken === "string" && registry.references.has(rawToken)) {
+        const rawLocator = child.properties.dataDtxReferenceLocator ??
+          child.properties["data-dtx-reference-locator"];
+        if (child.tagName === "a" && typeof rawLocator === "string") {
+          const wikilink = child.properties.dataDtxReferenceWikilink ??
+            child.properties["data-dtx-reference-wikilink"];
+          delete child.properties.dataDtxReferenceLocator;
+          delete child.properties["data-dtx-reference-locator"];
+          delete child.properties.dataDtxReferenceWikilink;
+          delete child.properties["data-dtx-reference-wikilink"];
           return [{
             type: TRUSTED_REFERENCE_NODE,
-            data: { token: rawToken },
+            data: { reference: { locator: rawLocator, wikilink: wikilink === "true" } },
             children: [child],
           } as unknown as HastNode];
         }
@@ -505,6 +475,23 @@ function rehypeWrapRegisteredReferences(registry: MarkdownReferenceRegistry) {
   };
 }
 
+function readMarkdownAuthoredReference(value: unknown): MarkdownAuthoredReference | null {
+  if (!value || typeof value !== "object") return null;
+  const reference = value as Record<string, unknown>;
+  return typeof reference.locator === "string" && typeof reference.wikilink === "boolean"
+    ? { locator: reference.locator, wikilink: reference.wikilink }
+    : null;
+}
+
+function readMarkdownReferenceFromNode(node: unknown): MarkdownAuthoredReference | null {
+  if (!node || typeof node !== "object") return null;
+  const data = (node as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return null;
+  return readMarkdownAuthoredReference(
+    (data as Record<string, unknown>).dtxUnavailableReference,
+  );
+}
+
 function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
   const targets = new Map((options.targets ?? []).map((target) => [target.locator, target]));
   const withFragmentPrefix = (href: string) => {
@@ -512,17 +499,18 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
     if (index < 0 || index === href.length - 1 || href.slice(index + 1).startsWith(CLOBBER_PREFIX)) return href;
     return `${href.slice(0, index + 1)}${CLOBBER_PREFIX}${href.slice(index + 1)}`;
   };
-  function resolveAnchor(child: HastElement, token: string | null): HastNode[] {
+  function resolveAnchor(child: HastElement, reference: MarkdownAuthoredReference | null): HastNode[] {
       const props = child.properties;
-      const reference = token ? options.referenceRegistry.references.get(token) : undefined;
+      // Raw HTML may claim these marker names, but it never passes through the
+      // private HAST wrapper that carries Markdown-authored reference data.
+      delete props.dataDtxReferenceLocator;
+      delete props["data-dtx-reference-locator"];
       delete props.dataDtxReferenceToken;
       delete props["data-dtx-reference-token"];
-      // Authored HTML may include arbitrary data attributes. Only a token
-      // registered from Markdown syntax can supply the original locator.
-      delete props.dataDtxUnavailableReference;
-      delete props["data-dtx-unavailable-reference"];
       delete props.dataDtxReferenceWikilink;
       delete props["data-dtx-reference-wikilink"];
+      delete props.dataDtxUnavailableReference;
+      delete props["data-dtx-unavailable-reference"];
       delete props.ariaDisabled;
       delete props["aria-disabled"];
       if (props.dataTag || props["data-tag"]) return [child];
@@ -530,7 +518,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       const locator = reference?.locator ?? href;
       const target = targets.get(locator);
       const unavailable = (): HastNode[] => {
-        if (!reference || !token) return child.children;
+        if (!reference) return child.children;
         delete props.href;
         delete props.title;
         delete props.ariaDisabled;
@@ -542,8 +530,10 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         delete props.dataContextLinkLocator;
         delete props["data-context-link-locator"];
         props.className = [];
-        props["data-dtx-unavailable-reference"] = token;
-        props["data-dtx-reference-wikilink"] = reference.wikilink ? "true" : "false";
+        props["data-dtx-unavailable-reference"] = "true";
+        child.data = Object.assign({}, child.data, {
+          dtxUnavailableReference: reference,
+        }) as typeof child.data;
         return [child];
       };
       if (options.confirmedOnly) {
@@ -584,14 +574,14 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
     parent.children = parent.children.flatMap((child): HastNode[] => {
       if ((child as { type: string }).type === TRUSTED_REFERENCE_NODE) {
         const trustedNode = child as unknown as {
-          data?: { token?: unknown };
+          data?: { reference?: unknown };
           children?: HastNode[];
         };
         const anchor = trustedNode.children?.[0];
-        const token = typeof trustedNode.data?.token === "string" ? trustedNode.data.token : null;
         if (!anchor || !isHastElement(anchor) || anchor.tagName !== "a") {
           return trustedNode.children ?? [];
         }
+        const reference = readMarkdownAuthoredReference(trustedNode.data?.reference);
         resolve(anchor);
         const recoveredSiblings = (trustedNode.children?.slice(1) ?? []).flatMap((sibling): HastNode[] => {
           if (!isHastElement(sibling)) return [sibling];
@@ -599,7 +589,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
           return sibling.tagName === "a" ? resolveAnchor(sibling, null) : [sibling];
         });
         return [
-          ...resolveAnchor(anchor, token),
+          ...resolveAnchor(anchor, reference),
           ...recoveredSiblings,
         ];
       }
@@ -748,7 +738,6 @@ type DtxTokenOptions = {
   resolveDeletedSource?: (sourceId: string) => string | undefined;
   sourceLineNumbers?: boolean;
   workspaceId?: string | null;
-  referenceRegistry?: MarkdownReferenceRegistry;
 };
 
 type WikilinkResolution = {
@@ -779,9 +768,8 @@ function remarkDtxTokens(options: DtxTokenOptions = {}) {
   };
 }
 
-function remarkMarkMarkdownReferences(registry: MarkdownReferenceRegistry) {
+function remarkMarkMarkdownReferences() {
   return (tree: Root) => {
-    registry.reset();
     const definitions = new Map<string, string>();
     const visit = (node: unknown, callback: (node: Record<string, unknown>) => void) => {
       if (!node || typeof node !== "object") return;
@@ -802,7 +790,6 @@ function remarkMarkMarkdownReferences(registry: MarkdownReferenceRegistry) {
         ? node.url
         : typeof node.identifier === "string" ? definitions.get(node.identifier) : undefined;
       if (typeof locator !== "string") return;
-      const token = registry.register(locator, false);
       const priorData = node.data && typeof node.data === "object"
         ? node.data as Record<string, unknown>
         : {};
@@ -811,7 +798,11 @@ function remarkMarkMarkdownReferences(registry: MarkdownReferenceRegistry) {
         : {};
       node.data = {
         ...priorData,
-        hProperties: { ...priorProperties, "data-dtx-reference-token": token },
+        hProperties: {
+          ...priorProperties,
+          "data-dtx-reference-locator": locator,
+          "data-dtx-reference-wikilink": "false",
+        },
       };
     });
   };
@@ -1011,7 +1002,6 @@ function wikilinkNode(rawTarget: string, alias: string | undefined, options: Dtx
     : { pageId: null, slug: "" };
   const headingSlug = target.headingTarget ? slugifyHeadingAnchor(target.headingTarget) : "";
   const href = wikilinkHref(resolution, headingSlug, options.workspaceId);
-  const referenceToken = options.referenceRegistry?.register(locator, true);
   const title = (alias || rawTarget).trim();
   return {
     type: "dtxWikilink",
@@ -1022,7 +1012,8 @@ function wikilinkNode(rawTarget: string, alias: string | undefined, options: Dtx
         className: href !== "#" ? ["wikilink"] : ["wikilink", "wikilink-broken"],
         "data-internal": "true",
         "data-context-link-locator": locator,
-        ...(referenceToken ? { "data-dtx-reference-token": referenceToken } : {}),
+        "data-dtx-reference-locator": locator,
+        "data-dtx-reference-wikilink": "true",
         ...(resolution.pageId ? { "data-internal-page-id": resolution.pageId } : {}),
       },
     },
@@ -1205,24 +1196,22 @@ function MarkdownLink({
   href,
   children,
   "data-dtx-unavailable-reference": unavailableToken,
-  "data-dtx-reference-wikilink": wikilinkToken,
-  "data-dtx-reference-token": _referenceToken,
-  node: _node,
+  node,
   ...props
 }: MarkdownAnchorProps) {
   const { t } = useTranslation("pages");
   const behavior = useContext(MarkdownLinkBehaviorContext);
   const routeState = useContext(MarkdownRouteStateContext);
-  const unavailableReference = unavailableToken && behavior
-    ? behavior.registry.references.get(unavailableToken)
-    : undefined;
+  const unavailableReference = unavailableToken === "true"
+    ? readMarkdownReferenceFromNode(node)
+    : null;
   if (unavailableReference) {
     const unavailableTrigger = (linkChildren: ReactNode) => (
       <UnavailableReference
         infoMode={behavior?.infoMode ?? "public"}
         infoOnly={!behavior?.authenticatedAuthored}
         reference={behavior?.authenticatedAuthored ? unavailableReference.locator : null}
-        wikilink={wikilinkToken === "true" && unavailableReference.wikilink}
+        wikilink={unavailableReference.wikilink}
       >
         {linkChildren}
       </UnavailableReference>
@@ -1247,18 +1236,19 @@ function MarkdownLink({
         </a>
       );
     }
-    if (href.startsWith("/") && !href.startsWith("//")) {
-      const returnState = behavior?.authenticatedAuthored &&
-        behavior.sourceWorkspaceId &&
-        routeState &&
-        isReferenceNavigationHref(href, behavior.sourceWorkspaceId)
+    const navigationHref = behavior?.authenticatedAuthored && behavior.sourceWorkspaceId
+      ? referenceNavigationHref(href, behavior.sourceWorkspaceId)
+      : null;
+    const renderedHref = navigationHref ?? href;
+    if (renderedHref.startsWith("/") && !renderedHref.startsWith("//")) {
+      const returnState = navigationHref && routeState
         ? createReferenceReturnState(routeState.sourceHref)
         : undefined;
       return (
-        <Link to={href} state={returnState} {...accessibleProps} className={className}>
+        <Link to={renderedHref} state={returnState} {...accessibleProps} className={className}>
           {linkChildren}
           {behavior?.authenticatedAuthored ? (
-            <WorkspaceLinkBadge href={href} sourceWorkspaceId={behavior.sourceWorkspaceId} />
+            <WorkspaceLinkBadge href={renderedHref} sourceWorkspaceId={behavior.sourceWorkspaceId} />
           ) : null}
         </Link>
       );
@@ -1285,14 +1275,32 @@ function MarkdownLink({
   return renderLink(children);
 }
 
-function isReferenceNavigationHref(href: string, workspaceId: string): boolean {
-  const classification = classifyContextLink(href, {
+function referenceNavigationHref(href: string, workspaceId: string): string | null {
+  if (/[\\\u0000-\u0020\u007f]/.test(href) || href !== href.trim() || href.startsWith("//")) return null;
+  const options = {
     workspaceId,
     allowWorkspaceNavigation: true,
-  });
-  return classification.kind === "workspace_navigation" ||
+  };
+  let classification = classifyContextLink(href, options);
+  const hashAt = href.indexOf("#");
+  const queryAt = href.indexOf("?");
+  if (classification.kind === "unknown" && queryAt >= 0 && (hashAt < 0 || queryAt < hashAt)) {
+    const query = href.slice(queryAt, hashAt < 0 ? undefined : hashAt);
+    if (!hasConflictingWorkspaceQuery(query)) {
+      const withoutQuery = href.slice(0, queryAt) + (hashAt < 0 ? "" : href.slice(hashAt));
+      const route = classifyContextLink(withoutQuery, options);
+      if (route.kind === "stable_full") classification = route;
+    }
+  }
+  const recognized = classification.kind === "workspace_navigation" ||
     classification.kind === "canonical_route" ||
     classification.kind === "stable_full";
+  if (!recognized) return null;
+  // Classify the authored path before stripping the origin: URL.pathname
+  // would silently normalize dot segments that must remain rejected.
+  return /^https?:\/\//i.test(href)
+    ? /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/"
+    : href;
 }
 
 function MarkdownLinkedContent({
@@ -2826,8 +2834,6 @@ const markdownSanitizeSchema = {
       "data-internal-page-id",
       "data-dtx-unavailable-reference",
       "dataDtxUnavailableReference",
-      "data-dtx-reference-wikilink",
-      "dataDtxReferenceWikilink",
       "dataTag",
       "target",
       "rel",

@@ -754,8 +754,8 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
           await expect(page.locator(".ask-composer")).toHaveCount(0);
           await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
           await expectMinimumTouchTarget(
-            page.getByRole("button", { name: "Select a workspace", exact: true }),
-            "Unavailable Ask workspace chooser",
+            page.getByRole("button", { name: `Open ${workspace.title} dashboard`, exact: true }),
+            "Unavailable Ask workspace dashboard recovery",
           );
           await expectNoHorizontalOverflow(page, "Unavailable Ask route");
         });

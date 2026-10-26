@@ -5,6 +5,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { getSelectedWorkspaceId } from "../../shared/api/workspace";
+import { isContextId } from "../../shared/lib/contextLinks";
 import { isWorkspaceProductRoute, readSafeReferenceReturnTo } from "../../shared/lib/navigationRecovery";
 import { workspacePath } from "../../shared/lib/workspaceRoutes";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
@@ -22,12 +24,27 @@ export function NotFoundScreen() {
   const workspaceContext = useOptionalWorkspaceContext();
   const workspaces = workspaceContext?.workspaces ?? [];
   const knownWorkspaceIds = workspaces.map((workspace) => workspace.id);
+  const pathWorkspaceId = workspaceIdFromPath(location.pathname);
+  const routeWorkspace = pathWorkspaceId
+    ? workspaces.find((workspace) => workspace.id.toLowerCase() === pathWorkspaceId)
+    : undefined;
+  const selectedMembership = workspaces.find(
+    (workspace) => workspace.id.toLowerCase() === (workspaceContext?.selectedId ?? "").toLowerCase(),
+  ) ?? workspaces.find(
+    (workspace) => workspace.id.toLowerCase() === (getSelectedWorkspaceId() ?? "").toLowerCase(),
+  );
+  const preferredWorkspace = routeWorkspace ?? selectedMembership ?? workspaces[0] ?? null;
   const previousHref = hasValidWorkspaceRoute
     ? readSafeReferenceReturnTo(location.state, currentHref, knownWorkspaceIds)
     : null;
   const [workspaceChooserOpen, setWorkspaceChooserOpen] = useState(false);
-  const [chosenWorkspaceId, setChosenWorkspaceId] = useState("");
-  const chosenWorkspace = workspaces.find((workspace) => workspace.id === chosenWorkspaceId) ?? workspaces[0] ?? null;
+  const [chosenWorkspaceId, setChosenWorkspaceId] = useState<string | null>(null);
+  const chosenWorkspace = workspaces.find((workspace) => workspace.id === chosenWorkspaceId) ?? preferredWorkspace;
+
+  function openWorkspaceDashboard(workspaceId: string) {
+    setWorkspaceChooserOpen(false);
+    navigate(workspacePath(workspaceId, "dashboard"), { replace: true, state: null });
+  }
 
   return (
     <div className="workspace-screen single-column">
@@ -72,11 +89,22 @@ export function NotFoundScreen() {
                     {t("unavailable.previous", { defaultValue: "Return to previous page" })}
                   </Link>
                 ) : null}
-                {workspaces.length > 0 ? (
+                {routeWorkspace ? (
+                  <button
+                    className={`icon-button text-button${previousHref ? "" : " primary"}`}
+                    onClick={() => openWorkspaceDashboard(routeWorkspace.id)}
+                    type="button"
+                  >
+                    {t("unavailable.openWorkspace", {
+                      defaultValue: "Open {{title}} dashboard",
+                      title: routeWorkspace.title,
+                    })}
+                  </button>
+                ) : workspaces.length > 0 ? (
                   <button
                     className="icon-button text-button"
                     onClick={() => {
-                      setChosenWorkspaceId(workspaces[0].id);
+                      setChosenWorkspaceId(preferredWorkspace?.id ?? null);
                       setWorkspaceChooserOpen(true);
                     }}
                     type="button"
@@ -91,7 +119,19 @@ export function NotFoundScreen() {
               </>
             ) : (
               <>
-                <Link className="icon-button text-button primary" to="/workspaces/find">
+                {routeWorkspace ? (
+                  <button
+                    className="icon-button text-button primary"
+                    onClick={() => openWorkspaceDashboard(routeWorkspace.id)}
+                    type="button"
+                  >
+                    {t("unavailable.openWorkspace", {
+                      defaultValue: "Open {{title}} dashboard",
+                      title: routeWorkspace.title,
+                    })}
+                  </button>
+                ) : null}
+                <Link className={`icon-button text-button${routeWorkspace ? "" : " primary"}`} to="/workspaces/find">
                   {t("workspace.find", { defaultValue: "Find workspaces" })}
                 </Link>
                 <Link className="icon-button text-button" to="/account">
@@ -137,8 +177,7 @@ export function NotFoundScreen() {
               disabled={!chosenWorkspace}
               onClick={() => {
                 if (!chosenWorkspace) return;
-                setWorkspaceChooserOpen(false);
-                navigate(workspacePath(chosenWorkspace.id, "dashboard"), { replace: true, state: null });
+                openWorkspaceDashboard(chosenWorkspace.id);
               }}
               type="button"
             >
@@ -154,4 +193,15 @@ export function NotFoundScreen() {
       ) : null}
     </div>
   );
+}
+
+function workspaceIdFromPath(pathname: string): string | null {
+  const match = /^\/workspaces\/([^/]+)(?:\/|$)/.exec(pathname);
+  if (!match) return null;
+  try {
+    const workspaceId = decodeURIComponent(match[1]);
+    return isContextId(workspaceId) ? workspaceId.toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }

@@ -15,6 +15,7 @@ vi.mock("../../../shared/workspace/WorkspaceContext", async (importOriginal) => 
 
 const WORKSPACE_A = "22222222-2222-4222-8222-000000000001";
 const WORKSPACE_B = "22222222-2222-4222-8222-000000000002";
+const WORKSPACE_C = "22222222-2222-4222-8222-000000000003";
 const PAGE_ID = "33333333-3333-4333-8333-333333333333";
 const OTHER_PAGE_ID = "33333333-3333-4333-8333-333333333334";
 
@@ -22,8 +23,9 @@ function renderNotFound(
   pathname: string,
   workspaces: Array<{ id: string; title: string }> = [],
   state?: unknown,
+  selectedId = workspaces[0]?.id ?? "",
 ) {
-  workspaceContext.current = { workspaces };
+  workspaceContext.current = { workspaces, selectedId };
   return render(
     <MemoryRouter initialEntries={[{ pathname, state }]}>
       <NotFoundScreen />
@@ -53,11 +55,21 @@ describe("NotFoundScreen", () => {
     expect(screen.queryByRole("heading", { name: "This item can't be opened" })).toBeNull();
   });
 
-  it("treats an unrecognized Workspace suffix as malformed rather than an unavailable item", () => {
-    renderNotFound(`/workspaces/${WORKSPACE_B}/context/not-a-route`);
+  it("keeps malformed Workspace routes on 404 but offers the exact known workspace dashboard", async () => {
+    renderNotFound(
+      `/workspaces/${WORKSPACE_B}/context/pages/abc`,
+      [{ id: WORKSPACE_B, title: "Operations" }],
+    );
 
     expect(screen.getByRole("heading", { name: "We couldn't find that page" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "This item can't be opened" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open Operations dashboard" }));
+    expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}")).toMatchObject({
+      pathname: `/workspaces/${WORKSPACE_B}/dashboard`,
+      state: null,
+      navigationType: "REPLACE",
+    });
+    expect(screen.queryByRole("button", { name: "Select a workspace" })).toBeNull();
   });
 
   it("does not reuse the failed Workspace URL when there are no memberships", () => {
@@ -70,7 +82,7 @@ describe("NotFoundScreen", () => {
     expect(screen.queryByRole("link", { name: "Return to previous page" })).toBeNull();
   });
 
-  it("offers a compact workspace chooser and rejects the same entity through a stable permalink", async () => {
+  it("opens the exact member workspace and rejects the same entity through a stable permalink", async () => {
     renderNotFound(
       `/workspaces/${WORKSPACE_B}/context/pages/${PAGE_ID}`,
       [
@@ -80,21 +92,20 @@ describe("NotFoundScreen", () => {
       createReferenceReturnState(`/p/${WORKSPACE_B}/${PAGE_ID}`),
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Select a workspace" }));
-    expect(screen.getByRole("combobox", { name: "Your workspaces" })).toHaveDisplayValue("Research");
-    expect(screen.getByRole("button", { name: "Open Research dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Operations dashboard" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Return to previous page" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Find workspaces" })).toBeNull();
   });
 
   it("accepts a trusted prior page only when its Workspace is in the current membership list, then clears it on return", async () => {
     renderNotFound(
-      `/workspaces/${WORKSPACE_B}/context/pages/${PAGE_ID}`,
+      `/workspaces/${WORKSPACE_C}/context/pages/${PAGE_ID}`,
       [
         { id: WORKSPACE_A, title: "Research" },
         { id: WORKSPACE_B, title: "Operations" },
       ],
       createReferenceReturnState(`/workspaces/${WORKSPACE_A}/context/pages/${OTHER_PAGE_ID}?tab=history#v3`),
+      WORKSPACE_B,
     );
 
     expect(screen.getByRole("link", { name: "Return to previous page" })).toHaveAttribute(
@@ -104,7 +115,7 @@ describe("NotFoundScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select a workspace" }));
     const recoveryDialog = screen.getByRole("dialog", { name: "Select a workspace" });
     const workspaceSelect = within(recoveryDialog).getByRole("combobox", { name: "Your workspaces" });
-    expect(workspaceSelect).toHaveDisplayValue("Research");
+    expect(workspaceSelect).toHaveDisplayValue("Operations");
     await userEvent.selectOptions(workspaceSelect, WORKSPACE_B);
     expect(within(recoveryDialog).getByRole("button", { name: "Open Operations dashboard" })).toBeInTheDocument();
     await userEvent.click(within(recoveryDialog).getByRole("button", { name: "Close workspace chooser" }));
@@ -113,16 +124,6 @@ describe("NotFoundScreen", () => {
       pathname: `/workspaces/${WORKSPACE_A}/context/pages/${OTHER_PAGE_ID}`,
       search: "?tab=history",
       hash: "#v3",
-      state: null,
-      navigationType: "REPLACE",
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Select a workspace" }));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Your workspaces" }), WORKSPACE_B);
-    await userEvent.click(screen.getByRole("button", { name: "Open Operations dashboard" }));
-    expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}")).toEqual({
-      pathname: `/workspaces/${WORKSPACE_B}/dashboard`,
-      search: "",
-      hash: "",
       state: null,
       navigationType: "REPLACE",
     });
