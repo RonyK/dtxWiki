@@ -177,7 +177,7 @@ export function LibraryScreen() {
   const uploadQueueRef = useRef<UploadQueue<UploadEntry, true> | null>(null);
   const uploadRunGenerationRef = useRef(0);
   const uploadRouteIdentityRef = useRef(location.pathname);
-  const preserveUploadRouteChangeRef = useRef<string | null>(null);
+  const uploadWorkspaceIdRef = useRef<string | null>(routeWorkspaceId);
   const uploadParentNodeIdRef = useRef<string | null>(null);
   const uploadSequenceRef = useRef(0);
   // Uploads select their item locally before the router commits the matching
@@ -191,23 +191,21 @@ export function LibraryScreen() {
   const unavailableTargetIdRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     uploadRouteIdentityRef.current = location.pathname;
+  }, [location.pathname]);
+  useLayoutEffect(() => {
+    uploadWorkspaceIdRef.current = routeWorkspaceId;
     return () => {
-      if (uploadRouteIdentityRef.current === location.pathname) {
-        uploadRouteIdentityRef.current = "";
-      }
+      uploadWorkspaceIdRef.current = null;
       uploadRunGenerationRef.current += 1;
     };
-  }, [location.pathname]);
+  }, [routeWorkspaceId]);
   useEffect(() => {
-    const preserveCompletedUpload = preserveUploadRouteChangeRef.current === location.pathname;
-    if (preserveCompletedUpload) preserveUploadRouteChangeRef.current = null;
     uploadRunGenerationRef.current += 1;
+    uploadQueueRef.current = null;
     setIsUploading(false);
-    if (!preserveCompletedUpload) {
-      setUploadEntries([]);
-      setErrorActionLink(null);
-    }
-  }, [location.pathname]);
+    setUploadEntries([]);
+    setErrorActionLink(null);
+  }, [routeWorkspaceId]);
   const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
   useEffect(() => {
     setRouteNotFoundKey(null);
@@ -898,8 +896,10 @@ export function LibraryScreen() {
     const runGeneration = ++uploadRunGenerationRef.current;
     const isCurrentRun = () =>
       uploadRunGenerationRef.current === runGeneration &&
-      uploadRouteIdentityRef.current === originRouteIdentity &&
+      uploadWorkspaceIdRef.current === originWorkspaceId &&
       routeWorkspaceId === originWorkspaceId;
+    const isOriginRoute = () =>
+      isCurrentRun() && uploadRouteIdentityRef.current === originRouteIdentity;
     setIsUploading(true);
     clearError();
     const failures: { file: File; error: unknown }[] = [];
@@ -971,15 +971,6 @@ export function LibraryScreen() {
       let uploadedHref: string | null = null;
       if (lastUploaded) {
         const uploaded = lastUploaded;
-        setState((current) =>
-          current
-            ? {
-                ...current,
-                detail: uploaded,
-              }
-            : current,
-        );
-        localTargetIdRef.current = uploaded.id;
         uploadedHref = workspaceTargetHref(routeWorkspaceId, "library", uploaded.id, "item");
         try {
           const [itemsPage, treeData] = await Promise.all([
@@ -989,6 +980,8 @@ export function LibraryScreen() {
           if (!isCurrentRun()) return false;
           const tree = treeData.nodes;
           const libraryTree = libraryExplorerTreeNodes(tree);
+          const selectUploaded = isOriginRoute();
+          if (selectUploaded) localTargetIdRef.current = uploaded.id;
           setState((current) =>
             current
               ? {
@@ -999,18 +992,26 @@ export function LibraryScreen() {
                   itemsHasMore: itemsPage.has_more,
                   tree,
                   treePolicies: treeData.policies,
-                  detail: uploaded,
+                  ...(selectUploaded ? { detail: uploaded } : {}),
                 }
               : current,
           );
-          const uploadedNode = libraryTree.find(
-            (node) => node.target_id === uploaded.id,
-          );
-          setStoredExpandedNodeIds(
-            expandNodeIds(expandedNodeIds, uploadedNode?.parent_id ?? null),
-          );
+          if (selectUploaded) {
+            const uploadedNode = libraryTree.find(
+              (node) => node.target_id === uploaded.id,
+            );
+            setStoredExpandedNodeIds(
+              expandNodeIds(expandedNodeIds, uploadedNode?.parent_id ?? null),
+            );
+          }
         } catch {
           if (!isCurrentRun()) return false;
+          if (isOriginRoute()) {
+            localTargetIdRef.current = uploaded.id;
+            setState((current) =>
+              current ? { ...current, detail: uploaded } : current,
+            );
+          }
           setError(
             t("upload.refreshFailed", {
               defaultValue:
@@ -1023,8 +1024,7 @@ export function LibraryScreen() {
       if (failures.length > 0) {
         reportUploadFailures(entries.length, failures);
       }
-      if (uploadedHref && isCurrentRun()) {
-        preserveUploadRouteChangeRef.current = uploadedHref;
+      if (uploadedHref && isOriginRoute()) {
         navigate(uploadedHref, { replace: true });
       }
       return Boolean(lastUploaded);

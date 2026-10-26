@@ -155,7 +155,9 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
     assert len(fixes) == 1
 
 
-def test_workspace_navigation_projection_respects_source_scope_and_route_identity():
+def test_workspace_navigation_projection_respects_source_scope_and_route_identity(
+    monkeypatch,
+):
     # Budget exception: foreign rejection/pass-through, safe view state,
     # identity-query conflict, and Context dispatcher collision are distinct
     # parser/policy paths. This pure unit boundary avoids extra DB setup.
@@ -223,10 +225,47 @@ def test_workspace_navigation_projection_respects_source_scope_and_route_identit
         actor=None,
         public=True,
     ) == (False, None)
+    # Budget exception: no existing target-resolution case asserts role-based
+    # Agent edit routing. The same readable target with viewer/editor roles
+    # covers the independent read-fallback and edit branches without DB setup.
+    from backend.models.agent import AgentPage
+
+    agent_page = SimpleNamespace(id=target)
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.get_in_workspace",
+        lambda _session, model, **_kwargs: (
+            agent_page if model is AgentPage else None
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.agent_page_visible",
+        lambda *_args, **_kwargs: True,
+    )
+    agent_edit_href = f"/workspaces/{source_workspace}/agent/pages/{target}/edit"
+    viewer = ActorContext(
+        actor_kind="user",
+        actor_id="viewer-1",
+        workspace_id=source_workspace,
+        workspace_role="viewer",
+        role="viewer",
+    )
+    editor = ActorContext(
+        actor_kind="user",
+        actor_id="editor-1",
+        workspace_id=source_workspace,
+        workspace_role="editor",
+        role="editor",
+    )
+    assert _server_navigation_target(
+        object(), agent_edit_href, workspace_id=source_workspace, actor=viewer
+    ) == (True, f"/workspaces/{source_workspace}/agent/pages/{target}")
+    assert _server_navigation_target(
+        object(), agent_edit_href, workspace_id=source_workspace, actor=editor
+    ) == (True, agent_edit_href)
 
 
 def test_preview_artifact_link_can_precede_ready_head(monkeypatch):
-    # The selected preview pointer is independent of the ready-source head.
+    # Budget exception: the preview pointer is independent of the ready head.
     # Existing foreign-workspace tests never reach artifact visibility and
     # cannot catch a false negative caused only by the newer ready pointer.
     # Canonical lineage is covered by the Library integration suite; stub
@@ -270,7 +309,7 @@ def test_preview_artifact_link_can_precede_ready_head(monkeypatch):
 
 
 def test_ask_recognizes_configured_absolute_context_route(monkeypatch):
-    # Absolute self-origin Context links need origin-aware classification in
+    # Budget exception: self-origin Context links need origin-aware classification in
     # Ask as well as in the trusted Context reader. This cannot be caught by
     # relative-link cases because an unconfigured absolute host is external.
     source_workspace = UUID("11111111-1111-4111-8111-111111111111")
@@ -315,6 +354,9 @@ def test_ask_recognizes_configured_absolute_context_route(monkeypatch):
 
     # A valid queried foreign Context URL is navigable in a trusted authored
     # page without a foreign target lookup; Ask above still scopes it to source.
+    # Budget exception: this is a separate authorization policy branch from
+    # the same-workspace self-origin case; a relative URL cannot expose a
+    # regression in authored Context's no-probe foreign pass-through.
     foreign_workspace = UUID("33333333-3333-4333-8333-333333333333")
     foreign_target = UUID("44444444-4444-4444-8444-444444444444")
     foreign_href = (
@@ -349,6 +391,51 @@ def test_ask_recognizes_configured_absolute_context_route(monkeypatch):
     assert foreign_link.state == "ok"
     assert foreign_link.href == foreign_href
     assert foreign_link.target_page_id is None
+
+    # Budget exception: no existing resolver case asserts role-based Context
+    # edit routing. These same-page viewer/editor inputs cover independent
+    # read-fallback and edit branches without another DB fixture.
+    edit_href = (
+        f"/workspaces/{source_workspace}/context/pages/{target}/edit?tab=history"
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.resolve",
+        lambda _locator, _context: SimpleNamespace(
+            state="ok", href=f"/p/{source_workspace}/{target}", page_id=target
+        ),
+    )
+    source_page = SimpleNamespace(
+        id=UUID("66666666-6666-4666-8666-666666666666"),
+        workspace_id=source_workspace,
+        current_published_version_id=source_version,
+    )
+    edit_version = SimpleNamespace(id=source_version, body_md=f"[Edit]({edit_href})")
+    viewer_actor = ActorContext(
+        actor_kind="user",
+        actor_id="viewer-1",
+        workspace_id=source_workspace,
+        workspace_role="viewer",
+        role="viewer",
+    )
+    (viewer_link,) = context_link_targets(
+        object(), page=source_page, version=edit_version, actor=viewer_actor
+    )
+    (editor_link,) = context_link_targets(
+        object(),
+        page=source_page,
+        version=edit_version,
+        actor=ActorContext(
+            actor_kind="user",
+            actor_id="editor-1",
+            workspace_id=source_workspace,
+            workspace_role="editor",
+            role="editor",
+        ),
+    )
+    assert viewer_link.state == "ok"
+    assert viewer_link.href == f"/p/{source_workspace}/{target}?tab=history"
+    assert editor_link.state == "ok"
+    assert editor_link.href == edit_href
 
 
 def test_context_navigation_batches_tree_visibility_projection(monkeypatch):

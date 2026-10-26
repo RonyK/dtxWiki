@@ -830,6 +830,104 @@ describe("LibraryScreen", () => {
     expect(screen.queryByText(/Late upload/)).toBeNull();
   });
 
+  it("keeps an in-flight upload queue on a same-workspace item route and reports its failure", async () => {
+    let resolveUpload!: (response: Response) => void;
+    let uploadPosts = 0;
+    let itemListCalls = 0;
+    let treeCalls = 0;
+    const pendingUpload = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploaded = libraryItemDetail(
+      LIBRARY_ITEM_ID,
+      "Uploaded second file",
+      `upload://${WORKSPACE_ID}/success.md`,
+    );
+    const destination = libraryItemDetail(
+      SECOND_LIBRARY_ITEM_ID,
+      "Destination item",
+      "https://example.com/destination",
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/capabilities`) {
+        return jsonResponse({ data: defaultLibraryCapabilities() });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items` && init?.method === "POST") {
+        uploadPosts += 1;
+        return uploadPosts === 1 ? pendingUpload : jsonResponse({ data: uploaded });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`) {
+        return jsonResponse({ data: destination });
+      }
+      if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/library/items`)) {
+        return jsonResponse({ data: itemListCalls++ === 0
+          ? []
+          : [
+              libraryItemSummary(SECOND_LIBRARY_ITEM_ID, "Destination item", destination.uri),
+              libraryItemSummary(LIBRARY_ITEM_ID, "Uploaded second file", uploaded.uri),
+            ] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=library`) {
+        return jsonResponse({ data: treeResponse("library", treeCalls++ === 0
+          ? []
+          : [
+              treeNode("node-destination", SECOND_LIBRARY_ITEM_ID, "Destination item"),
+              treeNode("node-uploaded", LIBRARY_ITEM_ID, "Uploaded second file"),
+            ]) });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("crypto", { getRandomValues: (bytes: Uint8Array) => bytes.fill(1) });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library`]}>
+        <LibraryScreen />
+        <LibraryWorkspaceRouteControls />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "No Library items yet" });
+    await userEvent.upload(
+      screen.getByLabelText("Upload Library file"),
+      [
+        new File(["# Pending"], "pending.md", { type: "text/markdown" }),
+        new File(["# Cancelled"], "cancel.md", { type: "text/markdown" }),
+        new File(["# Success"], "success.md", { type: "text/markdown" }),
+      ],
+    );
+    await screen.findByText("Uploading", { selector: ".status-pill" });
+    await userEvent.click(screen.getByRole("button", { name: "Open test item" }));
+    await screen.findByRole("heading", { name: "Destination item", level: 2 });
+
+    const queue = screen.getByRole("region", { name: "Upload queue" });
+    expect(queue).toHaveTextContent("pending.md Uploading");
+    const cancelledRow = within(queue).getByText("cancel.md").closest("li");
+    expect(cancelledRow).not.toBeNull();
+    await userEvent.click(within(cancelledRow as HTMLLIElement).getByRole("button", { name: "Cancel" }));
+    expect(within(cancelledRow as HTMLLIElement).getByText("Cancelled", { selector: ".status-pill" })).toBeInTheDocument();
+
+    await act(async () => resolveUpload(jsonResponse({
+      error_code: "temporary_failure",
+      message: "Temporary upload failure.",
+      request_id: "request-route-change",
+      warnings: [],
+    }, 503)));
+
+    expect(await within(queue).findByText("Failed", { selector: ".status-pill" })).toBeInTheDocument();
+    expect(await within(queue).findByText("Succeeded", { selector: ".status-pill" })).toBeInTheDocument();
+    expect(within(queue).getByRole("button", { name: "Retry upload for pending.md" })).toBeInTheDocument();
+    expect(await screen.findByText(/Failed to upload 1 of 3 files/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Destination item", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Uploaded second file", level: 2 })).toBeNull();
+    expect(screen.getByTestId("library-location")).toHaveTextContent(
+      `/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`,
+    );
+  });
+
   it("fails visibly without getRandomValues and never falls back to randomUUID", async () => {
     const randomUUID = vi.fn(() => "00000000-0000-4000-8000-000000000001");
     vi.stubGlobal("crypto", { randomUUID });
@@ -4109,6 +4207,9 @@ function LibraryWorkspaceRouteControls() {
       <output data-testid="library-location">{location.pathname}</output>
       <button type="button" onClick={() => navigate("/workspaces/workspace-2/library")}>
         Switch test workspace
+      </button>
+      <button type="button" onClick={() => navigate(`/workspaces/${WORKSPACE_ID}/library/items/${SECOND_LIBRARY_ITEM_ID}`)}>
+        Open test item
       </button>
     </>
   );

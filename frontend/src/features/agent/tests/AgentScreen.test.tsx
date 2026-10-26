@@ -99,7 +99,12 @@ describe("AgentScreen", () => {
         ]),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages/agent-1?version=active`]: {
-        data: agentDetail("agent-1", "persona", "Default Persona", "# Persona"),
+        data: agentDetail(
+          "agent-1",
+          "persona",
+          "Default Persona",
+          "# Persona\n\n[Library item](/workspaces/11111111-1111-4111-8111-111111111111/library/items/22222222-2222-4222-8222-222222222222?view=details#files)\n\n[Agent page](/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/33333333-3333-4333-8333-333333333333?tab=view#overview)",
+        ),
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=agent_page&target_id=agent-1`]: {
         data: {
@@ -226,6 +231,14 @@ describe("AgentScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "Persona" }),
     ).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Library item" })).toHaveAttribute(
+      "href",
+      "/workspaces/11111111-1111-4111-8111-111111111111/library/items/22222222-2222-4222-8222-222222222222?view=details#user-content-files",
+    );
+    expect(await screen.findByRole("link", { name: "Agent page" })).toHaveAttribute(
+      "href",
+      "/workspaces/11111111-1111-4111-8111-111111111111/agent/pages/33333333-3333-4333-8333-333333333333?tab=view#user-content-overview",
+    );
     expect(screen.getByRole("tab", { name: "Bundle" })).toBeEnabled();
     await userEvent.click(screen.getByRole("tab", { name: "Bundle" }));
     expect(
@@ -1199,9 +1212,10 @@ describe("AgentScreen", () => {
     await waitFor(() => expect(fetchSpy.mock.calls.some(([input, init]) =>
       input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes` && init?.method === "POST",
     )).toBe(true));
-    expect(screen.getByTestId("route-path")).toHaveTextContent(
+    await waitFor(() => expect(screen.getByTestId("route-path")).toHaveTextContent(
       `/workspaces/${WORKSPACE_ID}/agent/folders/agent-folder-new`,
-    );
+    ));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("updates the selected Agent page from the Edit draft action", async () => {

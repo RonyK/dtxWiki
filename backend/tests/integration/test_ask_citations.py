@@ -730,6 +730,11 @@ def test_session_detail_batches_graph_context_for_all_turns(session_factory):
         session.flush()
         seed.current_version_id = version.id
         seed.current_published_version_id = version.id
+        # Budget exception: this existing DB fixture needs real published-page
+        # provenance to prove Ask exposes only a confirmed same-workspace link
+        # and omits an external target. Pure projection tests cannot verify the
+        # service's publication and source-page checks; both links share this
+        # one existing fixture and add no separate DB scenario.
         graph = BatchGraphSpy()
         service = AskService(
             search_service=FakeSemanticSearch(),

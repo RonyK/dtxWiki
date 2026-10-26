@@ -111,8 +111,8 @@ type MarkdownViewProps = {
   // The source document/editor workspace supplies authority for short links.
   // Never infer it from whichever workspace the reader most recently selected.
   workspaceId?: string | null;
-  // Editable previews may activate only syntactically valid, explicit
-  // workspace routes; public readers and untrusted previews stay closed.
+  // Trusted authored previews/readers may activate only syntactically valid,
+  // explicit workspace routes; public readers and untrusted previews stay closed.
   allowWorkspaceNavigationLinks?: boolean;
 };
 

@@ -146,12 +146,10 @@ def context_link_targets(
             target_id is not None
             and locator.kind == "canonical_route"
             and urlsplit(occurrence.href).path.endswith("/edit")
+            and not public
+            and _actor_can_edit_workspace(actor)
         ):
-            href = (
-                f"{workspace_path(page.workspace_id)}/context/pages/{target_id}/edit"
-                if not public and _actor_can_edit_workspace(actor)
-                else None
-            )
+            href = f"{workspace_path(page.workspace_id)}/context/pages/{target_id}/edit"
         href = _preserve_workspace_view_query(
             href, occurrence.href, preserve_fragment=False
         )
@@ -544,10 +542,12 @@ def _server_navigation_target(
         )
         if not agent_page_visible(page, actor, workspace_id=workspace_id):
             return True, None
-        if kind == "page_edit" and not _actor_can_edit_workspace(actor):
-            return True, None
         page_href = agent_page_url(workspace_id, page.id)
-        return True, page_href + "/edit" if kind == "page_edit" else page_href
+        return True, (
+            page_href + "/edit"
+            if kind == "page_edit" and _actor_can_edit_workspace(actor)
+            else page_href
+        )
     return False, None
 
 

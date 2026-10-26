@@ -1168,8 +1168,6 @@ export function ContextScreen() {
       setRouteUnavailable(true);
       return;
     }
-    const parent = requestedParentNode?.id ?? null;
-    setNewItemDialog({ initialItemType: "folder", parentNodeId: parent });
   }, [canEdit, searchParams, state, workspaceRoute?.create, workspaceRoute?.targetKind]);
 
   useDocumentTitle(state?.detail?.title ?? null, " - ");
@@ -1209,13 +1207,23 @@ export function ContextScreen() {
   const selectedNode = state.selectedNodeId
     ? (state.tree.find((node) => node.id === state.selectedNodeId) ?? null)
     : null;
+  const folderCreateRoute = Boolean(
+    canEdit && workspaceRoute?.create && workspaceRoute.targetKind === "folder",
+  );
+  const routeFolderParentId = folderCreateRoute ? searchParams.get("parent") : null;
+  const routeFolderParent = routeFolderParentId
+    ? state.tree.find((node) => node.id === routeFolderParentId && node.section === "context" && node.can_have_children)
+    : null;
+  const activeNewItemDialog = newItemDialog ?? (folderCreateRoute && (!routeFolderParentId || routeFolderParent)
+    ? { initialItemType: "folder" as const, parentNodeId: routeFolderParentId }
+    : null);
   const contextRoot =
     state.tree.find((node) =>
       isSemanticSectionRoot(node, t("rail.title", { defaultValue: "Context" })),
     ) ?? null;
   const contextPolicy = state.treePolicies.context;
-  const itemParent = newItemDialog?.parentNodeId
-    ? (state.tree.find((node) => node.id === newItemDialog.parentNodeId) ??
+  const itemParent = activeNewItemDialog?.parentNodeId
+    ? (state.tree.find((node) => node.id === activeNewItemDialog.parentNodeId) ??
       null)
     : null;
   // F-5: folder destinations the new-item dialog's location picker can target.
@@ -1600,12 +1608,12 @@ export function ContextScreen() {
           ) : undefined
         }
       />
-      {newItemDialog ? (
+      {activeNewItemDialog ? (
         <NewItemDialog
           canCreateFolder={contextPolicy?.allow_user_folder_create === true}
           canCreatePage
-          initialItemType={newItemDialog.initialItemType}
-          initialParentId={newItemDialog.parentNodeId ?? ""}
+          initialItemType={activeNewItemDialog.initialItemType}
+          initialParentId={activeNewItemDialog.parentNodeId ?? ""}
           parentLabel={
             itemParent?.title ?? t("rail.title", { defaultValue: "Context" })
           }

@@ -2560,6 +2560,9 @@ describe("ContextScreen", () => {
         `/workspaces/${WORKSPACE_ID}/context/folders/${folderId}`,
       ),
     );
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Folder name" })).not.toBeInTheDocument(),
+    );
   });
 
   it("marks manual tree refresh busy and announces completion", async () => {

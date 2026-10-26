@@ -13,7 +13,7 @@ export type ContextLinkTarget = {
 export type ContextLinkOptions = {
   workspaceId?: string | null;
   selfOrigins?: readonly string[];
-  /** Allow explicit typed product routes in editable authored previews only. */
+  /** Allow explicit typed product routes in trusted authored previews/readers. */
   allowWorkspaceNavigation?: boolean;
 };
 
