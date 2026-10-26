@@ -116,6 +116,7 @@ import {
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
@@ -202,6 +203,7 @@ export function AgentScreen() {
   // Reveal a deep-linked target once. After that, the user's expansion state
   // is authoritative, including an intentional collapse of the active path.
   const revealedRouteTargetRef = useRef<string | null>(null);
+  const expansionWorkspaceRef = useRef<string | null>(null);
   // After a detail load failure the route params and `state` are unchanged, so
   // re-clicking the same tree node would never re-run the route-sync effect.
   // Record the failed target and bump a retry token from selectPage instead.
@@ -213,7 +215,9 @@ export function AgentScreen() {
   >(null);
   const {
     data: state,
+    revision: overviewRevision,
     error,
+    reload,
     setData: setState,
     setError,
   } = useAsyncLoad<AgentState>(
@@ -295,17 +299,35 @@ export function AgentScreen() {
         revealedRouteTargetRef.current = nextState.selectedNodeId
           ? `${nextState.workspaceId}:${nextState.selectedNodeId}`
           : null;
-        setExpandedNodeIds(
-          resolveExpandedNodeIds(
-            nextState.tree,
-            searchParams.get(TREE_EXPANDED_PARAM),
-            nextState.selectedNodeId ?? nextState.detail?.id ?? null,
-            { defaultMode: "none", storageKey: "agent" },
-          ),
+        const workspaceChanged = expansionWorkspaceRef.current !== nextState.workspaceId;
+        expansionWorkspaceRef.current = nextState.workspaceId;
+        const validNodeIds = new Set(nextState.tree.map((node) => node.id));
+        setExpandedNodeIds((current) =>
+          workspaceChanged
+            ? resolveExpandedNodeIds(
+                nextState.tree,
+                searchParams.get(TREE_EXPANDED_PARAM),
+                nextState.selectedNodeId ?? nextState.detail?.id ?? null,
+                { defaultMode: "none", storageKey: "agent" },
+              )
+            : current.filter((nodeId) => validNodeIds.has(nodeId)),
         );
       },
     },
   );
+
+  useScreenEntryRefresh("/agent", reload, {
+    isHome:
+      requestedTargetId === null &&
+      !searchParams.has(TREE_NEW_FOLDER_PARAM) &&
+      !searchParams.has("edit"),
+  });
+
+  const paginationGenerationRef = useRef(0);
+  useEffect(() => {
+    paginationGenerationRef.current += 1;
+    setLoadingMoreAgentPages(false);
+  }, [overviewRevision]);
 
   // A8: append the next keyset page of agent pages to the overview. Guarded so a
   // reload (create/draft/restore) that replaced the list mid-flight discards the
@@ -319,13 +341,19 @@ export function AgentScreen() {
     ) {
       return;
     }
-    const { workspaceId, pagesCursor } = state;
+    const { workspaceId, pagesCursor, pages } = state;
+    const requestGeneration = paginationGenerationRef.current;
     setLoadingMoreAgentPages(true);
     setError(null);
     try {
       const next = await listAgentPages(workspaceId, { cursor: pagesCursor });
       setState((current) => {
-        if (!current || current.pagesCursor !== pagesCursor) {
+        if (
+          !current ||
+          current.workspaceId !== workspaceId ||
+          current.pages !== pages ||
+          current.pagesCursor !== pagesCursor
+        ) {
           return current;
         }
         return {
@@ -336,9 +364,13 @@ export function AgentScreen() {
         };
       });
     } catch (exc) {
-      setError(apiErrorMessage(exc, t("errors.loadMore")));
+      if (requestGeneration === paginationGenerationRef.current) {
+        setError(apiErrorMessage(exc, t("errors.loadMore")));
+      }
     } finally {
-      setLoadingMoreAgentPages(false);
+      if (requestGeneration === paginationGenerationRef.current) {
+        setLoadingMoreAgentPages(false);
+      }
     }
   }
 
@@ -457,12 +489,12 @@ export function AgentScreen() {
           }
         : current,
     );
-    setSearchParams(
-      updateTreeSearchParams(searchParams, {
-        targetId: selectedNodeId,
-      }),
-      { replace: true },
-    );
+    const nextParams = updateTreeSearchParams(searchParams, {
+      targetId: selectedNodeId,
+    });
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true });
+    }
   }
 
   async function refreshTreeFromRail() {
@@ -472,7 +504,7 @@ export function AgentScreen() {
     setTreeRefreshing(true);
     setError(null);
     try {
-      await refreshTree();
+      await refreshTree({ refreshOverview: true });
     } catch (exc) {
       setError(apiErrorMessage(exc, t("errors.refreshTree")));
     } finally {

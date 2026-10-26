@@ -43,6 +43,7 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { activityCountLabel, activityEntryCounts, activityHref, parseActivityQuery, reconcileActivityReadGroup } from "../../shared/lib/activityFeed";
 import { iconForActivityLane } from "../../shared/lib/activityLanes";
@@ -141,6 +142,8 @@ export function DashboardScreen() {
       errorMessage: t("errors.load", { defaultValue: "Failed to load Dashboard" }),
     },
   );
+
+  useScreenEntryRefresh("/dashboard", reload, { queryDeps: [period, groupReads] });
 
   function updatePeriod(nextPeriod: ActivityPeriod) {
     setSearchParams(
