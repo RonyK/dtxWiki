@@ -749,13 +749,13 @@ test.describe("Overall UI responsive acceptance @cross-browser", () => {
         await test.step("Ask direct access has a usable mobile recovery action", async () => {
           await page.goto(workspaceUrl(workspace.id, "ask"));
           await expect(
-            page.getByRole("heading", { name: "We couldn't find that page" }),
+            page.getByRole("heading", { name: "This item can't be opened" }),
           ).toBeVisible();
           await expect(page.locator(".ask-composer")).toHaveCount(0);
           await expect(page.locator('a[href^="/workspaces/"][href$="/ask"]')).toHaveCount(0);
           await expectMinimumTouchTarget(
-            page.getByRole("link", { name: "Back to dashboard", exact: true }),
-            "Unavailable Ask recovery link",
+            page.getByRole("button", { name: "Select a workspace", exact: true }),
+            "Unavailable Ask workspace chooser",
           );
           await expectNoHorizontalOverflow(page, "Unavailable Ask route");
         });

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MarkdownView } from "../MarkdownView";
@@ -489,7 +489,8 @@ describe("MarkdownView", () => {
     expect(screen.getByRole("heading", { name: "Details" })).toBeInTheDocument();
   });
 
-  it("renders heading anchors, GFM alerts, and safe link behavior", () => {
+  it("renders heading anchors, GFM alerts, and safe link behavior", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <MarkdownView
@@ -497,6 +498,7 @@ describe("MarkdownView", () => {
           linkTargets={[
             { locator: "/pages/release-notes", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
             { locator: "/context/missing.md", href: null, target_page_id: null, state: "unavailable" },
+            { locator: "/context/missing-image.md", href: null, target_page_id: null, state: "unavailable" },
           ]}
           body={[
             "# Release Notes",
@@ -509,6 +511,8 @@ describe("MarkdownView", () => {
             "[target]: /pages/release-notes",
             "",
             "[Internal](/pages/release-notes), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
+            '[![Linked image](https://images.example.test/linked.png)](/context/missing-image.md)',
+            '<div><a href="https://raw-html.example.test"data-dtx-unavailable-reference="dtx-markdown-reference-0" data-dtx-reference-wikilink="true" data-dtx-reference-token="dtx-markdown-reference-0" data-context-link-locator="/context/missing.md">Raw HTML link</a></div>',
           ].join("\n")}
         />
       </MemoryRouter>,
@@ -536,9 +540,49 @@ describe("MarkdownView", () => {
       .toHaveAttribute("rel", "noopener noreferrer");
     // Budget exception: legacy destination pins, short preview inheritance,
     // reference links, and unavailable navigation are distinct render paths.
-    expect(screen.getByRole("link", { name: "Protocol" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("link", { name: "Missing" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("link", { name: "Missing" })).toHaveAttribute("title", "Unavailable page");
+    expect(screen.queryByRole("link", { name: "Protocol" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Missing" })).not.toBeInTheDocument();
+    const missing = screen.getByRole("button", { name: "Missing" });
+    expect(missing).toHaveAttribute("aria-haspopup", "dialog");
+    expect(missing).toHaveAttribute("aria-expanded", "false");
+    expect(missing).toHaveAttribute("aria-describedby");
+    expect(missing).toHaveClass("unavailable-reference__trigger");
+    await user.click(missing);
+    const unavailableDialog = screen.getByRole("dialog");
+    expect(unavailableDialog).toHaveTextContent("This item may be missing or unavailable to your current account.");
+    expect(unavailableDialog).toHaveTextContent("/context/missing.md");
+    expect(within(unavailableDialog).getByRole("button", { name: "Copy authored reference" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(missing).toHaveAttribute("aria-expanded", "false");
+    expect(document.activeElement).toBe(missing);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.pointerEnter(missing, { pointerType: "mouse" });
+    const hoverDialog = screen.getByRole("dialog");
+    const referenceRoot = missing.closest(".unavailable-reference");
+    expect(referenceRoot).not.toBeNull();
+    fireEvent.pointerLeave(referenceRoot!);
+    fireEvent.pointerEnter(hoverDialog, { pointerType: "mouse" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(within(hoverDialog).getByRole("button", { name: "Close explanation" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.pointerEnter(missing, { pointerType: "touch" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(missing);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close explanation" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Raw HTML link" })).toHaveAttribute("href", "https://raw-html.example.test");
+    expect(screen.queryByRole("button", { name: "Raw HTML link" })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-dtx-reference-token="dtx-markdown-reference-0"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "Raw HTML link" })).not.toBeInTheDocument();
+    const linkedImage = screen.getByRole("img", { name: "Linked image" });
+    fireEvent.error(linkedImage);
+    const linkedImageFailure = screen.getByRole("status");
+    const unavailableImageTrigger = linkedImageFailure.closest(".unavailable-reference__trigger");
+    if (!unavailableImageTrigger) throw new Error("Unavailable linked image trigger is missing");
+    expect(unavailableImageTrigger.querySelector("button, a")).toBeNull();
+    expect(screen.getByRole("link", { name: "Open original image: Linked image" }))
+      .not.toBe(unavailableImageTrigger);
     expect(screen.getByRole("link", { name: "Short" })).toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#user-content-details");
     expect(screen.getByRole("link", { name: "Reference" })).toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222");
   });
@@ -598,24 +642,10 @@ describe("MarkdownView", () => {
     // an actor-visible page id (here: no wikilinkTargets/wikilinkPages were
     // even supplied) can no longer navigate anywhere in-app and renders
     // broken instead of pointing at a dead route.
-    const wikilink = screen.getByRole("link", { name: "Release Notes" });
-    expect(wikilink).toHaveAttribute("href", "#");
-    expect(wikilink).toHaveAttribute("data-internal", "true");
-    expect(wikilink).toHaveClass("wikilink");
-    // Both intents, merged. M-4 (260908 UI audit): MarkdownLink used to
-    // re-derive "wikilink" on top of the class wikilinkNode() already set,
-    // doubling it in the DOM (measured: class="wikilink wikilink"), so this
-    // asserts the EXACT class list rather than mere containment -- an exact
-    // match is what catches a re-introduced duplicate. P10.1: /pages/{slug}
-    // is gone, so an unresolved wikilink now also carries "wikilink-broken"
-    // (MarkdownView.tsx:740 selects that pair whenever href === "#"), which
-    // is why the expected value is the pair and not the bare class the
-    // pre-P10.1 audit branch asserted.
-    expect(wikilink.className).toBe("wikilink wikilink-broken");
-    expect(wikilink).not.toHaveAttribute("node");
-    const missingPageLink = screen.getByRole("link", { name: "Missing Page" });
-    expect(missingPageLink).toHaveAttribute("href", "#");
-    expect(missingPageLink).toHaveClass("wikilink-broken");
+    const wikilink = screen.getByRole("button", { name: "Release Notes" });
+    expect(wikilink).toHaveClass("unavailable-reference__trigger");
+    expect(screen.getByRole("button", { name: "Missing Page" }))
+      .toHaveClass("unavailable-reference__trigger");
 
     const citation = screen.getByText("@cite{source-1#section-a}");
     expect(citation.tagName).toBe("CITE");
@@ -667,9 +697,8 @@ describe("MarkdownView", () => {
 
     // P10.1: resolved only to a slug (no page id) — /pages/{slug} is gone, so
     // this renders broken rather than pointing at a dead route.
-    const launchPlanLink = screen.getByRole("link", { name: "Launch Plan" });
-    expect(launchPlanLink).toHaveAttribute("href", "#");
-    expect(launchPlanLink).toHaveClass("wikilink-broken");
+    expect(screen.getByRole("button", { name: "Launch Plan" }))
+      .toHaveClass("unavailable-reference__trigger");
   });
 
   it("uses a stable canonical Context target after the target is renamed", () => {
@@ -701,12 +730,8 @@ describe("MarkdownView", () => {
         "href",
         "/p/workspace-1/target-page-id#user-content-breaking-changes",
       );
-    expect(screen.getByText("link to nothing").closest("a"))
-      .toHaveAttribute("href", "#");
-    expect(screen.getByText("link to nothing").closest("a"))
-      .toHaveClass("wikilink-broken");
-    expect(screen.getByText("link to nothing").closest("a")?.className)
-      .toBe("wikilink wikilink-broken");
+    expect(screen.getByRole("button", { name: "link to nothing" }))
+      .toHaveClass("unavailable-reference__trigger");
   });
 
   it("tokenizes wikilinks with non-ASCII text as broken (no page id resolved)", () => {
@@ -719,9 +744,8 @@ describe("MarkdownView", () => {
       </MemoryRouter>,
     );
 
-    const link = screen.getByRole("link", { name: "한글 문서" });
-    expect(link).toHaveAttribute("href", "#");
-    expect(link).toHaveClass("wikilink-broken");
+    expect(screen.getByRole("button", { name: "한글 문서" }))
+      .toHaveClass("unavailable-reference__trigger");
   });
   it("renders a local heading anchor wikilink, and a cross-page one without a resolved id as broken", () => {
     render(
@@ -746,9 +770,8 @@ describe("MarkdownView", () => {
     // degrade into a same-document anchor jump (that would scroll the
     // CURRENT page instead of pointing at Release Notes), so it renders
     // broken instead.
-    const changesLink = screen.getByRole("link", { name: "changes" });
-    expect(changesLink).toHaveAttribute("href", "#");
-    expect(changesLink).toHaveClass("wikilink-broken");
+    expect(screen.getByRole("button", { name: "changes" }))
+      .toHaveClass("unavailable-reference__trigger");
   });
 
   it("builds the canonical Context permalink for a resolved wikilink target when a workspace id is supplied", () => {
@@ -916,7 +939,7 @@ describe("MarkdownView", () => {
     expect(mermaidMock.render).not.toHaveBeenCalled();
   });
 
-  it("activates only server-confirmed internal links in untrusted answers", () => {
+  it("activates only server-confirmed internal links in untrusted answers", async () => {
     render(
       <MemoryRouter>
         <MarkdownView
@@ -930,6 +953,7 @@ describe("MarkdownView", () => {
           renderPolicy="confirmed-links"
           workspaceId="11111111-1111-4111-8111-111111111111"
         />
+        <LocationStateProbe />
       </MemoryRouter>,
     );
 
@@ -941,27 +965,47 @@ describe("MarkdownView", () => {
     expect(document.querySelector(".markdown-body")?.textContent).toContain("Image");
     expect(document.querySelector("img")).not.toBeInTheDocument();
     expect(document.querySelector('a[href="/raw"]')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Confirmed" }));
+    expect(screen.getByTestId("markdown-location-state")).toHaveTextContent("null");
   });
 
-  it("activates explicit typed workspace links only in opted-in editor previews", () => {
-    const workspaceId = "11111111-1111-4111-8111-111111111111";
+  it("activates explicit typed workspace links only in opted-in editor previews", async () => {
+    const sourceWorkspaceId = "11111111-1111-4111-8111-111111111111";
+    const sourcePageId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const workspaceId = "33333333-3333-4333-8333-333333333333";
     const itemId = "22222222-2222-4222-8222-222222222222";
     const itemHref = `/workspaces/${workspaceId}/library/items/${itemId}?page=2`;
+    const sourceHref = `/workspaces/${sourceWorkspaceId}/context/pages/${sourcePageId}`;
     const { rerender } = render(
-      <MemoryRouter>
-        <MarkdownView
-          allowWorkspaceNavigationLinks
-          body={`[Library item](${itemHref}) [Spoofed target](${itemHref}&target=other) [Unknown route](/workspaces/${workspaceId}/admin)`}
-          workspaceId={workspaceId}
-        />
+      <MemoryRouter initialEntries={[{
+        pathname: sourceHref,
+        state: { previousNotice: "discard this" },
+      }]}>
+        <Routes>
+          <Route
+            path="*"
+            element={(
+              <MarkdownView
+                allowWorkspaceNavigationLinks
+                body={`[Library item](${itemHref}) [Spoofed target](${itemHref}&target=other) [Unknown route](/workspaces/${workspaceId}/admin)`}
+                workspaceId={sourceWorkspaceId}
+              />
+            )}
+          />
+        </Routes>
+        <LocationStateProbe />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("link", { name: "Library item" })).toHaveAttribute("href", itemHref);
-    expect(screen.getByRole("link", { name: "Spoofed target" })).toHaveAttribute("href", "#");
-    expect(screen.getByRole("link", { name: "Spoofed target" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("link", { name: "Unknown route" })).toHaveAttribute("href", "#");
-    expect(screen.getByRole("link", { name: "Unknown route" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("link", { name: /Library item/ })).toHaveAttribute("href", itemHref);
+    expect(screen.queryByRole("link", { name: "Spoofed target" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Spoofed target" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Unknown route" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unknown route" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: /Library item/ }));
+    expect(screen.getByTestId("markdown-location-state")).toHaveTextContent(
+      JSON.stringify({ dtxwikiReferenceReturnTo: sourceHref }),
+    );
 
     rerender(
       <MemoryRouter>
@@ -974,7 +1018,33 @@ describe("MarkdownView", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByRole("link", { name: "Library item" })).not.toBeInTheDocument();
-    expect(screen.getByText("Library item")).toBeInTheDocument();
+    const askReference = screen.getByRole("button", { name: "Library item" });
+    await userEvent.click(askReference);
+    const askDialog = screen.getByRole("dialog");
+    expect(askDialog).toHaveTextContent("This reference could not be confirmed.");
+    expect(askDialog.querySelector("code")).toBeNull();
+    expect(askDialog).not.toHaveTextContent(itemHref);
+    expect(askDialog).not.toHaveTextContent(itemId);
+    expect(within(askDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
+    await userEvent.click(within(askDialog).getByRole("button", { name: "Close explanation" }));
+
+    rerender(
+      <MemoryRouter>
+        <MarkdownView
+          body={`[Library item](${itemHref})`}
+          wikilinkMode="plain"
+          workspaceId={sourceWorkspaceId}
+        />
+      </MemoryRouter>,
+    );
+    const publicReference = screen.getByRole("button", { name: "Library item" });
+    await userEvent.click(publicReference);
+    const publicDialog = screen.getByRole("dialog");
+    expect(publicDialog).toHaveTextContent("This reference cannot be opened from this view.");
+    expect(publicDialog.querySelector("code")).toBeNull();
+    expect(publicDialog).not.toHaveTextContent(itemHref);
+    expect(publicDialog).not.toHaveTextContent(itemId);
+    expect(within(publicDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
   });
 
   it("prefixes fragments on confirmed internal links before sanitization", () => {
@@ -1664,8 +1734,8 @@ describe("MarkdownView", () => {
     // P10.1: unresolved (no wikilinkTargets/wikilinkPages supplied) renders
     // broken now that /pages/{slug} is gone — the alias-text sanitization is
     // this test's actual subject, independent of the href value.
-    expect(screen.getByRole("link", { name: "Unsafe script>alert(1) text" }))
-      .toHaveAttribute("href", "#");
+    expect(screen.getByRole("button", { name: "Unsafe script>alert(1) text" }))
+      .toHaveClass("unavailable-reference__trigger");
     expect(document.querySelector("script")).not.toBeInTheDocument();
   });
 
@@ -1739,6 +1809,11 @@ describe("MarkdownView", () => {
 });
 
 type InlineCommentStatus = "exact" | "fuzzy" | "fuzzy_distant" | "orphan";
+
+function LocationStateProbe() {
+  const location = useLocation();
+  return <output data-testid="markdown-location-state">{JSON.stringify(location.state)}</output>;
+}
 
 function inlineComment(
   id: string,

@@ -867,7 +867,7 @@ describe("Shell", () => {
     const { container } = renderShell();
 
     expect(
-      await screen.findByRole("heading", { name: "We couldn't find that page" }),
+      await screen.findByRole("heading", { name: "This item can't be opened" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("content")).not.toBeInTheDocument();
     expect(

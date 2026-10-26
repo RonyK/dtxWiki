@@ -1285,6 +1285,16 @@ def test_page_first_creation_is_visible_to_its_own_author_and_hidden_from_others
     forbidden_read = other_client.get(f"{pages_url(page_service)}/{page_id}")
     assert forbidden_read.status_code == 404
 
+    # Budget exception: the history endpoint translates errors independently
+    # from page detail; service tests cannot catch an uncaught REST exception.
+    # Reuse this private-page fixture rather than adding another DB scenario.
+    forbidden_history = other_client.get(
+        f"/api/v1/workspaces/{default_workspace_id(page_service)}/changesets",
+        params={"target_type": "context_page", "target_id": page_id},
+    )
+    assert forbidden_history.status_code == 404
+    assert forbidden_history.json()["error_code"] == "not_found"
+
     forbidden_list = other_client.get(pages_url(page_service))
     assert forbidden_list.status_code == 200
     assert page_id not in {p["id"] for p in forbidden_list.json()["data"]}

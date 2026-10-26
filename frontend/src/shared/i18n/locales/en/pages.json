@@ -556,5 +556,22 @@
       "reset": "Reset zoom",
       "close": "Close Mermaid zoom"
     }
+  },
+  "workspaceLinkBadge": {
+    "other": "Other workspace",
+    "opensNamed": "Opens workspace {{title}}; access is checked after navigation.",
+    "opensOther": "Opens another workspace; access is checked after navigation."
+  },
+  "unavailableReference": {
+    "explanation": "This item may be missing or unavailable to your current account.",
+    "guidance": "Ask the person who shared it to check the link or sharing settings.",
+    "askExplanation": "This reference could not be confirmed.",
+    "publicExplanation": "This reference cannot be opened from this view.",
+    "copy": "Copy authored reference",
+    "copied": "Reference copied",
+    "selected": "Reference selected. Press Ctrl+C to copy.",
+    "copyUnavailable": "Could not copy the reference.",
+    "close": "Close explanation",
+    "infoLabel": "Why can’t I open this item?"
   }
 }

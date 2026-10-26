@@ -39,6 +39,7 @@ describe("auth route bootstrap", () => {
 });
 
 vi.mock("../shared/workspace/WorkspaceContext", () => ({
+  useOptionalWorkspaceContext: () => workspaceState.current,
   useWorkspaceContext: () => workspaceState.current,
   WorkspaceProvider: ({ children }: { children: ReactNode }) => children,
 }));

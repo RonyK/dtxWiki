@@ -141,7 +141,11 @@ test.describe("Sprint 2 UI surface", () => {
       await page.goto(path);
       await expect(page).toHaveURL(new URL(path, backendBaseUrl).href);
       await expect(
-        page.getByRole("heading", { name: "We couldn't find that page" }),
+        page.getByRole("heading", {
+          name: path === workspaceUrl(workspace.id, "ask")
+            ? "This item can't be opened"
+            : "We couldn't find that page",
+        }),
       ).toBeVisible();
       await expect(page.locator(".ask-composer")).toHaveCount(0);
     }
