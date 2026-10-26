@@ -708,13 +708,37 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { error, initialized, loading, refreshWorkspaces, selectedWorkspace } = useWorkspaceContext();
   const route = parseWorkspaceRoute(location.pathname);
+  const [lastAttemptedRefreshKey, setLastAttemptedRefreshKey] = useState<string | null>(null);
+  const [refreshingRouteKey, setRefreshingRouteKey] = useState<string | null>(null);
+  const routeKey = route ? `${location.key}:${route.workspaceId}` : null;
+  const validRoute = Boolean(route && isValidWorkspaceRoute(route, location.search));
+  const shouldRefreshUnknownRoute = Boolean(
+    route &&
+      validRoute &&
+      routeKey &&
+      initialized &&
+      !loading &&
+      !error &&
+      selectedWorkspace?.id !== route.workspaceId &&
+      lastAttemptedRefreshKey !== routeKey,
+  );
+
+  useEffect(() => {
+    if (!shouldRefreshUnknownRoute || !routeKey) return;
+    setLastAttemptedRefreshKey(routeKey);
+    setRefreshingRouteKey(routeKey);
+    void refreshWorkspaces().finally(() => {
+      setRefreshingRouteKey((current) => current === routeKey ? null : current);
+    });
+  }, [refreshWorkspaces, routeKey, shouldRefreshUnknownRoute]);
+
   if (!route) return children;
-  if (!isValidWorkspaceRoute(route, location.search)) return <NotFoundScreen />;
+  if (!validRoute) return <NotFoundScreen />;
   // Refreshing membership metadata must not discard an already authorized
   // screen's drafts, dialogs or operation notices. Only the exact URL's
   // cached membership can keep that subtree mounted during the refresh.
   if (initialized && selectedWorkspace?.id === route.workspaceId) return children;
-  if (loading || !initialized) return <RouteLoading label={t("workspaceResolution.loading", { defaultValue: "Loading workspaces" })} />;
+  if (loading || !initialized || shouldRefreshUnknownRoute || refreshingRouteKey === routeKey) return <RouteLoading label={t("workspaceResolution.loading", { defaultValue: "Loading workspaces" })} />;
   if (error) return (
     <section className="workspace-resolution-card">
       <StatusBanner tone="warning">{error}</StatusBanner>

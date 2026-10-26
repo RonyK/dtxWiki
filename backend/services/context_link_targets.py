@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 from uuid import UUID
 
 from sqlalchemy import or_
@@ -82,11 +82,19 @@ def context_link_targets(
     )
     targets: list[ContextLinkTarget] = []
     seen: set[str] = set()
-    for occurrence in extract_links(version.body_md):
+    occurrences = extract_links(version.body_md)
+    visible_node_ids = _visible_tree_node_ids_for_links(
+        session,
+        [occurrence.href for occurrence in occurrences],
+        workspace_id=page.workspace_id,
+        actor=None if public else actor,
+        self_origins=context.self_origins,
+    )
+    for occurrence in occurrences:
         if occurrence.href in seen:
             continue
         seen.add(occurrence.href)
-        locator = classify(occurrence.href, context.self_origins)
+        locator = _classify_context_navigation(occurrence.href, context.self_origins)
         handled, href = _server_navigation_target(
             session,
             occurrence.href,
@@ -94,8 +102,11 @@ def context_link_targets(
             actor=None if public else actor,
             public=public,
             self_origins=context.self_origins,
+            allow_foreign_explicit=not public and actor is not None,
+            visible_node_ids=visible_node_ids,
         )
         if handled:
+            href = _preserve_workspace_view_query(href, occurrence.href)
             targets.append(
                 ContextLinkTarget(
                     locator=occurrence.href,
@@ -114,6 +125,14 @@ def context_link_targets(
             and not public
             and locator.kind in {"stable_full", "canonical_route"}
         ):
+            if urlsplit(occurrence.href).query:
+                targets.append(
+                    ContextLinkTarget(
+                        locator=occurrence.href,
+                        href=occurrence.href,
+                        state="ok",
+                    )
+                )
             continue
         target_id = resolution.page_id if resolution.state == "ok" else None
         if locator.fragment and locator.fragment.lower().startswith(
@@ -123,6 +142,19 @@ def context_link_targets(
             resolution = resolve(locator, context)
             target_id = resolution.page_id if resolution.state == "ok" else None
         href = resolution.href if target_id is not None else None
+        if (
+            target_id is not None
+            and locator.kind == "canonical_route"
+            and urlsplit(occurrence.href).path.endswith("/edit")
+        ):
+            href = (
+                f"{workspace_path(page.workspace_id)}/context/pages/{target_id}/edit"
+                if not public and _actor_can_edit_workspace(actor)
+                else None
+            )
+        href = _preserve_workspace_view_query(
+            href, occurrence.href, preserve_fragment=False
+        )
         if public and target_id is not None:
             target = get_in_workspace(
                 session,
@@ -176,26 +208,49 @@ def ask_context_link_targets(
     actor: ActorContext | None,
 ) -> list[ContextLinkTarget]:
     """Project only server-confirmed internal links from an untrusted answer."""
-    context = LinkContext(session=session, workspace_id=workspace_id, actor=actor)
+    self_origins = configured_self_origins()
+    context = LinkContext(
+        session=session,
+        workspace_id=workspace_id,
+        actor=actor,
+        self_origins=self_origins,
+    )
     targets: list[ContextLinkTarget] = []
     seen: set[str] = set()
+    occurrences = extract_links(body)
+    visible_node_ids = _visible_tree_node_ids_for_links(
+        session,
+        [occurrence.href for occurrence in occurrences],
+        workspace_id=workspace_id,
+        actor=actor,
+        self_origins=self_origins,
+    )
     target_kinds = {
-        "page_id", "stable_full", "stable_short", "canonical_route",
-        "nav_target", "concept_path", "slug", "wikilink", "resource_uri",
+        "page_id",
+        "stable_full",
+        "stable_short",
+        "canonical_route",
+        "nav_target",
+        "concept_path",
+        "slug",
+        "wikilink",
+        "resource_uri",
     }
-    for occurrence in extract_links(body):
+    for occurrence in occurrences:
         if occurrence.href in seen:
             continue
         seen.add(occurrence.href)
-        locator = classify(occurrence.href)
+        locator = _classify_context_navigation(occurrence.href, self_origins)
         handled, href = _server_navigation_target(
             session,
             occurrence.href,
             workspace_id=workspace_id,
             actor=actor,
-            self_origins=configured_self_origins(),
+            self_origins=self_origins,
+            visible_node_ids=visible_node_ids,
         )
         if handled:
+            href = _preserve_workspace_view_query(href, occurrence.href)
             targets.append(
                 ContextLinkTarget(
                     locator=occurrence.href,
@@ -208,10 +263,17 @@ def ask_context_link_targets(
             continue
         resolution = resolve(locator, context)
         available = resolution.state == "ok" and resolution.href is not None
+        resolved_href = (
+            _preserve_workspace_view_query(
+                resolution.href, occurrence.href, preserve_fragment=False
+            )
+            if available
+            else None
+        )
         targets.append(
             ContextLinkTarget(
                 locator=occurrence.href,
-                href=resolution.href if available else None,
+                href=resolved_href,
                 target_page_id=resolution.page_id if available else None,
                 state="ok" if available else "unavailable",
             )
@@ -227,6 +289,8 @@ def _server_navigation_target(
     actor: ActorContext | None,
     public: bool = False,
     self_origins: frozenset[str] = frozenset(),
+    allow_foreign_explicit: bool = False,
+    visible_node_ids: set[UUID] | None = None,
 ) -> tuple[bool, str | None]:
     """Confirm non-Context browser destinations in their proven source workspace."""
     reference = _parse_workspace_navigation_reference(href, self_origins=self_origins)
@@ -236,7 +300,7 @@ def _server_navigation_target(
         return False, None
     section, kind, target_id, explicit_workspace_id = reference
     if explicit_workspace_id is not None and explicit_workspace_id != workspace_id:
-        return True, None
+        return True, href if allow_foreign_explicit and not public else None
     if public:
         if section == "context" and kind == "legacy_target":
             # Context's resolver must still apply pins and public exposure to
@@ -245,6 +309,15 @@ def _server_navigation_target(
             return False, None
         # The public reader never inherits authenticated SPA authority.
         return True, None
+
+    if kind == "overview":
+        parts = urlsplit(href)
+        path = parts.path
+        if parts.query:
+            path += f"?{parts.query}"
+        if parts.fragment:
+            path += f"#{parts.fragment}"
+        return True, path
 
     if section in {"review", "ask", "lint", "chats"}:
         if section == "chats" and not _actor_can_edit_workspace(actor):
@@ -314,7 +387,7 @@ def _server_navigation_target(
             or node.section != section
             or node.node_kind != "folder"
             or actor is None
-            or not TreeReadService.node_visible_to_actor(session, node, actor)
+            or not _tree_node_visible(session, node, actor, visible_node_ids)
         ):
             return True, None
         return True, f"{workspace_path(workspace_id)}/{section}/folders/{node.id}"
@@ -324,9 +397,15 @@ def _server_navigation_target(
             # Let the Context link resolver retain locator pin precedence for
             # real page and page-placement targets. A plain folder node has no
             # page pin to honor and gets its typed destination here.
-            if get_in_workspace(
-                session, ContextPage, workspace_id=workspace_id, resource_id=target_id
-            ) is not None:
+            if (
+                get_in_workspace(
+                    session,
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    resource_id=target_id,
+                )
+                is not None
+            ):
                 return False, None
             node = get_in_workspace(
                 session,
@@ -341,7 +420,7 @@ def _server_navigation_target(
             if (
                 public
                 or actor is None
-                or not TreeReadService.node_visible_to_actor(session, node, actor)
+                or not _tree_node_visible(session, node, actor, visible_node_ids)
             ):
                 return True, None
             return True, f"{workspace_path(workspace_id)}/context/folders/{node.id}"
@@ -387,7 +466,7 @@ def _server_navigation_target(
             node is None
             or node.section != section
             or actor is None
-            or not TreeReadService.node_visible_to_actor(session, node, actor)
+            or not _tree_node_visible(session, node, actor, visible_node_ids)
         ):
             return True, None
         if node.node_kind == "folder":
@@ -459,15 +538,16 @@ def _server_navigation_target(
             if library_item_visible(item, actor, workspace_id=workspace_id)
             else None
         )
-    if section == "agent" and kind == "page":
+    if section == "agent" and kind in {"page", "page_edit"}:
         page = get_in_workspace(
             session, AgentPage, workspace_id=workspace_id, resource_id=target_id
         )
-        return True, (
-            agent_page_url(workspace_id, page.id)
-            if agent_page_visible(page, actor, workspace_id=workspace_id)
-            else None
-        )
+        if not agent_page_visible(page, actor, workspace_id=workspace_id):
+            return True, None
+        if kind == "page_edit" and not _actor_can_edit_workspace(actor):
+            return True, None
+        page_href = agent_page_url(workspace_id, page.id)
+        return True, page_href + "/edit" if kind == "page_edit" else page_href
     return False, None
 
 
@@ -486,10 +566,16 @@ def _parse_workspace_navigation_reference(
     href: str,
     *,
     self_origins: frozenset[str] = frozenset(),
-) -> tuple[str, str, UUID, UUID | None] | None:
+) -> tuple[str, str, UUID | None, UUID | None] | None:
     try:
+        if href != href.strip() or any(
+            ord(char) < 32 or ord(char) == 127 for char in href
+        ):
+            return None
         parts = urlsplit(href)
         if parts.scheme or parts.netloc:
+            if parts.username or parts.password:
+                return None
             locator = classify(href, self_origins)
             if not locator.absolute:
                 return None
@@ -497,6 +583,10 @@ def _parse_workspace_navigation_reference(
             parts = urlsplit(href)
         if parts.scheme or parts.netloc or parts.username or parts.password:
             return None
+        if "//" in parts.path:
+            return None
+        if parts.path.endswith("/"):
+            parts = parts._replace(path=parts.path[:-1])
         legacy_sections = {
             "/context": "context",
             "/library": "library",
@@ -508,8 +598,12 @@ def _parse_workspace_navigation_reference(
         if parts.path in legacy_sections:
             query = parse_qs(parts.query, strict_parsing=True)
             expected_query = {
-                "context": "target", "library": "target", "agent": "target",
-                "review": "review", "ask": "target", "lint": "finding",
+                "context": "target",
+                "library": "target",
+                "agent": "target",
+                "review": "review",
+                "ask": "target",
+                "lint": "finding",
             }[legacy_sections[parts.path]]
             if set(query) != {expected_query} or len(query[expected_query]) != 1:
                 return None
@@ -522,10 +616,44 @@ def _parse_workspace_navigation_reference(
         chat_match = re.fullmatch(r"/chats/([0-9a-fA-F-]{36})", parts.path)
         if chat_match is not None and not parts.query:
             return "chats", "legacy_target", UUID(chat_match[1]), None
-        if parts.query:
+        if not _safe_workspace_query(parts.query, parts.path):
             return None
+        overview = re.fullmatch(r"/workspaces/([0-9a-fA-F-]{36})(?:/(.*))?", parts.path)
+        suffix = overview[2] if overview is not None else None
+        valid_overviews = {
+            None,
+            "dashboard",
+            "context",
+            "library",
+            "agent",
+            "activity",
+            "review",
+            "lint",
+            "chats",
+            "ask",
+            "search",
+            "settings",
+            "setup",
+            "settings/integrations",
+            "activity/pending",
+            "activity/advisory",
+            "activity/history",
+            "context/folders/new",
+            "context/pages/new",
+            "library/items/new",
+            "library/folders/new",
+            "agent/pages/new",
+            "agent/folders/new",
+        }
+        if overview is not None and suffix in valid_overviews:
+            return (
+                (suffix or "dashboard").split("/", 1)[0],
+                "overview",
+                None,
+                UUID(overview[1]),
+            )
         match = re.fullmatch(
-            r"/workspaces/([0-9a-fA-F-]{36})/(context|library|agent)/(items|artifacts|pages|folders)/([0-9a-fA-F-]{36})",
+            r"/workspaces/([0-9a-fA-F-]{36})/(context|library|agent)/(items|artifacts|pages|folders)/([0-9a-fA-F-]{36})(/edit)?",
             parts.path,
         )
         if match is not None:
@@ -538,9 +666,15 @@ def _parse_workspace_navigation_reference(
                 "pages": "page",
                 "folders": "folder",
             }[route_kind]
-            if (section == "library" and kind == "page") or (
-                section == "agent" and kind in {"item", "artifact"}
-            ) or (section == "context" and kind != "folder"):
+            if match[5]:
+                if section != "agent" or kind != "page":
+                    return None
+                kind = "page_edit"
+            if (
+                (section == "library" and kind == "page")
+                or (section == "agent" and kind in {"item", "artifact"})
+                or (section == "context" and kind != "folder")
+            ):
                 return None
             return section, kind, UUID(match[4]), explicit_workspace_id
         match = re.fullmatch(
@@ -560,7 +694,7 @@ def _looks_like_workspace_navigation(
 ) -> bool:
     """Recognize malformed internal route references without probing targets."""
     try:
-        locator = classify(href, self_origins)
+        locator = _classify_context_navigation(href, self_origins)
         if locator.kind in {"canonical_route", "stable_full", "stable_short"}:
             # Valid Context page links belong to the established Context
             # resolver, which preserves pin, publication, and foreign-link
@@ -581,6 +715,131 @@ def _looks_like_workspace_navigation(
         )
     except ValueError:
         return False
+
+
+def _tree_node_visible(
+    session: Session,
+    node: WorkspaceTreeNode,
+    actor: ActorContext,
+    visible_node_ids: set[UUID] | None,
+) -> bool:
+    if visible_node_ids is not None:
+        return node.id in visible_node_ids
+    return TreeReadService.node_visible_to_actor(session, node, actor)
+
+
+def _visible_tree_node_ids_for_links(
+    session: Session,
+    hrefs: list[str],
+    *,
+    workspace_id: UUID,
+    actor: ActorContext | None,
+    self_origins: frozenset[str],
+) -> set[UUID] | None:
+    """Use one workspace tree projection for all folder and placement links."""
+    if actor is None:
+        return set()
+    candidate_ids: set[UUID] = set()
+    candidate_sections: set[str] = set()
+    for href in hrefs:
+        reference = _parse_workspace_navigation_reference(
+            href, self_origins=self_origins
+        )
+        if reference is None:
+            continue
+        section, kind, target_id, explicit_workspace_id = reference
+        if (
+            target_id is not None
+            and section in {"context", "library", "agent"}
+            and (explicit_workspace_id is None or explicit_workspace_id == workspace_id)
+            and kind in {"folder", "legacy_target"}
+        ):
+            candidate_ids.add(target_id)
+            candidate_sections.add(section)
+    if not candidate_ids:
+        return set()
+    nodes = list(
+        session.scalars(
+            select_in_workspace(
+                WorkspaceTreeNode,
+                workspace_id=workspace_id,
+                conditions=(
+                    WorkspaceTreeNode.id.in_(candidate_ids),
+                    WorkspaceTreeNode.section.in_(candidate_sections),
+                ),
+            )
+        )
+    )
+    return TreeReadService.visible_node_ids(session, nodes, actor)
+
+
+def _safe_workspace_query(query: str, path: str = "") -> bool:
+    """Reject identity override parameters while allowing presentation state."""
+    if not query:
+        return True
+    params = parse_qs(query, keep_blank_values=True)
+    if {
+        "target",
+        "edit",
+        "review",
+        "finding",
+        "new",
+        "newFolder",
+        "parentNodeId",
+        "parentId",
+        "workspaceId",
+        "workspace_id",
+        "ws",
+    } & params.keys():
+        return False
+    parents = params.get("parent", ())
+    if not parents:
+        return True
+    if not path.endswith("/new") or len(parents) != 1:
+        return False
+    try:
+        UUID(parents[0])
+    except ValueError:
+        return False
+    return True
+
+
+def _classify_context_navigation(href: str, self_origins: frozenset[str]):
+    """Classify typed Context links after validating harmless UI query state."""
+    try:
+        parts = urlsplit(href)
+        if not parts.query or not parts.path.startswith(("/p/", "/workspaces/")):
+            return classify(href, self_origins)
+        if not _safe_workspace_query(parts.query, parts.path):
+            return classify(href, self_origins)
+        stripped = urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, "", parts.fragment)
+        )
+        locator = classify(stripped, self_origins)
+        if locator.kind not in {"stable_full", "stable_short", "canonical_route"}:
+            return classify(href, self_origins)
+        return replace(locator, href=href)
+    except ValueError:
+        return classify(href, self_origins)
+
+
+def _preserve_workspace_view_query(
+    destination: str | None,
+    original: str,
+    *,
+    preserve_fragment: bool = True,
+) -> str | None:
+    if destination is None:
+        return None
+    original_parts = urlsplit(original)
+    query = original_parts.query
+    if query and not _safe_workspace_query(query, original_parts.path):
+        return destination
+    destination_parts = urlsplit(destination)
+    fragment = (
+        original_parts.fragment if preserve_fragment else destination_parts.fragment
+    )
+    return destination_parts._replace(query=query, fragment=fragment).geturl()
 
 
 def legacy_wikilink_targets(

@@ -496,7 +496,7 @@ describe("appRoutes role gating", () => {
     },
   );
 
-  it("routes full page permalinks without a lookup and preserves fragments through authentication", async () => {
+  it("routes full page permalinks without a lookup and preserves view state through authentication", async () => {
     vi.restoreAllMocks();
     const pageId = "22222222-2222-4222-8222-222222222222";
     const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -515,7 +515,7 @@ describe("appRoutes role gating", () => {
     }
     const view = render(
       <AuthProvider>
-        <MemoryRouter initialEntries={[`/p/${workspaceId}/${pageId}#design%20details`]}>
+        <MemoryRouter initialEntries={[`/p/${workspaceId}/${pageId}?tab=history#design%20details`]}>
           <Suspense fallback={<div>Loading route</div>}>
             <Routes>
               <Route path="/p/:workspaceId/:pageId" element={fullElement} />
@@ -526,7 +526,7 @@ describe("appRoutes role gating", () => {
       </AuthProvider>,
     );
     expect(await screen.findByTestId("destination")).toHaveTextContent(
-      `/workspaces/${workspaceId}/context/pages/${pageId}#design%20details REPLACE`,
+      `/workspaces/${workspaceId}/context/pages/${pageId}?tab=history#design%20details REPLACE`,
     );
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["http://127.0.0.1:21080/api/v1/auth/me"]);
     view.unmount();

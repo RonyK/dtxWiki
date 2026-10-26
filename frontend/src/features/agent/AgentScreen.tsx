@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   useLocation,
@@ -196,6 +196,14 @@ export function AgentScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const routeIdentity = `${routeWorkspaceId}:${location.pathname}`;
+  const routeIdentityRef = useRef("");
+  useLayoutEffect(() => {
+    routeIdentityRef.current = routeIdentity;
+    return () => {
+      if (routeIdentityRef.current === routeIdentity) routeIdentityRef.current = "";
+    };
+  }, [routeIdentity]);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTargetId = route?.targetId ?? null;
   const selectedVersionId = searchParams.get(TREE_VERSION_PARAM);
@@ -396,6 +404,7 @@ export function AgentScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     if (input.parentNodeId && !state.tree.some((node) => node.id === input.parentNodeId && node.section === "agent" && node.can_have_children)) {
       setError(t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" }));
       return;
@@ -407,6 +416,7 @@ export function AgentScreen() {
       slug: input.slug,
       title: input.title,
     });
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const nextExpandedNodeIds = expandNodeIds(
       expandedNodeIds,
       folder.parent_id,
@@ -1021,8 +1031,10 @@ export function AgentScreen() {
     navigate(`${workspacePath(routeWorkspaceId, "agent/folders/new")}${query}`);
   }
 
-  function closeCreateFolder() {
-    if (folderCreateRoute) {
+  function closeCreateFolder(reason: "cancel" | "success") {
+    if (reason === "success") {
+      setNewItemDialog(null);
+    } else if (folderCreateRoute) {
       navigate(routeFolderParentId
         ? workspaceTargetHref(routeWorkspaceId, "agent", routeFolderParentId, "folder")
         : workspacePath(routeWorkspaceId, "agent"), { replace: true });
@@ -1042,6 +1054,7 @@ export function AgentScreen() {
     if (!state) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     setError(null);
     setNotice(null);
     const result = await createAgentPageDraft(state.workspaceId, input);
@@ -1051,6 +1064,7 @@ export function AgentScreen() {
       readAgentPage(state.workspaceId, result.agent_page_id, "draft"),
       listAgentChanges(state.workspaceId, result.agent_page_id),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const pages = pagesResult.data;
     const targetNodeId =
       nodeIdForPage(treeData.nodes, result.agent_page_id) ??
@@ -1086,6 +1100,7 @@ export function AgentScreen() {
     if (!state || !editDetail) {
       return;
     }
+    const originRouteIdentity = routeIdentity;
     setError(null);
     setNotice(null);
     const result = await updateAgentPageDraft(
@@ -1099,6 +1114,7 @@ export function AgentScreen() {
       readAgentPage(state.workspaceId, result.agent_page_id, "draft"),
       listAgentChanges(state.workspaceId, result.agent_page_id),
     ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
     const pages = pagesResult.data;
     const targetNodeId =
       nodeIdForPage(treeData.nodes, result.agent_page_id) ??

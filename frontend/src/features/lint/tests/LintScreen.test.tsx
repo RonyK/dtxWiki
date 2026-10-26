@@ -965,7 +965,8 @@ describe("LintScreen", () => {
   it("links page and tree targets while keeping null targets as text", async () => {
     const contextId = "11111111-1111-4111-8111-111111111111";
     const treeId = "22222222-2222-4222-8222-222222222222";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const secondTreeId = "33333333-3333-4333-8333-333333333333";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
@@ -991,6 +992,12 @@ describe("LintScreen", () => {
                 target_id: treeId,
               }),
               finding({
+                id: "second-tree-finding",
+                rule_id: "tree_target",
+                target_type: "workspace_tree_node",
+                target_id: secondTreeId,
+              }),
+              finding({
                 id: "null-finding",
                 rule_id: "null_target",
                 target_id: null,
@@ -1000,12 +1007,12 @@ describe("LintScreen", () => {
           },
         });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/${treeId}`) {
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?include_archived=true`) {
         return jsonResponse({
-          data: {
-            id: treeId,
+          data: [treeId, secondTreeId].map((id) => ({
+            id,
             section: "context",
-            title: "Workspace folder",
+            title: id === treeId ? "Workspace folder" : "Second workspace folder",
             node_kind: "folder",
             parent_id: null,
             sort_key: "0001",
@@ -1014,8 +1021,8 @@ describe("LintScreen", () => {
             is_system_node: false,
             can_have_children: true,
             primary_placement: true,
-            visibility_status: "visible",
-          },
+            visibility_status: id === secondTreeId ? "archived" : "visible",
+          })),
         });
       }
       throw new Error(`Unexpected request: ${url}`);
@@ -1030,9 +1037,9 @@ describe("LintScreen", () => {
     const contextRow = (await screen.findByText("context target")).closest(
       ".lint-finding-card",
     ) as HTMLElement;
-    const treeRow = screen
-      .getByText("tree target")
-      .closest(".lint-finding-card") as HTMLElement;
+    const treeRows = screen
+      .getAllByText("tree target")
+      .map((text) => text.closest(".lint-finding-card") as HTMLElement);
     const nullRow = screen
       .getByText("null target")
       .closest(".lint-finding-card") as HTMLElement;
@@ -1042,10 +1049,17 @@ describe("LintScreen", () => {
       }),
     ).toHaveAttribute("href", `/workspaces/workspace-1/context/pages/${contextId}`);
     expect(
-      within(treeRow).getByRole("link", {
+      within(treeRows[0]).getByRole("link", {
         name: "Open target Workspace folder",
       }),
     ).toHaveAttribute("href", `/workspaces/workspace-1/context/folders/${treeId}`);
+    expect(
+      within(treeRows[1]).getByRole("link", {
+        name: "Open target Workspace folder",
+      }),
+    ).toHaveAttribute("href", `/workspaces/workspace-1/context/folders/${secondTreeId}`);
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith("/tree?include_archived=true"))).toHaveLength(1);
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("/tree/nodes/"))).toBe(false);
     expect(within(nullRow).queryByRole("link")).toBeNull();
     expect(within(nullRow).getByText("Context page")).toBeInTheDocument();
   });

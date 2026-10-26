@@ -2979,7 +2979,13 @@ export function PageEditor({
             if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
             if (!isEditorMountedRef.current) return;
             reviewEditCompletedRef.current = true;
-            const reloaded = await readPage(workspaceId, page.id);
+            let reloaded: Awaited<ReturnType<typeof readPage>> | null = null;
+            try {
+              reloaded = await readPage(workspaceId, page.id);
+            } catch {
+              // The approval is already committed. A follow-up read failure
+              // must not be reported as if the review decision failed.
+            }
             if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
             if (!isEditorMountedRef.current) return;
             if (reloaded) {
@@ -2990,9 +2996,13 @@ export function PageEditor({
               setPublicationState(restoredPublication.state);
             }
             setStatus(
-              t("editor.publishedReviewCompleted", {
-                defaultValue: "Published and completed the review request.",
-              }),
+              reloaded
+                ? t("editor.publishedReviewCompleted", {
+                    defaultValue: "Published and completed the review request.",
+                  })
+                : t("editor.publishedReviewCompletedReloadFailed", {
+                    defaultValue: "Review approved, but the published page could not be reloaded.",
+                  }),
             );
             navigateToPublishedContext(
               page.id,
@@ -3448,48 +3458,67 @@ export function PageEditor({
 
   async function reloadLatest(): Promise<boolean> {
     if (!workspaceId) return false;
-    const latest = await readPage(workspaceId, pageIdRef.current ?? page?.id ?? "");
-    if (!latest) return false;
-    const restoredPublication = readPagePublicationState(latest);
-    const parsed = parsePageDocument(latest.body_md, {
-      aliases: latest.aliases,
-      tags: latest.tags,
-      type: latest.page_type as PageType,
-    });
-    const metadata = metadataFromPagePayload(parsed.metadata, latest);
-    const latestDestination =
-      contextTree.find((node) => node.target_id === latest.id)?.parent_id ??
-      chooseDefaultDestination(contextTree);
-    applyParsedMetadata(metadata);
-    sessionVersionIdRef.current = restoredPublication.sessionVersionId;
-    setPublicationState(restoredPublication.state);
-    pageIdRef.current = latest.id;
-    setPage(latest);
-    setTitle(latest.title);
-    setPageSlug(latest.slug);
-    bodyRef.current = parsed.body;
-    setBody(parsed.body);
-    setDestinationNodeId(latestDestination);
-    setConflict(null);
-    setStalePublishState("idle");
-    lastSavedRef.current = {
-      aliases: metadata.aliases,
-      body: parsed.body,
-      destinationNodeId: latestDestination,
-      icon: metadata.icon,
-      pageType: metadata.type,
-      slug: latest.slug,
-      tags: metadata.tags,
-      title: latest.title,
-    };
-    lastSavedFingerprintRef.current = draftSaveFingerprint(
-      lastSavedRef.current,
-      frontmatterExtraLinesRef.current,
-    );
-    acknowledgeCurrentEditorRevision();
-    setSaveError(false);
-    setTitleValidationRequested(false);
-    return true;
+    const requestWorkspaceId = workspaceId;
+    const requestPageId = pageIdRef.current ?? page?.id ?? "";
+    const requestEditorGeneration = editorGenerationRef.current;
+    if (!requestPageId) return false;
+    const isCurrentReload = () =>
+      isEditorMountedRef.current &&
+      workspaceIdRef.current === requestWorkspaceId &&
+      pageIdRef.current === requestPageId &&
+      editorGenerationRef.current === requestEditorGeneration;
+    try {
+      const latest = await readPage(requestWorkspaceId, requestPageId);
+      if (!isCurrentReload()) return false;
+      if (!latest) return false;
+      const restoredPublication = readPagePublicationState(latest);
+      const parsed = parsePageDocument(latest.body_md, {
+        aliases: latest.aliases,
+        tags: latest.tags,
+        type: latest.page_type as PageType,
+      });
+      const metadata = metadataFromPagePayload(parsed.metadata, latest);
+      const latestDestination =
+        contextTree.find((node) => node.target_id === latest.id)?.parent_id ??
+        chooseDefaultDestination(contextTree);
+      applyParsedMetadata(metadata);
+      sessionVersionIdRef.current = restoredPublication.sessionVersionId;
+      setPublicationState(restoredPublication.state);
+      pageIdRef.current = latest.id;
+      setPage(latest);
+      setTitle(latest.title);
+      setPageSlug(latest.slug);
+      bodyRef.current = parsed.body;
+      setBody(parsed.body);
+      setDestinationNodeId(latestDestination);
+      setConflict(null);
+      setStalePublishState("idle");
+      lastSavedRef.current = {
+        aliases: metadata.aliases,
+        body: parsed.body,
+        destinationNodeId: latestDestination,
+        icon: metadata.icon,
+        pageType: metadata.type,
+        slug: latest.slug,
+        tags: metadata.tags,
+        title: latest.title,
+      };
+      lastSavedFingerprintRef.current = draftSaveFingerprint(
+        lastSavedRef.current,
+        frontmatterExtraLinesRef.current,
+      );
+      acknowledgeCurrentEditorRevision();
+      setSaveError(false);
+      setTitleValidationRequested(false);
+      return true;
+    } catch (exc) {
+      if (!isCurrentReload()) return false;
+      setStatus(apiErrorMessage(
+        exc,
+        t("editor.reloadLatestFailed", { defaultValue: "Could not reload the latest server version." }),
+      ));
+      return false;
+    }
   }
 
   async function reloadAfterStalePublish() {
@@ -3537,13 +3566,16 @@ export function PageEditor({
       // page.current_version_id), so this session cannot keep autosaving onto
       // it. Rebase the editor onto the server head instead of adopting the
       // branch, and name the parked alternative in the status line.
-      await reloadLatest();
-      setStatus(
-        t("editor.alternativePreserved", {
-          id: preserved.alternative_draft_id?.slice(0, 8) ?? "",
-          defaultValue: "Preserved as alternative draft {{id}}",
-        }),
-      );
+      const reloaded = await reloadLatest();
+      setStatus(reloaded
+        ? t("editor.alternativePreserved", {
+            id: preserved.alternative_draft_id?.slice(0, 8) ?? "",
+            defaultValue: "Preserved as alternative draft {{id}}",
+          })
+        : t("editor.alternativePreservedReloadFailed", {
+            id: preserved.alternative_draft_id?.slice(0, 8) ?? "",
+            defaultValue: "Preserved as alternative draft {{id}}, but could not reload the latest server version.",
+          }));
     } catch (exc) {
       setStatus(
         apiErrorMessage(
@@ -5371,6 +5403,7 @@ export function PageEditor({
                 stripLeadingHeading={title}
                 wikilinkPages={pages}
                 workspaceId={workspaceId}
+                allowWorkspaceNavigationLinks
               />
             </div>
           ) : null}

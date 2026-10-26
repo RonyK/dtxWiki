@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeNodePayload } from "../../../shared/api/workspace";
@@ -775,6 +775,59 @@ describe("LibraryScreen", () => {
       .toHaveTextContent("notes.md Succeeded");
     expect(getRandomValues).toHaveBeenCalledOnce();
     expect(operationId).toBe("00010203-0405-4607-8809-0a0b0c0d0e0f");
+  });
+
+  it("does not navigate back after an upload resolves on another workspace route", async () => {
+    let resolveUpload!: (response: Response) => void;
+    const pendingUpload = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploaded = libraryItemDetail(
+      LIBRARY_ITEM_ID,
+      "Late upload",
+      `upload://${WORKSPACE_ID}/late.md`,
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url.endsWith("/library/capabilities")) {
+        return jsonResponse({ data: defaultLibraryCapabilities() });
+      }
+      const itemsUrl = new RegExp(`${BASE}/api/v1/workspaces/(workspace-1|workspace-2)/library/items`);
+      const itemsMatch = url.match(itemsUrl);
+      if (itemsMatch && (init?.method ?? "GET") === "GET") return jsonResponse({ data: [] });
+      if (itemsMatch && init?.method === "POST") return pendingUpload;
+      if (url.endsWith("/tree?section=library")) {
+        return jsonResponse({ data: treeResponse("library", []) });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("crypto", { getRandomValues: (bytes: Uint8Array) => bytes.fill(1) });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/library`]}>
+        <LibraryScreen />
+        <LibraryWorkspaceRouteControls />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "No Library items yet" });
+    await userEvent.upload(
+      screen.getByLabelText("Upload Library file"),
+      new File(["# Late"], "late.md", { type: "text/markdown" }),
+    );
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+    await userEvent.click(screen.getByRole("button", { name: "Switch test workspace" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("library-location")).toHaveTextContent("/workspaces/workspace-2/library"),
+    );
+
+    await act(async () => resolveUpload(jsonResponse({ data: uploaded })));
+
+    expect(screen.getByTestId("library-location")).toHaveTextContent("/workspaces/workspace-2/library");
+    expect(screen.queryByText(/Late upload/)).toBeNull();
   });
 
   it("fails visibly without getRandomValues and never falls back to randomUUID", async () => {
@@ -3563,6 +3616,7 @@ describe("LibraryScreen", () => {
     render(
       <MemoryRouter initialEntries={["/workspaces/workspace-1/library"]}>
         <LibraryScreen />
+        <LibraryLocationProbe />
       </MemoryRouter>,
     );
 
@@ -3584,6 +3638,9 @@ describe("LibraryScreen", () => {
       node_kind: "folder",
       title: "Research",
     });
+    expect(screen.getByTestId("library-location")).toHaveTextContent(
+      "/workspaces/workspace-1/library/folders/folder-new",
+    );
   });
 
   it("keeps upload one click, and the row + working, when folders are off", async () => {
@@ -3683,6 +3740,11 @@ function LibraryArtifactRouteSwitch({ artifactId }: { artifactId: string }) {
       Navigate to current artifact
     </button>
   );
+}
+
+function LibraryLocationProbe() {
+  const location = useLocation();
+  return <output data-testid="library-location">{location.pathname}</output>;
 }
 
 function defaultLibraryCapabilities() {
@@ -4037,6 +4099,19 @@ function treeResponse(
       },
     },
   };
+}
+
+function LibraryWorkspaceRouteControls() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="library-location">{location.pathname}</output>
+      <button type="button" onClick={() => navigate("/workspaces/workspace-2/library")}>
+        Switch test workspace
+      </button>
+    </>
+  );
 }
 
 function setMobileViewport(matches: boolean) {

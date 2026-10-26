@@ -303,6 +303,24 @@ describe("AttachmentsSection", () => {
     );
   });
 
+  it("loads global server attachments from the admin route without workspace identity", async () => {
+    vi.mocked(listAdminContextMediaAttachments).mockResolvedValue(
+      page([{ ...ATTACHMENT, workspace_title: "Other team", content_url: null }]) as never,
+    );
+    render(
+      <AttachmentManager
+        workspaceId={null}
+        isServerAdmin
+        canViewEveryUpload
+      />,
+    );
+
+    expect(await screen.findByText("Workspace: Other team")).toBeInTheDocument();
+    expect(listAdminContextMediaAttachments).toHaveBeenCalledTimes(1);
+    expect(listWorkspaceContextMediaAttachments).not.toHaveBeenCalled();
+    expect(screen.queryByRole("radiogroup", { name: /attachment scope/i })).toBeNull();
+  });
+
   it("shows a reassuring empty state, not an error, when there is nothing to clean up", async () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([]) as never,

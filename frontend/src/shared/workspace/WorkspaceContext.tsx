@@ -99,7 +99,10 @@ export function WorkspaceProvider({
   );
   useEffect(() => {
     if (routeWorkspaceId && selectedWorkspace?.id === routeWorkspaceId) {
-      // This is a landing hint only. Requests always use the committed URL.
+      // Once membership confirms the URL's Workspace, keep the unscoped
+      // provider selection and landing preference aligned with that identity.
+      // Do not persist unknown route IDs before they resolve in this list.
+      setSelectedId(routeWorkspaceId);
       setSelectedWorkspace(selectedWorkspace);
     }
   }, [routeWorkspaceId, selectedWorkspace]);

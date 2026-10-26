@@ -227,16 +227,18 @@ describe("NewItemDialog", () => {
 
     resolveRequest?.();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onClose).toHaveBeenCalledWith("success");
   });
 
   it("submits folder creation input with an advanced slug", async () => {
     const onSubmit = vi.fn();
+    const onClose = vi.fn();
 
     render(
       <NewItemDialog
         initialItemType="folder"
         parentLabel="Context"
-        onClose={() => undefined}
+        onClose={onClose}
         onSubmit={onSubmit}
       />,
     );
@@ -254,6 +256,7 @@ describe("NewItemDialog", () => {
       slug: "research-notes",
       title: "R&D Notes",
     });
+    expect(onClose).toHaveBeenCalledWith("success");
   });
 
   it("omits the slug when Advanced is open but left blank", async () => {

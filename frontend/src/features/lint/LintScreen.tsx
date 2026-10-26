@@ -25,7 +25,7 @@ import {
   listLintFindings,
 } from "../../shared/api/operations";
 import type { CoverageGap, LintFinding } from "../../shared/api/operations";
-import { readTreeNode } from "../../shared/api/workspace";
+import { listTreeData } from "../../shared/api/workspace";
 import type { TreeNodePayload } from "../../shared/api/workspace";
 import { ActionMenu } from "../../shared/components/ActionMenu";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
@@ -347,19 +347,23 @@ export function LintScreen() {
       throw new LintFindingNotFoundError();
     }
     const treeTargets: Record<string, TreeNodePayload> = {};
-    await Promise.all(
-      [...new Set(result.findings.flatMap((finding) =>
-        finding.target_type === "workspace_tree_node" && finding.target_id
-          ? [finding.target_id]
-          : [],
-      ))].map(async (nodeId) => {
-        try {
-          treeTargets[nodeId] = await readTreeNode(workspaceId, nodeId);
-        } catch {
-          // An inaccessible or deleted node has no safe section to link to.
+    const treeTargetIds = new Set(result.findings.flatMap((finding) =>
+      finding.target_type === "workspace_tree_node" && finding.target_id
+        ? [finding.target_id]
+        : [],
+    ));
+    if (treeTargetIds.size > 0) {
+      try {
+        const treeData = await listTreeData(workspaceId, undefined, {
+          includeArchived: true,
+        });
+        for (const node of treeData.nodes) {
+          if (treeTargetIds.has(node.id)) treeTargets[node.id] = node;
         }
-      }),
-    );
+      } catch {
+        // An inaccessible or deleted node has no safe section to link to.
+      }
+    }
     const resultPageSize = result.page_size ?? filters.pageSize;
     const total = result.total ?? result.findings.length;
     const pageCount =

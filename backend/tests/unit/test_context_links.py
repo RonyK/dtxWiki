@@ -5,7 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
-from backend.services.context_link_targets import _server_navigation_target
+from backend.services.context_link_targets import (
+    _server_navigation_target,
+    ask_context_link_targets,
+    context_link_targets,
+)
 from backend.services.context_links import (
     LinkContext,
     Resolution,
@@ -17,6 +21,7 @@ from backend.services.context_links import (
     resolve,
     rewrite_links_with_report,
 )
+from backend.services.tree_projection import TreeProjectionService
 from backend.spi.types import ActorContext
 
 
@@ -150,7 +155,10 @@ def test_context_link_contract_and_source_decisions(monkeypatch):
     assert len(fixes) == 1
 
 
-def test_foreign_workspace_navigation_is_unavailable_without_database_access():
+def test_workspace_navigation_projection_respects_source_scope_and_route_identity():
+    # Budget exception: foreign rejection/pass-through, safe view state,
+    # identity-query conflict, and Context dispatcher collision are distinct
+    # parser/policy paths. This pure unit boundary avoids extra DB setup.
     # A stored explicit workspace mismatch is rejected before any target lookup;
     # this prevents links from turning the source reader into a cross-workspace
     # existence probe.
@@ -160,6 +168,37 @@ def test_foreign_workspace_navigation_is_unavailable_without_database_access():
     assert _server_navigation_target(
         object(),
         f"/workspaces/{foreign_workspace}/library/items/{target}",
+        workspace_id=source_workspace,
+        actor=None,
+    ) == (True, None)
+    # Authenticated Context rendering preserves a valid explicit foreign SPA
+    # destination without querying its workspace; Ask/public do not receive
+    # this pass-through authority.
+    foreign_href = f"/workspaces/{foreign_workspace}/library/items/{target}"
+    assert _server_navigation_target(
+        object(),
+        foreign_href,
+        workspace_id=source_workspace,
+        actor=ActorContext(
+            actor_kind="user",
+            actor_id="user-1",
+            workspace_id=source_workspace,
+            workspace_role="viewer",
+            role="viewer",
+        ),
+        allow_foreign_explicit=True,
+    ) == (True, foreign_href)
+    # Safe view state is retained on a valid overview; query identity cannot
+    # replace its typed workspace route.
+    view_href = (
+        f"/workspaces/{source_workspace}/context?tab=history&version={target}#chapter-2"
+    )
+    assert _server_navigation_target(
+        object(), view_href, workspace_id=source_workspace, actor=None
+    ) == (True, view_href)
+    assert _server_navigation_target(
+        object(),
+        f"/workspaces/{source_workspace}/context?target={target}",
         workspace_id=source_workspace,
         actor=None,
     ) == (True, None)
@@ -228,3 +267,200 @@ def test_preview_artifact_link_can_precede_ready_head(monkeypatch):
         True,
         f"/workspaces/{workspace_id}/library/artifacts/{artifact_id}",
     )
+
+
+def test_ask_recognizes_configured_absolute_context_route(monkeypatch):
+    # Absolute self-origin Context links need origin-aware classification in
+    # Ask as well as in the trusted Context reader. This cannot be caught by
+    # relative-link cases because an unconfigured absolute host is external.
+    source_workspace = UUID("11111111-1111-4111-8111-111111111111")
+    target = UUID("22222222-2222-4222-8222-222222222222")
+    href = (
+        f"https://self.test/workspaces/{source_workspace}/context/pages/{target}"
+        "?tab=history#chapter"
+    )
+    seen_locators = []
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.configured_self_origins",
+        lambda: frozenset({"https://self.test"}),
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.resolve",
+        lambda locator, _context: (
+            seen_locators.append(locator)
+            or SimpleNamespace(
+                state="ok",
+                href=f"/p/{source_workspace}/{target}#chapter",
+                page_id=target,
+            )
+        ),
+    )
+
+    (result,) = ask_context_link_targets(
+        object(),
+        body=f"[Target]({href})",
+        workspace_id=source_workspace,
+        actor=ActorContext(
+            actor_kind="user",
+            actor_id="user-1",
+            workspace_id=source_workspace,
+            workspace_role="viewer",
+            role="viewer",
+        ),
+    )
+    assert result.locator == href
+    assert result.state == "ok"
+    assert result.href == f"/p/{source_workspace}/{target}?tab=history#chapter"
+    assert seen_locators[0].kind == "canonical_route"
+
+    # A valid queried foreign Context URL is navigable in a trusted authored
+    # page without a foreign target lookup; Ask above still scopes it to source.
+    foreign_workspace = UUID("33333333-3333-4333-8333-333333333333")
+    foreign_target = UUID("44444444-4444-4444-8444-444444444444")
+    foreign_href = (
+        f"/workspaces/{foreign_workspace}/context/pages/{foreign_target}?tab=history"
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.resolve",
+        lambda _locator, _context: SimpleNamespace(
+            state="foreign", href=None, page_id=None
+        ),
+    )
+    source_version = UUID("55555555-5555-4555-8555-555555555555")
+    (foreign_link,) = context_link_targets(
+        object(),
+        page=SimpleNamespace(
+            id=UUID("66666666-6666-4666-8666-666666666666"),
+            workspace_id=source_workspace,
+            current_published_version_id=source_version,
+        ),
+        version=SimpleNamespace(
+            id=source_version, body_md=f"[Foreign]({foreign_href})"
+        ),
+        actor=ActorContext(
+            actor_kind="user",
+            actor_id="user-1",
+            workspace_id=source_workspace,
+            workspace_role="viewer",
+            role="viewer",
+        ),
+        self_origins=frozenset({"https://self.test"}),
+    )
+    assert foreign_link.state == "ok"
+    assert foreign_link.href == foreign_href
+    assert foreign_link.target_page_id is None
+
+
+def test_context_navigation_batches_tree_visibility_projection(monkeypatch):
+    # Budget exception: the three URLs exercise typed Context folder, typed
+    # Library folder, and legacy non-folder placement candidates. They must all
+    # share one tree query and one projection; testing one link cannot detect
+    # an accidental per-link projection or dropping legacy placement rows.
+    workspace_id = UUID("11111111-1111-4111-8111-111111111111")
+    node_ids = [
+        UUID("22222222-2222-4222-8222-222222222222"),
+        UUID("33333333-3333-4333-8333-333333333333"),
+        UUID("44444444-4444-4444-8444-444444444444"),
+    ]
+    library_item_id = UUID("55555555-5555-4555-8555-555555555555")
+    nodes = [
+        SimpleNamespace(
+            id=node_ids[0],
+            workspace_id=workspace_id,
+            section="context",
+            node_kind="folder",
+            target_kind=None,
+            target_id=None,
+        ),
+        SimpleNamespace(
+            id=node_ids[1],
+            workspace_id=workspace_id,
+            section="library",
+            node_kind="folder",
+            target_kind=None,
+            target_id=None,
+        ),
+        SimpleNamespace(
+            id=node_ids[2],
+            workspace_id=workspace_id,
+            section="library",
+            node_kind="item",
+            target_kind="library_item",
+            target_id=library_item_id,
+        ),
+    ]
+    queries = []
+    projections = []
+
+    class SessionStub:
+        def scalars(self, statement):
+            queries.append(statement)
+            return nodes
+
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.select_in_workspace",
+        lambda *args, **kwargs: (args, kwargs),
+    )
+    def load_projection(_self, _session, _workspace_id, _actor, *, sections, **_kwargs):
+        projections.append(set(sections))
+        return SimpleNamespace(is_visible=lambda node_id: node_id in set(node_ids))
+
+    monkeypatch.setattr(TreeProjectionService, "load", load_projection)
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.library_item_visible",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.canonical_library_artifact_lookup",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def get_in_workspace(_session, model, *, resource_id, **_kwargs):
+        if model is WorkspaceTreeNode:
+            return next((node for node in nodes if node.id == resource_id), None)
+        if model is LibraryItem and resource_id == library_item_id:
+            return SimpleNamespace(id=library_item_id)
+        return None
+
+    from backend.models.library import LibraryItem
+    from backend.models.tree import WorkspaceTreeNode
+
+    monkeypatch.setattr(
+        "backend.services.context_link_targets.get_in_workspace", get_in_workspace
+    )
+    actor = ActorContext(
+        actor_kind="user",
+        actor_id="user-1",
+        workspace_id=workspace_id,
+        workspace_role="viewer",
+        role="viewer",
+    )
+    hrefs = [
+        f"/workspaces/{workspace_id}/context/folders/{node_ids[0]}",
+        f"/workspaces/{workspace_id}/library/folders/{node_ids[1]}?view=all#folder",
+        f"/library?target={node_ids[2]}",
+    ]
+
+    links = context_link_targets(
+        SessionStub(),
+        page=SimpleNamespace(
+            id=UUID("66666666-6666-4666-8666-666666666666"),
+            workspace_id=workspace_id,
+            current_published_version_id=None,
+        ),
+        version=SimpleNamespace(
+            id=UUID("77777777-7777-4777-8777-777777777777"),
+            body_md="\n".join(f"[target]({href})" for href in hrefs),
+        ),
+        actor=actor,
+    )
+    assert [link.state for link in links] == ["ok", "ok", "ok"]
+    assert links[0].href == f"/workspaces/{workspace_id}/context/folders/{node_ids[0]}"
+    assert links[1].href == (
+        f"/workspaces/{workspace_id}/library/folders/{node_ids[1]}?view=all#folder"
+    )
+    assert links[2].href == (
+        f"/workspaces/{workspace_id}/library/items/{library_item_id}"
+    )
+    assert len(queries) == 1
+    assert projections == [{"context", "library"}]

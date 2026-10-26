@@ -994,12 +994,10 @@ def _resolve_and_check_mcp_workspace(
     try:
         requested_workspace_id = require_workspace_target(arguments)
     except WorkspaceTargetValidationError:
-        return mcp_policy_error(
-            "validation_failed",
-            "A valid workspace_id is required for this tool.",
-            status_code=400,
-            body=body,
-        )
+        # Let the runner format malformed/missing targets as a tools/call
+        # result, matching the streamable transport. It validates before any
+        # directory lookup, repair, trace, or chat write.
+        return None
     session_factory = get_session_factory_from_app(request)
     with session_factory() as session:
         try:

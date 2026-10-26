@@ -463,11 +463,14 @@ export async function listTree(workspaceId: string, section?: string) {
 export async function listTreeData(
   workspaceId: string,
   section?: string,
+  options: { includeArchived?: boolean } = {},
 ): Promise<TreeListData> {
   const favoriteRead = beginTreeFavoriteRead();
-  const query = section
-    ? `?${new URLSearchParams({ section }).toString()}`
-    : "";
+  const params = new URLSearchParams();
+  if (section) params.set("section", section);
+  if (options.includeArchived) params.set("include_archived", "true");
+  const serializedParams = params.toString();
+  const query = serializedParams ? `?${serializedParams}` : "";
   const response = await apiRequest<{ data: TreeNodePayload[] | TreeListData }>(
     `/api/v1/workspaces/${workspaceId}/tree${query}`,
   );

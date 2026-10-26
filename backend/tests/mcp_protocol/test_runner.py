@@ -464,6 +464,9 @@ def test_missing_workspace_target_never_reads_page_directory(
         (True, "validation_failed", "workspace_id: Field required", False),
     ]
     assert directory_lookups == []
+    with page_service.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(MCPToolCall)) == 0
+        assert session.scalar(select(func.count()).select_from(McpChatSession)) == 0
 
 
 def test_list_my_workspaces_cannot_bypass_disabled_runtime_client(

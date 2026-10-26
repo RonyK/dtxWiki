@@ -15,6 +15,7 @@ import { TreePickerDropdown } from "./TreePickerDropdown";
 import { collectHiddenSystemRootNodeIds } from "./treeSectionRoot";
 
 export type NewItemType = "page" | "folder" | "upload";
+export type NewItemDialogCloseReason = "cancel" | "success";
 
 type NewItemDialogProps = {
   canCreateFolder?: boolean;
@@ -31,7 +32,7 @@ type NewItemDialogProps = {
   /** Label for the section root in the location picker (e.g. "Context"). */
   rootLabel?: string;
   typeOrder?: readonly NewItemType[];
-  onClose: () => void;
+  onClose: (reason: NewItemDialogCloseReason) => void;
   onSubmit: (input: {
     itemType: NewItemType;
     parentNodeId: string | null;
@@ -41,7 +42,7 @@ type NewItemDialogProps = {
   onPickFiles?: (
     files: File[],
     parentNodeId: string | null,
-  ) => Promise<void> | void;
+  ) => Promise<boolean | void> | boolean | void;
 };
 
 const TYPE_META: Record<NewItemType, { icon: typeof FilePlus; fallback: string }> = {
@@ -139,7 +140,7 @@ export function NewItemDialog({
 
   function requestClose() {
     if (!submitting) {
-      onClose();
+      onClose("cancel");
     }
   }
 
@@ -163,7 +164,7 @@ export function NewItemDialog({
             : undefined,
         title: trimShortText(title),
       });
-      onClose();
+      onClose("success");
     } catch (exc) {
       setError(
         newItemErrorMessage(
@@ -190,8 +191,13 @@ export function NewItemDialog({
     setSubmitting(true);
     setError(null);
     try {
-      await onPickFiles?.(files, parentId || null);
-      onClose();
+      const completed = await onPickFiles?.(files, parentId || null);
+      if (completed === false) {
+        setError(t("newItem.errors.upload", { defaultValue: "Failed to upload file" }));
+        setSubmitting(false);
+        return;
+      }
+      onClose("success");
     } catch (exc) {
       setError(
         apiErrorMessage(

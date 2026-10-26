@@ -145,7 +145,7 @@ export function AttachmentsSection({
         // global stays the fallback for hosts that render this with no
         // workspace context at all, where there is no selection to go stale.
         const resolved = workspaceId;
-        if (!resolved) {
+        if (!resolved && !serverScope) {
           throw new Error("no current workspace");
         }
         const query = {
@@ -165,7 +165,7 @@ export function AttachmentsSection({
         } as const;
         const page = serverScope
           ? await listAdminContextMediaAttachments(query)
-          : await listWorkspaceContextMediaAttachments(resolved, query);
+          : await listWorkspaceContextMediaAttachments(resolved!, query);
         if (generation !== loadGenerationRef.current) return;
         setItems((current) =>
           cursor ? [...current, ...page.items] : page.items,
@@ -246,7 +246,7 @@ export function AttachmentsSection({
     setDeleteError(null);
     try {
       const resolved = workspaceId;
-      if (!resolved) throw new Error("No current workspace");
+      if (!resolved && !serverScope) throw new Error("No current workspace");
       if (
         workspaceRef.current !== originWorkspace ||
         loadGenerationRef.current !== originGeneration
@@ -259,7 +259,7 @@ export function AttachmentsSection({
       await (
         serverScope ? deleteAdminContextMediaAttachment : deletePageContextMedia
       )(
-        serverScope ? item.workspace_id : resolved,
+        serverScope ? item.workspace_id : resolved!,
         item.asset_id,
         item.usage_token,
       );
@@ -326,7 +326,7 @@ export function AttachmentsSection({
     const failures: Record<string, number> = {};
     try {
       const resolved = workspaceId;
-      if (!resolved || !current()) return;
+      if ((!resolved && !serverScope) || !current()) return;
       for (const item of snapshot) {
         if (!current()) return;
         try {
@@ -335,7 +335,7 @@ export function AttachmentsSection({
               ? deleteAdminContextMediaAttachment
               : deletePageContextMedia
           )(
-            serverScope ? item.workspace_id : resolved,
+            serverScope ? item.workspace_id : resolved!,
             item.asset_id,
             item.usage_token,
           );

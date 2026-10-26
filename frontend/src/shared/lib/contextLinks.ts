@@ -1,7 +1,7 @@
 export type ContextLinkKind =
   | "page_id" | "stable_full" | "stable_short" | "canonical_route"
   | "nav_target" | "concept_path" | "slug" | "resource_uri" | "wikilink"
-  | "unknown" | "external" | "public_reader" | "local" | "media";
+  | "workspace_navigation" | "unknown" | "external" | "public_reader" | "local" | "media";
 
 export type ContextLinkTarget = {
   locator: string;
@@ -13,6 +13,8 @@ export type ContextLinkTarget = {
 export type ContextLinkOptions = {
   workspaceId?: string | null;
   selfOrigins?: readonly string[];
+  /** Allow explicit typed product routes in editable authored previews only. */
+  allowWorkspaceNavigation?: boolean;
 };
 
 export type ContextLink = {
@@ -25,6 +27,74 @@ export type ContextLink = {
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const WORKSPACE_IDENTITY_QUERIES = new Set([
+  "target", "edit", "review", "finding", "new", "newFolder", "parentNodeId",
+  "parentId", "workspaceId", "workspace_id", "ws",
+]);
+
+function isWorkspaceNavigationPath(pathname: string, query: string): boolean {
+  if (pathname.includes("//")) return false;
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "workspaces" || !UUID.test(parts[1] ?? "")) return false;
+  const suffix = parts.slice(2);
+  if (suffix.length === 0) suffix.push("dashboard");
+  const [section, group, target, extra] = suffix;
+  const id = (value: string | undefined) => Boolean(value && UUID.test(value));
+  let createRoute = false;
+  let valid = false;
+  switch (section) {
+    case "dashboard":
+    case "context":
+    case "library":
+    case "agent":
+    case "activity":
+    case "review":
+    case "lint":
+    case "chats":
+    case "ask":
+    case "search":
+    case "settings":
+    case "setup":
+      valid = suffix.length === 1;
+      break;
+  }
+  if (section === "context") {
+    createRoute = group === "pages" && target === "new" || group === "folders" && target === "new";
+    valid = suffix.length === 1 ||
+      (createRoute && suffix.length === 3) ||
+      (group === "pages" && id(target) && (suffix.length === 3 || suffix.length === 4 && extra === "edit")) ||
+      (group === "folders" && (target === "new" && suffix.length === 3 || id(target) && suffix.length === 3));
+  } else if (section === "library") {
+    createRoute = (group === "items" || group === "folders") && target === "new";
+    valid = suffix.length === 1 ||
+      ((group === "items" || group === "artifacts" || group === "folders") && id(target) && suffix.length === 3) ||
+      (createRoute && suffix.length === 3);
+  } else if (section === "agent") {
+    createRoute = (group === "pages" || group === "folders") && target === "new";
+    valid = suffix.length === 1 ||
+      (createRoute && suffix.length === 3) ||
+      (group === "pages" && id(target) && (suffix.length === 3 || suffix.length === 4 && extra === "edit")) ||
+      (group === "folders" && (target === "new" && suffix.length === 3 || id(target) && suffix.length === 3));
+  } else if (section === "activity") {
+    valid = suffix.length === 1 || suffix.length === 2 && ["pending", "advisory", "history"].includes(group ?? "");
+  } else if (section === "review" || section === "ask" || section === "chats") {
+    valid = suffix.length === 1 || suffix.length === 2 && id(group);
+  } else if (section === "lint") {
+    valid = suffix.length === 1 || suffix.length === 3 && group === "findings" && id(target);
+  } else if (section === "settings") {
+    valid = suffix.length === 1 || suffix.length === 2 && group === "integrations";
+  }
+  if (!valid) return false;
+
+  const params = new URLSearchParams(query);
+  for (const key of WORKSPACE_IDENTITY_QUERIES) {
+    if (params.has(key)) return false;
+  }
+  const parents = params.getAll("parent");
+  if (parents.length > 0 && (!createRoute || parents.length !== 1 || !id(parents[0]))) return false;
+  return true;
+}
+
 export function isContextId(value: string): boolean {
   return UUID.test(value);
 }
@@ -110,6 +180,9 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   if (input.startsWith("#")) return result("local", { fragment });
   if (/^\/w\/[^/]+\/pages\/[^/]+$/.test(pathname)) return result("public_reader", { fragment });
   if (/^\/(?:api|uploads)\//.test(pathname)) return result("media", { fragment });
+  if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(pathname, query)) {
+    return result("workspace_navigation", { stableUrl: input, fragment });
+  }
   if (query && pathname !== "/context" && /^\/(?:p|context|workspaces|pages)\//.test(pathname)) return result("unknown", { fragment });
   const withPage = (kind: ContextLinkKind, workspaceId: string | null, pageId: string): ContextLink => {
     const resolvedWorkspaceId = workspaceId ?? options.workspaceId;
@@ -124,6 +197,9 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   if (match && UUID.test(match[1])) return withPage("stable_short", null, match[1]);
   match = /^\/workspaces\/([^/]+)\/context\/pages\/([^/]+)(?:\/edit)?$/.exec(pathname);
   if (match && UUID.test(match[1]) && UUID.test(match[2])) return withPage("canonical_route", match[1].toLowerCase(), match[2]);
+  if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(pathname, query)) {
+    return result("workspace_navigation", { stableUrl: input, fragment });
+  }
   if (pathname === "/context" && query) {
     const targets = new URLSearchParams(query).getAll("target");
     if (targets.length === 1 && UUID.test(targets[0])) return result("nav_target", { lookup: targets[0].toLowerCase(), fragment });

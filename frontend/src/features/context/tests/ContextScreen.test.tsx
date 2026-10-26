@@ -2511,7 +2511,7 @@ describe("ContextScreen", () => {
   it("shows the setup sequence and writing CTA when Context is empty", async () => {
     const folderId = "context-folder-1";
     let createdFolder: TreeNodePayload | null = null;
-    mockFetch({
+    const fetchSpy = mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
         data: { current_workspace_id: WORKSPACE_ID, workspaces: [] },
       },
@@ -2534,6 +2534,7 @@ describe("ContextScreen", () => {
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextTestRoutes />
         <FolderCreateRouteButton />
+        <ContextLocationProbe />
       </MemoryRouter>,
     );
 
@@ -2553,7 +2554,12 @@ describe("ContextScreen", () => {
       "Research",
     );
     await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
-    expect(await screen.findByRole("treeitem", { name: "Research" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([input, init]) => input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes` && init?.method === "POST")).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByTestId("context-location")).toHaveTextContent(
+        `/workspaces/${WORKSPACE_ID}/context/folders/${folderId}`,
+      ),
+    );
   });
 
   it("marks manual tree refresh busy and announces completion", async () => {

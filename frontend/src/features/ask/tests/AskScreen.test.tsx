@@ -958,6 +958,73 @@ describe("AskScreen", () => {
     expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask/session-2`);
   });
 
+  it("starts a fresh session when sending during an overview reload", async () => {
+    let sessionListCalls = 0;
+    let resolveOverviewSessions!: (response: Response) => void;
+    const newSession = { ...sessionDetail([]), id: "session-new", title: "New Ask" };
+    let createTurnPath = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
+        if (init?.method === "POST") return jsonResponse({ data: newSession });
+        sessionListCalls += 1;
+        if (sessionListCalls === 2) {
+          return new Promise<Response>((resolve) => { resolveOverviewSessions = resolve; });
+        }
+        return jsonResponse({ data: { items: [sessionRef()], date_buckets: [], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
+        return jsonResponse({ data: sessionDetail() });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/session-new`) {
+        return jsonResponse({ data: newSession });
+      }
+      if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/`) &&
+          url.endsWith("/turns") && init?.method === "POST") {
+        createTurnPath = url;
+        return jsonResponse({ data: askTurn({ id: "turn-new", ask_session_id: "session-new" }) });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    let pathname = "";
+    function RouteControls() {
+      const navigate = useNavigate();
+      pathname = useLocation().pathname;
+      return (
+        <button type="button" onClick={() => navigate(`/workspaces/${WORKSPACE_ID}/ask`)}>
+          Open Ask overview
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+        <RouteControls />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Context-first retrieval summary/);
+    await userEvent.click(screen.getByRole("button", { name: "Open Ask overview" }));
+    await waitFor(() => expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask`));
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(message, "Fresh route target");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(createTurnPath).toContain("/sessions/session-new/turns"));
+    expect(createTurnPath).not.toContain(`/sessions/${SESSION_ID}/turns`);
+    expect(await screen.findByRole("heading", { name: "New Ask" })).toBeInTheDocument();
+    resolveOverviewSessions(jsonResponse({
+      data: { items: [sessionRef()], date_buckets: [], next_cursor: null },
+    }));
+  });
+
   it("disables the composer while another session is loading", async () => {
     let resolveDetail!: (response: Response) => void;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

@@ -943,6 +943,66 @@ describe("MarkdownView", () => {
     expect(document.querySelector('a[href="/raw"]')).not.toBeInTheDocument();
   });
 
+  it("activates explicit typed workspace links only in opted-in editor previews", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const itemId = "22222222-2222-4222-8222-222222222222";
+    const itemHref = `/workspaces/${workspaceId}/library/items/${itemId}?page=2`;
+    const { rerender } = render(
+      <MemoryRouter>
+        <MarkdownView
+          allowWorkspaceNavigationLinks
+          body={`[Library item](${itemHref}) [Spoofed target](${itemHref}&target=other) [Unknown route](/workspaces/${workspaceId}/admin)`}
+          workspaceId={workspaceId}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Library item" })).toHaveAttribute("href", itemHref);
+    expect(screen.getByRole("link", { name: "Spoofed target" })).toHaveAttribute("href", "#");
+    expect(screen.getByRole("link", { name: "Spoofed target" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("link", { name: "Unknown route" })).toHaveAttribute("href", "#");
+    expect(screen.getByRole("link", { name: "Unknown route" })).toHaveAttribute("aria-disabled", "true");
+
+    rerender(
+      <MemoryRouter>
+        <MarkdownView
+          allowWorkspaceNavigationLinks
+          body={`[Library item](${itemHref})`}
+          renderPolicy="confirmed-links"
+          workspaceId={workspaceId}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("link", { name: "Library item" })).not.toBeInTheDocument();
+    expect(screen.getByText("Library item")).toBeInTheDocument();
+  });
+
+  it("prefixes fragments on confirmed internal links before sanitization", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const pageId = "22222222-2222-4222-8222-222222222222";
+    const locator = "/pages/known#details";
+    render(
+      <MemoryRouter>
+        <MarkdownView
+          body={`[Confirmed](${locator})`}
+          linkTargets={[{
+            locator,
+            href: `/p/${workspaceId}/${pageId}#details`,
+            target_page_id: pageId,
+            state: "ok",
+          }]}
+          renderPolicy="confirmed-links"
+          workspaceId={workspaceId}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Confirmed" })).toHaveAttribute(
+      "href",
+      `/p/${workspaceId}/${pageId}#user-content-details`,
+    );
+  });
+
   it("keeps untrusted semantic payloads on the closed passive pipeline", () => {
     const assetId = "123e4567-e89b-12d3-a456-426614174000";
     const resolveContextMediaAsset = vi.fn(

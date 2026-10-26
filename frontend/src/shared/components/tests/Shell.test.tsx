@@ -18,7 +18,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "../../auth/AuthContext";
-import type { WorkspaceSummary } from "../../api/workspace";
+import { invalidateWorkspaceListCache, type WorkspaceSummary } from "../../api/workspace";
 import { i18n } from "../../i18n";
 import { useLabsPreferences } from "../../hooks/useLabsPreferences";
 import { WorkspaceProvider } from "../../workspace/WorkspaceContext";
@@ -882,6 +882,42 @@ describe("Shell", () => {
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
       "22222222-2222-4222-8222-000000000004",
     );
+  });
+
+  it("refreshes a stale membership list once before resolving an explicit workspace route", async () => {
+    invalidateWorkspaceListCache();
+    const alpha = workspace("22222222-2222-4222-8222-000000000013", "Alpha", "en");
+    const beta = workspace("22222222-2222-4222-8222-000000000014", "Beta", "en");
+    const fetchSpy = mockSession(true, [alpha]);
+    const fallback = fetchSpy.getMockImplementation();
+    let workspaceListReads = 0;
+    fetchSpy.mockImplementation(async (input, init) => {
+      if (
+        input.toString() === `${BASE}/api/v1/workspaces` &&
+        (!init?.method || init.method === "GET")
+      ) {
+        workspaceListReads += 1;
+        return jsonResponse({
+          data: {
+            current_workspace_id: alpha.id,
+            default_workspace_id: null,
+            personal_workspace_id: null,
+            workspaces: workspaceListReads === 1 ? [alpha] : [alpha, beta],
+          },
+        });
+      }
+      return fallback!(input, init);
+    });
+
+    renderShell([`/workspaces/${beta.id}/dashboard`]);
+
+    await waitFor(() =>
+      expect(screen.getByRole("main")).toHaveTextContent("content"),
+    );
+    await waitFor(() => expect(workspaceListReads).toBe(2));
+    expect(
+      window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
+    ).toBe(beta.id);
   });
 
   it("rejects a legacy target query before mounting the scoped resource screen", async () => {

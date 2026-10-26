@@ -111,6 +111,9 @@ type MarkdownViewProps = {
   // The source document/editor workspace supplies authority for short links.
   // Never infer it from whichever workspace the reader most recently selected.
   workspaceId?: string | null;
+  // Editable previews may activate only syntactically valid, explicit
+  // workspace routes; public readers and untrusted previews stay closed.
+  allowWorkspaceNavigationLinks?: boolean;
 };
 
 type DeletedSourceMark = {
@@ -174,6 +177,7 @@ export function MarkdownView({
   resolveContextMediaAsset,
   renderPolicy = "page",
   workspaceId,
+  allowWorkspaceNavigationLinks = false,
 }: MarkdownViewProps) {
   const { t } = useTranslation("pages");
   const articleRef = useRef<HTMLElement | null>(null);
@@ -217,8 +221,10 @@ export function MarkdownView({
     workspaceId,
     publicReader: wikilinkMode === "plain",
     confirmedOnly: renderPolicy === "confirmed-links",
+    allowWorkspaceNavigation:
+      renderPolicy === "page" && wikilinkMode === "internal" && allowWorkspaceNavigationLinks,
     unavailableTitle: t("reader.unavailableLink", { defaultValue: "Unavailable page" }),
-  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, t]);
+  }), [linkTargets, workspaceId, wikilinkMode, renderPolicy, allowWorkspaceNavigationLinks, t]);
   const contextMediaPluginOptions = useMemo(
     () => ({ resolveAssetUrl: resolveContextMediaAsset }),
     [resolveContextMediaAsset],
@@ -382,6 +388,7 @@ type ContextLinkResolverOptions = {
   publicReader: boolean;
   unavailableTitle: string;
   confirmedOnly?: boolean;
+  allowWorkspaceNavigation?: boolean;
 };
 
 function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
@@ -404,10 +411,13 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       const target = targets.get(locator);
       if (options.confirmedOnly) {
         if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return child.children;
-        props.href = target.href;
+        props.href = withFragmentPrefix(target.href);
         return [child];
       }
-      const classification = classifyContextLink(locator, { workspaceId: options.workspaceId });
+      const classification = classifyContextLink(locator, {
+        workspaceId: options.workspaceId,
+        allowWorkspaceNavigation: options.allowWorkspaceNavigation,
+      });
       const wikilink = typeof rawLocator === "string";
       const internal = target || wikilink || !["external", "public_reader", "local", "media"].includes(classification.kind);
       if (!internal) return [child];

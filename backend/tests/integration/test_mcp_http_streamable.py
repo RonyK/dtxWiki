@@ -701,7 +701,7 @@ def test_json_stateless_workspace_scoped_tool_keeps_transport_check(
         page_service=page_service,
     )
     with TestClient(app) as client:
-        client.post(
+        response = client.post(
             "/mcp",
             headers={"Authorization": f"Bearer {pat}"},
             json={
@@ -711,6 +711,10 @@ def test_json_stateless_workspace_scoped_tool_keeps_transport_check(
                 "params": {"name": "search", "arguments": {"query": "needle"}},
             },
         )
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert "workspace_id: Field required" in result["content"][0]["text"]
     assert len(eager_calls) == 1, (
         "json_stateless tools/call for workspace-scoped tools must keep the "
         f"transport workspace check; got {eager_calls}"
@@ -3573,7 +3577,7 @@ def test_sdk_streamable_agent_pat_can_write_agent_page_draft(page_service):
 
 
 def test_sdk_streamable_cross_workspace_denial_mentions_workspace(page_service):
-    """Cross-workspace call_tool denial keeps a stable workspace keyword."""
+    """Invalid targets use tool errors while foreign scopes keep their denial."""
     from uuid import uuid4
 
     from backend.tests.integration._cross_transport_helpers import (
@@ -3590,25 +3594,44 @@ def test_sdk_streamable_cross_workspace_denial_mentions_workspace(page_service):
 
     async def _run():
         with _UvicornServer(streamable_app) as server:
-            return await _call_tool_via_sdk(
+            # Budget exception: malformed UUID input reaches SDK argument
+            # validation before the existing foreign-scope case reaches auth;
+            # these are independent failure paths for the shared error shape.
+            invalid_workspace = await _call_tool_via_sdk(
                 server.url,
                 pat,
                 "search",
-                {
-                    "workspace_id": str(uuid4()),
-                    "query": "needle cross transport",
-                    "scope": "all",
-                },
+                {"workspace_id": "not-a-uuid", "query": "invalid workspace"},
             )
+            try:
+                foreign_workspace = await _call_tool_via_sdk(
+                    server.url,
+                    pat,
+                    "search",
+                    {
+                        "workspace_id": str(uuid4()),
+                        "query": "needle cross transport",
+                        "scope": "all",
+                    },
+                )
+            except Exception as exc:
+                return invalid_workspace, None, str(exc)
+            return invalid_workspace, foreign_workspace, None
 
-    try:
-        result = asyncio.run(_run())
-    except Exception as exc:
-        assert "workspace token claim mismatch" in str(exc).lower()
+    invalid_workspace_result, foreign_workspace_result, foreign_error = asyncio.run(
+        _run()
+    )
+    assert invalid_workspace_result.isError is True
+    invalid_text = invalid_workspace_result.content[0].text
+    assert "validation_failed" in invalid_text
+    assert "workspace_id" in invalid_text
+    if foreign_error is not None:
+        assert "workspace token claim mismatch" in foreign_error.lower()
     else:
-        assert result.isError is True
-        payload = result.model_dump(mode="json")
-        error_text = result.content[0].text.lower()
+        assert foreign_workspace_result is not None
+        assert foreign_workspace_result.isError is True
+        payload = foreign_workspace_result.model_dump(mode="json")
+        error_text = foreign_workspace_result.content[0].text.lower()
         assert "workspace token claim mismatch" in error_text
         assert "workspace" in str(payload).lower()
 

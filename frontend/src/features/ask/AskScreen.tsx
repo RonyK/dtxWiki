@@ -801,12 +801,26 @@ export function AskScreen() {
     ) {
       return;
     }
+    if (state.workspaceId !== routeWorkspaceId) {
+      return;
+    }
     setError(null);
     setLastTurnWarnings([]);
     setSendingTurn(true);
     const mutationRouteIdentity = routeIdentity;
     try {
-      let detail = state.detail;
+      // The overview deliberately has no selected session. During a route
+      // transition `state.detail` can still contain the prior detail while
+      // its replacement list is loading; never let that hidden stale object
+      // become the target of a write. A send from overview starts a fresh
+      // session, while a session URL must have its exact detail loaded.
+      const detailMatchesRoute = requestedSessionId
+        ? state.detail?.id === requestedSessionId
+        : state.detail === null;
+      if (requestedSessionId && !detailMatchesRoute) {
+        return;
+      }
+      let detail = detailMatchesRoute ? state.detail : null;
       if (!detail) {
         detail = await createAskSession(state.workspaceId, {});
         if (

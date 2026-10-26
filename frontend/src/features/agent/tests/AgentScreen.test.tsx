@@ -1165,6 +1165,45 @@ describe("AgentScreen", () => {
     });
   });
 
+  it("keeps the created Agent folder route after the dialog submits successfully", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/categories`) {
+        return jsonResponse({ data: [category("persona", "always")] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/agent/pages`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=agent`) {
+        return jsonResponse({ data: treeResponse("agent", []) });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes` && init?.method === "POST") {
+        return jsonResponse({ data: folderNode("agent-folder-new", "Research", "research", null) }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/agent/folders/new`]}>
+        <AgentScreen />
+        <RoutePathProbe />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(await screen.findByRole("textbox", { name: "Folder name" }), "Research");
+    await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
+
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([input, init]) =>
+      input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes` && init?.method === "POST",
+    )).toBe(true));
+    expect(screen.getByTestId("route-path")).toHaveTextContent(
+      `/workspaces/${WORKSPACE_ID}/agent/folders/agent-folder-new`,
+    );
+  });
+
   it("updates the selected Agent page from the Edit draft action", async () => {
     let updated = false;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {

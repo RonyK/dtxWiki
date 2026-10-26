@@ -1611,9 +1611,9 @@ export function ContextScreen() {
           }
           parentNodes={contextFolderNodes}
           rootLabel={t("rail.title", { defaultValue: "Context" })}
-          onClose={() => {
+          onClose={(reason) => {
             setNewItemDialog(null);
-            if (workspaceRoute?.create && workspaceRoute.targetKind === "folder") void navigate(workspacePath(workspaceId, "context"), { replace: true });
+            if (reason === "cancel" && workspaceRoute?.create && workspaceRoute.targetKind === "folder") void navigate(workspacePath(workspaceId, "context"), { replace: true });
           }}
           onSubmit={(input) => {
             if (input.itemType === "page") {

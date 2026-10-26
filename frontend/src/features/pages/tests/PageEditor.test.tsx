@@ -1601,8 +1601,11 @@ describe("PageEditor", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  it("completes a routed review edit after a manual save", async () => {
+  it.each([false, true] as const)(
+    "completes a routed review edit after a manual save when post-approval reload fails: %s",
+    async (reloadFails) => {
     let decisionBody: Record<string, unknown> | null = null;
+    let pageReadCount = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -1618,6 +1621,10 @@ describe("PageEditor", () => {
         return jsonResponse({ data: [page], next_cursor: null });
       }
       if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1` && init?.method !== "PATCH") {
+        pageReadCount += 1;
+        if (reloadFails && pageReadCount > 1) {
+          return jsonResponse({ message: "The approved page is temporarily unavailable." }, 404);
+        }
         return jsonResponse({ data: page });
       }
       if (url === `${BASE}/api/v1/workspaces/workspace-1/context/pages/p1/autosave` && init?.method === "POST") {
@@ -1689,7 +1696,10 @@ describe("PageEditor", () => {
         state: { contextPublishNotice: { kind: "review_completed" } },
       });
     });
-  });
+    expect(pageReadCount).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/Could not approve the review/)).not.toBeInTheDocument();
+    },
+  );
 
   it.each(["resolves", "rejects"] as const)(
     "does not redirect when a pending review completion %s after the editor route unmounts",
@@ -2268,7 +2278,9 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
   });
 
-  it("preserves stale updates as alternative drafts and rebases the editor onto the server head", async () => {
+  it.each([false, true] as const)(
+    "preserves stale updates as alternatives and handles reload failure: %s",
+    async (reloadFails) => {
     // PUB-02 (2): _preserve_alternative parks the caller's bytes on a
     // branched version that never becomes page.current_version_id, so
     // adopting the PATCH response directly (old behavior) would leave the
@@ -2305,6 +2317,9 @@ describe("PageEditor", () => {
         // preserveAlternative's rebase is the one that must see the head
         // that made the earlier autosave stale.
         pageReadCount += 1;
+        if (reloadFails && pageReadCount > 1) {
+          return jsonResponse({ message: "The server head is temporarily unavailable." }, 404);
+        }
         return jsonResponse({ data: pageReadCount === 1 ? page : serverHead });
       }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
@@ -2370,6 +2385,12 @@ describe("PageEditor", () => {
     );
 
     await screen.findByText(/Preserved as alternative draft v-alt/);
+    if (reloadFails) {
+      expect(screen.getByText(/Preserved as alternative draft v-alt, but could not reload/))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/Preserve failed/)).not.toBeInTheDocument();
+      return;
+    }
     const preserveCall = fetchMock.mock.calls.find((call) =>
       String(call[1]?.body).includes("preserve_as_alternative"),
     );
@@ -2408,7 +2429,8 @@ describe("PageEditor", () => {
         "clean",
       );
     });
-  });
+    },
+  );
 
   it("shows a conflict banner on stale updates and blocks stale retry saves", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

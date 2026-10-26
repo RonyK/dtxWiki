@@ -32,4 +32,23 @@ describe("Context link locators", () => {
       expect(formatContextPageMarkdown(item.title, item.workspace_id, item.page_id, item.fragment)).toBe(item.link_markdown);
     }
   });
+
+  it("accepts only explicit typed workspace navigation when editor preview opts in", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const itemId = "22222222-2222-4222-8222-222222222222";
+    const valid = `/workspaces/${workspaceId}/library/items/${itemId}?page=2`;
+    expect(classifyContextLink(valid, { allowWorkspaceNavigation: true })).toMatchObject({
+      kind: "workspace_navigation",
+      stableUrl: valid,
+    });
+    expect(classifyContextLink(valid).kind).toBe("unknown");
+    expect(classifyContextLink(
+      `/workspaces/${workspaceId}/library/items/${itemId}?target=other`,
+      { allowWorkspaceNavigation: true },
+    ).kind).toBe("unknown");
+    expect(classifyContextLink(
+      `/workspaces/${workspaceId}/library/items/not-an-id`,
+      { allowWorkspaceNavigation: true },
+    ).kind).toBe("unknown");
+  });
 });

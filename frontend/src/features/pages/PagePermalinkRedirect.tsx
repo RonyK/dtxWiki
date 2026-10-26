@@ -10,5 +10,5 @@ export function PagePermalinkRedirect() {
   // A short permalink has no workspace authority at this entry point.
   // Existence and access checks belong to the destination's scoped read API.
   if (!isContextId(workspaceId) || !isContextId(pageId) || hasConflictingWorkspaceQuery(search)) return <NotFoundScreen />;
-  return <Navigate replace to={formatCanonicalContextUrl(workspaceId.toLowerCase(), pageId.toLowerCase(), hash)} />;
+  return <Navigate replace to={formatCanonicalContextUrl(workspaceId.toLowerCase(), pageId.toLowerCase()) + search + hash} />;
 }

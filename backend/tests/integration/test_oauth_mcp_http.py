@@ -420,7 +420,7 @@ def test_mcp_http_accepts_personal_api_token(page_service):
     assert {"list_my_workspaces", "create_context_page"}.issubset(names)
 
 
-def test_mcp_transport_requires_workspace_without_repairing_default(
+def test_mcp_transport_defers_missing_workspace_without_repairing_default(
     page_service, monkeypatch
 ):
     import json
@@ -472,8 +472,10 @@ def test_mcp_transport_requires_workspace_without_repairing_default(
 
     monkeypatch.setattr(mcp_http, "resolve_workspace_for_actor", unexpected_resolution)
     response = _resolve_and_check_mcp_workspace(request, actor, body)
-    assert response is not None and response.status_code == 400
-    assert json.loads(response.body)["error"]["data"]["error"] == "validation_failed"
+    # Argument errors are formatted by the common runner in both transports.
+    # This preflight must defer without resolving or repairing a workspace;
+    # the JSON-stateless transport test asserts the resulting tool envelope.
+    assert response is None
     with page_service.session_factory() as session:
         persisted_user = session.get(User, user_id)
         assert persisted_user is not None

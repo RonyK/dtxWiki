@@ -13,12 +13,13 @@ import {
   type ChangeEvent,
   type DragEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../../shared/api/client";
 import { translate } from "../../shared/i18n";
@@ -155,6 +156,7 @@ export function LibraryScreen() {
   const { t } = useTranslation("library");
   const routeWorkspaceId = useRouteWorkspaceId();
   const route = useWorkspaceRoute();
+  const location = useLocation();
   const navigate = useNavigate();
   // Codex #25: hide write affordances from viewers (the backend re-enforces).
   const auth = useOptionalAuth();
@@ -173,6 +175,9 @@ export function LibraryScreen() {
   const pageSize = 10;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadQueueRef = useRef<UploadQueue<UploadEntry, true> | null>(null);
+  const uploadRunGenerationRef = useRef(0);
+  const uploadRouteIdentityRef = useRef(location.pathname);
+  const preserveUploadRouteChangeRef = useRef<string | null>(null);
   const uploadParentNodeIdRef = useRef<string | null>(null);
   const uploadSequenceRef = useRef(0);
   // Uploads select their item locally before the router commits the matching
@@ -184,6 +189,25 @@ export function LibraryScreen() {
   // bare-id resolver immediately issues the same doomed request again and
   // clears the explanatory notice.
   const unavailableTargetIdRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    uploadRouteIdentityRef.current = location.pathname;
+    return () => {
+      if (uploadRouteIdentityRef.current === location.pathname) {
+        uploadRouteIdentityRef.current = "";
+      }
+      uploadRunGenerationRef.current += 1;
+    };
+  }, [location.pathname]);
+  useEffect(() => {
+    const preserveCompletedUpload = preserveUploadRouteChangeRef.current === location.pathname;
+    if (preserveCompletedUpload) preserveUploadRouteChangeRef.current = null;
+    uploadRunGenerationRef.current += 1;
+    setIsUploading(false);
+    if (!preserveCompletedUpload) {
+      setUploadEntries([]);
+      setErrorActionLink(null);
+    }
+  }, [location.pathname]);
   const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
   useEffect(() => {
     setRouteNotFoundKey(null);
@@ -674,6 +698,7 @@ export function LibraryScreen() {
     if (!state) {
       return;
     }
+    const originPath = location.pathname;
     if (input.parentNodeId && !state.tree.some((node) => node.id === input.parentNodeId && node.section === "library" && node.can_have_children)) {
       setError(t("errors.folderParentUnavailable", { defaultValue: "The selected folder is unavailable" }));
       return;
@@ -685,6 +710,10 @@ export function LibraryScreen() {
       slug: input.slug,
       title: input.title,
     });
+    if (
+      uploadRouteIdentityRef.current !== originPath ||
+      routeWorkspaceId !== state.workspaceId
+    ) return;
     const nextExpandedNodeIds = expandNodeIds(
       expandedNodeIds,
       folder.parent_id,
@@ -806,9 +835,9 @@ export function LibraryScreen() {
     await uploadFiles(files, parentNodeId);
   }
 
-  async function uploadFiles(files: File[], parentNodeId?: string | null) {
+  async function uploadFiles(files: File[], parentNodeId?: string | null): Promise<boolean> {
     if (!state || files.length === 0) {
-      return;
+      return false;
     }
     let entries: UploadEntry[];
     try {
@@ -822,10 +851,10 @@ export function LibraryScreen() {
     } catch {
       setErrorActionLink(null);
       setError(t("errors.upload"));
-      return;
+      return false;
     }
     setUploadEntries(entries);
-    await runUploadEntries(entries);
+    return runUploadEntries(entries, location.pathname);
   }
 
   async function retryUpload(id: string, retryClock: number) {
@@ -858,13 +887,19 @@ export function LibraryScreen() {
     setUploadEntries((current) =>
       current.map((candidate) => (candidate.id === id ? retryEntry : candidate)),
     );
-    await runUploadEntries([retryEntry]);
+    await runUploadEntries([retryEntry], location.pathname);
   }
 
-  async function runUploadEntries(entries: UploadEntry[]) {
+  async function runUploadEntries(entries: UploadEntry[], originRouteIdentity: string): Promise<boolean> {
     if (!state || entries.length === 0) {
-      return;
+      return false;
     }
+    const originWorkspaceId = state.workspaceId;
+    const runGeneration = ++uploadRunGenerationRef.current;
+    const isCurrentRun = () =>
+      uploadRunGenerationRef.current === runGeneration &&
+      uploadRouteIdentityRef.current === originRouteIdentity &&
+      routeWorkspaceId === originWorkspaceId;
     setIsUploading(true);
     clearError();
     const failures: { file: File; error: unknown }[] = [];
@@ -907,6 +942,7 @@ export function LibraryScreen() {
         errorMessage: (error) =>
           libraryUploadError(error, t("errors.upload"), routeWorkspaceId).message,
         onChange: (entry) => {
+          if (!isCurrentRun()) return;
           const failure = entry.status === "failed"
             ? libraryUploadRetryMetadata(errorsById.get(entry.id))
             : null;
@@ -930,7 +966,9 @@ export function LibraryScreen() {
           });
         }
       }
+      if (!isCurrentRun()) return false;
       const lastUploaded = Array.from(uploadedById.values()).at(-1) ?? null;
+      let uploadedHref: string | null = null;
       if (lastUploaded) {
         const uploaded = lastUploaded;
         setState((current) =>
@@ -942,12 +980,13 @@ export function LibraryScreen() {
             : current,
         );
         localTargetIdRef.current = uploaded.id;
-        navigate(workspaceTargetHref(routeWorkspaceId, "library", uploaded.id, "item"), { replace: true });
+        uploadedHref = workspaceTargetHref(routeWorkspaceId, "library", uploaded.id, "item");
         try {
           const [itemsPage, treeData] = await Promise.all([
             listLibraryItems(state.workspaceId, { limit: pageSize }),
             listTreeData(state.workspaceId, "library"),
           ]);
+          if (!isCurrentRun()) return false;
           const tree = treeData.nodes;
           const libraryTree = libraryExplorerTreeNodes(tree);
           setState((current) =>
@@ -971,6 +1010,7 @@ export function LibraryScreen() {
             expandNodeIds(expandedNodeIds, uploadedNode?.parent_id ?? null),
           );
         } catch {
+          if (!isCurrentRun()) return false;
           setError(
             t("upload.refreshFailed", {
               defaultValue:
@@ -979,16 +1019,26 @@ export function LibraryScreen() {
           );
         }
       }
+      if (!isCurrentRun()) return false;
       if (failures.length > 0) {
         reportUploadFailures(entries.length, failures);
       }
+      if (uploadedHref && isCurrentRun()) {
+        preserveUploadRouteChangeRef.current = uploadedHref;
+        navigate(uploadedHref, { replace: true });
+      }
+      return Boolean(lastUploaded);
     } catch (exc) {
+      if (!isCurrentRun()) return false;
       const uploadError = libraryUploadError(exc, t("errors.upload"), routeWorkspaceId);
       setErrorActionLink(uploadError.settingsLink);
       setError(uploadError.message);
+      return false;
     } finally {
-      uploadQueueRef.current = null;
-      setIsUploading(false);
+      if (uploadRunGenerationRef.current === runGeneration) {
+        uploadQueueRef.current = null;
+        setIsUploading(false);
+      }
     }
   }
 
@@ -1485,7 +1535,11 @@ export function LibraryScreen() {
           parentLabel={createDialogParent?.title ?? t("libraryName")}
           parentNodes={libraryFolderNodes}
           rootLabel={t("libraryName")}
-          onClose={() => navigate(workspacePath(routeWorkspaceId, "library"), { replace: true })}
+          onClose={(reason) => {
+            if (reason === "cancel") {
+              navigate(workspacePath(routeWorkspaceId, "library"), { replace: true });
+            }
+          }}
           onPickFiles={(files, parentNodeId) =>
             uploadFiles(files, parentNodeId)
           }
