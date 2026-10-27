@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Apply MCP Access Key workspace edits to existing streamable MCP sessions
+  on the next request instead of keeping the workspaces granted at
+  initialize.
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin
