@@ -413,7 +413,9 @@ for (const language of ["en", "ko"] as const) {
             .click();
           const accountCard = page.locator(".admin-account-row").first();
           await accountCard.locator(".action-menu__trigger").click();
-          await accountCard.getByRole("menuitem", { name: "Issue one-time link" }).click();
+          await accountCard.getByRole("menuitem", {
+            name: language === "en" ? "Issue one-time link" : "일회용 링크 발급",
+          }).click();
           await expect(
             page.locator("#admin-recovery-revoke-tokens"),
           ).toBeVisible();
