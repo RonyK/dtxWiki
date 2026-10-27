@@ -227,7 +227,7 @@ def test_wheel_and_sdist_include_operator_artifacts(tmp_path, built_dist):
     assert packaged_migrations.returncode == 0, (
         packaged_migrations.stdout + packaged_migrations.stderr
     )
-    assert packaged_migrations.stdout.strip() == "a42d98c710e3"
+    assert packaged_migrations.stdout.strip() == "da94025713de"
 
     with tarfile.open(sdist_path) as sdist:
         sdist_names = set(sdist.getnames())

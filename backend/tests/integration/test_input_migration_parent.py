@@ -29,7 +29,6 @@ pytestmark = pytest.mark.xdist_group("postgres")
 
 CORE = "efcbcf724889"
 INPUTS = "19db79d3e622"
-CURRENT_HEAD = "a42d98c710e3"
 CONTENT_TABLES = ("context_page", "agent_page", "library_item")
 
 
@@ -311,8 +310,6 @@ def test_consolidated_release_schema_round_trip(migration_database):
     for stage in ("first", "again"):
         command.upgrade(config, INPUTS)
         assert _stamp(engine) == INPUTS
-        command.upgrade(config, "head")
-        assert _stamp(engine) == CURRENT_HEAD
         assert _row(engine, key) == {**expected, "context_media_policy": {}}
         actual_content = _existing_rows(engine)
         for name in CONTENT_TABLES:

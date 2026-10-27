@@ -10,13 +10,11 @@ from sqlalchemy.orm import Session
 
 from backend.models.workspace import Workspace
 from backend.policy.rbac import grant_workspace_membership
-from backend.services.ops.input_maintenance import audit_inputs
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
 PARENT_REVISION = "ef53a0a7061c"
 DROP_REVISION = "5c3395a75eb0"
-MERGE_REVISION = "a42d98c710e3"
 POINTER = "personal_workspace_id"
 
 
@@ -141,15 +139,6 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
                 if pointer_expected:
                     pointer = connection.scalar(text(f"SELECT {POINTER} FROM users"))
                     assert pointer is None
-        # Existing dev databases must receive the independent auth revisions.
-        assert audit_inputs(database_url) == []
-        command.upgrade(config, MERGE_REVISION)
-        assert "personal_workspace_id" not in {
-            column["name"] for column in inspect(engine).get_columns("users")
-        }
-        assert "user_identities" in inspect(engine).get_table_names()
-        with engine.connect() as connection:
-            assert kept_rows(connection) == original
     finally:
         try:
             if dialect == "postgresql" and migrated:

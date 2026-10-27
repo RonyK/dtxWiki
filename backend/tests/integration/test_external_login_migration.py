@@ -1,9 +1,12 @@
 # Budget exception: one complete upgrade/downgrade/re-upgrade traversal per DB
-# covers both unreleased revisions. Constraint/guard input loops are counted;
-# SQLite CHECK/FK rebuilds and PostgreSQL transactional DDL require real DBs.
+# covers the single external-login revision. Per dialect: 17 invalid storage
+# writes, 3 incompatible credential states, 4 isolated evidence guards and
+# 1 restored legacy mail-kind check (25 rejection inputs; 50 across both DBs).
+# Each constraint/table can break independently; SQLite CHECK/FK rebuilds and
+# PostgreSQL transactional DDL require real DBs, within the same traversal.
 import os
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -16,12 +19,11 @@ from sqlalchemy.exc import DBAPIError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models import Base
+from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.services.ops.input_maintenance import audit_inputs
 
-PARENT = "ef53a0a7061c"
-REVISION = "7e2b9c4d6a18"
-EMAIL_REVISION = "c31a6d907e42"
-MERGE_REVISION = "a42d98c710e3"
+PARENT = "5c3395a75eb0"
+REVISION = "da94025713de"
 
 
 @pytest.mark.parametrize(
@@ -63,6 +65,7 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
         return value.hex if dialect == "sqlite" else value
 
     existing_id, external_id, preserved_outbox_id = _id(), _id(), _id()
+    workspace_id = uuid4()
 
     def _user(user_id, password_hash, email):
         return {
@@ -84,6 +87,20 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             for name in ("users", "user_identities", "auth_login_transactions")
         )
 
+    def retained_account_state(connection):
+        return (
+            connection.execute(
+                sa.select(
+                    users.c.id,
+                    users.c.email,
+                    users.c.password_hash,
+                    users.c.default_workspace_id,
+                ).where(users.c.id == existing_id)
+            ).one(),
+            connection.execute(sa.select(Workspace.__table__)).all(),
+            connection.execute(sa.select(WorkspaceMembership.__table__)).all(),
+        )
+
     upgraded = False
     try:
         command.upgrade(config, PARENT)
@@ -91,8 +108,37 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
         users = sa.Table("users", sa.MetaData(), autoload_with=engine)
         with engine.begin() as connection:
             connection.execute(
+                Workspace.__table__.insert(),
+                {
+                    "id": workspace_id,
+                    "slug": "retained-workspace",
+                    "name": "Retained workspace",
+                    "title": "Retained workspace",
+                },
+            )
+            connection.execute(
                 users.insert(),
-                _user(existing_id, "preserved-local-hash", "existing@example.com"),
+                {
+                    **_user(
+                        existing_id, "preserved-local-hash", "existing@example.com"
+                    ),
+                    "default_workspace_id": workspace_id.hex
+                    if dialect == "sqlite"
+                    else workspace_id,
+                },
+            )
+            connection.execute(
+                Workspace.__table__.update().values(
+                    owner_user_id=UUID(str(existing_id))
+                )
+            )
+            connection.execute(
+                WorkspaceMembership.__table__.insert(),
+                {
+                    "user_id": UUID(str(existing_id)),
+                    "workspace_id": workspace_id,
+                    "role": "owner",
+                },
             )
             outbox = sa.Table("email_outbox", sa.MetaData(), autoload_with=connection)
             connection.execute(
@@ -108,31 +154,11 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                     "updated_at": now,
                 },
             )
+            retained = retained_account_state(connection)
         command.upgrade(config, REVISION)
         users, identities, transactions = _tables()
-        inspector = inspect(engine)
-        assert next(
-            column
-            for column in inspector.get_columns("users")
-            if column["name"] == "password_hash"
-        )["nullable"]
-        columns = {column["name"]: column for column in inspector.get_columns("users")}
-        assert columns["email"]["nullable"]
-        assert columns["pending_email"]["nullable"]
-        assert ("issuer", "subject") in {
-            tuple(unique["column_names"])
-            for unique in inspector.get_unique_constraints("user_identities")
-        }
-        assert ("user_id", "provider_slug") in {
-            tuple(unique["column_names"])
-            for unique in inspector.get_unique_constraints("user_identities")
-        }
-        assert "ix_user_identities_provider_slug" in {
-            index["name"] for index in inspector.get_indexes("user_identities")
-        }
-        assert "ix_auth_login_transactions_expires_at" in {
-            index["name"] for index in inspector.get_indexes("auth_login_transactions")
-        }
+        with engine.connect() as connection:
+            assert retained_account_state(connection) == retained
         identity = {
             "id": _id(),
             "user_id": external_id,
@@ -209,7 +235,6 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                         "23514",
                     }
 
-        command.upgrade(config, EMAIL_REVISION)
         assert audit_inputs(database_url) == []
         # Independent ORM parity covers every changed table on both dialects.
         # Frozen library/workspace tables have unrelated redundant constraints.
@@ -327,71 +352,134 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 with pytest.raises(DBAPIError), connection.begin_nested():
                     connection.execute(table.insert(), values)
 
-        with pytest.raises(RuntimeError, match="would discard data"):
-            command.downgrade(config, REVISION)
-        assert challenges.name in inspect(engine).get_table_names()
-        # CASCADE and both published outbox FKs survive SQLite's rebuild.
+        def assert_downgrade_refused(message):
+            with pytest.raises(RuntimeError, match=message):
+                command.downgrade(config, PARENT)
+            # Every guard belongs to the same revision and must preserve the
+            # complete schema, including tables created later in upgrade().
+            inspector = inspect(engine)
+            assert auth_tables <= set(inspector.get_table_names())
+            assert "reauthentication_challenge_id" in {
+                column["name"] for column in inspector.get_columns("email_outbox")
+            }
+            with engine.connect() as connection:
+                assert (
+                    connection.scalar(
+                        sa.text("SELECT version_num FROM alembic_version")
+                    )
+                    == REVISION
+                )
+
+        # Each nullable credential/pending-email state has a distinct refusal.
+        for credentials in (
+            {
+                "password_hash": None,
+                "email": "external@example.com",
+                "pending_email": None,
+            },
+            {
+                "password_hash": "external-local-hash",
+                "email": None,
+                "pending_email": None,
+            },
+            {
+                "password_hash": "external-local-hash",
+                "email": "external@example.com",
+                "pending_email": "pending@example.com",
+            },
+        ):
+            with engine.begin() as connection:
+                connection.execute(
+                    users.update()
+                    .where(users.c.id == external_id)
+                    .values(**credentials)
+                )
+            assert_downgrade_refused("incompatible account")
+
+        with engine.begin() as connection:
+            connection.execute(
+                users.update()
+                .where(users.c.id == external_id)
+                .values(
+                    password_hash="external-local-hash",
+                    email="external@example.com",
+                    pending_email=None,
+                )
+            )
+            connection.execute(identities.delete())
+            connection.execute(transactions.delete())
+            connection.execute(conflicts.delete())
+        # Isolate the evidence tables: a populated sibling must not hide a
+        # missing guard. Consumed/expired records still cannot be discarded.
+        assert_downgrade_refused("email_reauthentication_challenges")
         with engine.begin() as connection:
             connection.execute(challenges.delete())
+            # The new cascade removes only the challenge's message; the
+            # native recipient and original password-change outbox survive.
             assert (
                 connection.scalar(sa.select(sa.func.count()).select_from(outbox)) == 1
             )
-        # An admin-reviewed conflict is evidence too and blocks the downgrade.
-        with pytest.raises(RuntimeError, match="would discard data"):
-            command.downgrade(config, REVISION)
-        with engine.begin() as connection:
-            connection.execute(conflicts.delete())
-        command.downgrade(config, REVISION)
-        assert conflicts.name not in inspect(engine).get_table_names()
-        assert challenges.name not in inspect(engine).get_table_names()
+        for table, values in (
+            (conflicts, conflict),
+            (identities, identity),
+            (transactions, transaction),
+        ):
+            with engine.begin() as connection:
+                connection.execute(table.insert(), values)
+            assert_downgrade_refused(table.name)
+            with engine.begin() as connection:
+                connection.execute(table.delete())
+
+        command.downgrade(config, PARENT)
+        assert (auth_tables - {"users", "email_outbox"}).isdisjoint(
+            inspect(engine).get_table_names()
+        )
+        columns = {
+            column["name"]: column for column in inspect(engine).get_columns("users")
+        }
+        assert not columns["email"]["nullable"]
+        assert not columns["password_hash"]["nullable"]
+        assert "pending_email" not in columns
+        assert "personal_workspace_id" not in columns
         old_outbox = sa.Table("email_outbox", sa.MetaData(), autoload_with=engine)
-        assert not old_outbox.c.recipient_user_id.nullable
         assert "reauthentication_challenge_id" not in old_outbox.c
         with engine.begin() as connection:
+            assert retained_account_state(connection) == retained
             assert connection.scalar(sa.select(old_outbox.c.attempt_count)) == 2
             with pytest.raises(DBAPIError), connection.begin_nested():
                 connection.execute(
                     old_outbox.insert(),
                     {
-                        **{
-                            key: value
-                            for key, value in message.items()
-                            if key != "reauthentication_challenge_id"
-                        },
-                        "id": _id(),
+                        key: value
+                        for key, value in message.items()
+                        if key != "reauthentication_challenge_id"
                     },
                 )
-        # Each incompatible state must refuse before any destructive DDL.
-        for patch in (
-            {"email": "external@example.com"},
-            {"password_hash": "external-local-hash", "email": None},
-            {"email": "external@example.com", "pending_email": "pending@example.com"},
-        ):
-            if patch:
-                with engine.begin() as connection:
-                    connection.execute(
-                        users.update().where(users.c.id == external_id).values(**patch)
-                    )
-            with pytest.raises(RuntimeError, match="incompatible account"):
-                command.downgrade(config, PARENT)
-            assert {"user_identities", "auth_login_transactions"} <= set(
-                inspect(engine).get_table_names()
-            )
+        command.upgrade(config, REVISION)
+        assert audit_inputs(database_url) == []
+        users, identities, transactions = _tables()
         with engine.begin() as connection:
+            assert retained_account_state(connection) == retained
             connection.execute(
                 users.update()
                 .where(users.c.id == external_id)
-                .values(pending_email=None)
+                .values(password_hash=None, email=None)
             )
-        with pytest.raises(RuntimeError, match="would discard data"):
-            command.downgrade(config, PARENT)
-        with engine.begin() as connection:
+            connection.execute(identities.insert(), identity)
+            connection.execute(transactions.insert(), transaction)
             assert (
                 connection.scalar(
                     sa.select(users.c.password_hash).where(users.c.id == existing_id)
                 )
                 == "preserved-local-hash"
             )
+            assert (
+                connection.scalar(
+                    sa.select(users.c.email).where(users.c.id == existing_id)
+                )
+                == "existing@example.com"
+            )
+            # Deleting an external account cascades both new user-owned tables.
             connection.execute(users.delete().where(users.c.id == external_id))
             assert (
                 connection.scalar(sa.select(sa.func.count()).select_from(identities))
@@ -401,74 +489,38 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 connection.scalar(sa.select(sa.func.count()).select_from(transactions))
                 == 0
             )
-        command.downgrade(config, PARENT)
-        assert {"user_identities", "auth_login_transactions"}.isdisjoint(
-            inspect(engine).get_table_names()
-        )
-        columns = {
-            column["name"]: column for column in inspect(engine).get_columns("users")
-        }
-        assert not columns["email"]["nullable"]
-        assert not columns["password_hash"]["nullable"]
-        assert "pending_email" not in columns
-        command.upgrade(config, EMAIL_REVISION)
-        users, identities, transactions = _tables()
-        with engine.begin() as connection:
-            connection.execute(users.insert(), _user(external_id, None, None))
-            connection.execute(identities.insert(), identity)
-            connection.execute(transactions.insert(), transaction)
-        # Existing auth databases must also receive the independent pointer drop
-        # without losing identities or login transactions during SQLite rebuild.
-        command.upgrade(config, MERGE_REVISION)
-        assert audit_inputs(database_url) == []
-        assert "personal_workspace_id" not in {
-            column["name"] for column in inspect(engine).get_columns("users")
-        }
-        with engine.connect() as connection:
-            assert (
-                connection.scalar(
-                    sa.select(users.c.password_hash).where(users.c.id == existing_id)
+            if dialect == "postgresql":
+                # SQLite model parity is already checked by the shared release
+                # head test. PostgreSQL types/constraints need this real DB.
+                context = MigrationContext.configure(
+                    connection, opts={"include_object": include_auth_object}
                 )
-                == "preserved-local-hash"
-            )
-            assert (
-                connection.scalar(sa.select(sa.func.count()).select_from(identities))
-                == 1
-            )
-            assert (
-                connection.scalar(sa.select(sa.func.count()).select_from(transactions))
-                == 1
-            )
-            assert (
-                connection.scalar(
-                    sa.select(users.c.pending_email).where(users.c.id == existing_id)
-                )
-                is None
-            )
-            context = MigrationContext.configure(
-                connection, opts={"include_object": include_auth_object}
-            )
-            assert compare_metadata(context, Base.metadata) == []
+                assert compare_metadata(context, Base.metadata) == []
     finally:
-        if upgraded:
-            # Dedicated DB starts empty. Cleanup includes downgrade-refusing data.
-            with engine.begin() as connection:
-                present = set(inspect(connection).get_table_names())
-                for table in (
-                    "email_outbox",
-                    "email_reauthentication_challenges",
-                    "auth_login_transactions",
-                    "user_identities",
-                ):
-                    if table in present:
-                        connection.execute(sa.text(f"DELETE FROM {table}"))
-                columns = {
-                    column["name"]
-                    for column in inspect(connection).get_columns("users")
-                }
-                predicate = "password_hash IS NULL OR email IS NULL"
-                if "pending_email" in columns:
-                    predicate += " OR pending_email IS NOT NULL"
-                connection.execute(sa.text("DELETE FROM users WHERE " + predicate))
-            command.downgrade(config, "base")
-        engine.dispose()
+        try:
+            if upgraded:
+                # Dedicated DB starts empty. Cleanup includes refusal evidence.
+                with engine.begin() as connection:
+                    present = set(inspect(connection).get_table_names())
+                    for table in (
+                        "email_outbox",
+                        "auth_email_conflict_requests",
+                        "email_reauthentication_challenges",
+                        "auth_login_transactions",
+                        "user_identities",
+                    ):
+                        if table in present:
+                            connection.execute(sa.text(f"DELETE FROM {table}"))
+                    columns = {
+                        column["name"]
+                        for column in inspect(connection).get_columns("users")
+                    }
+                    predicate = "password_hash IS NULL OR email IS NULL"
+                    if "pending_email" in columns:
+                        predicate += " OR pending_email IS NOT NULL"
+                    connection.execute(sa.text("DELETE FROM users WHERE " + predicate))
+                command.downgrade(config, "base")
+                with engine.begin() as connection:
+                    connection.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
+        finally:
+            engine.dispose()

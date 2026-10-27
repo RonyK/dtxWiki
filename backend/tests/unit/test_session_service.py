@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.services.auth.password_method import DUMMY_PASSWORD_HASH
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.session_service import (
     SESSION_TOKEN_KIND,
@@ -243,7 +244,7 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
         )
 
 
-def test_login_rejects_unknown_or_wrong_password(session_service):
+def test_login_rejects_unknown_or_wrong_password(session_factory, session_service):
     session_service.signup(email="login@example.com", password="right-password-123")
 
     with pytest.raises(InvalidCredentialsError):
@@ -252,6 +253,39 @@ def test_login_rejects_unknown_or_wrong_password(session_service):
         )
     with pytest.raises(InvalidCredentialsError):
         session_service.login(email="login@example.com", password="wrong-pass")
+
+    with session_factory.begin() as session:
+        passwordless = session_service.provision_user(
+            session, email="external@example.com"
+        )
+        passwordless_id = passwordless.id
+
+    hashes = []
+
+    class AcceptingHasher:
+        def verify_password(self, _password, password_hash):
+            # A matching dummy hash cannot authenticate an absent credential.
+            hashes.append(password_hash)
+            return True
+
+    accepting = replace(session_service, credential_hasher=AcceptingHasher())
+    with pytest.raises(InvalidCredentialsError):
+        accepting.login(email="external@example.com", password="correct-password")
+    with pytest.raises(InvalidCredentialsError):
+        accepting.login(email="missing@example.com", password="correct-password")
+    with pytest.raises(InvalidCredentialsError):
+        accepting.change_password(
+            user_id=passwordless_id,
+            current_password="correct-password",
+            new_password="replacement-password",
+        )
+    with pytest.raises(InvalidCredentialsError):
+        accepting.reauthenticate(
+            user_id=passwordless_id, current_password="correct-password"
+        )
+    assert hashes == [DUMMY_PASSWORD_HASH] * 4
+    with session_factory() as session:
+        assert session.get(User, passwordless_id).password_hash is None
 
 
 def test_login_and_password_change_rotate_credentials(session_service):
