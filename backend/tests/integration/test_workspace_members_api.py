@@ -1,14 +1,18 @@
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
+from backend.models.auth_identity import UserIdentity
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.services.auth.provider_registry import ProviderRegistry
+from backend.testing.fake_auth_method import FakeAuthMethod
 from backend.tests.conftest import authenticate_test_client
 
 
@@ -43,7 +47,7 @@ def _users_and_owner_workspace(page_service):
 def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
     page_service,
 ):
-    owner_client, _ = _client_pair(page_service)
+    owner_client, member_client = _client_pair(page_service)
     owner, member, workspace = _users_and_owner_workspace(page_service)
     endpoint = f"/api/v1/workspaces/{workspace.id}/members"
 
@@ -54,12 +58,15 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
     )
     with page_service.session_factory() as session:
         assert session.get(WorkspaceMembership, (member.id, workspace.id)) is None
-        assert session.scalar(
-            select(AuditEvent).where(
-                AuditEvent.workspace_id == workspace.id,
-                AuditEvent.action == "workspace.member.added",
+        assert (
+            session.scalar(
+                select(AuditEvent).where(
+                    AuditEvent.workspace_id == workspace.id,
+                    AuditEvent.action == "workspace.member.added",
+                )
             )
-        ) is None
+            is None
+        )
 
     added = owner_client.post(
         endpoint,
@@ -78,9 +85,7 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
         },
         "created": True,
         "first_share": True,
-        "first_share_warning_code": (
-            "workspace_first_share_confirmation_required"
-        ),
+        "first_share_warning_code": ("workspace_first_share_confirmation_required"),
         "member_count": 2,
     }
     duplicate = owner_client.post(endpoint, json={"email": member.email})
@@ -124,6 +129,140 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
         assert persisted_workspace.join_policy == "invite_only"
         assert persisted_workspace.title == f"{owner.display_name}'s Personal Workspace"
 
+    # UUID selection and the opt-in directory have independent disclosure paths:
+    # the existing native-email traversal cannot detect a global candidate query
+    # or missing actor/candidate tenant binding. Reuse its DB/owner locks rather
+    # than creating another integration scenario for each selector or tenant.
+    candidate_endpoint = f"/api/v1/workspaces/{workspace.id}/member-candidates"
+    assert owner_client.get(candidate_endpoint, params={"query": "company"}).json()[
+        "data"
+    ] == {
+        "enabled": False,
+        "items": [],
+        "has_more": False,
+    }
+    registry = ProviderRegistry(
+        Settings(public_base_url="https://wiki.example.test"), [FakeAuthMethod()]
+    )
+    registry.add(
+        {
+            "slug": "company",
+            "method": "test_oidc",
+            "display_name": "Company SSO",
+            "directory_enabled": True,
+            "directory_tenant": "tenant-a",
+        }
+    )
+    owner_client.app.state.auth_providers = registry
+    sso_id, outsider_id = uuid4(), uuid4()
+    with page_service.session_factory.begin() as session:
+        session.add_all(
+            [
+                User(
+                    id=sso_id,
+                    email=None,
+                    display_name="Company colleague",
+                    status="active",
+                ),
+                User(
+                    id=outsider_id,
+                    email=None,
+                    display_name="Company outsider",
+                    status="active",
+                ),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                UserIdentity(
+                    user_id=owner.id,
+                    provider_slug="company",
+                    issuer="https://idp.example.test",
+                    subject="owner",
+                    linked_via="jit",
+                ),
+                UserIdentity(
+                    user_id=sso_id,
+                    provider_slug="company",
+                    issuer="https://idp.example.test",
+                    subject="colleague",
+                    directory_tenant="tenant-a",
+                    linked_via="jit",
+                ),
+                UserIdentity(
+                    user_id=outsider_id,
+                    provider_slug="company",
+                    issuer="https://idp.example.test",
+                    subject="outsider",
+                    directory_tenant="tenant-b",
+                    linked_via="jit",
+                ),
+            ]
+        )
+    assert (
+        owner_client.get(candidate_endpoint, params={"query": "company"}).json()[
+            "data"
+        ]["enabled"]
+        is False
+    )
+    with page_service.session_factory.begin() as session:
+        session.scalar(
+            select(UserIdentity).where(UserIdentity.user_id == owner.id)
+        ).directory_tenant = "tenant-a"
+    assert owner_client.get(candidate_endpoint).json()["data"] == {
+        "enabled": True,
+        "items": [],
+        "has_more": False,
+    }
+    found = owner_client.get(candidate_endpoint, params={"query": " COMPANY "})
+    assert found.headers["cache-control"] == "no-store"
+    assert found.json()["data"]["items"] == [
+        {
+            "user_id": str(sso_id),
+            "display_name": "Company colleague",
+            "provider_name": "Company SSO",
+            "provider_slug": "company",
+            "provider_label": dict(
+                owner_client.app.state.auth_providers.get(
+                    "company"
+                ).method.descriptor.branding.label
+            ),
+            "identity_label": f"{str(sso_id)[:8]}…{str(sso_id)[-8:]}",
+            "identity_verified": True,
+        }
+    ]
+    # The read is bounded: hitting the scan cap reports more instead of reading
+    # every email-only key match.
+    with pytest.MonkeyPatch.context() as capped:
+        capped.setattr(
+            "backend.services.workspace_membership_service.CANDIDATE_SCAN_LIMIT", 1
+        )
+        bounded = owner_client.get(
+            candidate_endpoint, params={"query": "company"}
+        ).json()["data"]
+    assert bounded["has_more"] is True and len(bounded["items"]) == 1
+    assert (
+        member_client.get(candidate_endpoint, params={"query": "company"}).status_code
+        == 403
+    )
+    for invalid_selector in ({}, {"user_id": str(sso_id), "email": member.email}):
+        assert owner_client.post(endpoint, json=invalid_selector).status_code == 422
+    selected = owner_client.post(
+        endpoint, json={"user_id": str(sso_id), "role": "editor"}
+    )
+    assert (
+        selected.status_code == 201
+        and selected.json()["data"]["member"]["email"] is None
+    )
+    assert selected.json()["data"]["member"]["user_id"] == str(sso_id)
+    assert (
+        owner_client.get(candidate_endpoint, params={"query": "company"}).json()[
+            "data"
+        ]["items"]
+        == []
+    )
+
 
 def test_shared_personal_workspace_summary_carries_owner_display_name(page_service):
     # Shared Personal workspaces retain the owner's display name alongside
@@ -139,9 +278,7 @@ def test_shared_personal_workspace_summary_carries_owner_display_name(page_servi
 
     listed = member_client.get("/api/v1/workspaces")
     assert listed.status_code == 200
-    rows = {
-        row["id"]: row for row in listed.json()["data"]["workspaces"]
-    }
+    rows = {row["id"]: row for row in listed.json()["data"]["workspaces"]}
     shared_row = rows[str(workspace.id)]
     own_personal_row = rows[str(member.default_workspace_id)]
     assert shared_row["title"] == f"{owner.display_name}'s Personal Workspace"
@@ -157,10 +294,13 @@ def test_owner_list_is_stably_paginated_and_non_owner_is_forbidden(page_service)
     owner_client, member_client = _client_pair(page_service)
     owner, member, workspace = _users_and_owner_workspace(page_service)
     endpoint = f"/api/v1/workspaces/{workspace.id}/members"
-    assert owner_client.post(
-        endpoint,
-        json={"email": member.email, "confirm_first_share": True},
-    ).status_code == 201
+    assert (
+        owner_client.post(
+            endpoint,
+            json={"email": member.email, "confirm_first_share": True},
+        ).status_code
+        == 201
+    )
 
     first = owner_client.get(endpoint, params={"limit": 1, "offset": 0})
     second = owner_client.get(endpoint, params={"limit": 1, "offset": 1})
@@ -192,10 +332,13 @@ def test_member_list_cursor_filters_normalize_without_read_audit_noise(
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
         persisted_member.display_name = "Straße\u2003ﬁ   Member"
-    assert owner_client.post(
-        endpoint,
-        json={"email": member.email, "confirm_first_share": True},
-    ).status_code == 201
+    assert (
+        owner_client.post(
+            endpoint,
+            json={"email": member.email, "confirm_first_share": True},
+        ).status_code
+        == 201
+    )
     # The list is ordered by (joined_at, user id) and joined_at is stamped from
     # the wall clock, so a backward clock step (or a tie, broken by the random
     # user id) can swap the pages asserted below. Pin the join order; the
@@ -253,9 +396,9 @@ def test_member_list_cursor_filters_normalize_without_read_audit_noise(
         params={"query": "STRASSE FI MEMBER", "role": "viewer"},
     )
     assert exact_unicode.status_code == 200
-    assert [
-        item["user_id"] for item in exact_unicode.json()["data"]["items"]
-    ] == [str(member.id)]
+    assert [item["user_id"] for item in exact_unicode.json()["data"]["items"]] == [
+        str(member.id)
+    ]
 
     query_mismatch = owner_client.get(
         endpoint,
@@ -302,10 +445,13 @@ def test_role_change_and_self_remove_default_fallback(page_service):
     owner, member, workspace = _users_and_owner_workspace(page_service)
     member_starter_id = member.default_workspace_id
     endpoint = f"/api/v1/workspaces/{workspace.id}/members"
-    assert owner_client.post(
-        endpoint,
-        json={"email": member.email, "confirm_first_share": True},
-    ).status_code == 201
+    assert (
+        owner_client.post(
+            endpoint,
+            json={"email": member.email, "confirm_first_share": True},
+        ).status_code
+        == 201
+    )
 
     changed = owner_client.patch(
         f"{endpoint}/{member.id}",

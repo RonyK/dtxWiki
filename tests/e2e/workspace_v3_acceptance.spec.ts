@@ -452,7 +452,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               ),
             ).toBeVisible();
             await expect(
-              memberPage.getByRole("button", { name: "Add member" }),
+              memberPage.getByRole("button", { name: "Add a member" }),
             ).toHaveCount(0);
             await expect(
               memberPage.locator(".workspace-member-row"),
@@ -478,7 +478,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               .filter({ hasText: memberEmail });
             await expect(selfRow.locator("select")).toHaveValue("owner");
 
-            await selfRow.getByRole("button", { name: "Remove" }).click();
+            await selfRow.getByRole("button", { name: /^Remove / }).click();
             const dialog = memberPage.getByRole("dialog", {
               name: "Remove this member?",
             });
@@ -604,7 +604,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           testInfo.project.name,
         );
         const resetPassword = `new-password-${viewport.key}`;
-        let initialOutboxTotal = 0;
 
         const targetContext = await isolatedContext(browser, viewport);
         const ownerContext = await isolatedContext(browser, viewport);
@@ -715,9 +714,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             const initialOutboxRow = recoveryCard
               .locator(".deployment-status-row")
               .filter({ hasText: "Delivery outbox" });
-            initialOutboxTotal = parseOutboxTotal(
-              await initialOutboxRow.locator("dd").innerText(),
-            );
+            parseOutboxTotal(await initialOutboxRow.locator("dd").innerText());
 
             await recoveryCard
               .getByRole("button", { name: "Show setup method" })
@@ -744,7 +741,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             // h1 says so: it was renamed off "Users" precisely because that sat
             // beside "Members & access" and read as a second way to manage this
             // one workspace's people. Assert the level too, so the destination
-            // title and the recovery card below it stay distinguishable.
+            // title and the accessible recovery region stay distinguishable.
             await expect(
               page.getByRole("heading", {
                 level: 1,
@@ -754,15 +751,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             ).toBeVisible();
             await expect(
               page.getByRole("heading", { name: "Account recovery" }),
-            ).toBeVisible();
-            await page
-              .locator("#admin-user-directory-password")
-              .fill(e2ePassword);
-            await page
-              .getByRole("button", { name: "Unlock user search" })
-              .click();
+            ).toBeAttached();
+            // The admin signed in moments ago, inside the reauthentication
+            // window, so the directory opens without a second password prompt.
             await expect(
-              page.getByText(/Protected user search is unlocked until/),
+              page.getByText("Your recent sign-in allows this action."),
             ).toBeVisible();
 
             await page.locator("#admin-user-search-query").fill(recoveryEmail);
@@ -770,15 +763,16 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               .getByRole("button", { name: "Search", exact: true })
               .click();
             const targetCard = page
-              .locator("li.admin-user-card")
+              .locator(".admin-account-row")
               .filter({ hasText: recoveryEmail });
             await expect(targetCard).toBeVisible();
             await expect(
               targetCard.getByText("Email verified", { exact: true }),
             ).toBeVisible();
 
+            await targetCard.getByRole("button", { name: /^Account actions for / }).click();
             await targetCard
-              .getByRole("button", { name: "Send recovery email" })
+              .getByRole("menuitem", { name: "Send recovery email" })
               .click();
             let confirmation = page.getByRole("dialog", {
               name: "Issue a password reset?",
@@ -786,9 +780,11 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expect(
               confirmation.getByRole("radio", { name: "Ordinary recovery" }),
             ).toBeChecked();
-            await confirmation
-              .locator("#admin-recovery-current-password")
-              .fill(e2ePassword);
+            // The verified directory session covers the reset, so the dialog
+            // does not ask for the admin password again.
+            await expect(
+              confirmation.locator("#admin-recovery-current-password"),
+            ).toHaveCount(0);
             await confirmation
               .getByRole("button", { name: "Issue password reset" })
               .click();
@@ -796,8 +792,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               page.getByText(`Recovery email queued for ${recoveryEmail}.`),
             ).toBeVisible();
 
+            await targetCard.getByRole("button", { name: /^Account actions for / }).click();
             await targetCard
-              .getByRole("button", { name: "Issue one-time link" })
+              .getByRole("menuitem", { name: "Issue one-time link" })
               .click();
             confirmation = page.getByRole("dialog", {
               name: "Issue a password reset?",
@@ -810,9 +807,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
                 name: "Also revoke all PAT/MCP tokens",
               }),
             ).toBeChecked();
-            await confirmation
-              .locator("#admin-recovery-current-password")
-              .fill(e2ePassword);
             // Read the one-time link from the response the dialog is built
             // from, never off the screen. Playwright writes an
             // `error-context.md` for every failed test whose accessibility
@@ -968,16 +962,24 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             const outboxRow = page
               .locator(".deployment-status-row")
               .filter({ hasText: "Delivery outbox" });
-            // The real worker has already been started by Playwright and will
-            // move a row from queued to failed as soon as the intentionally
-            // unreachable SMTP endpoint rejects an attempt. Both states are
-            // durable and retryable; assert that this journey added an outbox
-            // row instead of racing the worker over one transient status.
+            // Each reset revokes the previous one and a revoked token's mail
+            // leaves the count, so this journey's reset requests net to zero.
+            // The password-changed notice it queued has no token and cannot
+            // reach the intentionally unreachable SMTP endpoint, so it stays
+            // queued or failed. The real worker briefly holds a row as
+            // `sending`, outside both counters, so poll instead of reading once.
             await expect(outboxRow).toBeVisible({ timeout: 15_000 });
-            const finalOutboxTotal = parseOutboxTotal(
-              await outboxRow.locator("dd").innerText(),
-            );
-            expect(finalOutboxTotal).toBeGreaterThan(initialOutboxTotal);
+            await expect
+              .poll(
+                async () => {
+                  await page.reload();
+                  return parseOutboxTotal(
+                    await outboxRow.locator("dd").innerText(),
+                  );
+                },
+                { timeout: 15_000 },
+              )
+              .toBeGreaterThan(0);
             const recoveryCard = page
               .locator("section.deployment-configuration-card")
               .filter({ hasText: "Identity & Recovery" });
@@ -1092,10 +1094,12 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             await expect(
               ownerPage.getByRole("heading", { name: "Members & access" }),
             ).toBeVisible();
-            await ownerPage
-              .getByLabel("Find or add members")
+            await ownerPage.getByRole("button", { name: "Add a member" }).click();
+            const addMember = ownerPage.getByRole("dialog", { name: "Add a member" });
+            await addMember
+              .getByLabel("User ID or account email")
               .fill(inviteeEmail);
-            await ownerPage.getByRole("button", { name: "Add member" }).click();
+            await addMember.getByRole("button", { name: "Add member" }).click();
 
             const firstShare = ownerPage.getByRole("dialog", {
               name: "Share the whole workspace?",

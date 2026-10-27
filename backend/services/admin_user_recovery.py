@@ -9,6 +9,7 @@ from sqlalchemy import exists, func, or_, select
 from backend.domain.input_policy import (
     validate_text,
 )
+from backend.models.auth_identity import UserIdentity
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.services.audit_service import AuditService
@@ -26,6 +27,7 @@ class AdminUserWorkspace:
 class AdminUserRecord:
     user: User
     workspaces: list[AdminUserWorkspace]
+    identities: list[UserIdentity]
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,10 @@ class AdminUserRecoveryService:
         validate_text(query, field="query", max_length=320)
         normalized = unicodedata.normalize("NFKC", query).strip().casefold()
         pattern = f"%{normalized}%"
+        try:
+            exact_id = UUID(normalized)
+        except ValueError:
+            exact_id = None
         with self.session_factory.begin() as session:
             membership_match = exists(
                 select(WorkspaceMembership.user_id)
@@ -74,6 +80,7 @@ class AdminUserRecoveryService:
                         func.lower(User.email).like(pattern),
                         func.lower(User.display_name).like(pattern),
                         membership_match,
+                        User.id == exact_id if exact_id is not None else False,
                     ),
                 )
             total = int(
@@ -105,6 +112,13 @@ class AdminUserRecoveryService:
                 records.append(
                     AdminUserRecord(
                         user=user,
+                        identities=list(
+                            session.scalars(
+                                select(UserIdentity)
+                                .where(UserIdentity.user_id == user.id)
+                                .order_by(UserIdentity.provider_slug)
+                            )
+                        ),
                         workspaces=[
                             AdminUserWorkspace(
                                 workspace_id=workspace.id,

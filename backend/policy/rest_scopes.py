@@ -507,6 +507,7 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
         "/api/v1/workspaces/{workspace_id}/join-requests/{request_id}",
     ),
     ("GET", "/api/v1/workspaces/{workspace_id}/members"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/member-candidates"),
     ("POST", "/api/v1/workspaces/{workspace_id}/members"),
     (
         "PATCH",
@@ -551,6 +552,7 @@ REST_SESSION_UNSCOPED_ROUTES: set[tuple[str, str]] = {
 # truth — and keep this comment in sync with the dispatcher when adding
 # new MCP tools.
 SCOPE_EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/api/v1/capabilities",  # Public instance feature/login metadata.
     "/api/v1/auth",
     # Instance server-admin surface is session-only (gated by
     # require_server_admin); bearer tokens carry no session and get 401, so no

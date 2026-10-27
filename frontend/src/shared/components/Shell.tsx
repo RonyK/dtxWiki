@@ -392,7 +392,7 @@ export function Shell({ children }: ShellProps) {
   const shellScrollGuardRef = useScrollLeftGuardRef<HTMLDivElement>();
   const isAuthenticated = status === "authenticated" && Boolean(user);
   const needsCapabilitiesForNotice =
-    isAuthenticated && user?.email_verified_at === null;
+    isAuthenticated && Boolean(user?.email) && user?.email_verified_at === null;
   // M-14 (260908 UI audit): Account already shows its own "Email not
   // verified · Verify email" control inline, in context with the rest of the
   // account's connected-tools/security surface. Repeating the same CTA in the

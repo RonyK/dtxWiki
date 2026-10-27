@@ -16,8 +16,8 @@ import typer
 
 from backend.app.bootstrap import bootstrap_core as bootstrap_app
 from backend.app.runtime_resources import RuntimeResources, acquire_paths
-from backend.app.settings import Settings
 from backend.cli import prod_setup
+from backend.cli.invocation import invocation_settings, prepared_environment_file
 from backend.services import backup_service, update_service
 from backend.services.ops import install_method, runtime_lock
 from backend.services.ops.maintenance_handoff import (
@@ -146,6 +146,7 @@ def update_command(
 
     # Internal step: run migrations under the freshly-installed (NEW) code.
     if finalize_bootstrap:
+        env_file = env_file or prepared_environment_file()
         install = install_method.detect_install_method(
             override=None if method == "auto" else method
         )
@@ -165,7 +166,10 @@ def update_command(
                 {"DTXWIKI_WORKER_MODE": "external"},
             )
             os.environ["DTXWIKI_WORKER_MODE"] = "external"
-        settings = Settings(auto_bootstrap=True)
+        bootstrap_overrides = {"auto_bootstrap": True}
+        if production_env is not None:
+            bootstrap_overrides["worker_mode"] = "external"
+        settings = invocation_settings(**bootstrap_overrides)
         resources = RuntimeResources.for_settings(settings)
         # The old updater already holds root EX. It does not know about the
         # DB-side lock, so acquire that lock here without retaking root EX.
@@ -191,7 +195,7 @@ def update_command(
         return
 
     _load_prod_env(method, env_file)
-    settings = Settings()
+    settings = invocation_settings()
 
     if check:
         info = update_service.run_check(settings, index_url=index_url, channel=channel)
@@ -267,7 +271,7 @@ def rollback_command(
     """Roll back to a previous backup (reinstall old code + restore DB/secrets)."""
 
     _load_prod_env(method, env_file)
-    settings = Settings()
+    settings = invocation_settings()
 
     if list_backups:
         infos = backup_service.list_backups()

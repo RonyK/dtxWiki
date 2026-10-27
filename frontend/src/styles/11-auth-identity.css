@@ -1,0 +1,360 @@
+/* Sign-in and account identity management use provider metadata from Core. */
+.workspace-screen.auth-screen .auth-layout {
+  max-width: 460px;
+}
+
+.auth-screen .auth-welcome {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.auth-screen .auth-welcome-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.auth-screen .auth-welcome h1 {
+  margin: 0;
+  font-size: 27px;
+  letter-spacing: -0.03em;
+}
+
+.auth-screen .auth-welcome p,
+.auth-provider-help {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-screen .auth-panel {
+  padding: 20px;
+  gap: 14px;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgb(15 23 42 / 3%);
+}
+
+.auth-provider-group,
+.login-methods-available {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-screen .auth-provider-group {
+  gap: 8px;
+}
+
+.auth-section-label {
+  margin: 0 0 2px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-provider-button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 14px;
+  text-align: left;
+}
+
+.auth-provider-button span {
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.auth-method-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.auth-method-divider::before,
+.auth-method-divider::after {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.auth-screen .auth-submit {
+  justify-content: center;
+  width: 100%;
+  min-height: 42px;
+}
+
+.auth-screen .auth-actions {
+  padding-top: 2px;
+}
+
+.auth-screen .auth-remember {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+.auth-screen .auth-recovery-note {
+  margin: 0;
+}
+
+.auth-provider-help {
+  padding: 16px 12px 0;
+  text-align: center;
+}
+
+.login-methods-panel {
+  gap: 20px;
+}
+
+.login-methods-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.login-methods-heading > div {
+  display: grid;
+  gap: 6px;
+}
+
+.login-methods-heading h2,
+.login-methods-panel h3 {
+  margin: 0;
+}
+
+.login-methods-heading > .icon-button {
+  flex-shrink: 0;
+}
+
+.login-methods-heading > [aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.login-methods-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+  background: var(--surface-subtle);
+}
+
+.login-methods-summary > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.login-methods-summary p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.login-methods-group {
+  display: grid;
+  gap: 12px;
+}
+
+.login-methods-panel h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.login-methods-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-method-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.login-method-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  align-self: start;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  background: var(--surface-subtle);
+}
+
+.login-method-details {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.login-method-details strong {
+  font-size: 13px;
+}
+
+.login-method-email {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.login-method-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--ink-soft);
+  background: var(--surface-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.login-method-unlink {
+  font-size: 12px;
+}
+
+.login-methods-verification {
+  display: grid;
+  gap: 10px;
+}
+
+.login-methods-add {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  scroll-margin-top: 24px;
+}
+
+.login-methods-add-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.login-methods-available {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+
+.login-methods-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.login-methods-add .auth-form {
+  max-width: 440px;
+}
+
+.login-methods-add .auth-form > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.login-methods-managed-note {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.login-method-unlink-dialog {
+  max-width: 480px;
+}
+
+.login-method-unlink-confirm {
+  border-color: var(--danger-border);
+  color: var(--danger);
+  background: var(--danger-surface);
+}
+
+@media (max-width: 640px) {
+  .login-methods-heading {
+    flex-wrap: wrap;
+  }
+
+  .login-method-card {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .login-method-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .login-method-card .login-method-badge {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-self: center;
+    justify-self: start;
+  }
+
+  .login-method-unlink {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 8px;
+  }
+
+  .login-method-unlink > svg {
+    display: none;
+  }
+
+  .login-methods-add {
+    padding: 14px;
+  }
+}
+
+/* Login after an SSO address collided with an unverified account. */
+.auth-email-conflict {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-email-conflict h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.auth-email-conflict p {
+  margin: 0;
+  line-height: 1.6;
+}

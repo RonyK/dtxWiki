@@ -2460,17 +2460,6 @@ describe("SettingsScreen", () => {
     );
   });
 
-  it("keeps Members & access as one visual surface with nested subsections", () => {
-    const styles = readAppStyles();
-
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*box-shadow:\s*var\(--shadow-1\);/,
-    );
-    expect(styles).toMatch(
-      /\.workspace-members-access-unified \.workspace-settings-card\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/,
-    );
-  });
-
   it("asks before discarding a draft, and only when there is one", async () => {
     // Five policy surfaces used to be five destinations, so losing a draft
     // meant leaving one. As tabs they look like a lightweight toggle, and

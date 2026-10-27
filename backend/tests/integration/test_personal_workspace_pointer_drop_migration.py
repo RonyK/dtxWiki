@@ -1,4 +1,6 @@
 import os
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -6,7 +8,6 @@ from alembic import command
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
-from backend.models.user import User
 from backend.models.workspace import Workspace
 from backend.policy.rbac import grant_workspace_membership
 from backend.tests.integration.test_release_schema_migration import _config
@@ -38,9 +39,9 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
     migrated = False
     try:
         if dialect == "postgresql":
-            assert not (
-                set(inspect(engine).get_table_names()) - {"alembic_version"}
-            ), "PostgreSQL migration tests require an empty, dedicated database"
+            assert not (set(inspect(engine).get_table_names()) - {"alembic_version"}), (
+                "PostgreSQL migration tests require an empty, dedicated database"
+            )
         command.upgrade(config, PARENT_REVISION)
         migrated = True
 
@@ -50,21 +51,34 @@ def test_personal_pointer_round_trip_keeps_workspaces_and_defaults(
             )
             session.add(workspace)
             session.flush()
-            user = User(
-                email="pointer@example.com",
-                password_hash="hash",
-                display_name="Pointer",
-                default_workspace_id=workspace.id,
+            # Use the historical table shape: the current User model includes
+            # authentication columns introduced after this revision.
+            users = sa.Table("users", sa.MetaData(), autoload_with=session.connection())
+            user_id = uuid4()
+            stored_id = user_id.hex if dialect == "sqlite" else user_id
+            stored_workspace_id = (
+                workspace.id.hex if dialect == "sqlite" else workspace.id
             )
-            session.add(user)
-            session.flush()
+            now = datetime.now(UTC)
+            session.execute(
+                users.insert().values(
+                    id=stored_id,
+                    email="pointer@example.com",
+                    password_hash="hash",
+                    display_name="Pointer",
+                    member_search_key="pointer pointer@example.com",
+                    status="active",
+                    session_generation=0,
+                    default_workspace_id=stored_workspace_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
             grant_workspace_membership(
-                session, user_id=user.id, workspace_id=workspace.id, role="owner"
+                session, user_id=user_id, workspace_id=workspace.id, role="owner"
             )
             # The current model no longer maps the pointer, so set it in SQL.
-            session.execute(
-                text(f"UPDATE users SET {POINTER} = default_workspace_id")
-            )
+            session.execute(text(f"UPDATE users SET {POINTER} = default_workspace_id"))
 
         metadata = sa.MetaData()
         with engine.connect() as connection:

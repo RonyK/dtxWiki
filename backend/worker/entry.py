@@ -17,6 +17,7 @@ from sqlalchemy import select
 from backend.app.bootstrap import DatabaseNotCurrentError, verify_database_current
 from backend.app.bootstrap import bootstrap_core as bootstrap_app
 from backend.app.container import BlobStoreProvider, DatabaseProvider
+from backend.app.plugins import load_plugins
 from backend.app.runtime_resources import RuntimeResources
 from backend.app.settings import Settings
 from backend.models.workspace import Workspace
@@ -126,6 +127,7 @@ def _worker_runtime(settings: Settings, *, skip_bootstrap: bool) -> Iterator[Non
     """
 
     bootstrap_requested = not skip_bootstrap and settings.auto_bootstrap
+    load_plugins(settings)
     with ExitStack() as guards:
         try:
             resources = RuntimeResources.for_settings(settings)

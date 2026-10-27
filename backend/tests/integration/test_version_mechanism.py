@@ -300,7 +300,7 @@ def test_direct_alembic_stamp_cannot_relabel_final_schema_as_0001(
     with pytest.raises(RuntimeError, match="stamp_marker_conflict"):
         command.stamp(_alembic_config(sqlite_settings), "bd62193d5cf6")
 
-    assert current_db_alembic_revision(sqlite_settings) == "5c3395a75eb0"
+    assert current_db_alembic_revision(sqlite_settings) == "da94025713de"
     assert _file_fingerprint(database) == before
 
 
@@ -322,7 +322,7 @@ def test_alembic_guard_allows_verified_noop_nonbase_stamps(
         auto_bootstrap=False,
     )
     command.stamp(_alembic_config(head_settings), "head")
-    assert current_db_alembic_revision(head_settings) == "5c3395a75eb0"
+    assert current_db_alembic_revision(head_settings) == "da94025713de"
 
 
 def test_alembic_guard_allows_downgrade_base(sqlite_settings, sqlite_templates):
