@@ -266,6 +266,9 @@ export function ReviewScreen() {
   // Offset cursors repeat after a refresh, so a page requested for the list a
   // decision or refresh has since replaced is recognised by this counter.
   const queuePageRef = useRef(0);
+  // A reload re-enables Load more while an older request may still be in
+  // flight; only the latest request reports its error or clears the spinner.
+  const loadMoreRequestRef = useRef(0);
   useEffect(() => {
     loadMoreGenerationRef.current += 1;
   }, [
@@ -549,6 +552,7 @@ export function ReviewScreen() {
   }, [reviewParam, state]);
 
   async function loadReviews(): Promise<ReviewState> {
+    const queuePage = queuePageRef.current;
     const currentWorkspaceId = workspaceContext?.selectedId || await getCurrentWorkspaceId();
     if (!currentWorkspaceId) {
       throw new Error("Workspace not found");
@@ -566,6 +570,11 @@ export function ReviewScreen() {
       resolveCanEditDirectly(currentWorkspaceId),
       loadReviewPolicySummary(currentWorkspaceId),
     ]);
+    // A decision or bulk refresh replaced the queue while this load was in
+    // flight; its snapshot is older, so keep theirs (an abort is silent).
+    if (queuePageRef.current !== queuePage) {
+      throw new DOMException("Review queue replaced", "AbortError");
+    }
     return {
       workspaceId: currentWorkspaceId,
       reviews: reviewPage.items,
@@ -585,6 +594,9 @@ export function ReviewScreen() {
     }
     const generation = loadMoreGenerationRef.current;
     const queuePage = queuePageRef.current;
+    const request = ++loadMoreRequestRef.current;
+    const owned = () => loadMoreRequestRef.current === request
+      && loadMoreGenerationRef.current === generation && queuePageRef.current === queuePage;
     const cursor = state.nextCursor;
     setLoadingMore(true);
     try {
@@ -592,7 +604,7 @@ export function ReviewScreen() {
         ...reviewListFilters(activeScopeFilter),
         cursor,
       });
-      if (loadMoreGenerationRef.current !== generation || queuePageRef.current !== queuePage) {
+      if (!owned()) {
         return;
       }
       // The cursor must still match too, and rows already listed are not
@@ -613,13 +625,13 @@ export function ReviewScreen() {
           : current,
       );
     } catch (exc) {
-      if (loadMoreGenerationRef.current === generation) {
+      if (owned()) {
         setError(
           reviewErrorMessage(exc, t("errors.loadMore")),
         );
       }
     } finally {
-      setLoadingMore(false);
+      if (loadMoreRequestRef.current === request) setLoadingMore(false);
     }
   }
 
