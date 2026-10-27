@@ -4,6 +4,9 @@
 
 ### Fixes
 
+- Apply MCP Access Key workspace edits to existing streamable MCP sessions
+  on the next request instead of keeping the workspaces granted at
+  initialize.
 - Review evidence now distinguishes the current document destination from the
   exact reviewed Context version and its comparison baseline. Group approvals
   use a fixed, signed selection and preserve individual results across batches;
