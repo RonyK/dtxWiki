@@ -25,15 +25,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import ExitStack
+from contextlib import AsyncExitStack, ExitStack
+from datetime import timedelta
+from uuid import UUID, uuid4
 
 import anyio
 import pytest
 from fastapi.testclient import TestClient
+from mcp import types as mcp_types
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.shared.exceptions import McpError
 from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.shared.message import ServerMessageMetadata
 from sqlalchemy import select
+from starlette.requests import Request
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
@@ -101,58 +106,87 @@ def test_session_manager_lifespan_singleton_per_app(page_service):
             streamable_app.state.mcp_session_manager,
             StreamableHTTPSessionManager,
         )
-        # ContextVars must be installed for the dispatcher regardless of
-        # mode (the dispatcher reads them at tool dispatch time).
-        assert streamable_app.state.mcp_actor_var is not None
-        assert streamable_app.state.mcp_page_service_var is not None
-
     with TestClient(json_app) as _:
         assert json_app.state.mcp_session_manager is None
-        # Vars still present so the POST handler shape is uniform.
-        assert json_app.state.mcp_actor_var is not None
 
 
-def test_streamable_dispatcher_binds_prompt_resource_contextvars(
+async def _send_bound_dispatcher_request(client, request, result_type, *, app, actor):
+    http_request = Request(
+        {
+            "type": "http",
+            "app": app,
+            "headers": [(b"mcp-session-id", uuid4().hex.encode())],
+            "state": {"actor": actor},
+        }
+    )
+    return await client.send_request(
+        mcp_types.ClientRequest(request),
+        result_type,
+        metadata=ServerMessageMetadata(request_context=http_request),
+    )
+
+
+def test_streamable_dispatcher_binds_prompt_resource_request_metadata(
     page_service, mcp_default_actor
 ):
-    """The lifespan dispatcher must expose prompts/resources through bindings."""
-
+    """All discovery surfaces use the Request carried by their SDK message."""
     actor = mcp_default_actor(scopes=("*",))
     workspace_id = actor.workspace_id
     assert workspace_id is not None
-
     app = create_app(settings=_make_settings("streamable"), page_service=page_service)
-    with TestClient(app) as _:
+
+    with TestClient(app):
         dispatcher = app.state.mcp_session_manager.app
-        actor_token = app.state.mcp_actor_var.set(actor)
-        page_service_token = app.state.mcp_page_service_var.set(page_service)
-        session_factory_token = app.state.mcp_session_factory_var.set(
-            page_service.session_factory
-        )
-        try:
 
-            async def run():
-                async with create_connected_server_and_client_session(
-                    dispatcher
-                ) as client:
-                    prompts = await client.list_prompts()
-                    resources = await client.list_resources()
-                    guide = await client.read_resource(
-                        f"dtxwiki://workspaces/{workspace_id}/guide"
+        async def run():
+            async with create_connected_server_and_client_session(dispatcher) as client:
+                async def send(request, result_type):
+                    return await _send_bound_dispatcher_request(
+                        client, request, result_type, app=app, actor=actor
                     )
-                    assert "dtxwiki.context_workflow" in {
-                        prompt.name for prompt in prompts.prompts
-                    }
-                    assert "workspace-guide" in {
-                        resource.name for resource in resources.resources
-                    }
-                    assert guide.contents[0].mimeType == "application/json"
 
-            anyio.run(run)
-        finally:
-            app.state.mcp_actor_var.reset(actor_token)
-            app.state.mcp_page_service_var.reset(page_service_token)
-            app.state.mcp_session_factory_var.reset(session_factory_token)
+                tools = await send(
+                    mcp_types.ListToolsRequest(), mcp_types.ListToolsResult
+                )
+                prompts = await send(
+                    mcp_types.ListPromptsRequest(), mcp_types.ListPromptsResult
+                )
+                prompt = await send(
+                    mcp_types.GetPromptRequest(
+                        params=mcp_types.GetPromptRequestParams(
+                            name="dtxwiki.context_workflow",
+                            arguments={"workspace_id": str(workspace_id)},
+                        )
+                    ),
+                    mcp_types.GetPromptResult,
+                )
+                resources = await send(
+                    mcp_types.ListResourcesRequest(), mcp_types.ListResourcesResult
+                )
+                templates = await send(
+                    mcp_types.ListResourceTemplatesRequest(),
+                    mcp_types.ListResourceTemplatesResult,
+                )
+                guide = await send(
+                    mcp_types.ReadResourceRequest(
+                        params=mcp_types.ReadResourceRequestParams(
+                            uri=f"dtxwiki://workspaces/{workspace_id}/guide"
+                        )
+                    ),
+                    mcp_types.ReadResourceResult,
+                )
+                assert "guide" in {tool.name for tool in tools.tools}
+                assert "dtxwiki.context_workflow" in {
+                    item.name for item in prompts.prompts
+                }
+                assert prompt.messages
+                assert "workspace-guide" in {
+                    item.name for item in resources.resources
+                }
+                assert templates.resourceTemplates
+                assert guide.contents[0].mimeType == "application/json"
+
+        anyio.run(run)
 
 
 def test_streamable_dispatcher_blocks_disabled_client_on_all_surfaces(
@@ -163,53 +197,53 @@ def test_streamable_dispatcher_blocks_disabled_client_on_all_surfaces(
     assert workspace_id is not None
     assert actor.token_id is not None
     with page_service.session_factory.begin() as session:
-        client_row = MCPClient(
-            workspace_id=workspace_id,
-            name="disabled-streamable-surfaces-client",
-            client_type="generic",
-            scopes=["*"],
-            status="disabled",
-            runtime_binding_key=f"api_token:{actor.token_id}",
+        session.add(
+            MCPClient(
+                workspace_id=workspace_id,
+                name="disabled-streamable-surfaces-client",
+                client_type="generic",
+                scopes=["*"],
+                status="disabled",
+                runtime_binding_key=f"api_token:{actor.token_id}",
+            )
         )
-        session.add(client_row)
-        session.flush()
 
     app = create_app(settings=_make_settings("streamable"), page_service=page_service)
-    with TestClient(app) as _:
+    with TestClient(app):
         dispatcher = app.state.mcp_session_manager.app
-        actor_token = app.state.mcp_actor_var.set(actor)
-        page_service_token = app.state.mcp_page_service_var.set(page_service)
-        session_factory_token = app.state.mcp_session_factory_var.set(
-            page_service.session_factory
-        )
-        try:
 
-            async def run():
-                async with create_connected_server_and_client_session(
-                    dispatcher
-                ) as client:
-                    calls = (
-                        client.list_tools(),
-                        client.get_prompt(
-                            "dtxwiki.context_workflow",
-                            {"workspace_id": str(workspace_id)},
+        async def run():
+            async with create_connected_server_and_client_session(dispatcher) as client:
+                requests = (
+                    (mcp_types.ListToolsRequest(), mcp_types.ListToolsResult),
+                    (
+                        mcp_types.GetPromptRequest(
+                            params=mcp_types.GetPromptRequestParams(
+                                name="dtxwiki.context_workflow",
+                                arguments={"workspace_id": str(workspace_id)},
+                            )
                         ),
-                        client.read_resource(
-                            f"dtxwiki://workspaces/{workspace_id}/guide"
+                        mcp_types.GetPromptResult,
+                    ),
+                    (
+                        mcp_types.ReadResourceRequest(
+                            params=mcp_types.ReadResourceRequestParams(
+                                uri=f"dtxwiki://workspaces/{workspace_id}/guide"
+                            )
                         ),
-                    )
-                    for call in calls:
-                        with pytest.raises(McpError) as error:
-                            await call
-                        assert error.value.error.data["error_code"] == (
-                            "mcp_client_disabled"
+                        mcp_types.ReadResourceResult,
+                    ),
+                )
+                for request, result_type in requests:
+                    with pytest.raises(McpError) as error:
+                        await _send_bound_dispatcher_request(
+                            client, request, result_type, app=app, actor=actor
                         )
+                    assert error.value.error.data["error_code"] == (
+                        "mcp_client_disabled"
+                    )
 
-            anyio.run(run)
-        finally:
-            app.state.mcp_actor_var.reset(actor_token)
-            app.state.mcp_page_service_var.reset(page_service_token)
-            app.state.mcp_session_factory_var.reset(session_factory_token)
+        anyio.run(run)
 
 
 def test_json_stateless_path_unchanged(page_service):
@@ -474,71 +508,132 @@ def test_resolve_and_check_allows_own_workspace(page_service, mcp_default_actor)
 
 
 # ---------------------------------------------------------------------------
-# SEC-4 — Concurrent ContextVar leak regression
+# SEC-4 — Concurrent SDK message binding regression
 # ---------------------------------------------------------------------------
 
 
-def test_dispatcher_actor_contextvar_no_leak_between_concurrent_requests(
-    page_service, mcp_default_actor
+def test_dispatcher_request_bindings_do_not_leak_between_sdk_sessions(
+    page_service, monkeypatch
 ):
-    """SEC-4: two concurrent dispatcher invocations with distinct actor
-    contexts MUST each see their own actor — no cross-contamination via
-    the shared ``app.state.mcp_actor_var`` ContextVar.
+    """Two credential-bound SDK sessions keep their own crossed requests."""
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
 
-    Negative-test rule (ADR A6): positive control asserts each task
-    returns *its own* actor.actor_id; negative would be a leaked actor
-    surfacing in the other task (the assertion catches the leak by id
-    equality). Pins the SDK contract Phase_2 §10 'Dispatcher pattern
-    actor context leak'.
+    import backend.api.mcp_http as transport
 
-    The test uses ``asyncio.gather`` to drive both tasks on the same
-    event loop with interleaved awaits so a ContextVar that was
-    accidentally set as a module-level global (instead of per-task)
-    would surface as a flipped actor_id on at least one task.
-    """
-
-    import asyncio
-
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
+    setup, workspace_a, workspace_b, issued_a = _workspace_grant_test_setup(
+        page_service
     )
-
-    with TestClient(app) as _:
-        actor_var = app.state.mcp_actor_var
-
-        actor_a = mcp_default_actor(scopes=("mcp:read",), actor_id="actor-A")
-        actor_b = mcp_default_actor(scopes=("mcp:read",), actor_id="actor-B")
-
-        async def _bound_task(actor):
-            token = actor_var.set(actor)
-            try:
-                # Yield control multiple times so the two tasks interleave
-                # — if the ContextVar were shared across tasks, the second
-                # task's set() would clobber the first's view.
-                await asyncio.sleep(0)
-                observed_1 = actor_var.get()
-                await asyncio.sleep(0)
-                observed_2 = actor_var.get()
-                return observed_1.actor_id, observed_2.actor_id
-            finally:
-                actor_var.reset(token)
-
-        async def _run():
-            return await asyncio.gather(
-                _bound_task(actor_a),
-                _bound_task(actor_b),
-            )
-
-        results = asyncio.run(_run())
-
-    # Each task must see its own actor on both reads (no leak).
-    assert results[0] == ("actor-A", "actor-A"), (
-        f"SEC-4 leak: task A observed {results[0]} (expected ('actor-A', 'actor-A'))"
+    issued_response = setup.post(
+        "/api/v1/auth/tokens",
+        json={
+            "workspace_grants": [{"workspace_id": str(workspace_b)}],
+            "name": "second-workspace-pat",
+            "scopes": ["mcp:read"],
+        },
     )
-    assert results[1] == ("actor-B", "actor-B"), (
-        f"SEC-4 leak: task B observed {results[1]} (expected ('actor-B', 'actor-B'))"
-    )
+    assert issued_response.status_code == 201, issued_response.text
+    issued_b = issued_response.json()["data"]
+    token_a = UUID(issued_a["api_token"]["id"])
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+    observed = []
+    app = create_app(settings=_make_settings("streamable"), page_service=page_service)
+
+    async def inspect_crossed_request(name, arguments, **kwargs):
+        assert name == "guide"
+        actor = kwargs["actor"]
+        if actor.token_id == token_a:
+            first_entered.set()
+            await asyncio.wait_for(second_entered.wait(), timeout=10)
+        else:
+            await asyncio.wait_for(first_entered.wait(), timeout=10)
+            second_entered.set()
+
+        # Resolve again after crossing another SDK message to prove that the
+        # SDK request context still belongs to this invocation.
+        binding = transport._dispatcher_request_bindings(
+            app.state.mcp_session_manager.app, app
+        )
+        assert binding.actor == actor
+        assert binding.mcp_session_id == kwargs["mcp_session_id"]
+        snapshot = {
+            "token_id": str(actor.token_id),
+            "allowed_workspaces": sorted(map(str, actor.token_workspace_ids)),
+            "target_workspace": arguments["workspace_id"],
+            "session_id": kwargs["mcp_session_id"],
+        }
+        observed.append(snapshot)
+        return mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text=json.dumps(snapshot))]
+        )
+
+    monkeypatch.setattr(transport, "call_tool_async", inspect_crossed_request)
+
+    async def run():
+        with _UvicornServer(app) as server:
+            async with AsyncExitStack() as stack:
+                clients = []
+                session_ids = []
+                for issued in (issued_a, issued_b):
+                    read_stream, write_stream, get_session_id = (
+                        await stack.enter_async_context(
+                            streamablehttp_client(
+                                url=f"{server.url}/mcp",
+                                headers={
+                                    "Authorization": f"Bearer {issued['plain_token']}"
+                                },
+                            )
+                        )
+                    )
+                    client = await stack.enter_async_context(
+                        ClientSession(
+                            read_stream,
+                            write_stream,
+                            read_timeout_seconds=timedelta(seconds=15),
+                        )
+                    )
+                    await client.initialize()
+                    clients.append(client)
+                    session_ids.append(get_session_id())
+                assert all(session_ids)
+                assert session_ids[0] != session_ids[1]
+
+                async def request(client, workspace_id):
+                    return await client.send_request(
+                        mcp_types.ClientRequest(
+                            mcp_types.CallToolRequest(
+                                params=mcp_types.CallToolRequestParams(
+                                    name="guide",
+                                    arguments={"workspace_id": str(workspace_id)},
+                                )
+                            )
+                        ),
+                        mcp_types.CallToolResult,
+                    )
+
+                results = await asyncio.gather(
+                    request(clients[0], workspace_a),
+                    request(clients[1], workspace_b),
+                )
+                for index, (issued, workspace_id) in enumerate(
+                    ((issued_a, workspace_a), (issued_b, workspace_b))
+                ):
+                    expected = {
+                        "token_id": issued["api_token"]["id"],
+                        "allowed_workspaces": [str(workspace_id)],
+                        "target_workspace": str(workspace_id),
+                        "session_id": session_ids[index],
+                    }
+                    assert results[index].isError is False
+                    assert json.loads(results[index].content[0].text) == expected
+                    assert expected in observed
+                assert len(observed) == 2
+
+    try:
+        asyncio.run(run())
+    finally:
+        setup.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1194,84 +1289,6 @@ def test_get_mcp_handshake_does_not_call_workspace_resolve(
         f"Task 2.3: GET handshake MUST NOT call resolve_and_check; "
         f"spy captured {calls} (status was {status})"
     )
-
-
-def test_post_initialize_triggers_resolve_lazy_positive_control(
-    page_service, monkeypatch, mcp_default_actor
-):
-    """Task 2.3 positive control: a tool call *does* trigger
-    ``resolve_and_check`` so the GET handshake assertion above is not a
-    false positive (an environment where ``resolve_and_check`` were
-    permanently broken would also see zero calls).
-
-    Directly invokes the dispatcher's bound ``_call_tool`` closure via
-    a search request (TOOL_REQUIRED_ROLES["search"] == "viewer" → action
-    "read"). Confirms the spy fires exactly once.
-    """
-    import asyncio
-
-    import backend.api.mcp_http as mcp_http_module
-
-    calls: list[tuple] = []
-    original = mcp_http_module.resolve_and_check
-
-    def _spy(*, session, actor, action):
-        calls.append((actor.actor_id, action))
-        return original(session=session, actor=actor, action=action)
-
-    monkeypatch.setattr(mcp_http_module, "resolve_and_check", _spy)
-
-    app = create_app(
-        settings=_make_settings("streamable"),
-        page_service=page_service,
-    )
-    actor = mcp_default_actor(scopes=("mcp:read",))
-
-    with TestClient(app) as _:
-        # Bind contextvars manually then invoke the dispatcher's tool path
-        # via the module-private helper closure. This exercises the lazy
-        # resolve_and_check inside @call_tool without depending on the SDK
-        # SSE plumbing.
-        from backend.services.page_service import PageService  # noqa: F401
-
-        actor_var = app.state.mcp_actor_var
-        page_service_var = app.state.mcp_page_service_var
-        session_factory_var = app.state.mcp_session_factory_var
-        settings_var = app.state.mcp_settings_var
-
-        actor_token = actor_var.set(actor)
-        ps_token = page_service_var.set(page_service)
-        sf_token = session_factory_var.set(page_service.session_factory)
-        s_token = settings_var.set(app.state.settings)
-
-        try:
-            # The dispatcher's _call_tool is bound on the MCPServer; we
-            # invoke the same workspace check it would invoke by calling
-            # _map_action + resolve_and_check directly under the spy.
-            action = mcp_http_module._map_action("search")
-            assert action == "read"
-            with page_service.session_factory() as session:
-                mcp_http_module.resolve_and_check(
-                    session=session,
-                    actor=actor,
-                    action=action,
-                )
-        finally:
-            settings_var.reset(s_token)
-            session_factory_var.reset(sf_token)
-            page_service_var.reset(ps_token)
-            actor_var.reset(actor_token)
-
-        # Use asyncio to keep the test body parallel-friendly even though
-        # the call above is sync — this matches the actual dispatcher
-        # invocation path used by the SDK.
-        asyncio.get_event_loop_policy()
-
-    assert len(calls) == 1, (
-        f"Positive control: a tool-name workspace check MUST trigger "
-        f"resolve_and_check once; got {calls}"
-    )
-    assert calls[0][1] == "read"
 
 
 # ---------------------------------------------------------------------------
@@ -3455,6 +3472,139 @@ async def _call_tool_via_sdk(
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             return await session.call_tool(tool_name, arguments)
+
+
+def _workspace_grant_test_setup(page_service):
+    from backend.models.user import User
+    from backend.models.workspace import Workspace
+    from backend.policy.rbac import grant_workspace_membership
+    from backend.scripts.seed_dev import seed_default_workspace
+    from backend.tests.integration._cross_transport_helpers import make_client
+
+    setup = make_client(page_service)
+    with page_service.session_factory.begin() as session:
+        workspace_a = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        ).id
+        user = session.scalar(select(User).where(User.email == "test@example.com"))
+        workspace_b = seed_default_workspace(
+            session, slug="workspace-grant-target", title="Workspace Grant Target"
+        ).id
+        grant_workspace_membership(
+            session, user_id=user.id, workspace_id=workspace_b, role="owner"
+        )
+    issued = setup.post(
+        "/api/v1/auth/tokens",
+        json={
+            "workspace_grants": [{"workspace_id": str(workspace_a)}],
+            "name": "workspace-grant-pat",
+            "scopes": ["mcp:read"],
+        },
+    )
+    assert issued.status_code == 201, issued.text
+    return setup, workspace_a, workspace_b, issued.json()["data"]
+
+
+@pytest.mark.parametrize("mode", ["streamable", "auto"])
+def test_sdk_workspace_grant_changes_keep_existing_session(
+    page_service, monkeypatch, mode
+):
+    """Workspace edits reach the next SDK message without reinitializing."""
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    import backend.api.mcp_http as transport
+
+    setup, workspace_a, workspace_b, issued = _workspace_grant_test_setup(page_service)
+    token = issued["plain_token"]
+    token_id = issued["api_token"]["id"]
+    observed = []
+    original = transport.call_tool_async
+
+    async def spy(name, arguments, **kwargs):
+        observed.append(
+            (
+                name,
+                kwargs["actor"].token_id,
+                set(kwargs["actor"].token_workspace_ids),
+                kwargs["mcp_session_id"],
+            )
+        )
+        return await original(name, arguments, **kwargs)
+
+    monkeypatch.setattr(transport, "call_tool_async", spy)
+    app = create_app(settings=_make_settings(mode), page_service=page_service)
+
+    async def run():
+        with _UvicornServer(app) as server:
+            async with streamablehttp_client(
+                url=f"{server.url}/mcp",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as (read_stream, write_stream, get_session_id):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=15),
+                ) as session:
+                    await session.initialize()
+                    session_id = get_session_id()
+                    assert session_id
+
+                    async def assert_workspaces(expected):
+                        result = await session.call_tool("list_my_workspaces", {})
+                        assert result.isError is False
+                        assert {
+                            UUID(row["id"])
+                            for row in result.structuredContent["data"]["workspaces"]
+                        } == expected
+                        assert observed[-1][2] == expected
+                        assert get_session_id() == session_id
+
+                    async def replace_workspaces(workspaces):
+                        response = await asyncio.to_thread(
+                            setup.patch,
+                            f"/api/v1/auth/tokens/{token_id}",
+                            json={
+                                "workspace_grants": [
+                                    {"workspace_id": str(workspace_id)}
+                                    for workspace_id in workspaces
+                                ]
+                            },
+                        )
+                        assert response.status_code == 200, response.text
+
+                    await assert_workspaces({workspace_a})
+                    await replace_workspaces([workspace_b])
+                    await assert_workspaces({workspace_b})
+                    permitted = await session.call_tool(
+                        "guide", {"workspace_id": str(workspace_b)}
+                    )
+                    assert permitted.isError is False
+                    assert permitted.structuredContent["envelope"]["result_status"] == (
+                        "succeeded"
+                    )
+                    denied = await session.call_tool(
+                        "guide", {"workspace_id": str(workspace_a)}
+                    )
+                    assert denied.isError is True
+                    assert denied.structuredContent is None
+                    assert [content.text for content in denied.content] == [
+                        "workspace token claim mismatch"
+                    ]
+                    await replace_workspaces([workspace_a, workspace_b])
+                    await assert_workspaces({workspace_a, workspace_b})
+                    permitted = await session.call_tool(
+                        "guide", {"workspace_id": str(workspace_b)}
+                    )
+                    assert permitted.isError is False
+                    assert get_session_id() == session_id
+                    assert {row[1] for row in observed} == {UUID(token_id)}
+                    assert {row[3] for row in observed} == {session_id}
+
+    try:
+        asyncio.run(run())
+    finally:
+        setup.close()
 
 
 def test_sdk_streamable_pat_call_tool_uses_argument_workspace(page_service):
