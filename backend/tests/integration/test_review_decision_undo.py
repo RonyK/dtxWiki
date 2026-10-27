@@ -299,37 +299,40 @@ def test_undo_requires_the_unchanged_result_of_a_recorded_decision(session_facto
         with pytest.raises(ReviewDecisionUndoUnavailableError):
             _undo(session, workspace.id, draft.review_item_id, decision_id)
 
-        # A decision recorded before undo existed explains why undo is unavailable.
+        # A decision recorded before undo existed explains why undo is
+        # unavailable, without a substitute recovery path.
         legacy = _seed_review(
             session,
             workspace.id,
             published.page_id,
             version_id=draft.draft_version_id,
-            status="approved",
+            status="rejected",
         )
         session.add(
             ReviewDecision(
                 workspace_id=workspace.id,
                 review_item_id=legacy.id,
-                decision_type="approve",
+                decision_type="reject",
                 actor_type="human",
                 actor_id=ACTOR_UUID,
-                resulting_review_status="approved",
-                resulting_change_set_status="approved",
+                resulting_review_status="rejected",
+                resulting_change_set_status="rejected",
             )
         )
         session.flush()
         unavailable = _detail(session, workspace.id, legacy.id).undo
-        assert (unavailable.available, unavailable.reason_code) == (
-            False, "not_recorded"
-        )
+        assert (
+            unavailable.available,
+            unavailable.reason_code,
+            unavailable.restore_version_id,
+        ) == (False, "not_recorded", None)
 
         # Publishing revives an archived page; undo would not re-archive it.
         _, archived, revived = _published_page_with_draft(session, "Undo archived")
         session.get(ContextPage, archived.page_id).lifecycle_status = "archived"
         unavailable = _approve(session, workspace.id, revived.review_item_id).undo
         assert (unavailable.available, unavailable.reason_code) == (
-            False, "not_recorded"
+            False, "unsupported_effect"
         )
 
 

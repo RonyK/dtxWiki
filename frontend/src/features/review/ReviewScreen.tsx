@@ -262,6 +262,9 @@ export function ReviewScreen() {
   // after a tab/risk/scope switch (stale closure or in-flight request) is
   // dropped instead of contaminating the freshly loaded list.
   const loadMoreGenerationRef = useRef(0);
+  // Offset cursors repeat after a refresh, so a page requested for the list a
+  // decision or refresh has since replaced is recognised by this counter.
+  const queuePageRef = useRef(0);
   useEffect(() => {
     loadMoreGenerationRef.current += 1;
   }, [
@@ -285,6 +288,9 @@ export function ReviewScreen() {
   ], {
     errorMessage: t("errors.load", { defaultValue: "Failed to load Review" }),
     formatError: reviewErrorMessage,
+    onSuccess: () => {
+      queuePageRef.current += 1;
+    },
     fallbackData: {
       workspaceId: "",
       reviews: [],
@@ -569,6 +575,7 @@ export function ReviewScreen() {
       return;
     }
     const generation = loadMoreGenerationRef.current;
+    const queuePage = queuePageRef.current;
     const cursor = state.nextCursor;
     setLoadingMore(true);
     try {
@@ -576,16 +583,19 @@ export function ReviewScreen() {
         ...reviewListFilters(activeScopeFilter),
         cursor,
       });
-      if (loadMoreGenerationRef.current !== generation) {
+      if (loadMoreGenerationRef.current !== generation || queuePageRef.current !== queuePage) {
         return;
       }
-      // The cursor must still match too: a decision/refresh reload replaces
-      // the list without changing filters, and this page belongs to the old one.
+      // The cursor must still match too, and rows already listed are not
+      // appended twice.
       setState((current) =>
         current && current.workspaceId === state.workspaceId && current.nextCursor === cursor
           ? {
               ...current,
-              reviews: [...current.reviews, ...nextPage.items],
+              reviews: [
+                ...current.reviews,
+                ...nextPage.items.filter((item) => !current.reviews.some((review) => review.id === item.id)),
+              ],
               deferredReconciliationCount:
                 deferredReconciliationCount(nextPage),
               selectedReviewId: current.selectedReviewId,
@@ -630,6 +640,7 @@ export function ReviewScreen() {
     detailCacheRef.current.clear();
     setDetailReload((value) => value + 1);
     setRefreshFailed(true);
+    queuePageRef.current += 1;
     setState((current) => current && current.workspaceId === receipt.workspace_id ? {
       ...current, reviews: stillDecided
         ? current.reviews.filter((review) => review.id !== receipt.id)
@@ -650,21 +661,21 @@ export function ReviewScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDetail, selectedDetailKey, uncertainDecision, draftKey, busyId, auth?.user?.user_id]);
 
-  async function recoverDecision(pending: PendingReviewDecision, key: string, generation: number): Promise<boolean> {
+  async function recoverDecision(pending: PendingReviewDecision, key: string, generation: number): Promise<ReviewItem | null> {
     const fresh = await getReview(pending.workspaceId, pending.reviewId);
-    if (generation !== loadMoreGenerationRef.current) return false;
+    if (generation !== loadMoreGenerationRef.current) return null;
     const receipt = hasDecisionReceipt(fresh, pending, auth?.user?.user_id);
     if (!receipt) {
       setRefreshFailed(true);
       setError(t("workflow.decisionOutcomeUnknown"));
-      return false;
+      return null;
     }
     const displayed = (lifecycleTab === "pending"
       ? groupPendingReviewsByPage(state?.reviews ?? [], t)
       : groupReviewsByDate(state?.reviews ?? [])).flatMap((group) => group.reviews.map((review) => review.id));
     setNextReviewOrder({ after: displayed.filter((id) => id !== fresh.id), before: [] });
     storeDecisionReceipt(fresh, key, generation);
-    return true;
+    return fresh;
   }
 
   async function retryPendingDecision() {
@@ -792,6 +803,7 @@ export function ReviewScreen() {
       }
       nextId ??= order.before.find((id) => reviews.some((review) => review.id === id));
       nextId ??= reviews[0]?.id;
+      queuePageRef.current += 1;
       setState((current) => current?.workspaceId === state.workspaceId ? { ...current, reviews, nextCursor: cursor } : current);
       if (nextId) {
         setReviewParam(nextId);
@@ -964,6 +976,7 @@ export function ReviewScreen() {
       listRecentReviewDecisions(workspaceId, { limit: 5 }),
     ]);
     if (!mountedRef.current || generation !== loadMoreGenerationRef.current) return;
+    queuePageRef.current += 1;
     setRefreshFailed(false);
     setSettledReviewStates({});
     setGroupSnapshotTotals({});
@@ -995,8 +1008,14 @@ export function ReviewScreen() {
     setError(null);
     try {
       const generation = loadMoreGenerationRef.current;
-      if (uncertainDecision && draftKey && !await recoverDecision(uncertainDecision, draftKey, generation)) return;
-      const receipt = completedReview?.id === reviewParam ? completedReview : null;
+      let recovered: ReviewItem | null = null;
+      if (uncertainDecision && draftKey) {
+        recovered = await recoverDecision(uncertainDecision, draftKey, generation);
+        if (!recovered) return;
+      }
+      // A receipt recovered just now is not in this render's completedReview.
+      const latestReceipt = recovered ?? completedReview;
+      const receipt = latestReceipt?.id === reviewParam ? latestReceipt : null;
       await refreshQueueAfterBulk(Boolean(receipt));
       if (receipt && state?.workspaceId) {
         const fresh = await getReview(state.workspaceId, receipt.id);
@@ -2990,7 +3009,7 @@ function ReviewDetail({
       </header>
       {review.undo ? (
         <ReviewUndoNotice busy={busy} onStartDraft={onStartDraft} undo={review.undo} workspaceId={workspaceId} />
-      ) : isResolved && review.review_type !== "context_update" ? (
+      ) : isResolved && review.review_type !== "context_update" && reviewStateIsDecided(review) ? (
         <StatusBanner tone="info">{t("undo.unsupportedReviewType")}</StatusBanner>
       ) : null}
       {!isReadOnly && isReconciliation ? (
@@ -3530,6 +3549,14 @@ function reviewPublicationTarget(review: ReviewItem): ReviewContentTarget | null
     && operation.content?.is_current_candidate === true,
   );
   return singleCandidate ? candidate.content! : null;
+}
+
+/** Whether the review's current status is the result of its latest decision. */
+function reviewStateIsDecided(review: ReviewItem): boolean {
+  const latest = review.decisions.find((decision) => decision.decision_type !== "revision_submitted");
+  return latest != null
+    && ["approve", "reject", "request_changes"].includes(latest.decision_type)
+    && latest.resulting_review_status === review.status;
 }
 
 function ReviewUndoNotice({ undo, workspaceId, busy, onStartDraft }: {

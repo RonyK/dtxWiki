@@ -630,9 +630,13 @@ class ReviewSelectionService:
                             ReviewBulkItemOutcome(
                                 id=review_id,
                                 outcome="approved",
+                                # Only an undoable decision is named; the row
+                                # offers undo exactly when this is set.
                                 decision_id=(
                                     decided.undo.decision_id
-                                    if decided is not None and decided.undo is not None
+                                    if decided is not None
+                                    and decided.undo is not None
+                                    and decided.undo.available
                                     else None
                                 ),
                                 **metadata,

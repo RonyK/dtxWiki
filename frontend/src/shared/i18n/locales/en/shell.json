@@ -412,7 +412,7 @@
     "closeAction": "Close",
     "removedLine": "Removed line",
     "restore": "Start a new draft from this version",
-    "restoring": "Restoring"
+    "restoring": "Creating draft"
   },
   "history": {
     "changes": "Changes",

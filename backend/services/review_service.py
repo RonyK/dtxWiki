@@ -2685,7 +2685,16 @@ class ReviewService:
                     if request.decision_type == "reject"
                     else {}
                 ),
-                **({"effect": effect} if effect is not None else {}),
+                **(
+                    {"effect": effect}
+                    if effect is not None
+                    # Decided while undo existed, but with an effect undo does
+                    # not reverse (e.g. reviving an archived page).
+                    else {"effect_unsupported": True}
+                    if review.review_type == "context_update"
+                    and isinstance(locked_page, ContextPage)
+                    else {}
+                ),
             },
         )
         detail = self._detail(
@@ -2962,7 +2971,19 @@ class ReviewService:
     def _decision_effect(
         session: Session, review: ReviewItem, decision: ReviewDecision
     ) -> dict | None:
-        """The effect recorded with ``decision`` (None before undo existed).
+        """The effect recorded with ``decision`` (None if none is usable)."""
+
+        payload = ReviewService._decision_audit_payload(session, review, decision)
+        effect = (payload or {}).get("effect")
+        if isinstance(effect, dict) and effect.get("format") == EFFECT_FORMAT:
+            return effect
+        return None
+
+    @staticmethod
+    def _decision_audit_payload(
+        session: Session, review: ReviewItem, decision: ReviewDecision
+    ) -> dict | None:
+        """The review.decision audit payload written with ``decision``.
 
         The decision row and its audit share one transaction, so a window
         around the decision finds the audit through the (workspace_id,
@@ -2983,10 +3004,7 @@ class ReviewService:
         for event in events:
             payload = event.payload or {}
             if payload.get("decision_id") == str(decision.id):
-                effect = payload.get("effect")
-                if isinstance(effect, dict) and effect.get("format") == EFFECT_FORMAT:
-                    return effect
-                return None
+                return payload
         return None
 
     @staticmethod
@@ -3076,9 +3094,13 @@ class ReviewService:
             ):
                 return None
             assert decision is not None
-            # A missing effect must not look like a missing feature. Recovery
-            # uses only the actor-visible, exact versions already projected in
-            # this review's evidence; a parent draft is not an old publication.
+            payload = self._decision_audit_payload(session, review, decision) or {}
+            # Decided before undo existed: nothing was recorded. Such decisions
+            # are not undoable and get no substitute recovery path either.
+            unsupported = "effect" in payload or bool(payload.get("effect_unsupported"))
+            # Recovery uses only the actor-visible, exact versions already
+            # projected in this review's evidence; a parent draft is not an old
+            # publication.
             operations = [
                 operation
                 for operation in (evidence.operations if evidence else ())
@@ -3098,18 +3120,16 @@ class ReviewService:
             }
             restore = (
                 next(iter(versions.values()))
-                if decision.decision_type == "reject" and len(versions) == 1
+                if unsupported
+                and decision.decision_type == "reject"
+                and len(versions) == 1
                 else None
             )
             return ReviewDecisionUndo(
                 decision_id=decision.id,
                 decision_type=decision.decision_type,
                 available=False,
-                reason_code=(
-                    "not_recorded"
-                    if self._decision_effect(session, review, decision) is None
-                    else "unsupported_effect"
-                ),
+                reason_code="unsupported_effect" if unsupported else "not_recorded",
                 page_id=page_id,
                 restore_version_id=restore.candidate_version_id if restore else None,
                 restore_version_no=restore.candidate_version_no if restore else None,

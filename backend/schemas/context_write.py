@@ -1029,7 +1029,7 @@ class ReviewBulkItemOutcome(BaseModel):
     reason: str | None = None
     target_title: str | None = None
     target_version_no: int | None = None
-    # approved: the decision a per-document undo names.
+    # approved and undoable now: the decision a per-document undo names.
     decision_id: UUID | None = None
 
     model_config = ConfigDict(extra="forbid")

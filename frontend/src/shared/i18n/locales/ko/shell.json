@@ -412,7 +412,7 @@
     "closeAction": "닫기",
     "removedLine": "삭제된 줄",
     "restore": "이 버전으로 새 초안 만들기",
-    "restoring": "복원 중"
+    "restoring": "새 초안 만드는 중"
   },
   "history": {
     "changes": "변경 내용",

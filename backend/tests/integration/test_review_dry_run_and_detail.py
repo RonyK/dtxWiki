@@ -493,6 +493,10 @@ def test_selection_approves_newest_selected_draft_and_settles_earlier_one(
         page_service, workspace_id, review_id, 1
     )
     newest = str(newer.review_item_id)
+    # Approving revives the archived page, an effect undo does not reverse, so
+    # the approved row must not offer a per-document undo.
+    with page_service.session_factory.begin() as session:
+        session.get(ContextPage, UUID(page_id)).lifecycle_status = "archived"
 
     # Listed oldest first, the newest draft still becomes the approval basis.
     selection = _selection(client, workspace_id, review_item_ids=[older, newest])
@@ -506,6 +510,8 @@ def test_selection_approves_newest_selected_draft_and_settles_earlier_one(
     data = result.json()["data"]
     assert data["approved"] == [newest]
     assert data["auto_settled_review_item_ids"] == [older]
+    approved = next(item for item in data["outcomes"] if item["id"] == newest)
+    assert approved["decision_id"] is None
     with page_service.session_factory() as session:
         page = session.get(ContextPage, UUID(page_id))
         assert page.current_published_version_id == newer.draft_version_id

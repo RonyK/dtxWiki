@@ -2665,6 +2665,41 @@ describe("ReviewScreen", () => {
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 
+  it("drops a load-more page requested before a decision refreshed the queue", async () => {
+    const user = userEvent.setup();
+    const current = reviewItem({ targetTitle: "Decided first" });
+    let approved = false;
+    let releaseStalePage: () => void = () => {};
+    mockReviewQueue([current], "review-offset:50", (url) => {
+      if (url.endsWith("/reviews/review-1/decision")) {
+        approved = true;
+        return jsonResponse({ data: { ...current, status: "approved" } });
+      }
+      if (url.includes("cursor=review-offset%3A50")) {
+        // Answered with the queue as it was before the approval.
+        return new Promise<Response>((resolve) => {
+          releaseStalePage = () => resolve(jsonResponse({ data: { items: [
+            current, reviewItem({ id: "review-stale", targetTitle: "Stale page row" }),
+          ], next_cursor: null } }));
+        });
+      }
+      if (approved && url.includes("/reviews?")) {
+        return jsonResponse({ data: { items: [], next_cursor: "review-offset:50" } });
+      }
+      return undefined;
+    });
+    render(<MemoryRouter initialEntries={["/review?review=review-1"]}><ReviewScreen /></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Decided first", level: 2 });
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText(savedDecisionLabel())).toBeVisible();
+    await act(async () => { releaseStalePage(); });
+    const rail = screen.getByRole("complementary", { name: "Review queue" });
+    expect(within(rail).queryByText("Decided first")).not.toBeInTheDocument();
+    expect(within(rail).queryByText("Stale page row")).not.toBeInTheDocument();
+  });
+
   it("retires a queued infinite-scroll callback when filters reuse a cursor", async () => {
     const user = userEvent.setup();
     const observers: Array<{
@@ -3324,7 +3359,8 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(bodies).toHaveLength(2));
     expect(bodies[1]).toEqual(bodies[0]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry the same decision" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Retry the same decision" }));
+    // Reloading the queue reads the receipt first and keeps it as the saved result.
+    await user.click(screen.getByRole("button", { name: "Reload queue" }));
     expect(await screen.findByText(savedDecisionLabel())).toBeVisible();
     expect(events[0]).toBe("post-1");
     expect(events[events.indexOf("post-2") - 1]).toBe("read-unconfirmed");
