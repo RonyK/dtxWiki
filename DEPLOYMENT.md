@@ -180,13 +180,18 @@ IP에서만 접근하게 제한하세요(`--tls external --forwarded-ip <proxy I
 `team`과 `solo_remote` 모드는 self-signup이 기본 off입니다. 조직 내 자유 가입이 의도라면
 `DTXWIKI_SIGNUP_ENABLED=true`를 명시하고 서비스를 재시작하세요. 가입이 허용된 `team` 모드의
 신규 사용자는 다른 공유 workspace에 자동 가입하지 않고 private `<표시 이름>'s Personal Workspace`의
-owner가 됩니다. 초기 slug는 `personal-<이름 토큰>`입니다(예: `personal-rony`).
-이름 토큰은 표시 이름을 영문 소문자·숫자·하이픈으로 정규화하여 최대 32자로 만들며,
-비어 있으면 `user`를 사용합니다. 같은 slug가 이미 있으면 `personal-rony-2`,
+owner가 됩니다. 초기 slug는 `personal-<이메일 토큰>`입니다(예: `rony@example.com` →
+`personal-rony`). 이메일 토큰은 이메일 주소의 `@` 앞부분만 영문 소문자·숫자·하이픈으로
+정규화하여 최대 32자로 만들며, 도메인은 넣지 않습니다. 악센트가 붙은 라틴 문자는 기본 문자로
+바뀝니다(`josé` → `jose`). 이메일이 없거나 정규화 결과가 비면 workspace UUID 앞 8자리를
+사용합니다(예: `personal-82da8c7d`). 같은 slug가 이미 있으면 `personal-rony-2`,
 `personal-rony-3`처럼 2부터 숫자를 붙여 사용 가능한 slug를 선택합니다.
-내부 workspace UUID는 slug에 포함하지 않습니다.
+이메일 앞부분이 slug에 들어가므로, Personal workspace를 public으로 바꾸기 전에 slug 변경을
+검토하세요. `personal-`로 시작하는 slug는 Personal workspace 전용입니다. 일반 workspace
+생성과 설정의 slug 변경은 이 prefix를 거부하고, 제목에서 자동으로 만든 slug는 앞에 `ws-`를
+붙입니다(예: `Personal Notes` → `ws-personal-notes`). 이미 쓰고 있는 slug는 그대로 둘 수 있습니다.
 이 규칙은 신규 생성에 적용하며 기존 workspace의 이름과 slug는 유지합니다.
-생성 후 표시 이름을 바꿔도 workspace의 이름과 slug는 자동 변경되지 않습니다.
+생성 후 표시 이름이나 이메일을 바꿔도 workspace의 이름과 slug는 자동 변경되지 않습니다.
 `solo_local`은 설정을 생략하면 기본 on이며,
 모든 모드에서 명시한 true/false 값이 mode 기본값보다 우선합니다. 외부에서는 80/443만 열고
 기본 설정에서는 app port 21080이 loopback에 남아 있는지 `ss -ltnp | grep 21080`으로 확인합니다.

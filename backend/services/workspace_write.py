@@ -6,7 +6,6 @@ workspace create/delete/default orchestration in its overlay so control-plane
 and data-plane work can be coordinated explicitly.
 """
 
-import re
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
@@ -14,6 +13,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.domain.input_policy import validate_text
+from backend.domain.workspace_slug_policy import (
+    RESERVED_WORKSPACE_SLUG_MESSAGE,
+    WORKSPACE_SLUG_MAX_LENGTH,
+    is_reserved_workspace_slug,
+    slugify_workspace_text,
+)
 from backend.models import (
     AgentInputBundle,
     AgentPage,
@@ -603,15 +608,24 @@ class WorkspaceWriteService:
 
 def normalize_workspace_slug(value: str, *, generated: bool = False) -> str:
     if not generated:
-        validate_text(value, field="slug", max_length=80, min_length=1)
-    slug = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)
+        validate_text(
+            value, field="slug", max_length=WORKSPACE_SLUG_MAX_LENGTH, min_length=1
+        )
+    slug = slugify_workspace_text(value)
     if generated:
-        slug = slug[:80].strip("-")
+        # The create form has no slug field, so a title such as "Personal
+        # Notes" must still yield a creatable slug instead of a reserved one.
+        if is_reserved_workspace_slug(slug):
+            slug = f"ws-{slug}"
+        slug = slug[:WORKSPACE_SLUG_MAX_LENGTH].strip("-")
     if not slug:
         raise WorkspaceCreateConflictError("workspace slug is required")
     if not generated:
-        validate_text(slug, field="slug", max_length=80, min_length=1)
+        validate_text(
+            slug, field="slug", max_length=WORKSPACE_SLUG_MAX_LENGTH, min_length=1
+        )
+        if is_reserved_workspace_slug(slug):
+            raise WorkspaceCreateConflictError(RESERVED_WORKSPACE_SLUG_MESSAGE)
     return slug
 
 

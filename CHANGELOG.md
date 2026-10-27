@@ -21,6 +21,12 @@
   precedence when both the base and save-time content checks would fail.
 - Keep legacy citation-only updates and patch previews compatible with stored
   frontmatter, and verify reconciliation independently of current fixer settings.
+- Name new Personal workspaces `<display name>'s Personal Workspace` with a
+  `personal-<email local part>` slug, numbered on collision. Accounts without a
+  usable local part get the first eight characters of the workspace id.
+- Reserve the `personal-` slug prefix for Personal workspaces. Workspace
+  creation and slug changes refuse it; slugs generated from a title get a `ws-`
+  prefix instead. All workspace slugs fold accented Latin letters to ASCII.
 
 ## 0.1.4 — 2026-10-23
 

@@ -7,13 +7,16 @@ authorization continues to come from the normal owner membership row.
 
 from __future__ import annotations
 
-import re
 from uuid import UUID, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.domain.workspace_slug_policy import (
+    PERSONAL_WORKSPACE_SLUG_PREFIX,
+    slugify_workspace_text,
+)
 from backend.models.media import WorkspaceMediaWriteIntent
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
 from backend.models.user import User
@@ -83,31 +86,22 @@ def _create_collision_safe_workspace(
     user: User,
 ) -> Workspace:
     title = f"{user.display_name}'s {PERSONAL_WORKSPACE_TITLE}"
-    base_slug = _personal_workspace_slug(user.display_name)
-    id_attempt = 0
-    slug_index = 1
+    attempt = 0
     while True:
-        seed = str(user.id) if id_attempt == 0 else f"{user.id}:{id_attempt}"
+        seed = str(user.id) if attempt == 0 else f"{user.id}:{attempt}"
         workspace_id = uuid5(PERSONAL_WORKSPACE_NAMESPACE, seed)
-        slug = base_slug if slug_index == 1 else f"{base_slug}-{slug_index}"
-        existing_by_id = session.get(Workspace, workspace_id)
-        if existing_by_id is not None:
-            if _is_deterministic_personal_candidate(
-                existing_by_id, user, workspace_id, base_slug
-            ):
-                return existing_by_id
-            id_attempt += 1
-            continue
-        existing_by_slug = session.scalar(
-            select(Workspace).where(Workspace.slug == slug)
-        )
-        if existing_by_slug is not None:
-            slug_index += 1
+        existing = session.get(Workspace, workspace_id)
+        if existing is not None:
+            if _is_deterministic_personal_candidate(existing, user, workspace_id):
+                return existing
+            attempt += 1
             continue
 
         workspace = Workspace(
             id=workspace_id,
-            slug=slug,
+            slug=_available_personal_slug(
+                session, _personal_workspace_slug_base(user, workspace_id)
+            ),
             title=title,
             name=title,
             visibility="private",
@@ -138,47 +132,55 @@ def _create_collision_safe_workspace(
                 concurrent,
                 user,
                 workspace_id,
-                base_slug,
             ):
                 return concurrent
             continue
         return workspace
 
 
-def _personal_workspace_slug(display_name: str) -> str:
-    """Build a readable base; allocation adds a number only on collision.
+def _personal_workspace_slug_base(user: User, workspace_id: UUID) -> str:
+    """Name the slug after the email local part, never the domain.
 
-    Match ordinary workspace slugs: lowercase letters, digits, and hyphens.
-    Bound the token after lowercasing (which can expand Unicode characters)
-    so the slug stays within the 80-character workspace limit. Names without
-    ASCII letters or digits use ``user``.
+    The token is bounded so a numbered suffix still fits the slug limit. An
+    account without an email, or whose local part has no ASCII form, uses the
+    start of its own workspace id instead of a shared word whose numbering
+    would reveal how many such accounts exist.
     """
 
-    name = re.sub(r"[^a-z0-9]+", "-", display_name.lower())[:32].strip("-")
-    return f"personal-{name or 'user'}"
+    local_part = (user.email or "").split("@", maxsplit=1)[0]
+    token = slugify_workspace_text(local_part)[:32].strip("-")
+    return f"{PERSONAL_WORKSPACE_SLUG_PREFIX}{token or workspace_id.hex[:8]}"
+
+
+def _available_personal_slug(session: Session, base: str) -> str:
+    # A slugified base holds only [a-z0-9-], so it needs no LIKE escaping.
+    taken = set(
+        session.scalars(
+            select(Workspace.slug).where(
+                or_(Workspace.slug == base, Workspace.slug.like(f"{base}-%"))
+            )
+        )
+    )
+    if base not in taken:
+        return base
+    index = 2
+    while f"{base}-{index}" in taken:
+        index += 1
+    return f"{base}-{index}"
 
 
 def _is_deterministic_personal_candidate(
     workspace: Workspace,
     user: User,
     expected_id: UUID,
-    base_slug: str,
 ) -> bool:
-    """Recognize only a workspace created by this deterministic algorithm."""
+    """Recognize only a workspace created by this deterministic algorithm.
 
-    return (
-        workspace.id == expected_id
-        # Recover an unanchored workspace created before owner names were
-        # included in new slugs without changing its existing public URL.
-        and (
-            workspace.slug in {base_slug, f"personal-{expected_id.hex}"}
-            or re.fullmatch(
-                rf"{re.escape(base_slug)}-(?:[2-9]|[1-9][0-9]+)", workspace.slug
-            )
-            is not None
-        )
-        and workspace.owner_user_id == user.id
-    )
+    Only this algorithm issues these uuid5 ids. The slug is not compared: it is
+    owner-editable, and earlier rules derived it from the id or display name.
+    """
+
+    return workspace.id == expected_id and workspace.owner_user_id == user.id
 
 
 def _enforce_personal_workspace_contract(

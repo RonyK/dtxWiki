@@ -1,4 +1,3 @@
-import re
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from uuid import uuid5
@@ -17,7 +16,6 @@ from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.policy.rbac import grant_workspace_membership
 from backend.services.personal_workspace_service import (
     PERSONAL_WORKSPACE_NAMESPACE,
-    _personal_workspace_slug,
     ensure_personal_workspace,
 )
 
@@ -83,7 +81,7 @@ def test_personal_workspace_is_ordinary_private_owner_anchor(session_factory):
             )
             is None
         )
-        assert workspace.slug == "personal-owner-name"
+        assert workspace.slug == "personal-owner"
         assert "example" not in workspace.slug
 
 
@@ -186,46 +184,37 @@ def test_concurrent_personal_ensure_converges_on_one_anchor(tmp_path):
     engine.dispose()
 
 
-def test_personal_workspace_slug_collision_uses_number_without_changing_id(
+def test_personal_workspace_slug_numbers_email_namesakes_and_recovers_by_id(
     session_factory,
 ):
     with session_factory.begin() as session:
-        namesake = _user(session, email="namesake@example.com")
-        namesake.display_name = "김민아"
-        occupied = ensure_personal_workspace(session, user=namesake)
-        assert occupied.slug == "personal-user"
+        namesake = _user(session, email="rony@one.example")
+        assert ensure_personal_workspace(session, user=namesake).slug == "personal-rony"
 
-        user = _user(session, email="collision@example.com")
+        user = _user(session, email="rony@two.example")
         user.display_name = "김민아"
         first_candidate_id = uuid5(PERSONAL_WORKSPACE_NAMESPACE, str(user.id))
 
         personal = ensure_personal_workspace(session, user=user)
 
         assert personal.id == first_candidate_id
-        assert personal.title == "김민아's Personal Workspace"
-        assert personal.name == personal.title
-        assert personal.slug == "personal-user-2"
-        assert "collision" not in personal.slug
+        assert personal.title == personal.name == "김민아's Personal Workspace"
+        assert personal.slug == "personal-rony-2"
 
-        # Freeing the base must not create a second workspace when recovering
-        # an existing numbered candidate whose anchor pointer was lost.
+        # Recovering a lost anchor pointer must not depend on the slug, which
+        # the owner may have changed or an earlier rule may have derived.
         user.personal_workspace_id = None
-        occupied.slug = "renamed-workspace"
+        personal.slug = "owner-chosen"
         session.flush()
 
         recovered = ensure_personal_workspace(session, user=user)
 
         assert recovered.id == first_candidate_id
-        assert recovered.slug == "personal-user-2"
+        assert recovered.slug == "owner-chosen"
 
-
-def test_personal_workspace_slug_bounds_unicode_lowercase_expansion():
-    slug = _personal_workspace_slug("İ" * 32)
-
-    assert len(slug) <= 80
-    assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug)
-    assert slug.startswith("personal-i-i-")
-    assert len(slug) <= len("personal-") + 32
+        no_ascii = _user(session, email="김민아@three.example")
+        fallback = ensure_personal_workspace(session, user=no_ascii)
+        assert fallback.slug == f"personal-{fallback.id.hex[:8]}"
 
 
 def test_personal_workspace_recovers_legacy_candidate_without_renaming(session_factory):
