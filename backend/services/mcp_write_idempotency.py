@@ -79,10 +79,9 @@ def execute_idempotent_write[ResultT: BaseModel](
         )
     if retry_only:
         # No valid receipt: answer "unknown", never fall through to a claim +
-        # execute below. Deleting an expired row here would be indistinguishable
-        # from "no receipt ever existed", which is exactly the license-to-
-        # execute reading this mode exists to refuse -- so an expired row is
-        # left in place for the real (non-retry_only) resend to reclaim.
+        # execute below. This is the same answer whether an expired receipt
+        # remains or maintenance already removed it. This read path leaves
+        # receipts untouched; only a real (non-retry_only) resend may execute.
         raise OperationOutcomeUnknownError()
     if row is not None:
         session.execute(
