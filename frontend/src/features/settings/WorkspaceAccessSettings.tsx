@@ -1,7 +1,13 @@
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
-import { normalizeAccountEmail } from "../../shared/auth/identityPolicy";
-import { Building2, Globe, Inbox, Plus, Search, Users } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Globe, Inbox, Plus, Search, Trash2, Users } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
@@ -22,7 +28,6 @@ import {
   type WorkspaceMemberInviteRole,
   type WorkspaceMemberRole,
   type WorkspaceMemberSelector,
-  type WorkspaceMemberCandidate,
   type WorkspaceVisibility,
 } from "../../shared/api/workspaceAccess";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
@@ -38,6 +43,8 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatDisplayDateTime } from "../../shared/lib/datetime";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
+import { WorkspaceMemberAddDialog } from "./WorkspaceMemberAddDialog";
+import { WorkspaceMemberId } from "./WorkspaceMemberId";
 import {
   SettingsEmptyState,
   SettingsLoadingRow,
@@ -52,11 +59,14 @@ type WorkspaceSettingsTarget = {
   isPersonal: boolean;
 };
 
-type PendingMemberAction =
+type MemberMutationScope = { workspaceId: string; generation: number };
+
+type PendingMemberAction = (
   | { kind: "first-share"; selector: WorkspaceMemberSelector; label: string; role: WorkspaceMemberInviteRole }
   | { kind: "promote"; member: WorkspaceMember }
   | { kind: "self-demote"; member: WorkspaceMember; role: WorkspaceMemberRole }
-  | { kind: "remove"; member: WorkspaceMember };
+  | { kind: "remove"; member: WorkspaceMember }
+) & MemberMutationScope;
 
 const MEMBER_PAGE_SIZE = 25;
 const JOIN_PAGE_SIZE = 50;
@@ -104,26 +114,21 @@ export function WorkspaceMembersSection() {
   const [membersMoreBusy, setMembersMoreBusy] = useState(false);
   const [memberError, setMemberError] = useState<string | null>(null);
   const [queryDraft, setQueryDraft] = useState("");
-  const [addSelectorDraft, setAddSelectorDraft] = useState("");
-  const [directoryQueryDraft, setDirectoryQueryDraft] = useState("");
-  const [directorySearched, setDirectorySearched] = useState(false);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<WorkspaceMemberRole | "all">(
     "all",
   );
   const [memberReloadKey, setMemberReloadKey] = useState(0);
-  const [addRole, setAddRole] = useState<WorkspaceMemberInviteRole>("viewer");
   const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
   const [memberNotice, setMemberNotice] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingMemberAction | null>(
     null,
   );
   const memberGeneration = useRef(0);
-  const candidateGeneration = useRef(0);
+  const memberMutationGeneration = useRef(0);
+  const addMemberButtonRef = useRef<HTMLButtonElement>(null);
   const [directoryEnabled, setDirectoryEnabled] = useState(false);
-  const [candidates, setCandidates] = useState<WorkspaceMemberCandidate[]>([]);
-  const [candidateHasMore, setCandidateHasMore] = useState(false);
-  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const appliedMemberFilterRef = useRef({ query, roleFilter });
 
   const [joinRequests, setJoinRequests] = useState<WorkspaceJoinRequest[]>([]);
@@ -136,26 +141,34 @@ export function WorkspaceMembersSection() {
   const [joinNotice, setJoinNotice] = useState<string | null>(null);
   const [joinReloadKey, setJoinReloadKey] = useState(0);
   const joinGeneration = useRef(0);
-  let exactLoginEmail = "";
-  try { exactLoginEmail = normalizeAccountEmail(addSelectorDraft); } catch { /* A selector may be a UUID rather than an email. */ }
-  const canAddExactLoginEmail = looksLikeLoginEmail(exactLoginEmail);
-  const exactUserId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(addSelectorDraft.trim()) ? addSelectorDraft.trim() : "";
-  const exactSelector: WorkspaceMemberSelector | null = exactUserId ? { user_id: exactUserId } : canAddExactLoginEmail ? { email: exactLoginEmail } : null;
-  const invalidLoginEmail = addSelectorDraft.includes("@") && !exactLoginEmail;
+
+  useEffect(() => {
+    memberMutationGeneration.current += 1;
+    setPendingAction(null);
+    setAddDialogOpen(false);
+    setMemberBusyId(null);
+    setMemberError(null);
+    setMemberNotice(null);
+    return () => {
+      // Responses and confirmations belong to the workspace that started them,
+      // including when a user switches away and then returns to the same id.
+      memberMutationGeneration.current += 1;
+    };
+  }, [target?.id]);
+
+  function isCurrentMemberMutation(scope: MemberMutationScope) {
+    return scope.generation === memberMutationGeneration.current;
+  }
 
   useEffect(() => {
     setDirectoryEnabled(false);
-    setCandidates([]);
-    setCandidatesLoading(false);
-    setCandidateHasMore(false);
-    setDirectorySearched(false);
-    setDirectoryQueryDraft("");
-    setAddSelectorDraft("");
-    candidateGeneration.current += 1;
+    setAddDialogOpen(false);
     if (!target || !isOwner) return;
     const controller = new AbortController();
     void listWorkspaceMemberCandidates(target.id, "", controller.signal)
-      .then((result) => { if (!controller.signal.aborted) setDirectoryEnabled(result.enabled); })
+      .then((result) => {
+        if (!controller.signal.aborted) setDirectoryEnabled(result.enabled);
+      })
       .catch(() => undefined);
     return () => controller.abort();
   }, [isOwner, target]);
@@ -290,46 +303,6 @@ export function WorkspaceMembersSection() {
     setQuery(nextQuery);
   }
 
-  function onDirectorySearch(event: FormEvent) {
-    event.preventDefault();
-    const error = inputTextError(directoryQueryDraft, 320);
-    if (error) { setMemberError(error); return; }
-    const nextQuery = directoryQueryDraft.trim();
-    setMemberError(null);
-    setDirectorySearched(false);
-    if (directoryEnabled && target && nextQuery.length >= 2) {
-      const generation = ++candidateGeneration.current;
-      setCandidatesLoading(true);
-      setCandidates([]);
-      setCandidateHasMore(false);
-      void listWorkspaceMemberCandidates(target.id, nextQuery)
-        .then((result) => {
-          if (generation !== candidateGeneration.current) return;
-          setCandidates(result.items);
-          setCandidateHasMore(result.has_more);
-          setDirectoryEnabled(result.enabled);
-          setDirectorySearched(true);
-        })
-        .catch((caught) => { if (generation === candidateGeneration.current) setMemberError(apiErrorMessage(caught)); })
-        .finally(() => { if (generation === candidateGeneration.current) setCandidatesLoading(false); });
-    } else {
-      candidateGeneration.current += 1;
-      setCandidates([]);
-      setCandidateHasMore(false);
-      setCandidatesLoading(false);
-    }
-  }
-
-  function onAddMember(event: FormEvent) {
-    event.preventDefault();
-    if (!exactSelector || !target || memberBusyId === "add") {
-      return;
-    }
-    setMemberError(null);
-    setMemberNotice(null);
-    void submitAddMember(exactSelector, addRole, false, exactUserId || exactLoginEmail);
-  }
-
   async function submitAddMember(
     selector: WorkspaceMemberSelector,
     role: WorkspaceMemberInviteRole,
@@ -339,17 +312,19 @@ export function WorkspaceMembersSection() {
     if (!target) {
       return;
     }
+    const scope = { workspaceId: target.id, generation: memberMutationGeneration.current };
     setMemberBusyId("add");
     setMemberError(null);
+    setMemberNotice(null);
     try {
-      const result = await addWorkspaceMember(target.id, {
+      const result = await addWorkspaceMember(scope.workspaceId, {
         ...selector,
         role,
         confirm_first_share: confirmFirstShare,
       });
-      setCandidates((current) => current.filter((candidate) => candidate.user_id !== result.member.user_id));
+      if (!isCurrentMemberMutation(scope)) return;
       setPendingAction(null);
-      setAddRole("viewer");
+      setAddDialogOpen(false);
       setMemberNotice(
         result.created
           ? t("workspaceMembers.notice.added", { email: label })
@@ -373,19 +348,23 @@ export function WorkspaceMembersSection() {
       // WS-11: the switcher's member_count badge only ever refreshes on
       // mount, so without this an added member never shows up there until a
       // full reload.
-      await workspaceContext?.refreshWorkspaces(target.id);
+      // Preserve the selection while this refresh is in flight; forcing the
+      // old id here could undo a switch made after the mutation completed.
+      await workspaceContext?.refreshWorkspaces();
     } catch (caught) {
+      if (!isCurrentMemberMutation(scope)) return;
       if (
         caught instanceof ApiError &&
         caught.body.error_code === "workspace_first_share_confirmation_required"
       ) {
-        setPendingAction({ kind: "first-share", selector, label, role });
+        setAddDialogOpen(false);
+        setPendingAction({ kind: "first-share", selector, label, role, ...scope });
       } else {
         setPendingAction(null);
         setMemberError(apiErrorMessage(caught));
       }
     } finally {
-      setMemberBusyId(null);
+      if (isCurrentMemberMutation(scope)) setMemberBusyId(null);
     }
   }
 
@@ -393,18 +372,20 @@ export function WorkspaceMembersSection() {
     if (!target || role === member.role) {
       return;
     }
+    const scope = { workspaceId: target.id, generation: memberMutationGeneration.current };
     setMemberBusyId(member.user_id);
     setMemberError(null);
     setMemberNotice(null);
     try {
       const result = await updateWorkspaceMemberRole(
-        target.id,
+        scope.workspaceId,
         member.user_id,
         role,
       );
+      if (!isCurrentMemberMutation(scope)) return;
       if (result.member.is_current_user) {
         const currentWorkspace = workspaceContext?.selectedWorkspace;
-        if (currentWorkspace?.id === target.id) {
+        if (currentWorkspace?.id === scope.workspaceId) {
           workspaceContext?.addWorkspace({
             ...currentWorkspace,
             role: result.member.role,
@@ -414,7 +395,8 @@ export function WorkspaceMembersSection() {
       // WS-11: not only the self-update path — any role change moves
       // member_count for a first grant, and the switcher must not show a
       // stale role/count for the workspace until the next full reload.
-      await workspaceContext?.refreshWorkspaces(target.id);
+      await workspaceContext?.refreshWorkspaces();
+      if (!isCurrentMemberMutation(scope)) return;
       setPendingAction(null);
       setMemberNotice(
         t("workspaceMembers.notice.roleChanged", {
@@ -431,26 +413,28 @@ export function WorkspaceMembersSection() {
         ),
       );
     } catch (caught) {
+      if (!isCurrentMemberMutation(scope)) return;
       setPendingAction(null);
       setMemberError(apiErrorMessage(caught));
     } finally {
-      setMemberBusyId(null);
+      if (isCurrentMemberMutation(scope)) setMemberBusyId(null);
     }
   }
 
   function requestRoleChange(member: WorkspaceMember, role: WorkspaceMemberRole) {
-    if (role === member.role) {
+    if (!target || role === member.role) {
       return;
     }
+    const scope = { workspaceId: target.id, generation: memberMutationGeneration.current };
     if (role === "owner") {
-      setPendingAction({ kind: "promote", member });
+      setPendingAction({ kind: "promote", member, ...scope });
       return;
     }
     if (member.is_current_user && member.role === "owner") {
       // WS-10: if another active owner exists this passes
       // _protect_owner_removal and takes effect immediately — a single
       // dropdown click, with no way back except another owner re-promoting.
-      setPendingAction({ kind: "self-demote", member, role });
+      setPendingAction({ kind: "self-demote", member, role, ...scope });
       return;
     }
     void changeRole(member, role);
@@ -460,16 +444,18 @@ export function WorkspaceMembersSection() {
     if (!target) {
       return;
     }
+    const scope = { workspaceId: target.id, generation: memberMutationGeneration.current };
     setMemberBusyId(member.user_id);
     setMemberError(null);
     setMemberNotice(null);
     try {
-      const result = await removeWorkspaceMember(target.id, member.user_id);
+      const result = await removeWorkspaceMember(scope.workspaceId, member.user_id);
+      if (!isCurrentMemberMutation(scope)) return;
       setPendingAction(null);
       if (member.is_current_user) {
         const transition = await reconcileWorkspaceContextAfterSelfRemoval({
           fallbackWorkspaceId: result.fallback_workspace_id,
-          removedWorkspaceId: target.id,
+          removedWorkspaceId: scope.workspaceId,
           workspaceContext,
         });
         if (transition.refreshFailed) {
@@ -496,12 +482,13 @@ export function WorkspaceMembersSection() {
       setMemberTotal(result.member_count);
       // WS-11: removing someone else's membership drops member_count, which
       // the switcher would otherwise keep showing stale.
-      await workspaceContext?.refreshWorkspaces(target.id);
+      await workspaceContext?.refreshWorkspaces();
     } catch (caught) {
+      if (!isCurrentMemberMutation(scope)) return;
       setPendingAction(null);
       setMemberError(apiErrorMessage(caught));
     } finally {
-      setMemberBusyId(null);
+      if (isCurrentMemberMutation(scope)) setMemberBusyId(null);
     }
   }
 
@@ -586,109 +573,33 @@ export function WorkspaceMembersSection() {
 
   return (
     <section className="feature-section workspace-member-settings">
-      <div className="workspace-settings-card">
+      <div className="workspace-settings-card workspace-member-current-card">
         {/* Title + count read as one unit, the same pairing the MCP panel
             headers use. The bespoke 999px caps chip that used to float at the
             far right was the only count face of its kind in Settings. The
             chip stays outside the <h3> so it does not join the heading's
             accessible name. */}
-        <div className="policy-card-heading">
-          <h3 className="metric-card-title">
-            <Users size={16} aria-hidden="true" />
-            <span>{t("workspaceMembers.title")}</span>
-          </h3>
-          <CountChip
-            compact
-            formatted={t("workspaceMembers.memberCount", { count: memberTotal })}
-            value={memberTotal}
-          />
+        <div className="workspace-settings-heading workspace-member-header">
+          <div className="policy-card-heading">
+            <h3 className="metric-card-title">
+              <Users size={16} aria-hidden="true" />
+              <span>{t("workspaceMembers.title")}</span>
+            </h3>
+            <CountChip compact formatted={t("workspaceMembers.memberCount", { count: memberTotal })} value={memberTotal} />
+          </div>
+          <button ref={addMemberButtonRef} className="icon-button primary" type="button" aria-haspopup="dialog" aria-expanded={addDialogOpen}
+            disabled={memberBusyId !== null}
+            onClick={() => { setMemberError(null); setAddDialogOpen(true); }}>
+            <Plus size={16} aria-hidden="true" />{t("workspaceMembers.add.title")}
+          </button>
         </div>
-        <p>{t("workspaceMembers.description")}</p>
 
         <p className="identity-settings-scope-note">
           {t("workspaceMembers.wholeWorkspaceNotice")}
         </p>
-        {memberError ? <StatusBanner tone="warning">{memberError}</StatusBanner> : null}
+        {memberError && !addDialogOpen ? <StatusBanner tone="warning">{memberError}</StatusBanner> : null}
         {memberNotice ? <StatusBanner tone="info">{memberNotice}</StatusBanner> : null}
 
-        <section className="workspace-member-add-panel" aria-labelledby="workspace-member-add-heading">
-          <div className="identity-settings-section-heading">
-            <div>
-              <h4 id="workspace-member-add-heading"><Plus size={16} aria-hidden="true" />{t("workspaceMembers.add.title")}</h4>
-              <p>{t("workspaceMembers.add.fromSearchHint")}</p>
-            </div>
-            <label className="field-stack">
-              {t("workspaceMembers.add.role")}
-              <select disabled={memberBusyId === "add"} onChange={(event) => setAddRole(event.target.value as WorkspaceMemberInviteRole)} value={addRole}>
-                {addMemberRoleOptions(t)}
-              </select>
-            </label>
-          </div>
-          <form className="workspace-member-direct-add" onSubmit={onAddMember}>
-            <label className="field-stack">
-              <span>{t("workspaceMembers.add.selector")}</span>
-              <input
-                {...textInputLimit(320)}
-                aria-describedby="workspace-member-add-status"
-                aria-invalid={invalidLoginEmail || undefined}
-                autoComplete="off"
-                autoCapitalize="none"
-                onChange={(event) => setAddSelectorDraft(event.target.value)}
-                placeholder={t("workspaceMembers.add.selectorPlaceholder")}
-                spellCheck={false}
-                value={addSelectorDraft}
-              />
-            </label>
-            <button className="icon-button primary" disabled={memberBusyId === "add" || !exactSelector} type="submit">
-              <Plus size={16} aria-hidden="true" />
-              {memberBusyId === "add" ? t("workspaceMembers.add.adding") : t("workspaceMembers.add.action")}
-            </button>
-          </form>
-          <p className="field-hint" id="workspace-member-add-status" role="status">
-            {exactSelector ? t("workspaceMembers.add.fromSearchReady", { email: exactUserId || exactLoginEmail }) : invalidLoginEmail ? t("auth:validation.email") : t("workspaceMembers.add.identityHint")}
-          </p>
-          {directoryEnabled ? (
-            <div className="workspace-company-directory" aria-labelledby="workspace-company-directory-title">
-              <h4 id="workspace-company-directory-title"><Building2 size={16} aria-hidden="true" />{t("workspaceMembers.directory.title")}</h4>
-              <p className="field-hint">{t("workspaceMembers.directory.hint")}</p>
-              <form className="workspace-company-directory-search" onSubmit={onDirectorySearch}>
-                <label className="field-stack">
-                  <span>{t("workspaceMembers.directory.query")}</span>
-                  <input {...textInputLimit(320)} type="search" autoComplete="off" value={directoryQueryDraft}
-                    placeholder={t("workspaceMembers.directory.queryPlaceholder")}
-                    onChange={(event) => setDirectoryQueryDraft(event.target.value)} />
-                </label>
-                <button className="icon-button" type="submit" disabled={candidatesLoading || directoryQueryDraft.trim().length < 2}>
-                  <Search size={16} aria-hidden="true" />{t("workspaceMembers.directory.search")}
-                </button>
-              </form>
-              {candidatesLoading ? <p role="status">{t("workspaceMembers.directory.loading")}</p> : null}
-              {candidates.length > 0 ? (
-                <ul className="workspace-company-candidates">
-                  {candidates.map((candidate) => (
-                    <li key={candidate.user_id} className="workspace-company-candidate">
-                      <div className="workspace-company-candidate-identity">
-                        <strong>{candidate.display_name || candidate.user_id}</strong>
-                        <span className="workspace-company-candidate-provider">{candidate.provider_name}</span>
-                        <span className="workspace-company-candidate-evidence">{candidate.identity_label}</span>
-                        <code>{candidate.user_id}</code>
-                      </div>
-                      <button type="button" className="icon-button" disabled={memberBusyId !== null}
-                        onClick={() => void submitAddMember({ user_id: candidate.user_id }, addRole, false, candidate.display_name || candidate.user_id)}>
-                        <Plus size={16} aria-hidden="true" />{t("workspaceMembers.directory.add", { name: candidate.display_name || candidate.user_id })}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : directorySearched && !candidatesLoading ? <p className="field-hint" role="status">{t("workspaceMembers.directory.empty")}</p> : null}
-              {candidateHasMore ? <p className="field-hint">{t("workspaceMembers.directory.refine")}</p> : null}
-            </div>
-          ) : null}
-        </section>
-
-        <div className="identity-settings-section-heading workspace-member-current-heading">
-          <h4>{t("workspaceMembers.filters.title")}</h4>
-        </div>
         <form className="workspace-member-lookup" onSubmit={onMemberSearch}>
           <label className="field-stack workspace-member-search">
             <span id="workspace-member-query-label">{t("workspaceMembers.filters.query")}</span>
@@ -745,27 +656,17 @@ export function WorkspaceMembersSection() {
             title={t("workspaceMembers.empty.title")}
           />
         ) : (
-          <div className="workspace-member-list" role="list">
+          <div className="workspace-member-list workspace-member-current-list" role="list">
             {members.map((member) => (
-              <div className="workspace-member-row" key={member.user_id} role="listitem">
+              <div className="workspace-member-row workspace-member-current-row" key={member.user_id} role="listitem">
                 <div className="workspace-member-identity">
-                  <strong>{member.display_name || member.email || member.user_id}</strong>
-                  <span>{member.email ?? member.user_id}</span>
-                  <span className="meta-line">
-                    {t("workspaceMembers.joined", {
-                      date: formatDisplayDateTime(member.joined_at, i18n.language),
-                    })}
-                  </span>
-                  {member.is_personal_anchor_owner ? (
-                    <span className="workspace-member-anchor">
-                      {t("workspaceMembers.personalAnchor")}
-                    </span>
-                  ) : null}
-                  {member.is_current_user ? (
-                    <span className="workspace-member-you">
-                      {t("workspaceMembers.you")}
-                    </span>
-                  ) : null}
+                  <strong className="workspace-member-name" title={t("workspaceMembers.joined", { date: formatDisplayDateTime(member.joined_at, i18n.language) })}>
+                    {member.display_name || member.email || member.user_id}
+                    {member.is_current_user ? <span className="workspace-member-you">{t("workspaceMembers.you")}</span> : null}
+                  </strong>
+                  {member.email ? <span>{member.email}</span> : <WorkspaceMemberId userId={member.user_id} name={member.display_name || member.user_id} />}
+                  <span className="visually-hidden">{t("workspaceMembers.joined", { date: formatDisplayDateTime(member.joined_at, i18n.language) })}</span>
+                  {member.is_personal_anchor_owner ? <span className="visually-hidden">{t("workspaceMembers.personalAnchor")}</span> : null}
                 </div>
                 <div className="workspace-member-actions">
                   <label className="visually-hidden" htmlFor={`member-role-${member.user_id}`}>
@@ -790,15 +691,20 @@ export function WorkspaceMembersSection() {
                     {memberRoleOptions(t)}
                   </select>
                   <button
-                    className="icon-button danger-action"
+                    className="icon-button danger-action workspace-member-remove"
+                    aria-label={t("workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
+                    title={t(member.is_personal_anchor_owner ? "workspaceMembers.personalAnchor" : "workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
                     disabled={
                       member.is_personal_anchor_owner ||
                       memberBusyId === member.user_id
                     }
-                    onClick={() => setPendingAction({ kind: "remove", member })}
+                    onClick={() => setPendingAction({
+                      kind: "remove", member, workspaceId: target.id,
+                      generation: memberMutationGeneration.current,
+                    })}
                     type="button"
                   >
-                    {t("workspaceMembers.remove")}
+                    <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -819,98 +725,125 @@ export function WorkspaceMembersSection() {
         ) : null}
       </div>
 
-      <div className="workspace-settings-card">
-        {/* The "Owner queue" eyebrow added a heading level no other settings
-            card carries, over a card that is already inside an owner-only
-            surface. Same header shape as the Members card above it. */}
-        <div className="policy-card-heading">
-          <h3 className="metric-card-title">
-            <Inbox size={16} aria-hidden="true" />
-            <span>{t("workspaceMembers.join.title")}</span>
-          </h3>
-          <CountChip
-            compact
-            formatted={t("workspaceMembers.join.count", { count: joinTotal })}
-            value={joinTotal}
-          />
-        </div>
-        <p>{t("workspaceMembers.join.description")}</p>
-        {joinError ? <StatusBanner tone="warning">{joinError}</StatusBanner> : null}
-        {joinNotice ? <StatusBanner tone="info">{joinNotice}</StatusBanner> : null}
-        {joinLoading ? (
-          <SettingsLoadingRow>
-            {t("workspaceMembers.join.loading")}
-          </SettingsLoadingRow>
-        ) : joinRequests.length === 0 ? (
-          <SettingsEmptyState
-            description={t("workspaceMembers.join.empty.description")}
-            title={t("workspaceMembers.join.empty.title")}
-          />
-        ) : (
-          <div className="workspace-member-list" role="list">
-            {joinRequests.map((request) => (
-              <div className="workspace-member-row" key={request.request_id} role="listitem">
-                <div className="workspace-member-identity">
-                  <strong>
-                    {request.requester_display_name || request.requester_email || request.requester_user_id}
-                  </strong>
-                  <span>{request.requester_email ?? request.requester_user_id}</span>
-                  <span className="meta-line">
-                    {t("workspaceMembers.join.requested", {
-                      date: formatDisplayDateTime(request.requested_at, i18n.language),
-                      attempt: request.attempt_no,
-                    })}
-                  </span>
-                </div>
-                <div className="workspace-member-actions">
-                  <button
-                    className="icon-button text-button"
-                    disabled={joinBusyId === request.request_id}
-                    onClick={() => void decideJoinRequest(request, "reject")}
-                    type="button"
-                  >
-                    {t("workspaceMembers.join.reject")}
-                  </button>
-                  <button
-                    className="icon-button primary"
-                    disabled={joinBusyId === request.request_id}
-                    onClick={() => void decideJoinRequest(request, "approve")}
-                    type="button"
-                  >
-                    {joinBusyId === request.request_id
-                      ? t("workspaceMembers.join.updating")
-                      : t("workspaceMembers.join.approve")}
-                  </button>
-                </div>
+      <div className="workspace-settings-card workspace-member-requests-card">
+        <details
+          className="workspace-settings-disclosure"
+          open={joinTotal > 0 || !!joinError || !!joinNotice}
+        >
+          <summary>
+            <div className="policy-card-heading">
+              <h3 className="metric-card-title">
+                <Inbox size={16} aria-hidden="true" />
+                <span>{t("workspaceMembers.join.title")}</span>
+              </h3>
+              <CountChip
+                compact
+                formatted={t("workspaceMembers.join.count", { count: joinTotal })}
+                value={joinTotal}
+              />
+            </div>
+          </summary>
+          <div className="workspace-settings-disclosure-content">
+            <p>{t("workspaceMembers.join.description")}</p>
+            {joinError ? <StatusBanner tone="warning">{joinError}</StatusBanner> : null}
+            {joinNotice ? <StatusBanner tone="info">{joinNotice}</StatusBanner> : null}
+            {joinLoading ? (
+              <SettingsLoadingRow>
+                {t("workspaceMembers.join.loading")}
+              </SettingsLoadingRow>
+            ) : joinRequests.length === 0 ? (
+              <SettingsEmptyState
+                description={t("workspaceMembers.join.empty.description")}
+                title={t("workspaceMembers.join.empty.title")}
+              />
+            ) : (
+              <div className="workspace-member-list" role="list">
+                {joinRequests.map((request) => (
+                  <div className="workspace-member-row" key={request.request_id} role="listitem">
+                    <div className="workspace-member-identity">
+                      <strong>
+                        {request.requester_display_name || request.requester_email || request.requester_user_id}
+                      </strong>
+                      <span>{request.requester_email ?? request.requester_user_id}</span>
+                      <span className="meta-line">
+                        {t("workspaceMembers.join.requested", {
+                          date: formatDisplayDateTime(request.requested_at, i18n.language),
+                          attempt: request.attempt_no,
+                        })}
+                      </span>
+                    </div>
+                    <div className="workspace-member-actions">
+                      <button
+                        className="icon-button text-button"
+                        disabled={joinBusyId === request.request_id}
+                        onClick={() => void decideJoinRequest(request, "reject")}
+                        type="button"
+                      >
+                        {t("workspaceMembers.join.reject")}
+                      </button>
+                      <button
+                        className="icon-button primary"
+                        disabled={joinBusyId === request.request_id}
+                        onClick={() => void decideJoinRequest(request, "approve")}
+                        type="button"
+                      >
+                        {joinBusyId === request.request_id
+                          ? t("workspaceMembers.join.updating")
+                          : t("workspaceMembers.join.approve")}
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+            {joinHasMore ? (
+              <button
+                className="icon-button text-button workspace-load-more"
+                disabled={joinMoreBusy}
+                onClick={() => void loadMoreJoinRequests()}
+                type="button"
+              >
+                {joinMoreBusy
+                  ? t("workspaceMembers.loadingMore")
+                  : t("workspaceMembers.loadMore")}
+              </button>
+            ) : null}
           </div>
-        )}
-        {joinHasMore ? (
-          <button
-            className="icon-button text-button workspace-load-more"
-            disabled={joinMoreBusy}
-            onClick={() => void loadMoreJoinRequests()}
-            type="button"
-          >
-            {joinMoreBusy
-              ? t("workspaceMembers.loadingMore")
-              : t("workspaceMembers.loadMore")}
-          </button>
-        ) : null}
+        </details>
       </div>
 
-      {pendingAction ? (
+      {addDialogOpen ? (
+        <WorkspaceMemberAddDialog
+          workspaceId={target.id}
+          directoryEnabled={directoryEnabled}
+          busy={memberBusyId !== null}
+          error={memberError}
+          onDirectoryAvailabilityChange={setDirectoryEnabled}
+          onClose={() => {
+            if (memberBusyId === null) {
+              setAddDialogOpen(false);
+              setMemberError(null);
+            }
+          }}
+          onAdd={(selector, role, label) => submitAddMember(selector, role, false, label)}
+        />
+      ) : null}
+      {pendingAction && pendingAction.workspaceId === target.id ? (
         <MemberActionDialog
           action={pendingAction}
           busy={memberBusyId !== null}
           isPersonal={target.isPersonal}
+          restoreFocusFallback={() => addMemberButtonRef.current}
           onCancel={() => {
             if (memberBusyId === null) {
               setPendingAction(null);
             }
           }}
           onConfirm={() => {
+            if (pendingAction.workspaceId !== target.id || !isCurrentMemberMutation(pendingAction)) {
+              setPendingAction(null);
+              return;
+            }
             if (pendingAction.kind === "promote") {
               void changeRole(pendingAction.member, "owner");
               return;
@@ -937,7 +870,45 @@ export function WorkspaceMembersSection() {
   );
 }
 
-export function WorkspaceAccessSharingSection() {
+function WorkspaceAccessCard({
+  children,
+  collapsible,
+  summary,
+}: {
+  children: ReactNode;
+  collapsible: boolean;
+  summary: string;
+}) {
+  const { t } = useTranslation("settings");
+  const heading = (
+    <h3 className="metric-card-title">
+      <Globe size={16} aria-hidden="true" />
+      <span>{t("workspaceAccess.title")}</span>
+    </h3>
+  );
+  return (
+    <div className="workspace-settings-card">
+      {collapsible ? (
+        <details className="workspace-settings-disclosure">
+          <summary>
+            {heading}
+            <span className="meta-line">{summary}</span>
+          </summary>
+          <div className="workspace-settings-disclosure-content">{children}</div>
+        </details>
+      ) : (
+        <>
+          <div className="workspace-settings-heading">{heading}</div>
+          {children}
+        </>
+      )}
+    </div>
+  );
+}
+
+export function WorkspaceAccessSharingSection({
+  collapsible = false,
+}: { collapsible?: boolean } = {}) {
   const { t } = useTranslation("settings");
   const workspaceContext = useOptionalWorkspaceContext();
   const { error: targetError, loading: targetLoading, target } =
@@ -1096,13 +1067,7 @@ export function WorkspaceAccessSharingSection() {
   if (!isOwner) {
     return (
       <section className="feature-section workspace-access-settings">
-        <div className="workspace-settings-card">
-          <div className="workspace-settings-heading">
-            <h3 className="metric-card-title">
-              <Globe size={16} aria-hidden="true" />
-              <span>{t("workspaceAccess.title")}</span>
-            </h3>
-          </div>
+        <WorkspaceAccessCard collapsible={collapsible} summary={`${visibilityLabel(t, target.visibility)} · ${joinPolicyLabel(t, target.joinPolicy)}`}>
           <p>{t("workspaceAccess.readOnlyDescription")}</p>
           <StatusBanner tone="info">
             {t("workspaceAccess.readOnlyRole", {
@@ -1129,20 +1094,15 @@ export function WorkspaceAccessSharingSection() {
           <p className="workspace-whole-access-note">
             {t("workspaceAccess.wholeWorkspaceNotice")}
           </p>
-        </div>
+        </WorkspaceAccessCard>
       </section>
     );
   }
 
   return (
     <section className="feature-section workspace-access-settings">
-      <div className="workspace-settings-card">
-        <div className="workspace-settings-heading">
-          <h3 className="metric-card-title">
-            <Globe size={16} aria-hidden="true" />
-            <span>{t("workspaceAccess.title")}</span>
-          </h3>
-        </div>
+      <WorkspaceAccessCard collapsible={collapsible} summary={`${visibilityLabel(t, access?.visibility ?? target.visibility)} · ${joinPolicyLabel(t, access?.join_policy ?? target.joinPolicy)}`}>
+
         <p>{t("workspaceAccess.description")}</p>
         <WorkspaceAccessPolicyGuide />
         {accessError ? <StatusBanner tone="warning">{accessError}</StatusBanner> : null}
@@ -1245,7 +1205,7 @@ export function WorkspaceAccessSharingSection() {
             </div>
           </>
         ) : null}
-      </div>
+      </WorkspaceAccessCard>
 
       {confirmOpen && access && effects ? (
         <AccessChangeDialog
@@ -1417,6 +1377,7 @@ function MemberActionDialog({
   isPersonal,
   onCancel,
   onConfirm,
+  restoreFocusFallback,
   workspaceTitle,
 }: {
   action: PendingMemberAction;
@@ -1424,6 +1385,7 @@ function MemberActionDialog({
   isPersonal: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  restoreFocusFallback: () => HTMLElement | null;
   workspaceTitle: string;
 }) {
   const { t } = useTranslation("settings");
@@ -1452,6 +1414,7 @@ function MemberActionDialog({
       dismissible={!busy}
       labelledBy="workspace-member-action-title"
       onClose={requestCancel}
+      restoreFocusFallback={restoreFocusFallback}
     >
       <h2 id="workspace-member-action-title">{title}</h2>
       {isFirstShare ? (
@@ -1750,10 +1713,6 @@ function WorkspaceAccessPolicyGuide() {
   );
 }
 
-function looksLikeLoginEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 function memberRoleOptions(t: ReturnType<typeof useTranslation>["t"]) {
   return (["viewer", "editor", "owner"] as WorkspaceMemberRole[]).map((role) => (
     <option key={role} value={role}>
@@ -1762,13 +1721,6 @@ function memberRoleOptions(t: ReturnType<typeof useTranslation>["t"]) {
   ));
 }
 
-function addMemberRoleOptions(t: ReturnType<typeof useTranslation>["t"]) {
-  return (["viewer", "editor"] as WorkspaceMemberInviteRole[]).map((role) => (
-    <option key={role} value={role}>
-      {roleLabel(t, role)}
-    </option>
-  ));
-}
 
 function roleLabel(
   t: ReturnType<typeof useTranslation>["t"],

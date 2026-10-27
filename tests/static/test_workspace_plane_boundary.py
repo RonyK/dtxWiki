@@ -411,6 +411,11 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "reauthentication challenges use global users/identity/outbox records, "
         "never workspace document or membership data."
     ),
+    "backend/api/auth_sso.py": (
+        "Identity-plane only: an SSO email-conflict release request reads the "
+        "holder user, identity and auth_email_conflict_requests control-plane "
+        "rows; it never resolves a workspace or reads workspace content."
+    ),
     "backend/api/auth_dependencies.py": (
         "Builds the external-login broker over control-plane users, identities "
         "and browser login transactions. Provisioning uses the existing Personal "

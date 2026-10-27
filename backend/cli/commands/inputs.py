@@ -7,7 +7,7 @@ import typer
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.settings import Settings
-from backend.cli.commands.admin import users_app
+from backend.cli.commands.admin import cli_operator_actor_id, users_app
 from backend.services.ops.input_maintenance import audit_inputs, repair_input
 
 inputs_app = typer.Typer(
@@ -21,7 +21,9 @@ def _url(db):
 
 def _repair(entity, identity, field, value, db):
     try:
-        repair_input(_url(db), entity, identity, field, value)
+        repair_input(
+            _url(db), entity, identity, field, value, actor_id=cli_operator_actor_id()
+        )
     except (ValueError, RuntimeError, OSError) as exc:
         typer.echo(f"input repair refused: {exc}", err=True)
         raise typer.Exit(2) from exc

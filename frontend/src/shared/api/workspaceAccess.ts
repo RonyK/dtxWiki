@@ -8,7 +8,9 @@ export type WorkspaceMemberSelector = { user_id: string; email?: never } | { ema
 export type WorkspaceMemberCandidate = {
   user_id: string;
   display_name: string;
-  provider_name: string;
+  provider_name: string | null;
+  provider_slug: string;
+  provider_label: Record<string, string>;
   identity_label: string;
   identity_verified: true;
 };

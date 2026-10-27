@@ -1,4 +1,4 @@
-"""Add purpose-bound email confirmation for sensitive account operations.
+"""Add purpose-bound email confirmation and admin-reviewed email conflicts.
 
 Revision ID: c31a6d907e42
 Revises: 7e2b9c4d6a18
@@ -55,6 +55,36 @@ def upgrade() -> None:
         "email_reauthentication_challenges",
         ["user_id", "created_at"],
     )
+    op.create_table(
+        "auth_email_conflict_requests",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("target_user_id", sa.Uuid(), nullable=False),
+        sa.Column("email", sa.Text(), nullable=False),
+        sa.Column("provider_slug", sa.Text(), nullable=False),
+        sa.Column("issuer", sa.Text(), nullable=False),
+        sa.Column("subject", sa.Text(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("decided_by", sa.Text(), nullable=True),
+        sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'resolved', "
+            "'auto_released')",
+            name="auth_email_conflict_status_check",
+        ),
+        sa.ForeignKeyConstraint(["target_user_id"], ["users.id"], ondelete="CASCADE"),
+    )
+    op.create_index(
+        "ix_auth_email_conflict_status_created",
+        "auth_email_conflict_requests",
+        ["status", "created_at"],
+    )
+    op.create_index(
+        "ix_auth_email_conflict_target",
+        "auth_email_conflict_requests",
+        ["target_user_id"],
+    )
     with op.batch_alter_table("email_outbox") as batch:
         batch.add_column(
             sa.Column("reauthentication_challenge_id", sa.Uuid(), nullable=True)
@@ -84,6 +114,8 @@ def downgrade() -> None:
             "SELECT count(*) FROM email_outbox "
             "WHERE message_kind = 'email_reauthentication'"
         )
+    ) or connection.scalar(
+        sa.text("SELECT count(*) FROM auth_email_conflict_requests")
     ):
         raise RuntimeError("auth email verification downgrade would discard data")
     with op.batch_alter_table("email_outbox") as batch:
@@ -104,3 +136,11 @@ def downgrade() -> None:
         "ix_email_reauth_expires_at", table_name="email_reauthentication_challenges"
     )
     op.drop_table("email_reauthentication_challenges")
+    op.drop_index(
+        "ix_auth_email_conflict_target", table_name="auth_email_conflict_requests"
+    )
+    op.drop_index(
+        "ix_auth_email_conflict_status_created",
+        table_name="auth_email_conflict_requests",
+    )
+    op.drop_table("auth_email_conflict_requests")

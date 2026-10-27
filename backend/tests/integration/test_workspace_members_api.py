@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -220,10 +221,26 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
             "user_id": str(sso_id),
             "display_name": "Company colleague",
             "provider_name": "Company SSO",
+            "provider_slug": "company",
+            "provider_label": dict(
+                owner_client.app.state.auth_providers.get(
+                    "company"
+                ).method.descriptor.branding.label
+            ),
             "identity_label": f"{str(sso_id)[:8]}…{str(sso_id)[-8:]}",
             "identity_verified": True,
         }
     ]
+    # The read is bounded: hitting the scan cap reports more instead of reading
+    # every email-only key match.
+    with pytest.MonkeyPatch.context() as capped:
+        capped.setattr(
+            "backend.services.workspace_membership_service.CANDIDATE_SCAN_LIMIT", 1
+        )
+        bounded = owner_client.get(
+            candidate_endpoint, params={"query": "company"}
+        ).json()["data"]
+    assert bounded["has_more"] is True and len(bounded["items"]) == 1
     assert (
         member_client.get(candidate_endpoint, params={"query": "company"}).status_code
         == 403

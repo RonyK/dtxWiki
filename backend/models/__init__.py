@@ -25,7 +25,10 @@ from backend.models.ask import (
 )
 from backend.models.audit import AuditEvent
 from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
-from backend.models.auth_verification import EmailReauthenticationChallenge
+from backend.models.auth_verification import (
+    EmailConflictRequest,
+    EmailReauthenticationChallenge,
+)
 from backend.models.base import Base
 from backend.models.bundle import AgentInputBundle, AgentInputBundleItem
 from backend.models.change import ChangeOperation, ChangeSet
@@ -150,6 +153,7 @@ __all__ = [
     "ApiTokenWorkspace",
     "AuditEvent",
     "AuthLoginTransaction",
+    "EmailConflictRequest",
     "EmailReauthenticationChallenge",
     "AgentPage",
     "AgentPageVersion",

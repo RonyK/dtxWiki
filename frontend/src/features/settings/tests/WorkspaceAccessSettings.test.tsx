@@ -102,6 +102,18 @@ describe("Workspace Settings membership and access", () => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceList("owner", "private", "invite_only", true));
       }
+      // This existing gate traversal also exercises the API-eligible company
+      // directory and its UUID target; it does not need another collected case.
+      if (url.includes(`/workspaces/${WORKSPACE_ID}/member-candidates?`)) {
+        const searched = new URL(url).searchParams.get("query");
+        return jsonResponse({ data: {
+          enabled: true,
+          items: searched ? [{ user_id: MEMBER_ID, display_name: "Person", provider_name: null,
+            provider_slug: "company", provider_label: { en: "Company SSO", ko: "회사 SSO" },
+            identity_label: "00000000…00000003", identity_verified: true }] : [],
+          has_more: false,
+        } });
+      }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
@@ -158,8 +170,9 @@ describe("Workspace Settings membership and access", () => {
     expect(
       await screen.findByRole("heading", { name: "Members" }),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
     const memberLookup = screen.getByRole("textbox", {
-      name: "Account UUID or native login email",
+      name: "User ID or account email",
     });
     expect(screen.getByRole("heading", { name: "Add a member" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
@@ -172,14 +185,22 @@ describe("Workspace Settings membership and access", () => {
       memberLookup,
       "person@example.com",
     );
-    expect(screen.getByText(/Add account person@example.com/))
-      .toBeInTheDocument();
+    expect(memberLookup).toHaveAccessibleDescription(/exact email registered on the account/);
     expect(
       within(screen.getByLabelText("Initial role")).queryByRole("option", {
         name: "Owner",
       }),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await user.click(screen.getByRole("tab", { name: "Company directory" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search names in your company" }), "Person");
+    await user.click(screen.getByRole("button", { name: "Search directory" }));
+    const candidateAdd = await screen.findByRole("button", { name: "Add Person" });
+    const candidate = candidateAdd.closest("li")!;
+    expect(within(candidate).getByText("Company SSO")).toBeInTheDocument();
+    expect(within(candidate).getByLabelText("Company account verified")).toBeInTheDocument();
+    await user.click(within(candidate).getByLabelText("Full user ID for Person"));
+    expect(within(candidate).getByText(MEMBER_ID)).toBeVisible();
+    await user.click(candidateAdd);
 
     const dialog = await screen.findByRole("dialog", {
       name: "Share the whole workspace?",
@@ -194,7 +215,7 @@ describe("Workspace Settings membership and access", () => {
       within(dialog).getByText(/create a new collaborative Workspace/),
     ).toBeInTheDocument();
     expect(postBodies[0]).toMatchObject({
-      email: "person@example.com",
+      user_id: MEMBER_ID,
       role: "viewer",
       confirm_first_share: false,
     });
@@ -205,7 +226,76 @@ describe("Workspace Settings membership and access", () => {
     await waitFor(() => expect(postBodies).toHaveLength(2));
     expect(postBodies[1]).toMatchObject({ confirm_first_share: true });
     expect(await screen.findByText(/was added to this workspace/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add a member" })).toHaveFocus());
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("ignores a first-share response after switching to another workspace", async () => {
+    // A deferred 409 crosses workspace selection and dialog lifetime. The
+    // existing first-share traversal stays in one workspace and cannot catch
+    // a stale response replacing the new workspace's add-member dialog.
+    const user = userEvent.setup();
+    const nextWorkspaceId = "00000000-0000-0000-0000-000000000006";
+    const postedWorkspaceIds: string[] = [];
+    let resolveAdd!: (response: Response) => void;
+    const addRequest = new Promise<Response>((resolve) => { resolveAdd = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        const response = workspaceList("owner", "private", "invite_only", true);
+        return jsonResponse({ data: {
+          ...response.data,
+          workspaces: [...response.data.workspaces, {
+            ...response.data.workspaces[0], id: nextWorkspaceId,
+            slug: "other", title: "Other Workspace", name: "Other Workspace",
+          }],
+        } });
+      }
+      if (url.includes("/member-candidates?")) {
+        return jsonResponse({ data: { enabled: false, items: [], has_more: false } });
+      }
+      if (url.includes("/members?")) {
+        const name = url.includes(`/workspaces/${nextWorkspaceId}/`) ? "Other owner" : "Owner";
+        return memberPage([member(OWNER_ID, "owner@example.com", name, "owner", false)]);
+      }
+      if (url.includes("/join-requests?")) {
+        return jsonResponse({ data: { items: [], total: 0, has_more: false } });
+      }
+      if (init?.method === "POST" && url.endsWith("/members")) {
+        postedWorkspaceIds.push(url.split("/").at(-2)!);
+        return addRequest;
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+
+    testingLibraryRender(
+      <MemoryRouter>
+        <WorkspaceProvider>
+          <WorkspaceContextProbe />
+          <WorkspaceSwitchControl workspaceId={nextWorkspaceId} />
+          <WorkspaceMembersSection />
+        </WorkspaceProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("combobox", { name: "Role for Owner" });
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    await user.type(screen.getByRole("textbox", { name: "User ID or account email" }), "person@example.com");
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await waitFor(() => expect(postedWorkspaceIds).toEqual([WORKSPACE_ID]));
+
+    await user.click(screen.getByRole("button", { name: "Switch workspace" }));
+    await screen.findByRole("combobox", { name: "Role for Other owner" });
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    await user.type(screen.getByRole("textbox", { name: "User ID or account email" }), "other@example.com");
+    await act(async () => {
+      resolveAdd(await errorResponse(409, "workspace_first_share_confirmation_required"));
+      await addRequest;
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Share the whole workspace?" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Add a member" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "User ID or account email" })).toHaveValue("other@example.com");
+    expect(postedWorkspaceIds).toEqual([WORKSPACE_ID]);
   });
 
   it("re-queries the applied member search after adding a non-matching email", async () => {
@@ -278,7 +368,8 @@ describe("Workspace Settings membership and access", () => {
 
     // Adding a person does not change the current-member search. The add
     // result does not belong in the filtered result set.
-    await user.type(screen.getByRole("textbox", { name: "Account UUID or native login email" }), "person@example.com");
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    await user.type(screen.getByRole("textbox", { name: "User ID or account email" }), "person@example.com");
     await user.click(screen.getByRole("button", { name: "Add member" }));
 
     await waitFor(() => {
@@ -360,8 +451,9 @@ describe("Workspace Settings membership and access", () => {
     );
     await waitFor(() => expect(filteredReads).toBe(1));
 
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Account UUID or native login email" }),
+      screen.getByRole("textbox", { name: "User ID or account email" }),
       "viewer@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Add member" }));
@@ -479,8 +571,9 @@ describe("Workspace Settings membership and access", () => {
     expect(firstPageReads).toBe(1);
     expect(screen.getByText("26 members")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Account UUID or native login email" }),
+      screen.getByRole("textbox", { name: "User ID or account email" }),
       "added@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Add member" }));
@@ -548,8 +641,15 @@ describe("Workspace Settings membership and access", () => {
 
     render(<WorkspaceMembersSection />);
     await screen.findByRole("combobox", { name: "Role for Editor" });
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    expect(screen.queryByRole("tab", { name: "Company directory" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Initial role"), "editor");
+    await user.click(screen.getByRole("button", { name: "Close member form" }));
+    await user.click(screen.getByRole("button", { name: "Add a member" }));
+    expect(screen.getByLabelText("Initial role")).toHaveValue("viewer");
+    expect(screen.getByRole("textbox", { name: "User ID or account email" })).toHaveValue("");
     await user.type(
-      screen.getByRole("textbox", { name: "Account UUID or native login email" }),
+      screen.getByRole("textbox", { name: "User ID or account email" }),
       MEMBER_ID,
     );
     await user.selectOptions(screen.getByLabelText("Initial role"), "editor");
@@ -1512,7 +1612,7 @@ describe("Workspace Settings membership and access", () => {
     );
     expect(ownerRow).not.toBeNull();
     await user.click(
-      within(ownerRow as HTMLElement).getByRole("button", { name: "Remove" }),
+      within(ownerRow as HTMLElement).getByRole("button", { name: /^Remove / }),
     );
     await user.click(
       within(
@@ -1630,7 +1730,7 @@ describe("Workspace Settings membership and access", () => {
     );
     expect(ownerRow).not.toBeNull();
     await user.click(
-      within(ownerRow as HTMLElement).getByRole("button", { name: "Remove" }),
+      within(ownerRow as HTMLElement).getByRole("button", { name: /^Remove / }),
     );
     await user.click(
       within(
@@ -1698,14 +1798,7 @@ describe("Workspace Settings membership and access", () => {
       .toBeDefined();
   });
 
-  it("stacks member and sharing controls at phone widths", () => {
-    const styles = readAppStyles();
-    expect(styles).toContain("@media (max-width: 640px)");
-    expect(styles).toContain(".workspace-member-lookup,");
-    expect(styles).toContain(".workspace-access-policy-cards,");
-    expect(styles).toContain(".workspace-access-options--two,");
-    expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
-  });
+
 });
 
 function renderWithWorkspaceProvider(initialEntry = "/settings") {
@@ -1743,6 +1836,11 @@ function WorkspaceContextProbe() {
   }, [refreshWorkspaces]);
   const target = workspaces.find((workspace) => workspace.id === WORKSPACE_ID);
   return <span data-testid="switcher-visibility">{target?.visibility}</span>;
+}
+
+function WorkspaceSwitchControl({ workspaceId }: { workspaceId: string }) {
+  const { selectWorkspaceId } = useWorkspaceContext();
+  return <button onClick={() => selectWorkspaceId(workspaceId)}>Switch workspace</button>;
 }
 
 function FallbackRoute() {

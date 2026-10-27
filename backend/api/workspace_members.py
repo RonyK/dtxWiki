@@ -83,6 +83,8 @@ def list_workspace_member_candidates(
                     "user_id": item.user_id,
                     "display_name": item.display_name,
                     "provider_name": item.provider_name,
+                    "provider_slug": item.provider_slug,
+                    "provider_label": item.provider_label,
                     "identity_label": item.identity_label,
                     "identity_verified": True,
                 }

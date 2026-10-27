@@ -547,6 +547,15 @@ def test_oidc_code_flow_and_bounded_discovery_jwks_transport(monkeypatch):
                 "authorization_params": {"redirect_uri": "https://evil.test"},
             }
         )
+    # Login start validates the normalized config again (issuer first), so the
+    # alias limit must count the same distinct extra aliases both times.
+    aliases = [f"https://alias-{index}.example.test" for index in range(17)]
+    normalized = adapter.validate_config(
+        {**provider.config, "accepted_issuers": [ISSUER, *aliases[:16], aliases[0]]}
+    )
+    assert adapter.validate_config(normalized) == normalized
+    with pytest.raises(AuthMethodError):
+        adapter.validate_config({**provider.config, "accepted_issuers": aliases})
     with pytest.raises(AuthMethodError):
         client.discovery("http://idp.example.test")
     token_requests = []

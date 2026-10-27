@@ -25,13 +25,15 @@ from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
 from backend.models.auth_verification import (
     EmailReauthenticationChallenge,
 )
-from backend.models.base import Base
+from backend.models.base import Base, utc_now
 from backend.models.mail import EmailOutbox
+from backend.models.password_reset import PasswordResetToken
 from backend.models.user import User
 from backend.models.workspace import WorkspaceMembership
 from backend.services import server_admin_service
 from backend.services.audit_service import AuditService
 from backend.services.auth.broker import AuthBroker
+from backend.services.auth.email_conflicts import EmailConflictService
 from backend.services.auth.login_transactions import (
     AuthFlowError,
     LoginTransactionStore,
@@ -142,7 +144,7 @@ def deliver_confirmation(page_service, client, kind):
     return token
 
 
-def test_external_signup_mail_policy_and_browser_bound_confirmation(
+def test_sso_signup_email_evidence_enrollment_and_initial_password(
     page_service, tmp_path, monkeypatch
 ):
     """Untrusted profile claims never reserve the account email namespace."""
@@ -217,6 +219,17 @@ def test_external_signup_mail_policy_and_browser_bound_confirmation(
     stranger = TestClient(client.app, base_url=ORIGIN, follow_redirects=False)
     confirm = "/api/v1/auth/email-verification/confirm"
     assert stranger.post(confirm, json={"token": token}).status_code == 401
+    # A refused claim must roll back the enrollment too; on SQLite the
+    # SAVEPOINT must not become the outermost transaction and commit early.
+    with page_service.session_factory.begin() as session:
+        pending = session.scalar(
+            select(PasswordResetToken).where(PasswordResetToken.user_id == user_id)
+        )
+        valid_until, pending.expires_at = pending.expires_at, utc_now()
+    assert client.post(confirm, json={"token": token}).status_code == 400
+    assert client.get("/api/v1/auth/me").json()["data"]["email"] is None
+    with page_service.session_factory.begin() as session:
+        session.get(PasswordResetToken, pending.id).expires_at = valid_until
     assert client.post(confirm, json={"token": token}).status_code == 200
     assert (
         client.get("/api/v1/auth/me").json()["data"]["email"] == "native@example.test"
@@ -236,6 +249,67 @@ def test_external_signup_mail_policy_and_browser_bound_confirmation(
         == 200
     )
     assert client.get("/api/v1/auth/me").json()["data"]["user_id"] == str(user_id)
+    # Argon2 costs 64 MiB per call: a refused or throttled initial-password
+    # request must never reach the hasher.
+    hashed = []
+    original_hash = CredentialHasher.hash_password
+    monkeypatch.setattr(
+        CredentialHasher,
+        "hash_password",
+        lambda self, password: hashed.append(password)
+        or original_hash(self, password),
+    )
+    repeat = {"new_password": "another-password"}
+    already = client.post(
+        "/api/v1/auth/password/set", json=repeat, headers={"Origin": ORIGIN}
+    )
+    assert already.json()["error_code"] == "password_already_set"
+    with monkeypatch.context() as exhausted:
+        exhausted.setattr(
+            "backend.services.session_service.AUTH_RATE_LIMIT_PER_EMAIL", 0
+        )
+        throttled = client.post(
+            "/api/v1/auth/password/set", json=repeat, headers={"Origin": ORIGIN}
+        )
+    assert throttled.status_code == 429 and hashed == []
+    # A trusted address adopted later supersedes an unfinished enrollment: its
+    # queued mail is discarded and the old link no longer verifies anything.
+    assert (
+        complete(client, begin(client), "collision").headers["location"] == "/dashboard"
+    )
+    pending_request = client.post(
+        endpoint, json={"email": "pending@example.test"}, headers={"Origin": ORIGIN}
+    )
+    assert pending_request.status_code == 202, pending_request.text
+    cipher = EmailDeliveryService(settings=client.app.state.settings).cipher
+    with page_service.session_factory() as session:
+        queued = session.scalar(
+            select(EmailOutbox)
+            .where(EmailOutbox.message_kind == "email_verification")
+            .order_by(EmailOutbox.created_at.desc())
+            .limit(1)
+        )
+        stale = cipher.decrypt(
+            outbox_id=queued.id,
+            message_kind="email_verification",
+            envelope=queued.encrypted_token,
+        )
+    method.assertions["collision"] = replace(
+        method.assertions["collision"],
+        email="adopted@example.test",
+        email_verified=True,
+    )
+    assert (
+        complete(client, begin(client), "collision").headers["location"] == "/dashboard"
+    )
+    adopted = client.get("/api/v1/auth/me").json()["data"]
+    assert adopted["user_id"] == other_id
+    assert adopted["email"] == "adopted@example.test"
+    assert client.post(confirm, json={"token": stale}).status_code == 400
+    with page_service.session_factory() as session:
+        assert session.get(User, UUID(other_id)).pending_email is None
+        discarded = session.get(EmailOutbox, queued.id)
+        assert discarded.encrypted_token is None and discarded.status != "queued"
 
 
 def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
@@ -1004,8 +1078,11 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
     )
     assert signup.status_code == 201
     native_id = signup.json()["data"]["user"]["user_id"]
+    # Its address is unverified, so this is a conflict, not a plain link prompt:
+    # the browser gets a release ticket and no second account exists.
     rejected = complete(client, begin(client))
-    assert "account_link_required" in rejected.headers["location"]
+    assert "account_email_conflict" in rejected.headers["location"]
+    assert rejected.cookies.get("dtxwiki_email_conflict")
     current = client.get("/api/v1/auth/me").json()["data"]
     assert current["email"] == "fake@example.test" and current["user_id"] == native_id
     with page_service.session_factory() as session:
@@ -1027,6 +1104,93 @@ def test_account_decision_table_blocks_email_pre_hijack_and_policy_bypass(
         )
         assert session.get(User, UUID(native_id)).email_verified_at is not None
     assert client.post("/api/v1/auth/logout").status_code == 200
+    # When the unverified holder is someone else, the requester asks a server
+    # admin to release it; signup completes only on a later login.
+    squatter_id = client.post(
+        "/api/v1/auth/signup",
+        json={"email": "victim@example.test", "password": "password"},
+    ).json()["data"]["user"]["user_id"]
+    assert client.post("/api/v1/auth/logout").status_code == 200
+    method.assertions["victim"] = ExternalAssertion(
+        issuer=FAKE_ISSUER,
+        subject="victim",
+        email="victim@example.test",
+        email_verified=True,
+    )
+    with page_service.session_factory() as session:
+        accounts = session.scalar(select(func.count()).select_from(User))
+    conflict = complete(client, begin(client), "victim")
+    assert "account_email_conflict" in conflict.headers["location"]
+    release = "/api/v1/auth/sso/email-conflict/request"
+    requested = client.post(release, headers={"Origin": ORIGIN})
+    assert requested.status_code == 202, requested.text
+    assert requested.json()["data"]["status"] == "pending"
+    # The ticket is consumed by its one request; a new login repeats the same
+    # pending request instead of queueing another.
+    assert client.post(release, headers={"Origin": ORIGIN}).status_code == 400
+    complete(client, begin(client), "victim")
+    again = client.post(release, headers={"Origin": ORIGIN}).json()["data"]
+    assert again == requested.json()["data"]
+    with page_service.session_factory.begin() as session:
+        assert session.scalar(select(func.count()).select_from(User)) == accounts
+        server_admin_service.grant_server_admin(session, UUID(native_id))
+        generation = session.get(User, UUID(native_id)).session_generation
+    EmailConflictService(page_service.session_factory).decide(
+        UUID(again["request_id"]),
+        approve=True,
+        reason="Holder never verified the mailbox",
+        actor_user_id=UUID(native_id),
+        actor_session_generation=generation,
+    )
+    assert complete(client, begin(client), "victim").headers["location"] == "/dashboard"
+    victim = client.get("/api/v1/auth/me").json()["data"]
+    assert victim["email"] == "victim@example.test"
+    assert victim["user_id"] != squatter_id
+    with page_service.session_factory() as session:
+        released = session.get(User, UUID(squatter_id))
+        assert released.status == "disabled" and released.email is None
+        assert {
+            "auth.email_conflict.requested",
+            "auth.email_conflict.approved",
+            "auth.account.released",
+        } <= set(
+            session.scalars(
+                select(AuditEvent.action).where(
+                    AuditEvent.target_id == UUID(squatter_id)
+                )
+            )
+        )
+    assert client.post("/api/v1/auth/logout").status_code == 200
+    # Provider-selected SSO priority releases at once, but never a server admin:
+    # that holder links the identity from its own account instead.
+    default_policy = registry.get("company")
+    registry.providers["company"] = replace(
+        default_policy,
+        policy=default_policy.policy.model_copy(
+            update={"email_collision_policy": "auto_release"}
+        ),
+    )
+    for key, is_admin in (("held", True), ("auto", False)):
+        holder = client.post(
+            "/api/v1/auth/signup",
+            json={"email": f"{key}@example.test", "password": "password"},
+        ).json()["data"]["user"]["user_id"]
+        assert client.post("/api/v1/auth/logout").status_code == 200
+        if is_admin:
+            with page_service.session_factory.begin() as session:
+                server_admin_service.grant_server_admin(session, UUID(holder))
+        method.assertions[key] = replace(
+            method.assertions["victim"], subject=key, email=f"{key}@example.test"
+        )
+        outcome = complete(client, begin(client), key).headers["location"]
+        if is_admin:
+            assert "account_link_required" in outcome
+        else:
+            assert outcome == "/dashboard"
+            with page_service.session_factory() as session:
+                assert session.get(User, UUID(holder)).status == "disabled"
+            assert client.post("/api/v1/auth/logout").status_code == 200
+    registry.providers["company"] = default_policy
     # Separate new identities exercise JIT, trust and domain gates.
     method.assertions["new"] = ExternalAssertion(
         issuer=FAKE_ISSUER, subject="new", email="new@example.test", email_verified=True

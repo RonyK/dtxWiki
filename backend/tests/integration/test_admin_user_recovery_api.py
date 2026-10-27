@@ -9,6 +9,7 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
 from backend.models.auth_identity import UserIdentity
+from backend.models.auth_verification import EmailConflictRequest
 from backend.models.mail import EmailOutbox
 from backend.models.password_reset import PasswordResetToken
 from backend.models.user import User
@@ -139,6 +140,50 @@ def test_server_admin_search_requires_recent_http_only_proof(page_service):
         assert reauthentication_event.target_id == admin.user_id
         assert "reauthenticated_until" in reauthentication_event.payload
         assert "password" not in str(reauthentication_event.payload)
+        session.add(
+            EmailConflictRequest(
+                target_user_id=target.user_id,
+                email="target@example.com",
+                provider_slug="company",
+                issuer="https://idp.example.test",
+                subject="claimant",
+                status="pending",
+            )
+        )
+        session.commit()
+    # The same proof opens server-level history: operator-created accounts and
+    # grants are recorded there, and reading it is recorded too.
+    history = client.get(
+        "/api/v1/admin/audit-events", params={"action_prefix": "server_admin."}
+    )
+    assert history.status_code == 200, history.text
+    assert history.headers["cache-control"] == "no-store"
+    assert [
+        (item["action"], item["target_id"]) for item in history.json()["data"]["items"]
+    ] == [("server_admin.granted", str(admin.user_id))]
+    created = client.get(
+        "/api/v1/admin/audit-events",
+        params={"target_user_id": str(target.user_id), "action_prefix": "auth.user."},
+    ).json()["data"]["items"]
+    assert [item["action"] for item in created] == ["auth.user.admin_created"]
+    # Pending email conflicts are reviewed with the same proof; rejecting keeps
+    # the holder untouched.
+    pending = client.get("/api/v1/admin/email-conflicts").json()["data"]
+    assert [item["target"]["user_id"] for item in pending["items"]] == [
+        str(target.user_id)
+    ]
+    decided = client.post(
+        f"/api/v1/admin/email-conflicts/{pending['items'][0]['request_id']}/decision",
+        json={"decision": "reject", "reason": "Holder confirmed by phone"},
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["data"]["status"] == "rejected"
+    with page_service.session_factory() as session:
+        holder = session.get(User, target.user_id)
+        assert holder.status == "active" and holder.email == "target@example.com"
+        assert session.scalar(
+            select(AuditEvent.id).where(AuditEvent.action == "admin.audit.listed")
+        )
 
 
 def test_reauthentication_audits_failures_and_rate_limits(page_service, monkeypatch):
@@ -367,6 +412,9 @@ def test_workspace_owner_without_server_admin_cannot_search_or_reset(page_servic
         == 200
     )
     assert client.get("/api/v1/admin/users").status_code == 403
+    # Server-level history and conflict review are server-admin only.
+    assert client.get("/api/v1/admin/audit-events").status_code == 403
+    assert client.get("/api/v1/admin/email-conflicts").status_code == 403
     denied = client.post(
         f"/api/v1/admin/users/{target.user_id}/password-reset",
         json={

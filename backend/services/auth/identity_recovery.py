@@ -3,21 +3,17 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from backend.models.api_token import ApiToken
-from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
-from backend.models.auth_verification import EmailReauthenticationChallenge
+from backend.models.auth_identity import UserIdentity
 from backend.models.base import utc_now
-from backend.models.password_reset import PasswordResetToken
 from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
 from backend.services.audit_service import AuditService
+from backend.services.auth.account_credentials import revoke_user_credentials
 from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.db_write_intent import acquire_write_intent
-from backend.services.mail_delivery import terminalize_token_outboxes
-from backend.services.oauth_service import revoke_all_user_oauth_credentials
 
 
 class IdentityRecoveryError(RuntimeError):
@@ -143,62 +139,7 @@ class IdentityRecoveryService:
                 ) = None
                 identity.last_email_verified = False
                 identity.last_login_at = None
-                user.session_generation += 1
-                user.pending_email = None
-                session.execute(
-                    update(AuthLoginTransaction)
-                    .where(
-                        AuthLoginTransaction.user_id == user_id,
-                        AuthLoginTransaction.consumed_at.is_(None),
-                    )
-                    .values(consumed_at=now)
-                )
-                challenge_ids = list(
-                    session.scalars(
-                        select(EmailReauthenticationChallenge.id).where(
-                            EmailReauthenticationChallenge.user_id == user_id,
-                            EmailReauthenticationChallenge.revoked_at.is_(None),
-                            EmailReauthenticationChallenge.consumed_at.is_(None),
-                        )
-                    )
-                )
-                if challenge_ids:
-                    session.execute(
-                        update(EmailReauthenticationChallenge)
-                        .where(
-                            EmailReauthenticationChallenge.id.in_(challenge_ids),
-                        )
-                        .values(revoked_at=now)
-                    )
-                token_ids = list(
-                    session.scalars(
-                        select(PasswordResetToken.id).where(
-                            PasswordResetToken.user_id == user_id,
-                            PasswordResetToken.revoked_at.is_(None),
-                            PasswordResetToken.used_at.is_(None),
-                        )
-                    )
-                )
-                if token_ids:
-                    session.execute(
-                        update(PasswordResetToken)
-                        .where(PasswordResetToken.id.in_(token_ids))
-                        .values(revoked_at=now)
-                    )
-                terminalize_token_outboxes(
-                    session=session,
-                    token_ids=token_ids,
-                    reauthentication_challenge_ids=challenge_ids,
-                    terminal_at=now,
-                )
-                session.execute(
-                    update(ApiToken)
-                    .where(ApiToken.user_id == user_id, ApiToken.revoked_at.is_(None))
-                    .values(revoked_at=now)
-                )
-                revoke_all_user_oauth_credentials(
-                    session, user_id=user_id, revoked_at=now
-                )
+                revoke_user_credentials(session, user, now)
                 AuditService().emit(
                     session=session,
                     workspace_id=None,

@@ -76,6 +76,9 @@ def test_remembered_session_lifetimes_load_from_exact_environment_keys(monkeypat
     settings = Settings()
 
     assert settings.auth_reauthentication_max_age_seconds == 2400
+    monkeypatch.setenv("DTXWIKI_AUTH_REAUTHENTICATION_MAX_AGE_SECONDS", "999999999999")
+    with pytest.raises(ValidationError, match="auth_reauthentication_max_age_seconds"):
+        Settings()
     assert settings.session_remembered_ttl_seconds == 300
     assert settings.session_remembered_refresh_threshold_seconds == 30
     assert settings.session_remembered_absolute_ttl_seconds == 900

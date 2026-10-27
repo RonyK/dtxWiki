@@ -112,6 +112,12 @@ class AuthAccountService:
         password: str,
     ) -> SessionResult:
         validate_password(password)
+        # Refuse what the locked transaction would refuse before paying for
+        # Argon2; that transaction still rechecks the live row.
+        if user.has_password:
+            raise AuthFlowError("password_already_set")
+        if not user.email:
+            raise AuthFlowError("native_email_required")
         # Argon2 must not hold SQLite's database-wide writer lock. The locked
         # transaction below rechecks every state used to authorize the write.
         password_hash = self.sessions.credential_hasher.hash_password(password)

@@ -46,6 +46,11 @@ class ProviderPolicy(BaseModel):
     allowed_email_domains: list[str] = []
     link_policy: str = "confirm"
     trust_email_verified: bool = False
+    # What a trusted address colliding with an UNVERIFIED account does: wait
+    # for a server admin to release that address, or release it at once.
+    email_collision_policy: Literal["admin_approval", "auto_release"] = (
+        "admin_approval"
+    )
     provisioning_workspace_roles: dict[str, list[Literal["viewer", "editor"]]] = {}
     directory_enabled: bool = False
     directory_tenant: str | None = None
@@ -161,6 +166,11 @@ class ProviderRegistry:
             raise ValueError("invalid directory tenant")
         if policy.directory_enabled and not tenant:
             raise ValueError("directory_enabled requires directory_tenant")
+        if (
+            policy.email_collision_policy == "auto_release"
+            and not policy.trust_email_verified
+        ):
+            raise ValueError("auto_release requires trust_email_verified")
         for workspace_id, roles in policy.provisioning_workspace_roles.items():
             try:
                 canonical_id = str(UUID(workspace_id))

@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import type { components } from "./types.gen";
 
 export type AdminUserWorkspace = {
   workspace_id: string;
@@ -86,4 +87,38 @@ export async function issueAdminPasswordReset(
     },
   );
   return response.data;
+}
+
+export type AdminEmailConflict = components["schemas"]["AdminEmailConflictData"];
+export type AdminAuditEvent = components["schemas"]["AdminAuditEventData"];
+
+export async function listAdminEmailConflicts() {
+  return apiRequest<{ data: components["schemas"]["AdminEmailConflictListData"] }>(
+    "/api/v1/admin/email-conflicts?status=pending&limit=50",
+  ).then((response) => response.data);
+}
+
+export async function decideAdminEmailConflict(
+  requestId: string,
+  decision: "approve" | "reject",
+  reason: string,
+) {
+  return apiRequest<{ data: components["schemas"]["AdminEmailConflictDecisionData"] }>(
+    `/api/v1/admin/email-conflicts/${encodeURIComponent(requestId)}/decision`,
+    { method: "POST", body: JSON.stringify({ decision, reason }) },
+  ).then((response) => response.data);
+}
+
+export async function listAdminAuditEvents(filters: {
+  actionPrefix?: string;
+  targetUserId?: string;
+  cursor?: string | null;
+}) {
+  const query = new URLSearchParams({ limit: "50" });
+  if (filters.actionPrefix) query.set("action_prefix", filters.actionPrefix);
+  if (filters.targetUserId) query.set("target_user_id", filters.targetUserId);
+  if (filters.cursor) query.set("cursor", filters.cursor);
+  return apiRequest<{ data: components["schemas"]["AdminAuditEventListData"] }>(
+    `/api/v1/admin/audit-events?${query.toString()}`,
+  ).then((response) => response.data);
 }

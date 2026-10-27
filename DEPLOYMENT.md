@@ -346,7 +346,7 @@ remembered 갱신은 `auth.session.renewed` audit event 로 Activity 에 남습�
 provider는 별도 배포 패키지에서 구현하고, API·worker·CLI가 사용하는 **같은 Python
 환경**에 설치합니다. 패키지 설치만으로 플러그인이 활성화되지는 않습니다.
 `DTXWIKI_PLUGINS`에는 패키지 이름이 아닌 `dtxwiki.plugins` entry point 이름을
-쉼표로 나열합니다. 다음 예시는 `company_login` 플러그인이 `company_oidc` 로그인
+쉼표로 나열합니다. 다음 예시는 `company_login` 플러그인이 `company.oidc` 로그인
 method를 제공하는 경우입니다.
 
 ```dotenv
@@ -363,7 +363,7 @@ DTXWIKI_AUTH_PASSWORD_LOGIN_ENABLED=true
 ```toml
 [[providers]]
 slug = "company"
-method = "company_oidc"
+method = "company.oidc"
 display_name = "Company SSO"
 issuer = "https://idp.example.com/tenant"
 client_id = "dtxwiki"
@@ -384,7 +384,18 @@ provider 설정에는 HTTPS 대표 URL이 필요하며, `solo_local`의 loopback
 SMTP 없이 대표 이메일로 등록합니다. 없거나 신뢰하지 않는 주소는 identity 프로필에만
 기록하며 대표 이메일을 선점하지 않습니다. 신뢰·검증된 주소가 이미 등록돼 있으면 새
 계정을 만들지 않고 기존 계정으로 로그인한 뒤 명시적으로 연결하도록 안내합니다.
-이메일만으로 계정을 병합하거나 기존 주소를 덮어쓰지 않습니다. `auto_verified_email`
+이메일만으로 계정을 병합하거나 기존 주소를 덮어쓰지 않습니다.
+
+그 기존 계정의 이메일이 확인되지 않았다면(예: SMTP 없이 가입한 계정) 가입은 보류되고
+개인 워크스페이스도 만들지 않습니다. 계정 주인이면 그 계정으로 로그인해 연결합니다.
+본인 계정이 아니면 로그인 화면에서 서버 관리자에게 주소 해제를 요청할 수 있습니다.
+요청은 방금 SSO 로그인을 마친 브라우저만 보낼 수 있습니다. 서버 관리자가 보호된 사용자
+화면에서 승인하면 기존 계정을 비활성화하고 주소를 비우며 세션·자격 증명을 폐기합니다.
+데이터는 지우지 않습니다. 이후 요청자가 SSO로 다시 로그인하면 가입됩니다. provider에
+`email_collision_policy = "auto_release"`를 설정하면(기본값 `"admin_approval"`) 승인 없이
+같은 해제를 즉시 수행하며, `trust_email_verified = true`인 provider에서만 쓸 수 있습니다.
+서버 관리자 계정은 어떤 경우에도 자동 해제하지 않으므로 관리자 본인이 계정 설정에서
+SSO를 연결합니다. 비밀번호 로그인을 끄기 전에 먼저 연결해 두십시오. `auto_verified_email`
 설정은 시작 시 거부합니다. 이미 연결된 identity의 프로필 주소 변경도 대표 이메일을
 자동 교체하지 않습니다.
 `allowed_email_domains`를 설정하면 `trust_email_verified = true`와 IdP의 검증된 이메일이
@@ -428,6 +439,13 @@ CLI는 `dtxwiki users rebind-identity --help`를 참고하세요. 기존 issuer/
 퇴직·차단해야 합니다. 매핑 삭제만으로 이전 identity의 JIT 재가입을 영구 차단하지는
 않습니다. 유일한 IdP의 장애는 IdP 복구 또는 사전 승인된 다른 IdP가 필요합니다.
 SSO 서버 관리자 지정은 `dtxwiki admin grant --user-id <UUID>`를 사용합니다.
+
+서버 관리자 권한 부여·회수, setup의 초기 관리자 지정, `users add`, `users set-email`,
+`users set-display-name`, identity 재연결, 비밀번호 재설정과 이메일 충돌 해제 결정은 서버
+단위 감사 기록에 남습니다. CLI 작업은 `cli:<OS 사용자>`로 기록합니다. 이 기록은 서버
+관리자만 보호된 사용자 화면이나 `GET /api/v1/admin/audit-events`(최근 본인 확인 필요)로
+조회할 수 있고, 조회 자체도 기록됩니다. 워크스페이스 활동 화면에는 나타나지 않습니다.
+비활성 사용자에게는 서버 관리자 권한을 부여하지 않습니다.
 
 공개 OIDC helper로 사설망 IdP에 연결하려면 provider 설정의
 `allow_private_network = true`를 명시합니다. IdP URL은 여전히 HTTPS여야 합니다.

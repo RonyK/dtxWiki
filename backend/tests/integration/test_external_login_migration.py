@@ -218,6 +218,7 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             "auth_login_transactions",
             "email_reauthentication_challenges",
             "email_outbox",
+            "auth_email_conflict_requests",
         }
 
         def include_auth_object(obj, name, kind, reflected, compare_to):
@@ -236,6 +237,9 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             "email_reauthentication_challenges", metadata, autoload_with=engine
         )
         outbox = sa.Table("email_outbox", metadata, autoload_with=engine)
+        conflicts = sa.Table(
+            "auth_email_conflict_requests", metadata, autoload_with=engine
+        )
         assert not outbox.c.recipient_user_id.nullable
         assert "pending_signup_id" not in outbox.c
         assert {"ix_email_reauth_expires_at", "ix_email_reauth_user_created_at"} <= {
@@ -265,7 +269,18 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             "created_at": now,
             "updated_at": now,
         }
+        conflict = {
+            "id": _id(),
+            "target_user_id": existing_id,
+            "email": "existing@example.com",
+            "provider_slug": "company",
+            "issuer": "https://idp.example.com",
+            "subject": "claimant",
+            "status": "pending",
+            "created_at": now,
+        }
         with engine.begin() as connection:
+            connection.execute(conflicts.insert(), conflict)
             preserved = (
                 connection.execute(
                     sa.select(outbox).where(outbox.c.id == preserved_outbox_id)
@@ -310,6 +325,8 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 (outbox, {**message, "id": _id(), "message_kind": "pending_signup"}),
                 (outbox, {**message, "id": _id(), "message_kind": "password_changed"}),
                 (outbox, {**message, "id": _id(), "token_id": _id()}),
+                (conflicts, {**conflict, "id": _id(), "status": "merged"}),
+                (conflicts, {**conflict, "id": _id(), "target_user_id": _id()}),
             ):
                 with pytest.raises(DBAPIError), connection.begin_nested():
                     connection.execute(table.insert(), values)
@@ -323,7 +340,13 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
             assert (
                 connection.scalar(sa.select(sa.func.count()).select_from(outbox)) == 1
             )
+        # An admin-reviewed conflict is evidence too and blocks the downgrade.
+        with pytest.raises(RuntimeError, match="would discard data"):
+            command.downgrade(config, REVISION)
+        with engine.begin() as connection:
+            connection.execute(conflicts.delete())
         command.downgrade(config, REVISION)
+        assert conflicts.name not in inspect(engine).get_table_names()
         assert challenges.name not in inspect(engine).get_table_names()
         old_outbox = sa.Table("email_outbox", sa.MetaData(), autoload_with=engine)
         assert not old_outbox.c.recipient_user_id.nullable

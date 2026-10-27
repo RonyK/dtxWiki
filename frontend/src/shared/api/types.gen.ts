@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Audit Events */
+        get: operations["admin_list_audit_events_api_v1_admin_audit_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/context-media/attachments": {
         parameters: {
             query?: never;
@@ -143,6 +160,40 @@ export interface paths {
          * @description Check the package index for a release without applying any update.
          */
         post: operations["admin_deployment_update_check_api_v1_admin_deployment_update_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/email-conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Email Conflicts */
+        get: operations["admin_list_email_conflicts_api_v1_admin_email_conflicts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/email-conflicts/{request_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Decide Email Conflict */
+        post: operations["admin_decide_email_conflict_api_v1_admin_email_conflicts__request_id__decision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -610,6 +661,28 @@ export interface paths {
         put?: never;
         /** Signup */
         post: operations["signup_api_v1_auth_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/email-conflict/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Email Conflict Release
+         * @description Ask a server admin to release the unverified account holding this address.
+         *
+         *     Only the browser that completed the colliding IdP login holds the ticket.
+         */
+        post: operations["request_email_conflict_release_api_v1_auth_sso_email_conflict_request_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3305,6 +3378,50 @@ export interface components {
             /** Target Kind */
             target_kind: string;
         };
+        /** AdminAuditEventData */
+        AdminAuditEventData: {
+            /** Action */
+            action: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            } | null;
+            /** Summary */
+            summary: string | null;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Kind */
+            target_kind: string;
+        };
+        /** AdminAuditEventListData */
+        AdminAuditEventListData: {
+            /** Items */
+            items: components["schemas"]["AdminAuditEventData"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** AdminAuditEventListResponse */
+        AdminAuditEventListResponse: {
+            data: components["schemas"]["AdminAuditEventListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** AdminContextMediaAttachmentListData */
         AdminContextMediaAttachmentListData: {
             /** Items */
@@ -3399,6 +3516,98 @@ export interface components {
             workspace_id: string;
             /** Workspace Title */
             workspace_title: string;
+        };
+        /** AdminEmailConflictData */
+        AdminEmailConflictData: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided By */
+            decided_by: string | null;
+            /** Email */
+            email: string;
+            /** Provider Slug */
+            provider_slug: string;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected" | "resolved" | "auto_released";
+            /** Subject */
+            subject: string;
+            target: components["schemas"]["AdminEmailConflictTargetData"];
+        };
+        /** AdminEmailConflictDecisionData */
+        AdminEmailConflictDecisionData: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "approved" | "rejected" | "resolved";
+        };
+        /** AdminEmailConflictDecisionRequest */
+        AdminEmailConflictDecisionRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /** Reason */
+            reason: string;
+        };
+        /** AdminEmailConflictDecisionResponse */
+        AdminEmailConflictDecisionResponse: {
+            data: components["schemas"]["AdminEmailConflictDecisionData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** AdminEmailConflictListData */
+        AdminEmailConflictListData: {
+            /** Items */
+            items: components["schemas"]["AdminEmailConflictData"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** AdminEmailConflictListResponse */
+        AdminEmailConflictListResponse: {
+            data: components["schemas"]["AdminEmailConflictListData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** AdminEmailConflictTargetData */
+        AdminEmailConflictTargetData: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Display Name */
+            display_name: string;
+            /** Status */
+            status: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
         };
         /** AdminIdentityRebindData */
         AdminIdentityRebindData: {
@@ -5781,6 +5990,22 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /** EmailConflictRequestData */
+        EmailConflictRequestData: {
+            /** Request Id */
+            request_id: string | null;
+            /**
+             * Status
+             * @description resolved means a new SSO login now decides without an admin.
+             * @enum {string}
+             */
+            status: "pending" | "resolved";
+        };
+        /** EmailConflictRequestResponse */
+        EmailConflictRequestResponse: {
+            data: components["schemas"]["EmailConflictRequestData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** EmailReauthenticationConfirmData */
         EmailReauthenticationConfirmData: {
@@ -10576,8 +10801,14 @@ export interface components {
              * @constant
              */
             identity_verified: true;
+            /** Provider Label */
+            provider_label: {
+                [key: string]: string;
+            };
             /** Provider Name */
-            provider_name: string;
+            provider_name: string | null;
+            /** Provider Slug */
+            provider_slug: string;
             /**
              * User Id
              * Format: uuid
@@ -10797,6 +11028,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    admin_list_audit_events_api_v1_admin_audit_events_get: {
+        parameters: {
+            query?: {
+                action_prefix?: string | null;
+                target_user_id?: string | null;
+                actor_id?: string | null;
+                since?: string | null;
+                until?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditEventListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
         };
@@ -11095,6 +11390,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentUpdateStatusResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_list_email_conflicts_api_v1_admin_email_conflicts_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmailConflictListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_decide_email_conflict_api_v1_admin_email_conflicts__request_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminEmailConflictDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmailConflictDecisionResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -12731,6 +13148,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    request_email_conflict_release_api_v1_auth_sso_email_conflict_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailConflictRequestResponse"];
                 };
             };
         };

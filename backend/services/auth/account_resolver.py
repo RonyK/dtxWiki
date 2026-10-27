@@ -13,6 +13,12 @@ from backend.domain.identity_policy import (
 )
 from backend.models.auth_identity import UserIdentity
 from backend.models.user import User
+from backend.services.auth.account_credentials import supersede_pending_email
+from backend.services.auth.email_conflicts import (
+    EmailConflictRequired,
+    auto_release,
+    releasable,
+)
 from backend.services.auth.login_transactions import AuthFlowError
 from backend.utils.database_errors import is_single_column_unique_violation
 
@@ -89,6 +95,9 @@ def accept_account_email(session, user, email, now, *, linking):
             raise
         if linking:
             raise AuthFlowError("account_link_required") from None
+        return
+    # The trusted address replaces any unfinished native-email enrollment.
+    supersede_pending_email(session, user, now)
 
 
 @dataclass
@@ -155,10 +164,18 @@ class AccountResolver:
             linked = True
             via = "user_link"
         else:
-            if (
-                trusted_email
-                and session.scalar(select(User.id).where(User.email == trusted_email))
-                is not None
+            owner = (
+                session.scalar(
+                    select(User).where(User.email == trusted_email).with_for_update()
+                )
+                if trusted_email
+                else None
+            )
+            # A verified holder, a server admin, or a provider without signup
+            # keeps the explicit sign-in-and-link path; nothing is released.
+            if owner is not None and (
+                not provider.policy.jit_provisioning
+                or not releasable(session, owner, trusted_email)
             ):
                 raise AuthFlowError("account_link_required")
             if not provider.policy.jit_provisioning:
@@ -172,6 +189,20 @@ class AccountResolver:
                 and email.rsplit("@", 1)[-1] in provider.policy.allowed_email_domains
             ):
                 raise AuthFlowError("signup_not_allowed")
+            if owner is not None:
+                # An unverified holder blocks signup until its owner links this
+                # identity or the address is released; no second account yet.
+                if provider.policy.email_collision_policy != "auto_release":
+                    raise EmailConflictRequired(
+                        {
+                            "provider_slug": provider.slug,
+                            "issuer": assertion.issuer,
+                            "subject": assertion.subject,
+                            "email": trusted_email,
+                            "target_user_id": str(owner.id),
+                        }
+                    )
+                auto_release(session, provider, assertion, owner, trusted_email, now)
             user = self.sessions.provision_user(
                 session,
                 email=trusted_email,

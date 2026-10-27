@@ -11,6 +11,7 @@ import { normalizeAccountEmail, normalizeAccountName, validateAccountPassword, r
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
+import { EmailConflictNotice } from "./EmailConflictNotice";
 import { SSO_ERROR_CODES } from "./ExternalAuthErrorBanner";
 
 type AuthMode = "login" | "signup";
@@ -59,6 +60,7 @@ export function AuthScreen() {
     const code = searchParams.get("auth_error");
     return code ? t(`sso.errors.${SSO_ERROR_CODES.has(code) ? code : "unknown"}`) : null;
   });
+  const [emailConflict] = useState(() => searchParams.get("auth_error") === "account_email_conflict");
   const [submitting, setSubmitting] = useState(false);
 
   const canSignup =
@@ -206,6 +208,7 @@ export function AuthScreen() {
         </header>
         {status ? <StatusBanner tone="info">{status}</StatusBanner> : null}
         {error ? <div id="auth-input-error"><StatusBanner tone="warning">{error}</StatusBanner></div> : null}
+        {emailConflict ? <EmailConflictNotice passwordLoginEnabled={passwordLoginEnabled} /> : null}
         {capabilitiesChecked && capabilitiesError ? (
           <StatusBanner tone="warning">{t("capabilitiesUnavailable")}</StatusBanner>
         ) : null}
@@ -213,24 +216,6 @@ export function AuthScreen() {
           <StatusBanner tone="info">{t("signupDisabled")}</StatusBanner>
         ) : null}
         <section className="auth-panel" aria-label={t("panelLabel")}>
-          {loginMethods.length > 0 ? (
-            <div className="auth-provider-group" aria-label={t("sso.methods")}>
-              <p className="auth-section-label">{t("welcome.external")}</p>
-              {loginMethods.map((method) => {
-                const query = new URLSearchParams({
-                  next: safeNextPath(searchParams.get("next")),
-                  remember_me: String(rememberMe),
-                });
-                return <a className="icon-button auth-provider-button" key={method.slug} style={loginMethodStyle(method)}
-                  href={`${method.start_url}?${query.toString()}`}>
-                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : <ShieldCheck size={20} aria-hidden="true" />}
-                  <span>{loginMethodLabel(method, i18n.language)}</span>
-                  <ArrowUpRight size={16} aria-hidden="true" />
-                </a>;
-              })}
-            </div>
-          ) : null}
-          {passwordLoginEnabled && loginMethods.length > 0 ? <div className="auth-method-divider"><span>{t("welcome.native")}</span></div> : null}
           {canSignup ? (
             <SegmentedControl
               compact
@@ -341,6 +326,26 @@ export function AuthScreen() {
               </p>
             )}
           </form> : null}
+          {passwordLoginEnabled && loginMethods.length > 0 ? (
+            <div className="auth-method-divider"><span>{t("welcome.externalContinue")}</span></div>
+          ) : null}
+          {loginMethods.length > 0 ? (
+            <div className="auth-provider-group" aria-label={t("sso.methods")}>
+              {!passwordLoginEnabled ? <p className="auth-section-label">{t("welcome.external")}</p> : null}
+              {loginMethods.map((method) => {
+                const query = new URLSearchParams({
+                  next: safeNextPath(searchParams.get("next")),
+                  remember_me: String(rememberMe),
+                });
+                return <a className="icon-button auth-provider-button" key={method.slug} style={loginMethodStyle(method)}
+                  href={`${method.start_url}?${query.toString()}`}>
+                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : <ShieldCheck size={20} aria-hidden="true" />}
+                  <span>{loginMethodLabel(method, i18n.language)}</span>
+                  <ArrowUpRight size={16} aria-hidden="true" />
+                </a>;
+              })}
+            </div>
+          ) : null}
           {passwordLoginEnabled || loginMethods.length > 0 ? (
             <label className="checkbox-field auth-remember">
               <input checked={rememberMe} onKeyDown={preventCompositionSubmit}

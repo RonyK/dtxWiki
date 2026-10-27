@@ -23,6 +23,7 @@ from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
+from backend.services.db_write_intent import acquire_write_intent
 from backend.services.mail_delivery import (
     EMAIL_VERIFICATION_LINK_PATH,
     PASSWORD_RESET_LINK_PATH,
@@ -867,6 +868,10 @@ class PasswordRecoveryService:
         digest = recovery_token_digest(token, purpose="email_verification")
         verified_at = self.now()
         with self.session_factory.begin() as session:
+            # Without a writer lock first, pysqlite starts no transaction before
+            # the enrollment SAVEPOINT below, so its RELEASE would commit the
+            # address before the token claim can still refuse the link.
+            acquire_write_intent(session)
             user_id = session.scalar(
                 select(PasswordResetToken.user_id).where(
                     PasswordResetToken.token_digest == digest,

@@ -94,8 +94,8 @@
     }
   },
   "crossLinks": {
-    "toUsers": "이 워크스페이스에 접근할 수 있는 사람들입니다. 서버 전체에서 사람을 찾거나 계정 복구를 시작하려면 다음으로 이동하세요:",
-    "toMembers": "서버 전체의 계정을 조회합니다. 이 워크스페이스의 구성원이나 역할을 바꾸려면 다음으로 이동하세요:"
+    "toUsers": "서버 전체 계정 검색·복구는",
+    "toMembers": "이 워크스페이스의 멤버·역할 관리는"
   },
   "workspaceMembers": {
     "title": "멤버",
@@ -128,13 +128,18 @@
       "fromSearchReady": "{{email}} 계정을 추가합니다.",
       "fromSearchHint": "기존 계정을 추가하려면 정확한 계정 UUID 또는 native 로그인 이메일을 입력하세요.",
       "title": "멤버 추가",
-      "selector": "계정 UUID 또는 이메일 로그인 주소",
-      "selectorPlaceholder": "계정 UUID 또는 person@example.com",
-      "identityHint": "상대방이 알려 준 계정 식별자를 사용하세요. SSO 프로필 이메일은 이메일 로그인 주소와 다릅니다."
+      "selector": "사용자 ID 또는 계정 이메일",
+      "selectorPlaceholder": "사용자 ID 또는 name@example.com",
+      "identityHint": "계정에 등록된 이메일을 정확히 입력하세요. 이메일이 없는 계정은 사용자 ID로 추가합니다.",
+      "description": "이 워크스페이스를 함께 사용할 기존 계정을 추가합니다.",
+      "methods": "멤버 추가 방법",
+      "directTab": "직접 입력",
+      "close": "멤버 추가 닫기",
+      "workspaceScope": "추가하면 워크스페이스 전체에 접근할 수 있습니다. 처음 공유할 때는 한 번 더 확인합니다."
     },
     "filters": {
       "query": "현재 멤버 검색",
-      "queryPlaceholder": "이름, 계정 UUID 또는 로그인 이메일",
+      "queryPlaceholder": "이름 또는 계정 이메일",
       "queryHelp": "이미 이 워크스페이스에 접근할 수 있는 멤버를 검색합니다.",
       "role": "역할 필터",
       "search": "검색",
@@ -205,16 +210,23 @@
       "confirmRemove": "멤버 제거"
     },
     "directory": {
-      "title": "회사 계정 디렉터리",
-      "hint": "검색하면 이 워크스페이스에서 허용한 회사 디렉터리의 계정을 찾을 수 있습니다. 제공자와 계정 식별값을 확인해 대상을 선택하세요.",
+      "title": "회사 디렉터리",
+      "hint": "회사 SSO 연동과 디렉터리 검색이 허용된 경우에만 표시됩니다.",
       "loading": "회사 계정 검색 중…",
       "add": "{{name}} 추가",
       "refine": "일치하는 계정이 더 있습니다. 검색 범위를 좁혀 주세요.",
-      "query": "회사 계정 검색",
+      "query": "같은 회사에서 이름 검색",
       "queryPlaceholder": "2자 이상 입력",
       "search": "디렉터리 검색",
-      "empty": "검색어와 일치하는 회사 계정이 없습니다."
-    }
+      "empty": "검색어와 일치하는 회사 계정이 없습니다.",
+      "verified": "회사 계정 확인됨",
+      "resultCount": "검색 결과 {{count}}명",
+      "distinguish": "동명이인은 사용자 ID로 구분하세요.",
+      "addAction": "추가",
+      "verifiedShort": "회사 계정 확인됨"
+    },
+    "userIdFor": "{{name}}의 전체 사용자 ID",
+    "removeFor": "{{name}} 멤버 제거"
   },
   "workspaceAccess": {
     "title": "검색 노출, 가입 및 웹 게시",
@@ -1089,7 +1101,7 @@
       "expired": "최근 본인 인증이 만료되었습니다. 사용자를 다시 검색하려면 본인 인증을 다시 진행하세요."
     },
     "searchLabel": "사용자 검색",
-    "searchHint": "이메일, 표시 이름 또는 워크스페이스 이름",
+    "searchHint": "이름·계정 이메일·사용자 ID·워크스페이스",
     "searchPlaceholder": "예: alex@example.com 또는 연구",
     "searchAction": "검색",
     "searching": "검색 중…",
@@ -1185,7 +1197,55 @@
       "complete": "선택한 SSO identity를 다시 연결하고 기존 세션을 무효화했습니다.",
       "failed": "SSO identity를 다시 연결하지 못했습니다. 관리자 본인 확인과 identity 정보를 확인하세요."
     },
-    "optionsSummary": "복구 방법과 세션에 미치는 영향"
+    "optionsSummary": "복구 방법과 세션에 미치는 영향",
+    "conflicts": {
+      "title": "이메일 충돌로 대기 중인 SSO 가입",
+      "description": "제공자가 확인한 주소를 이메일 확인을 마치지 않은 기존 계정이 사용하고 있어 계정을 만들지 않았습니다. 승인하면 그 계정을 비활성화하고 주소를 해제합니다. 데이터는 보존됩니다. 서버 관리자 계정은 목록에 나오지 않습니다.",
+      "load": "대기 중인 요청 보기",
+      "empty": "대기 중인 요청이 없습니다.",
+      "requester": "{{provider}}로 요청함 (subject {{subject}})",
+      "holder": "현재 사용 계정: {{name}} ({{status}})",
+      "reason": "사유와 확인 방법",
+      "approve": "주소 해제",
+      "reject": "기존 계정 유지",
+      "failed": "요청을 불러오거나 처리하지 못했습니다. 다시 시도하세요."
+    },
+    "audit": {
+      "title": "서버 감사 기록",
+      "description": "계정·자격 증명·서버 관리자 권한 변경과 운영자 CLI 작업 기록입니다. 서버 관리자만 볼 수 있으며, 조회한 사실도 기록됩니다.",
+      "actionPrefix": "작업 접두어",
+      "targetUserId": "대상 사용자 UUID",
+      "load": "기록 보기",
+      "more": "더 보기",
+      "empty": "조건에 맞는 기록이 없습니다.",
+      "actor": "실행: {{actor}}",
+      "failed": "감사 기록을 불러오지 못했습니다. 다시 시도하세요."
+    },
+    "accountCard": {
+      "details": "계정 정보 보기",
+      "actions": "{{name}} 계정 작업",
+      "noEmail": "등록된 계정 이메일 없음",
+      "shortId": "ID",
+      "copyId": "{{name}} 전체 사용자 ID 복사",
+      "copied": "사용자 ID를 복사했습니다.",
+      "copyUnavailable": "복사할 수 없습니다. 계정 정보에서 전체 ID를 복사하세요.",
+      "sso": "SSO",
+      "noSso": "연결 없음",
+      "workspaces": "워크스페이스"
+    },
+    "accountDetails": {
+      "title": "계정 정보",
+      "close": "계정 정보 닫기",
+      "displayName": "표시 이름",
+      "userId": "사용자 ID",
+      "email": "계정 이메일",
+      "emailVerifiedAt": "이메일 검증 시각",
+      "status": "상태",
+      "provider": "제공자",
+      "issuer": "발급자",
+      "subject": "주체 식별자",
+      "identityId": "연결 ID"
+    }
   },
   "jobs": {
     "serverAdminOnlyNotice": "백그라운드 작업 큐는 서버 관리자만 볼 수 있습니다.",

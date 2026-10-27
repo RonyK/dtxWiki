@@ -226,6 +226,17 @@ export function setAccountPassword(newPassword: string) {
   }).then((response) => response.data);
 }
 
+export type EmailConflictRequest = components["schemas"]["EmailConflictRequestData"];
+
+// Only the browser that just finished the colliding SSO login holds the
+// HttpOnly ticket this request presents.
+export function requestEmailConflictRelease() {
+  return apiRequest<{ data: EmailConflictRequest }>(
+    "/api/v1/auth/sso/email-conflict/request",
+    { method: "POST" },
+  ).then((response) => response.data);
+}
+
 export type IdentityVerification = components["schemas"]["VerificationData"];
 export type VerificationScope = IdentityVerification["scope"];
 

@@ -20,30 +20,54 @@ afterEach(() => vi.restoreAllMocks());
 function Location() { const location = useLocation(); return <output>{location.pathname}{location.search}</output>; }
 
 it("uses capability-driven external login, safe next, remember policy and fixed callback errors", async () => {
+  let passwordLoginEnabled = true;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).endsWith("/capabilities")
-    ? json({ data: { signup_enabled: false, password_login: { enabled: false }, login_methods: [
+    ? json({ data: { signup_enabled: false, password_login: { enabled: passwordLoginEnabled }, login_methods: [
       { ...provider, label: { en: "Continue" } },
       { ...provider, slug: "company", display_name: "Company SSO", label: { en: "Continue" } },
       { ...provider, slug: "localized", display_name: "", label: { en: "Localized provider" } },
     ], password_recovery: { mode: "email", admin_assisted: false } } })
-    : json({ error_code: "invalid_session", message: "Missing cookie", request_id: "", warnings: [] }, 401));
-  render(<MemoryRouter initialEntries={["/login?auth_error=account_link_required&next=%2Foauth%2Fauthorize%3Fstate%3Done"]}>
+    : String(input).endsWith("/sso/email-conflict/request")
+      ? json({ data: { status: "pending", request_id: "request-1" } }, 202)
+      : json({ error_code: "invalid_session", message: "Missing cookie", request_id: "", warnings: [] }, 401));
+  const { unmount } = render(<MemoryRouter initialEntries={["/login?auth_error=account_link_required&next=%2Foauth%2Fauthorize%3Fstate%3Done"]}>
     <AuthProvider loadInstanceCapabilities><AuthScreen /><Location /></AuthProvider>
   </MemoryRouter>);
   const button = await screen.findByRole("link", { name: "Example" });
   expect(screen.getByRole("link", { name: "Company SSO" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Localized provider" })).toBeInTheDocument();
   expect(button).toHaveStyle({ backgroundColor: "#0055aa", color: "#ffffff" });
-  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "Forgot your password?" })).not.toBeInTheDocument();
+  const nativeForm = screen.getByLabelText("Password").closest("form")!;
+  const remember = screen.getByRole("checkbox", { name: "Keep me signed in on this browser" });
+  // DOM order also determines the keyboard path: email first, external methods
+  // next, and one shared session option after both groups.
+  expect(nativeForm.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(button.compareDocumentPosition(remember) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  expect(remember.closest("form")).toBeNull();
+  expect(screen.getByText("or continue with an external account")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Forgot your password?" })).toBeInTheDocument();
   expect(button).toHaveAttribute("href", "/api/v1/auth/sso/example/start?next=%2Foauth%2Fauthorize%3Fstate%3Done&remember_me=true");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Keep me signed in on this browser" }));
+  fireEvent.click(remember);
   expect(button.getAttribute("href")).toContain("remember_me=false");
   expect(await screen.findByText("An existing account uses this email. Sign in using that account’s existing login method, then link this provider under Account settings → Add login method.")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText(/^\/login\?/)).not.toHaveTextContent("auth_error"));
   for (const unsafe of ["//evil.example", "/\\evil.example", "/%2f/evil.example", "/%252f/evil.example", "/a/../api/v1/auth/me", "/\u0001bad"]) {
     expect(safeNextPath(unsafe)).toBe("/dashboard");
   }
+  // An unverified holder yields no account: without password sign-in the only
+  // path is asking a server admin, sent with the browser's conflict ticket.
+  unmount();
+  passwordLoginEnabled = false;
+  render(<MemoryRouter initialEntries={["/login?auth_error=account_email_conflict"]}>
+    <AuthProvider loadInstanceCapabilities><AuthScreen /></AuthProvider>
+  </MemoryRouter>);
+  expect(await screen.findByText(/Password sign-in is turned off on this server/)).toBeInTheDocument();
+  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Forgot your password?" })).not.toBeInTheDocument();
+  expect(screen.queryByText("or continue with an external account")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "This isn’t my account — ask a server admin" }));
+  expect(await screen.findByText("Request sent. After a server admin approves it, sign in with this provider again.")).toBeInTheDocument();
 });
 
 it("protects the final external method and refreshes methods after setting a password and unlinking", async () => {
@@ -74,7 +98,11 @@ it("protects the final external method and refreshes methods after setting a pas
     }
     throw new Error(`Unexpected URL ${url}`);
   });
+  // A link that collides with another account's address is reported as that
+  // conflict; "sign in and link" would send a signed-in user in a circle.
+  window.history.replaceState(null, "", "/account?auth_error=account_link_required");
   const enrollment = render(<AuthProvider><LoginMethodsSection /></AuthProvider>);
+  expect(await screen.findByText(/already registered to another dtxWiki account/)).toBeInTheDocument();
   expect(await screen.findByRole("button", { name: "Unlink" })).toBeDisabled();
   expect(screen.getByRole("link", { name: "Add login method" })).toHaveAttribute("href", "#login-methods-add");
   expect(screen.getByText("All sign-in providers available on this server are already connected.")).toBeInTheDocument();

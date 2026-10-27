@@ -105,6 +105,7 @@ def users_add(
             email=email,
             password=password,
             display_name=display_name,
+            actor_id=cli_operator_actor_id(),
         )
     except SessionServiceError as exc:
         typer.echo(f"user add failed: {exc}", err=True)
@@ -509,7 +510,16 @@ def server_admin_grant(
                 err=True,
             )
             raise typer.Exit(2)
-        server_admin_service.grant_server_admin(session, user.id, granted_by="cli")
+        try:
+            server_admin_service.grant_server_admin(
+                session,
+                user.id,
+                granted_by="cli",
+                actor_id=cli_operator_actor_id(),
+            )
+        except server_admin_service.ServerAdminGrantError as exc:
+            typer.echo(f"admin grant failed: {exc}", err=True)
+            raise typer.Exit(2) from exc
     typer.echo(f"granted server-admin to {email or user.id}")
 
 
@@ -531,7 +541,9 @@ def server_admin_revoke(
             target = f"user ID {user_id}" if user_id else f"email {email!r}"
             typer.echo(f"admin revoke failed: no user with {target}", err=True)
             raise typer.Exit(2)
-        removed = server_admin_service.revoke_server_admin(session, user.id)
+        removed = server_admin_service.revoke_server_admin(
+            session, user.id, actor_id=cli_operator_actor_id(), via="cli"
+        )
     if removed:
         typer.echo(f"revoked server-admin from {email or user.id}")
     else:
@@ -648,7 +660,11 @@ def workspace_members_list(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
     for member in payload:
-        typer.echo(f"{member['email']} role={member['role']}")
+        # The UUID is the stable selector; SSO-only members may have no email.
+        typer.echo(
+            f"{member['user_id']} {member['email'] or '(no email)'} "
+            f"role={member['role']}"
+        )
 
 
 @workspace_members_app.command(name="add")

@@ -504,6 +504,15 @@ def test_workspace_members_add_list_and_remove(tmp_path):
     )
     assert promoted.exit_code == 0
     assert json.loads(promoted.stdout)["role"] == "editor"
+    # Text output must still name an email-less member by its UUID selector.
+    text_listed = runner.invoke(
+        cli_main.app,
+        [
+            *("workspace", "members", "list", "--workspace", "default"),
+            *("--db", database_url),
+        ],
+    )
+    assert f"{target_id} (no email) role=editor" in text_listed.stdout
 
     removed = runner.invoke(
         cli_main.app,

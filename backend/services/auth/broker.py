@@ -144,6 +144,20 @@ class AuthBroker:
             try:
                 with self.session_factory.begin() as session:
                     acquire_write_intent(session)
+                    if transaction.purpose != "reauth" and (
+                        getattr(provider.method, "on_login", None) is not None
+                    ):
+                        # Core locks Workspace before User (workspace_join_service,
+                        # membership service). Take every workspace this provider
+                        # may provision now, before the resolver locks the user.
+                        for workspace_id in sorted(
+                            provider.policy.provisioning_workspace_roles
+                        ):
+                            session.scalar(
+                                select(Workspace.id)
+                                .where(Workspace.id == UUID(workspace_id))
+                                .with_for_update()
+                            )
                     now = self.now()
                     user, identity, created, linked = self.resolver.resolve(
                         session,

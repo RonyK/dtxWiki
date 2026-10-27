@@ -147,11 +147,20 @@ class WorkspaceMemberRemoval:
     member_count: int
 
 
+# The shared search key also holds native email, which directory results never
+# match on; cap the rows read so a broad address query cannot scan everyone.
+CANDIDATE_SCAN_LIMIT = 500
+
+
 @dataclass(frozen=True)
 class WorkspaceMemberCandidate:
     user_id: UUID
     display_name: str
-    provider_name: str
+    # The same naming inputs as a login button: explicit name, plugin labels
+    # by locale, then the slug. The client picks the viewer's locale.
+    provider_name: str | None
+    provider_slug: str
+    provider_label: dict[str, str]
     identity_label: str
 
 
@@ -232,11 +241,14 @@ class WorkspaceMembershipService:
                     .exists(),
                 )
                 .order_by(User.member_search_key, User.id, UserIdentity.provider_slug)
+                .limit(CANDIDATE_SCAN_LIMIT)
                 .execution_options(yield_per=50)
             )
             items = []
             seen = set()
+            scanned = 0
             for user, slug in rows:
+                scanned += 1
                 # The shared search index also contains native email. Only the
                 # normalized display name may produce company-directory results.
                 if user.id in seen or normalized_query not in normalize_search_key(
@@ -252,11 +264,17 @@ class WorkspaceMembershipService:
                     WorkspaceMemberCandidate(
                         user_id=user.id,
                         display_name=user.display_name,
-                        provider_name=provider.policy.display_name or slug,
+                        provider_name=provider.policy.display_name,
+                        provider_slug=slug,
+                        provider_label=dict(provider.method.descriptor.branding.label),
                         identity_label=f"{identifier[:8]}…{identifier[-8:]}",
                     )
                 )
-            return WorkspaceMemberCandidates(True, items)
+            # Email-only key matches are discarded above, so a bounded scan can
+            # end short; report that more may exist rather than reading on.
+            return WorkspaceMemberCandidates(
+                True, items, scanned == CANDIDATE_SCAN_LIMIT
+            )
 
     def list_members(
         self,

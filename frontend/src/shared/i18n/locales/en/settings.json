@@ -94,8 +94,8 @@
     }
   },
   "crossLinks": {
-    "toUsers": "This is who can reach this workspace. To find a person across every workspace on the server, or to start account recovery, go to",
-    "toMembers": "This reads every account on the server. To change who is in this workspace, or their roles, go to"
+    "toUsers": "For server-wide account search and recovery, go to",
+    "toMembers": "For this workspace’s membership and roles, go to"
   },
   "workspaceMembers": {
     "title": "Members",
@@ -128,13 +128,18 @@
       "fromSearchReady": "Add account {{email}}.",
       "fromSearchHint": "Enter an exact account UUID or native login email to add an existing account.",
       "title": "Add a member",
-      "selector": "Account UUID or native login email",
-      "selectorPlaceholder": "Account UUID or person@example.com",
-      "identityHint": "Use an identifier shared by the person. An SSO profile email is not a native login email."
+      "selector": "User ID or account email",
+      "selectorPlaceholder": "User ID or name@example.com",
+      "identityHint": "Enter the exact email registered on the account. Use a user ID when the account has no email.",
+      "description": "Add an existing account to this workspace.",
+      "methods": "Add member method",
+      "directTab": "Direct entry",
+      "close": "Close member form",
+      "workspaceScope": "Members can access the whole workspace. First-time sharing requires confirmation."
     },
     "filters": {
       "query": "Search current members",
-      "queryPlaceholder": "Name, account UUID, or login email",
+      "queryPlaceholder": "Name or account email",
       "queryHelp": "Filters people who already have access to this workspace.",
       "role": "Role filter",
       "search": "Search",
@@ -205,16 +210,23 @@
       "confirmRemove": "Remove member"
     },
     "directory": {
-      "title": "Company account directory",
-      "hint": "Search to find accounts in the company directory enabled for this workspace. The provider and account identifier distinguish the selected account.",
+      "title": "Company directory",
+      "hint": "Shown only when company SSO is connected and directory search is enabled.",
       "loading": "Searching company accounts…",
       "add": "Add {{name}}",
       "refine": "More accounts match. Refine your search.",
-      "query": "Search company accounts",
+      "query": "Search names in your company",
       "queryPlaceholder": "At least 2 characters",
       "search": "Search directory",
-      "empty": "No company accounts match this search."
-    }
+      "empty": "No company accounts match this search.",
+      "verified": "Company account verified",
+      "resultCount": "Matches: {{count}}",
+      "distinguish": "Use the user ID to distinguish people with the same name.",
+      "addAction": "Add",
+      "verifiedShort": "Verified"
+    },
+    "userIdFor": "Full user ID for {{name}}",
+    "removeFor": "Remove {{name}}"
   },
   "workspaceAccess": {
     "title": "Discovery, joining & web publishing",
@@ -1089,7 +1101,7 @@
       "expired": "Your recent verification expired. Verify your identity again to search users."
     },
     "searchLabel": "Search users",
-    "searchHint": "Email, display name, or workspace name",
+    "searchHint": "Name, account email, user ID, or workspace",
     "searchPlaceholder": "e.g. alex@example.com or Research",
     "searchAction": "Search",
     "searching": "Searching…",
@@ -1185,7 +1197,55 @@
       "complete": "The selected SSO identity was reconnected. Existing sessions were revoked.",
       "failed": "The SSO identity could not be reconnected. Verify your administrator session and the identity details."
     },
-    "optionsSummary": "Recovery options and session effects"
+    "optionsSummary": "Recovery options and session effects",
+    "conflicts": {
+      "title": "SSO sign-ups waiting on an email conflict",
+      "description": "A provider verified this address, but an existing account with an unverified email already uses it, so no account was created. Approving deactivates that account and frees the address; its data is kept. Server-admin accounts are never listed.",
+      "load": "Show pending requests",
+      "empty": "No pending requests.",
+      "requester": "Requested through {{provider}} (subject {{subject}})",
+      "holder": "Current holder: {{name}} ({{status}})",
+      "reason": "Reason and how you verified it",
+      "approve": "Release the address",
+      "reject": "Keep the existing account",
+      "failed": "Requests could not be loaded or updated. Try again."
+    },
+    "audit": {
+      "title": "Server audit log",
+      "description": "Account, credential and server-admin changes, including operator CLI actions. Only server admins can read this history; viewing it is recorded too.",
+      "actionPrefix": "Action prefix",
+      "targetUserId": "Target user UUID",
+      "load": "Show records",
+      "more": "Show more",
+      "empty": "No matching records.",
+      "actor": "by {{actor}}",
+      "failed": "The audit log could not be loaded. Try again."
+    },
+    "accountCard": {
+      "details": "View account information",
+      "actions": "Account actions for {{name}}",
+      "noEmail": "No registered account email",
+      "shortId": "ID",
+      "copyId": "Copy full user ID for {{name}}",
+      "copied": "User ID copied.",
+      "copyUnavailable": "Copy unavailable. Open account information to copy the full ID.",
+      "sso": "SSO",
+      "noSso": "Not connected",
+      "workspaces": "Workspaces"
+    },
+    "accountDetails": {
+      "title": "Account information",
+      "close": "Close account information",
+      "displayName": "Display name",
+      "userId": "User ID",
+      "email": "Account email",
+      "emailVerifiedAt": "Email verified",
+      "status": "Status",
+      "provider": "Provider",
+      "issuer": "Issuer",
+      "subject": "Subject",
+      "identityId": "Identity ID"
+    }
   },
   "jobs": {
     "serverAdminOnlyNotice": "The background job queue is visible to server admins only.",

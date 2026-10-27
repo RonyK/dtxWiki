@@ -222,10 +222,7 @@ describe("AdminUserRecoverySection", () => {
     await searchForUser(user, "alex@example.com");
     fetchMock.mockClear();
 
-    const linkAction = await screen.findByRole("button", {
-      name: "Issue one-time link",
-    });
-    await user.click(linkAction);
+    const linkAction = await chooseAccountAction(user, "Issue one-time link");
 
     let confirmDialog = screen.getByRole("dialog", {
       name: "Issue a password reset?",
@@ -250,7 +247,7 @@ describe("AdminUserRecoverySection", () => {
     ).not.toBeInTheDocument();
     expect(linkAction).toHaveFocus();
 
-    await user.click(linkAction);
+    await chooseAccountAction(user, "Issue one-time link");
     confirmDialog = screen.getByRole("dialog", {
       name: "Issue a password reset?",
     });
@@ -325,7 +322,7 @@ describe("AdminUserRecoverySection", () => {
       screen.getByText(/The one-time link was hidden/),
     ).toBeInTheDocument();
 
-    await user.click(linkAction);
+    await chooseAccountAction(user, "Issue one-time link");
     expect(screen.queryByDisplayValue(maskedUrl)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Your current password/)).toHaveValue("");
     await user.keyboard("{Escape}");
@@ -489,10 +486,7 @@ describe("AdminUserRecoverySection", () => {
 
     render(<AdminUserRecoverySection />);
     await searchForUser(user, "alex@example.com");
-    const recoveryAction = screen.getByRole("button", {
-      name: "Send recovery email",
-    });
-    await user.click(recoveryAction);
+    const recoveryAction = await chooseAccountAction(user, "Send recovery email");
     const dialog = screen.getByRole("dialog", {
       name: "Issue a password reset?",
     });
@@ -586,9 +580,7 @@ describe("AdminUserRecoverySection", () => {
     try {
       render(<AdminUserRecoverySection />);
       await searchForUser(user, "alex@example.com");
-      await user.click(
-        await screen.findByRole("button", { name: "Send recovery email" }),
-      );
+      await chooseAccountAction(user, "Send recovery email");
       await user.type(
         screen.getByLabelText(/Your current password/),
         "wrong-password",
@@ -657,9 +649,7 @@ describe("AdminUserRecoverySection", () => {
 
     render(<AdminUserRecoverySection />);
     await searchForUser(user, "alex@example.com");
-    await user.click(
-      await screen.findByRole("button", { name: "Send recovery email" }),
-    );
+    await chooseAccountAction(user, "Send recovery email");
     await user.type(
       screen.getByLabelText(/Your current password/),
       "admin-current-password",
@@ -716,9 +706,7 @@ describe("AdminUserRecoverySection", () => {
 
     render(<AdminUserRecoverySection />);
     await searchForUser(user, "alex@example.com");
-    await user.click(
-      await screen.findByRole("button", { name: "Send recovery email" }),
-    );
+    await chooseAccountAction(user, "Send recovery email");
     await user.type(
       screen.getByLabelText(/Your current password/),
       "admin-current-password",
@@ -746,6 +734,8 @@ describe("AdminUserRecoverySection", () => {
   it("keeps delivery actions independent and disables email for an unverified address", async () => {
     const user = userEvent.setup();
     let ssoOnly = false;
+    let rebindProofExpired = false;
+    let conflictDecided = false;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/auth/reauthenticate`) {
@@ -760,7 +750,29 @@ describe("AdminUserRecoverySection", () => {
           identities: [{ identity_id: "identity-1", provider_slug: "company", issuer: "https://idp.example.test", subject: "old-subject" }],
         }] } } : result);
       }
+      if (url.startsWith(`${BASE}/api/v1/admin/email-conflicts?`)) {
+        return jsonResponse({ data: { total: conflictDecided ? 0 : 1, limit: 50, offset: 0, items: conflictDecided ? [] : [{
+          request_id: "conflict-1", status: "pending", email: "claimed@example.com", provider_slug: "company", subject: "claimant",
+          created_at: "2026-10-27T00:00:00Z", decided_at: null, decided_by: null, reason: null,
+          target: { user_id: "holder-1", display_name: "Unverified Holder", status: "active", created_at: "2026-10-01T00:00:00Z" },
+        }] } });
+      }
+      if (url.endsWith("/admin/email-conflicts/conflict-1/decision")) {
+        expect(JSON.parse(String(init?.body))).toEqual({ decision: "approve", reason: "Mailbox owner confirmed" });
+        conflictDecided = true;
+        return jsonResponse({ data: { request_id: "conflict-1", status: "approved" } });
+      }
+      if (url.startsWith(`${BASE}/api/v1/admin/audit-events?`)) {
+        expect(new URL(url).searchParams.get("action_prefix")).toBe("server_admin.");
+        return jsonResponse({ data: { next_cursor: null, items: [{ event_id: "event-1", created_at: "2026-10-27T00:00:00Z",
+          action: "server_admin.granted", actor_kind: "system", actor_id: "cli:operator", target_kind: "user",
+          target_id: USER_ID, summary: null, payload: { via: "cli" } }] } });
+      }
       if (url.endsWith(`/admin/users/${USER_ID}/identities/rebind`)) {
+        if (rebindProofExpired) {
+          return jsonResponse({ error_code: "recent_reauthentication_required", message: "recent verification required",
+            request_id: "request-rebind-proof-expired", warnings: [] }, 401);
+        }
         expect(JSON.parse(String(init?.body))).toEqual({ identity_id: "identity-1", expected_issuer: "https://idp.example.test", expected_subject: "old-subject",
           provider_slug: "company", issuer: "https://idp.example.test", subject: "new-subject", reason: "Company verified" });
         return jsonResponse({ data: { user_id: USER_ID, identity_id: "identity-1", provider_slug: "company", issuer: "https://idp.example.test", subject: "new-subject" } });
@@ -770,19 +782,24 @@ describe("AdminUserRecoverySection", () => {
 
     const { container, unmount } = render(<AdminUserRecoverySection />);
     await searchForUser(user, "alex@example.com");
-    expect(
-      await screen.findByRole("button", { name: "Send recovery email" }),
-    ).toBeDisabled();
-    const linkAction = screen.getByRole("button", {
-      name: "Issue one-time link",
-    });
-    expect(linkAction).toBeEnabled();
-    expect(
-      screen.getByText(
-        "Email delivery is unavailable because this address is not verified.",
-      ),
-    ).toBeInTheDocument();
-    await user.click(linkAction);
+    const card = screen.getByRole("article", { name: "Alex Kim" });
+    expect(within(card).getByText("00000000…00101")).toHaveAttribute("title", USER_ID);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await user.click(within(card).getByRole("button", { name: "Copy full user ID for Alex Kim" }));
+    expect(writeText).toHaveBeenCalledWith(USER_ID);
+    expect(await within(card).findByText("User ID copied.")).toBeInTheDocument();
+    await openAccountMenu(user);
+    expect(screen.getByRole("menuitem", { name: "Send recovery email" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Issue one-time link" })).toBeEnabled();
+    await chooseAccountAction(user, "View account information");
+    const information = screen.getByRole("dialog", { name: "Account information" });
+    expect(within(information).getByText(USER_ID)).toBeInTheDocument();
+    expect(within(information).getByText(
+      "Email delivery is unavailable because this address is not verified.",
+    )).toBeInTheDocument();
+    await user.click(within(information).getByRole("button", { name: "Close account information" }));
+    await chooseAccountAction(user, "Issue one-time link");
     expect(
       screen.getByRole("dialog", { name: "Issue a password reset?" }),
     ).toBeInTheDocument();
@@ -798,9 +815,21 @@ describe("AdminUserRecoverySection", () => {
     ssoOnly = true;
     render(<AdminUserRecoverySection />);
     await searchForUser(user, USER_ID);
-    expect(screen.queryByRole("button", { name: "Send recovery email" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Issue one-time link" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Reconnect SSO identity" }));
+    // The unlocked directory also reviews held SSO sign-ups and server history.
+    await user.click(screen.getByRole("button", { name: "Show pending requests" }));
+    expect(await screen.findByText("claimed@example.com")).toBeInTheDocument();
+    const release = screen.getByRole("button", { name: "Release the address" });
+    expect(release).toBeDisabled();
+    await user.type(screen.getByLabelText("Reason and how you verified it"), "Mailbox owner confirmed");
+    await user.click(release);
+    expect(await screen.findByText("No pending requests.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Action prefix"), "server_admin.");
+    await user.click(screen.getByRole("button", { name: "Show records" }));
+    expect(await screen.findByText("server_admin.granted")).toBeInTheDocument();
+    await openAccountMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Send recovery email" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Issue one-time link" })).not.toBeInTheDocument();
+    await chooseAccountAction(user, "Reconnect SSO identity");
     const rebind = screen.getByRole("dialog", { name: "Reconnect this account’s SSO identity" });
     const save = within(rebind).getByRole("button", { name: "Reconnect SSO identity" });
     expect(save).toBeDisabled();
@@ -809,7 +838,18 @@ describe("AdminUserRecoverySection", () => {
     await user.type(within(rebind).getByLabelText("Type the target account UUID to confirm"), USER_ID);
     await user.click(save);
     expect(await screen.findByText("The selected SSO identity was reconnected. Existing sessions were revoked.")).toBeInTheDocument();
-  });
+    // An expired admin proof relocks the directory instead of treating the
+    // valid browser session as expired.
+    rebindProofExpired = true;
+    await chooseAccountAction(user, "Reconnect SSO identity");
+    const retry = screen.getByRole("dialog", { name: "Reconnect this account’s SSO identity" });
+    await user.type(within(retry).getByLabelText("New subject"), "newer-subject");
+    await user.type(within(retry).getByLabelText("Reason and independent verification reference"), "Company verified");
+    await user.type(within(retry).getByLabelText("Type the target account UUID to confirm"), USER_ID);
+    await user.click(within(retry).getByRole("button", { name: "Reconnect SSO identity" }));
+    expect(await screen.findByText("Verify your identity to unlock protected user search.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Reconnect this account’s SSO identity" })).not.toBeInTheDocument();
+  }, 15_000);
 
   it("requires both a verified target and ready server mail capability", async () => {
     const user = userEvent.setup();
@@ -830,17 +870,13 @@ describe("AdminUserRecoverySection", () => {
     render(<AdminUserRecoverySection />);
     await searchForUser(user, "alex@example.com");
 
-    expect(
-      screen.getByRole("button", { name: "Send recovery email" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Issue one-time link" }),
-    ).toBeEnabled();
-    expect(
-      screen.getByText(
-        "Email delivery is unavailable because server mail recovery is not ready.",
-      ),
-    ).toBeInTheDocument();
+    await openAccountMenu(user);
+    expect(screen.getByRole("menuitem", { name: "Send recovery email" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Issue one-time link" })).toBeEnabled();
+    await chooseAccountAction(user, "View account information");
+    expect(within(screen.getByRole("dialog", { name: "Account information" })).getByText(
+      "Email delivery is unavailable because server mail recovery is not ready.",
+    )).toBeInTheDocument();
   });
 
   it("pages through protected search results without exposing an unbounded list", async () => {
@@ -913,7 +949,7 @@ describe("AdminUserRecoverySection", () => {
 
     expect(
       screen.getByRole("heading", { name: "계정 복구" }),
-    ).toBeInTheDocument();
+    ).toHaveClass("visually-hidden");
     expect(screen.queryByLabelText("사용자 검색")).not.toBeInTheDocument();
     await user.type(
       screen.getByLabelText("내 현재 비밀번호"),
@@ -924,16 +960,19 @@ describe("AdminUserRecoverySection", () => {
     );
     await screen.findByLabelText(/사용자 검색/);
     expect(screen.getByText("사용자 검색")).toBeInTheDocument();
-    expect(
-      screen.getByText(/PAT\/MCP 토큰은 별도 자격 증명/),
-    ).toBeInTheDocument();
+    const recoveryScope = screen.getByText("복구 방법과 세션에 미치는 영향");
+    expect(recoveryScope.closest("details")).not.toHaveAttribute("open");
+    await user.click(recoveryScope);
+    expect(screen.getByText(/PAT\/MCP 토큰은 별도 자격 증명/)).toBeVisible();
+    await user.click(recoveryScope);
     await user.type(screen.getByLabelText(/사용자 검색/), "alex@example.com");
     await user.click(screen.getByRole("button", { name: "검색" }));
     await screen.findByText("Alex Kim");
+    await openAccountMenu(user);
     expect(
-      screen.getByRole("button", { name: "복구 메일 보내기" }),
+      screen.getByRole("menuitem", { name: "복구 메일 보내기" }),
     ).toBeEnabled();
-    const linkAction = screen.getByRole("button", { name: "일회용 링크 발급" });
+    const linkAction = screen.getByRole("menuitem", { name: "일회용 링크 발급" });
     expect(linkAction).toBeEnabled();
     await user.click(linkAction);
     expect(screen.getByRole("radio", { name: "일반 복구" })).toBeChecked();
@@ -989,9 +1028,7 @@ async function openOneTimeLinkDialog(
   mockLinkIssuingFetch(resetUrl);
   render(<AdminUserRecoverySection />);
   await searchForUser(user, "alex@example.com");
-  await user.click(
-    await screen.findByRole("button", { name: "Issue one-time link" }),
-  );
+  await chooseAccountAction(user, "Issue one-time link");
   const confirmDialog = screen.getByRole("dialog", {
     name: "Issue a password reset?",
   });
@@ -1007,6 +1044,19 @@ async function openOneTimeLinkDialog(
   return screen.findByRole("dialog", {
     name: "Copy this recovery link now",
   });
+}
+
+async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
+  const card = await screen.findByRole("article", { name: "Alex Kim" });
+  const trigger = within(card).getByRole("button", { name: /Account actions|계정 작업/ });
+  if (trigger.getAttribute("aria-expanded") !== "true") await user.click(trigger);
+  return trigger;
+}
+
+async function chooseAccountAction(user: ReturnType<typeof userEvent.setup>, label: string) {
+  const trigger = await openAccountMenu(user);
+  await user.click(screen.getByRole("menuitem", { name: label }));
+  return trigger;
 }
 
 async function searchForUser(

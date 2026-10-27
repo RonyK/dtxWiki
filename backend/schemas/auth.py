@@ -561,6 +561,18 @@ class AuthSessionResponse(RESTResponseBase):
     data: AuthSessionData
 
 
+class EmailConflictRequestData(BaseModel):
+    status: Literal["pending", "resolved"] = Field(
+        description="resolved means a new SSO login now decides without an admin."
+    )
+    request_id: UUID | None
+    model_config = ConfigDict(extra="forbid")
+
+
+class EmailConflictRequestResponse(RESTResponseBase):
+    data: EmailConflictRequestData
+
+
 class AuthMeResponse(RESTResponseBase):
     data: AuthUserData
 

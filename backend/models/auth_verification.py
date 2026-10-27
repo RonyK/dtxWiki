@@ -1,4 +1,4 @@
-"""Single-use email confirmation bound to one account session and purpose."""
+"""Single-use email confirmation and admin-reviewed email conflict requests."""
 
 from datetime import datetime
 from uuid import UUID
@@ -32,3 +32,34 @@ class EmailReauthenticationChallenge(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class EmailConflictRequest(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
+    """A verified SSO identity asking an admin to release an unverified address.
+
+    No account exists for the requester until the owner of ``target_user_id``
+    links the identity or a server admin releases the address.
+    """
+
+    __tablename__ = "auth_email_conflict_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'resolved', "
+            "'auto_released')",
+            name="auth_email_conflict_status_check",
+        ),
+        Index("ix_auth_email_conflict_status_created", "status", "created_at"),
+        Index("ix_auth_email_conflict_target", "target_user_id"),
+    )
+
+    target_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_slug: Mapped[str] = mapped_column(Text, nullable=False)
+    issuer: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    reason: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

@@ -6,18 +6,18 @@
 .auth-screen .auth-welcome {
   display: grid;
   justify-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 18px;
   text-align: center;
 }
 
 .auth-screen .auth-welcome-icon {
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 10px;
   color: var(--accent);
   background: var(--surface);
 }
@@ -37,8 +37,8 @@
 }
 
 .auth-screen .auth-panel {
-  padding: 24px;
-  gap: 20px;
+  padding: 20px;
+  gap: 14px;
   border-radius: 14px;
   box-shadow: 0 8px 28px rgb(15 23 42 / 3%);
 }
@@ -47,6 +47,10 @@
 .login-methods-available {
   display: grid;
   gap: 10px;
+}
+
+.auth-screen .auth-provider-group {
+  gap: 8px;
 }
 
 .auth-section-label {
@@ -98,7 +102,7 @@
 }
 
 .auth-screen .auth-remember {
-  padding-top: 14px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
   color: var(--ink-soft);
   font-size: 12.5px;
@@ -299,10 +303,6 @@
 }
 
 @media (max-width: 640px) {
-  .auth-screen .auth-panel {
-    padding: 18px;
-  }
-
   .login-methods-heading {
     flex-wrap: wrap;
   }
@@ -341,4 +341,20 @@
   .login-methods-add {
     padding: 14px;
   }
+}
+
+/* Login after an SSO address collided with an unverified account. */
+.auth-email-conflict {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-email-conflict h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.auth-email-conflict p {
+  margin: 0;
+  line-height: 1.6;
 }

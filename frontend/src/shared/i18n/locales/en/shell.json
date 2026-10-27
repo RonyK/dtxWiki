@@ -306,7 +306,11 @@
     "identity_not_found": "The selected SSO identity no longer belongs to this account. Refresh and select it again.",
     "identity_changed": "This SSO identity changed since you selected it. Refresh and review the current identity.",
     "identity_unchanged": "Enter a different verified SSO identity to reconnect.",
-    "identity_already_linked": "This SSO identity is already linked. Review the exact account and provider before continuing."
+    "identity_already_linked": "This SSO identity is already linked. Review the exact account and provider before continuing.",
+    "email_conflict_ticket_invalid": "This request expired. Sign in with the provider again, then send the request.",
+    "email_conflict_already_decided": "This request was already decided. Refresh the list.",
+    "email_conflict_not_found": "This request no longer exists. Refresh the list.",
+    "invalid_email_conflict_decision": "Enter a reason of up to 1,000 characters."
   },
   "preview": {
     "badge": "Preview",

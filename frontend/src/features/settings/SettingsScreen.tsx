@@ -3680,7 +3680,7 @@ function SettingsScreenBody() {
                   ) : null}
                 </header>
                 <WorkspaceMembersSection />
-                <WorkspaceAccessSharingSection />
+                <WorkspaceAccessSharingSection collapsible />
               </section>
             ) : null}
             {activeSection === "workspace" ? (

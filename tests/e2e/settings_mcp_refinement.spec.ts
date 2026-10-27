@@ -400,22 +400,20 @@ for (const language of ["en", "ko"] as const) {
           await expect(familyDialog).toBeHidden();
         }
         if (section === "users") {
-          await page
-            .locator("#admin-user-directory-password")
-            .fill("correct-password");
-          await page
-            .locator('.admin-user-reauth button[type="submit"]')
-            .click();
+          // The sign-in above is still inside the reauthentication window, so
+          // the directory opens without asking for the password again.
+          await expect(
+            page.locator(".identity-settings-protection"),
+          ).toBeVisible();
           await page
             .locator("#admin-user-search-query")
             .fill(`e2e-recovery-${testInfo.project.name}-1440x900@example.com`);
           await page
             .locator('.admin-user-search button[type="submit"]')
             .click();
-          await page
-            .locator(".admin-user-recovery-actions button")
-            .nth(1)
-            .click();
+          const accountCard = page.locator(".admin-account-row").first();
+          await accountCard.locator(".action-menu__trigger").click();
+          await accountCard.getByRole("menuitem", { name: "Issue one-time link" }).click();
           await expect(
             page.locator("#admin-recovery-revoke-tokens"),
           ).toBeVisible();

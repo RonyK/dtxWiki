@@ -32,6 +32,7 @@ class UserAdminService:
         email: str,
         password: str,
         display_name: str | None = None,
+        actor_id: str = "system",
     ) -> AuthenticatedUser:
         normalized_email = normalize_email(email)
         validate_password(password)
@@ -57,6 +58,18 @@ class UserAdminService:
             # separate administration action and never comes from a
             # process-wide slug.
             ensure_personal_workspace(session, user=user)
+            self.audit_service.emit(
+                session=session,
+                workspace_id=None,
+                actor_kind="system",
+                actor_id=actor_id,
+                action="auth.user.admin_created",
+                target_kind="user",
+                target_id=user.id,
+                payload={"email": user.email, "display_name": user.display_name},
+                event_summary="A server operator created a local account",
+                retention_class="sensitive",
+            )
             return authenticated_user(user)
 
     def reset_password(

@@ -56,7 +56,9 @@ class WorkspaceMemberAddRequest(BaseModel):
 class WorkspaceMemberCandidateItem(BaseModel):
     user_id: UUID
     display_name: str
-    provider_name: str
+    provider_name: str | None
+    provider_slug: str
+    provider_label: dict[str, str]
     identity_label: str
     identity_verified: Literal[True] = True
 

@@ -139,11 +139,14 @@ class OidcMethodBase:
             raise AuthMethodError("unsafe_oidc_signing_algorithm")
         declared_aliases = tuple(properties["accepted_issuers"]["default"])
         aliases = raw.get("accepted_issuers", declared_aliases)
-        if (
-            not isinstance(aliases, (list, tuple))
-            or len(aliases) > 16
-            or any(not isinstance(alias, str) or not alias for alias in aliases)
+        if not isinstance(aliases, (list, tuple)) or any(
+            not isinstance(alias, str) or not alias for alias in aliases
         ):
+            raise AuthMethodError("invalid_oidc_accepted_issuers")
+        # The normalized config lists the issuer first. Count only distinct
+        # extra aliases so validating that output again gives the same result.
+        aliases = tuple(alias for alias in dict.fromkeys(aliases) if alias != issuer)
+        if len(aliases) > 16:
             raise AuthMethodError("invalid_oidc_accepted_issuers")
         for alias in aliases:
             # Non-URL issuer aliases require a deliberate plugin declaration.

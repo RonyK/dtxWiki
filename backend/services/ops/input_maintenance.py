@@ -7,7 +7,7 @@ an older database. Identifiers are fixed below; values remain bound parameters.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from packaging.version import Version
@@ -178,7 +178,13 @@ def _audit_optional_native_email(connection, report):
 
 
 def repair_input(
-    database_url: str, entity: str, identity: UUID, field: str, value: str | None
+    database_url: str,
+    entity: str,
+    identity: UUID,
+    field: str,
+    value: str | None,
+    *,
+    actor_id: str = "system",
 ) -> None:
     if entity == "user":
         if field not in {"display_name", "email"} or value is None:
@@ -275,7 +281,7 @@ def repair_input(
                     name = value if field == "display_name" else row["display_name"]
                     email = value if field == "email" else row["email"]
                     changes["member_search_key"] = (
-                        normalize_search_key(f"{name} {email}")
+                        normalize_search_key(f"{name} {email or ''}")
                         if "member_search_key" in table.c
                         else None
                     )
@@ -285,6 +291,9 @@ def repair_input(
                         _invalidate_email_credentials(
                             connection, table, key, changes, now
                         )
+                    _audit_user_repair(
+                        connection, key, field, row[field], value, now, actor_id
+                    )
                 if entity == "workspace" and field in {"title", "name"}:
                     changes.update(title=value, name=value)
                     if "directory_title_key" in table.c:
@@ -316,6 +325,31 @@ def repair_input(
                     )
         finally:
             engine.dispose()
+
+
+def _audit_user_repair(connection, key, field, previous, value, now, actor_id):
+    """Record an operator's account change for server-admin-only review."""
+    audit = _table(connection, "audit_event")
+    values = {
+        "id": _key(connection, uuid4()),
+        "created_at": now,
+        "workspace_id": None,
+        "actor_kind": "system",
+        "actor_id": actor_id,
+        "actor_type": "system",
+        "action": "auth.user.repaired",
+        "target_kind": "user",
+        "target_type": "user",
+        "target_id": key,
+        "payload": {"field": field, "previous": previous, "value": value},
+        "event_summary": "A server operator changed account metadata",
+        "retention_class": "sensitive",
+    }
+    connection.execute(
+        audit.insert().values(
+            **{name: item for name, item in values.items() if name in audit.c}
+        )
+    )
 
 
 def _invalidate_email_credentials(connection, users, key, changes, now):

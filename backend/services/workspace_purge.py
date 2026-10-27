@@ -68,6 +68,7 @@ GLOBAL_TABLES = frozenset(
     {
         "api_tokens",
         "app_metadata",
+        "auth_email_conflict_requests",
         "auth_login_transactions",
         "email_reauthentication_challenges",
         "email_outbox",

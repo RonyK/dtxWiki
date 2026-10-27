@@ -32,15 +32,25 @@ from backend.api.auth_dependencies import (
     flow_error,
     policy_for_request,
 )
+from backend.api.deps import SessionFactoryDep
 from backend.api.middleware.security_headers import CSP_SCRIPT_NONCE_STATE_KEY
 from backend.api.request_origin import require_same_origin
+from backend.app.errors import build_rest_error_response
 from backend.schemas.auth import (
     AuthSessionResponse,
     CapabilitiesResponse,
+    EmailConflictRequestResponse,
     LoginMethodCapability,
 )
 from backend.services.auth.account_management import (
     IdentityNotFoundError,
+)
+from backend.services.auth.email_conflicts import (
+    TICKET_TTL_SECONDS,
+    EmailConflictError,
+    EmailConflictRequired,
+    EmailConflictService,
+    EmailConflictTicketCodec,
 )
 from backend.services.auth.login_transactions import (
     LOGIN_TTL_SECONDS,
@@ -58,6 +68,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 capabilities_router = APIRouter(tags=["capabilities"])
 BINDING_COOKIE = "dtxwiki_login_txn"
 BINDING_PATH = "/api/v1/auth/sso"
+EMAIL_CONFLICT_COOKIE = "dtxwiki_email_conflict"
+EMAIL_CONFLICT_PATH = "/api/v1/auth/sso/email-conflict"
 CALLBACK_MAX_BYTES = 64 * 1024
 CALLBACK_MAX_FIELDS = 20
 
@@ -99,6 +111,19 @@ def set_binding(response, request, binding, provider):
         samesite="lax",
         path=BINDING_PATH,
         max_age=LOGIN_TTL_SECONDS,
+    )
+
+
+def set_email_conflict_ticket(response, request, facts):
+    settings = request.app.state.settings
+    response.set_cookie(
+        EMAIL_CONFLICT_COOKIE,
+        EmailConflictTicketCodec(settings.effective_session_secret).issue(facts),
+        httponly=True,
+        secure=session_cookie_secure_for_request(settings, request),
+        samesite="lax",
+        path=EMAIL_CONFLICT_PATH,
+        max_age=TICKET_TTL_SECONDS,
     )
 
 
@@ -354,7 +379,10 @@ def complete_callback(slug, request, broker, sessions, query, form=None):
         context = exc.context
         if context is None and exc.code == "sso_provider_unavailable":
             context = recover_callback_context(slug, request, broker, state, binding)
-        return callback_error(exc.code, context)
+        failed = callback_error(exc.code, context)
+        if isinstance(exc, EmailConflictRequired):
+            set_email_conflict_ticket(failed, request, exc.facts)
+        return failed
     except AuthRateLimitError as exc:
         context = recover_callback_context(slug, request, broker, state, binding)
         broker.audit_failure(slug, exc.error_code)
@@ -534,6 +562,9 @@ def set_password(
         user, verified = sessions.authenticate_session_context(
             current_session_token(request)
         )
+        # Argon2 is the expensive step; bound it per account before any proof
+        # or password work so repeated requests cannot burn memory.
+        consume_auth_slot(auth_client_ip(request), user_id=user.user_id)
         require_account_proof(request, sessions)
         issued = accounts.set_initial_password(user, verified, body.new_password)
         from fastapi.encoders import jsonable_encoder
@@ -548,6 +579,52 @@ def set_password(
         return flow_error(exc)
     except SessionServiceError as exc:
         return no_store_response(auth_error_response(exc))
+
+
+@router.post(
+    "/sso/email-conflict/request",
+    response_model=EmailConflictRequestResponse,
+    status_code=202,
+)
+def request_email_conflict_release(
+    request: Request, session_factory: SessionFactoryDep
+):
+    """Ask a server admin to release the unverified account holding this address.
+
+    Only the browser that completed the colliding IdP login holds the ticket.
+    """
+    same_origin(request)
+    settings = request.app.state.settings
+    try:
+        consume_auth_slot(auth_client_ip(request), namespace="email_conflict")
+        facts = EmailConflictTicketCodec(settings.effective_session_secret).verify(
+            request.cookies.get(EMAIL_CONFLICT_COOKIE)
+        )
+        result = EmailConflictService(session_factory).submit(facts)
+    except EmailConflictError as exc:
+        return no_store_response(
+            build_rest_error_response(
+                error_code=exc.error_code,
+                message=str(exc),
+                status_code=exc.status_code,
+            )
+        )
+    except SessionServiceError as exc:
+        return no_store_response(auth_error_response(exc))
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse
+
+    response = no_store_response(
+        JSONResponse(jsonable_encoder({"data": result}), status_code=202)
+    )
+    response.delete_cookie(
+        EMAIL_CONFLICT_COOKIE,
+        path=EMAIL_CONFLICT_PATH,
+        secure=session_cookie_secure_for_request(settings, request),
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @router.get("/methods/{method_id}/icon.png")

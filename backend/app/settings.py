@@ -188,9 +188,13 @@ class Settings(BaseSettings):
         gt=0,
     )
     session_cookie_name: str = "dtxwiki_session"
+    # The window is also capped by each session's own expiry. The upper bound
+    # only keeps an accidental huge value from overflowing datetime arithmetic
+    # (a 500 on every sensitive request) instead of failing at startup.
     auth_reauthentication_max_age_seconds: int = Field(
         default=AUTH_REAUTHENTICATION_MAX_AGE_DEFAULT_SECONDS,
         gt=0,
+        le=366 * 24 * 60 * 60,
     )
     session_cookie_secure: bool | None = None
     # Keep the raw operator value nullable so mode-derived defaults remain

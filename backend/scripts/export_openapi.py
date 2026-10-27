@@ -1,7 +1,7 @@
 import json
 import sys
 
-from backend.api.auth_sso import BINDING_COOKIE
+from backend.api.auth_sso import BINDING_COOKIE, EMAIL_CONFLICT_COOKIE
 from backend.api.auth_verification import email_binding_name
 from backend.app.main import create_app
 from backend.policy.rest_scopes import (
@@ -23,6 +23,7 @@ SESSION_OR_BEARER_SECURITY = [
 RECENT_REAUTHENTICATION_SECURITY = SESSION_COOKIE_SECURITY
 ACCOUNT_REAUTHENTICATION_SECURITY = SESSION_COOKIE_SECURITY
 LOGIN_TRANSACTION_SECURITY = [{"LoginTransactionCookie": []}]
+EMAIL_CONFLICT_SECURITY = [{"EmailConflictTicketCookie": []}]
 EMAIL_REAUTHENTICATION_SECURITY = [
     {"SessionCookie": [], "AccountEmailBindingCookie": []},
     {"SessionCookie": [], "AdminEmailBindingCookie": []},
@@ -97,6 +98,9 @@ OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
     ("POST", "/api/v1/admin/users/{user_id}/identities/rebind"),
+    ("GET", "/api/v1/admin/email-conflicts"),
+    ("POST", "/api/v1/admin/email-conflicts/{request_id}/decision"),
+    ("GET", "/api/v1/admin/audit-events"),
 }
 
 OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
@@ -112,6 +116,11 @@ OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {
 
 OPENAPI_EMAIL_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("POST", "/api/v1/auth/email-reauthentication/confirm"),
+}
+
+# Only the browser that completed a colliding IdP login holds this ticket.
+OPENAPI_EMAIL_CONFLICT_ROUTES: set[RouteKey] = {
+    ("POST", "/api/v1/auth/sso/email-conflict/request"),
 }
 
 OPENAPI_OPTIONAL_SESSION_ROUTES: set[RouteKey] = {
@@ -206,6 +215,9 @@ def reviewed_openapi_security() -> dict[RouteKey, list[dict[str, list]]]:
             for route in OPENAPI_EMAIL_REAUTHENTICATION_ROUTES
         }
     )
+    route_security.update(
+        {route: EMAIL_CONFLICT_SECURITY for route in OPENAPI_EMAIL_CONFLICT_ROUTES}
+    )
     return route_security
 
 
@@ -234,6 +246,12 @@ def build_openapi_schema() -> dict:
         "type": "apiKey",
         "in": "cookie",
         "name": BINDING_COOKIE,
+    }
+    security_schemes["EmailConflictTicketCookie"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": EMAIL_CONFLICT_COOKIE,
+        "description": "Signed ticket from an SSO login whose address collided.",
     }
     security_schemes["AccountEmailBindingCookie"] = {
         "type": "apiKey",
