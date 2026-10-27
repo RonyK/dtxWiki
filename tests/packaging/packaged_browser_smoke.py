@@ -161,7 +161,7 @@ const health = await page.request.get(`${baseUrl}/health/ready`);
 expect((await health.json()).components.worker).toBe('ok');
 const workspaces = await page.request.get(`${baseUrl}/api/v1/workspaces`);
 expect(workspaces.ok()).toBeTruthy();
-const workspaceId = (await workspaces.json()).data.personal_workspace_id;
+const workspaceId = (await workspaces.json()).data.default_workspace_id;
 expect(workspaceId).toBeTruthy();
 const libraryUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/library/items`;
 const marker = 'The packaged worker converted this uploaded document.';

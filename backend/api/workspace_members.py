@@ -221,7 +221,6 @@ def _member_payload(
         "status": member.status,
         "role": member.role,
         "joined_at": member.joined_at,
-        "is_personal_anchor_owner": member.is_personal_anchor_owner,
         "is_current_user": member.user_id == actor_user_id,
     }
 

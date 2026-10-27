@@ -6,7 +6,6 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.user import User
 from backend.models.workspace import WorkspaceMembership
-from backend.policy.auth import ActorContext, get_rest_actor
 from backend.policy.rbac import grant_workspace_membership
 from backend.repositories.workspace_repo import insert_workspace
 from backend.tests.conftest import authenticate_test_client
@@ -56,55 +55,20 @@ def test_user_default_workspace_is_selected(page_service):
     assert payload["default_workspace_id"] == str(beta_id)
 
 
-def test_user_fallback_prefers_live_personal_workspace(page_service):
-    client = make_client(page_service)
-    add_workspace_for_current_user(client, page_service, "alpha")
-    user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
-    with page_service.session_factory.begin() as session:
-        user = session.get(User, user_id)
-        assert user is not None
-        personal_id = user.personal_workspace_id
-        assert personal_id is not None
-        user.default_workspace_id = None
-    # Bypass the normal request-auth repair so this assertion specifically
-    # exercises the GET /workspaces transaction and WorkspaceReadService.
-    client.app.dependency_overrides[get_rest_actor] = lambda: ActorContext(
-        actor_kind="human",
-        actor_id=str(user_id),
-        user_id=user_id,
-        workspace_id=personal_id,
-        workspace_role="owner",
-        role="owner",
-        token_kind="session",
-        provenance="browser_session",
-    )
-    response = client.get("/api/v1/workspaces")
-
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    assert payload["current_workspace_id"] == str(personal_id)
-    assert payload["default_workspace_id"] == str(personal_id)
-    with page_service.session_factory() as session:
-        persisted_user = session.get(User, user_id)
-        assert persisted_user is not None
-        assert persisted_user.default_workspace_id == personal_id
-
-
 def test_current_workspace_falls_back_to_sole_accessible_workspace(page_service):
     client = make_client(page_service)
     user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
     with page_service.session_factory.begin() as session:
         user = session.get(User, user_id)
         assert user is not None
-        personal_id = user.personal_workspace_id
-        assert personal_id is not None
-        personal_membership = session.get(
+        starter_id = user.default_workspace_id
+        assert starter_id is not None
+        starter_membership = session.get(
             WorkspaceMembership,
-            (user_id, personal_id),
+            (user_id, starter_id),
         )
-        assert personal_membership is not None
-        session.delete(personal_membership)
-        user.personal_workspace_id = None
+        assert starter_membership is not None
+        session.delete(starter_membership)
         user.default_workspace_id = None
     only_id = add_workspace_for_current_user(client, page_service, "only-accessible")
     response = client.get("/api/v1/workspaces")
@@ -115,7 +79,7 @@ def test_current_workspace_falls_back_to_sole_accessible_workspace(page_service)
     assert payload["default_workspace_id"] is None
 
 
-def test_multiple_memberships_without_live_anchor_require_picker(page_service):
+def test_multiple_memberships_without_default_require_picker(page_service):
     client = make_client(page_service)
     add_workspace_for_current_user(client, page_service, "picker-target")
     user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
@@ -123,7 +87,6 @@ def test_multiple_memberships_without_live_anchor_require_picker(page_service):
         user = session.get(User, user_id)
         assert user is not None
         user.default_workspace_id = None
-        user.personal_workspace_id = None
 
     response = client.get("/api/v1/workspaces")
 
@@ -134,19 +97,18 @@ def test_multiple_memberships_without_live_anchor_require_picker(page_service):
     assert payload["default_workspace_id"] is None
 
 
-def test_zero_membership_without_anchor_enters_recovery_onboarding(page_service):
+def test_zero_membership_enters_recovery_onboarding(page_service):
     client = make_client(page_service)
     user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
     with page_service.session_factory.begin() as session:
         user = session.get(User, user_id)
         assert user is not None
-        personal_id = user.personal_workspace_id
-        assert personal_id is not None
-        membership = session.get(WorkspaceMembership, (user_id, personal_id))
+        starter_id = user.default_workspace_id
+        assert starter_id is not None
+        membership = session.get(WorkspaceMembership, (user_id, starter_id))
         assert membership is not None
         session.delete(membership)
         user.default_workspace_id = None
-        user.personal_workspace_id = None
 
     response = client.get("/api/v1/workspaces")
 

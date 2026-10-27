@@ -17,7 +17,6 @@ class WorkspaceMemberItem(BaseModel):
     status: str
     role: WorkspaceMemberRole
     joined_at: datetime
-    is_personal_anchor_owner: bool
     is_current_user: bool
 
     model_config = ConfigDict(extra="forbid")

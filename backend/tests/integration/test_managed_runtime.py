@@ -165,7 +165,7 @@ def _upload_and_wait_for_conversion(
     assert signup.status_code == 201, signup.text
     workspaces = runtime.client.get("/api/v1/workspaces")
     assert workspaces.status_code == 200, workspaces.text
-    workspace_id = workspaces.json()["data"]["personal_workspace_id"]
+    workspace_id = workspaces.json()["data"]["default_workspace_id"]
     assert workspace_id
     content = b"# Managed runtime\n\nThis exact document was converted by the worker.\n"
     collection_url = f"/api/v1/workspaces/{workspace_id}/library/items"

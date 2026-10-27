@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
@@ -43,8 +43,7 @@ def resolve_workspace_for_actor(
       1. OAuth ``token_workspace_ids`` claim binding.
       2. Explicit request/path/query workspace id.
       3. A live, accessible persisted user default.
-      4. The user's live, accessible Personal workspace, when one exists.
-      5. A single remaining workspace membership.
+      4. A single remaining workspace membership.
 
     The function deliberately chooses a workspace only; access is checked by
     ``backend.policy.trust_boundaries.check_actor_can_access``.
@@ -80,13 +79,6 @@ def resolve_workspace_for_actor(
     if user_id is not None:
         user = session.get(User, user_id)
         if user is not None:
-            repaired_to_personal = repair_default_workspace_to_personal(
-                session=session,
-                user=user,
-            )
-            # The conditional repair expires this attribute after its UPDATE.
-            # Reading it here observes either our Personal repair or a
-            # concurrent explicit selection that won the compare-and-swap.
             default_workspace_id = user.default_workspace_id
             if _user_can_access_workspace(
                 session,
@@ -94,8 +86,7 @@ def resolve_workspace_for_actor(
                 workspace_id=default_workspace_id,
             ):
                 assert default_workspace_id is not None
-                source = "personal" if repaired_to_personal else "user_default"
-                return WorkspaceContext(default_workspace_id, source)
+                return WorkspaceContext(default_workspace_id, "user_default")
         membership_workspace_ids = list(
             session.scalars(
                 select(WorkspaceMembership.workspace_id)
@@ -155,58 +146,6 @@ def _user_can_access_workspace(
     if workspace_id is None or session.get(Workspace, workspace_id) is None:
         return False
     return session.get(WorkspaceMembership, (user_id, workspace_id)) is not None
-
-
-def repair_default_workspace_to_personal(
-    *,
-    session: Session,
-    user: User,
-) -> bool:
-    """Repair a stale/null landing pointer to a live Personal workspace.
-
-    The repair is a compare-and-swap against the default value this transaction
-    observed.  A concurrent explicit default selection therefore wins instead
-    of being overwritten by a stale read.  The mutation executes in the
-    caller's transaction, so application boundaries that invoke this fallback
-    must use a commit-capable transaction.
-    """
-
-    if _user_can_access_workspace(
-        session,
-        user_id=user.id,
-        workspace_id=user.default_workspace_id,
-    ):
-        return False
-    personal_workspace_id = user.personal_workspace_id
-    if not _user_can_access_workspace(
-        session,
-        user_id=user.id,
-        workspace_id=personal_workspace_id,
-    ):
-        return False
-    assert personal_workspace_id is not None
-    observed_default_workspace_id = user.default_workspace_id
-    expected_default = (
-        User.default_workspace_id.is_(None)
-        if observed_default_workspace_id is None
-        else User.default_workspace_id == observed_default_workspace_id
-    )
-    result = session.execute(
-        update(User)
-        .where(
-            User.id == user.id,
-            expected_default,
-            User.personal_workspace_id == personal_workspace_id,
-        )
-        .values(default_workspace_id=personal_workspace_id)
-        .execution_options(synchronize_session=False)
-    )
-    repaired = result.rowcount == 1
-    # The identity map still carries the pointers read before the CAS. Expire
-    # both for either outcome so callers observe our repair or every concurrent
-    # winner (including deletion clearing the Personal pointer).
-    session.expire(user, ["default_workspace_id", "personal_workspace_id"])
-    return repaired
 
 
 def workspace_existence_is_hidden(

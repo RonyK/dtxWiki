@@ -91,11 +91,11 @@ def _check_file_processing(
         ).encode(),
     )
     workspaces = request("/api/v1/workspaces")
-    workspace_id = (
-        workspaces.get("current_workspace_id")
-        or workspaces.get("default_workspace_id")
-        or workspaces["personal_workspace_id"]
+    workspace_id = workspaces.get("current_workspace_id") or workspaces.get(
+        "default_workspace_id"
     )
+    if not workspace_id:
+        raise RuntimeError("signup did not select a workspace")
     endpoint = f"/api/v1/workspaces/{workspace_id}/library/items"
     marker = "DesktopManagedWorkerSmoke"
     boundary = "desktop-smoke-upload-boundary"

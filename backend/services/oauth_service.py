@@ -2382,14 +2382,6 @@ class OAuthService:
         workspace the user currently holds membership in; an authorize
         request from a user with zero memberships returns an empty list (the
         caller renders a submit-disabled empty checklist).
-
-        Uses a COMMITTING transaction, not a read-only session: the no-hint,
-        no-existing-consent fallback calls ``resolve_workspace_for_actor``,
-        whose single-membership path can repair a stale/inaccessible
-        ``User.default_workspace_id`` to the live Personal workspace
-        (``repair_default_workspace_to_personal``) -- a real write that must
-        survive past this call, exactly as the deleted
-        ``resolve_authorization_workspace`` committed it.
         """
 
         with self.session_factory.begin() as session:

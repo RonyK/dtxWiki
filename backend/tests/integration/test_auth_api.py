@@ -638,7 +638,7 @@ def test_team_mode_signup_grants_personal_owner_only(page_service):
         ).all()
     assert len(rows) == 1
     workspace, membership = rows[0]
-    assert workspace.id == user.personal_workspace_id
+    assert workspace.id == user.default_workspace_id
     assert workspace.slug.startswith("personal-")
     assert membership.role == "owner"
 
@@ -915,9 +915,9 @@ def test_api_token_issue_list_and_revoke_are_session_scoped(page_service):
             select(User).where(User.email == "token-owner@example.com")
         )
         assert user is not None
-        assert user.personal_workspace_id is not None
+        assert user.default_workspace_id is not None
         owner_user_id = str(user.id)
-        workspace_id = str(user.personal_workspace_id)
+        workspace_id = str(user.default_workspace_id)
 
     issued = client.post(
         "/api/v1/auth/tokens",
@@ -1029,8 +1029,8 @@ def test_api_token_create_requires_supported_scope(page_service):
     with page_service.session_factory() as session:
         user = session.scalar(select(User).where(User.email == "bad-scope@example.com"))
         assert user is not None
-        assert user.personal_workspace_id is not None
-        workspace_id = str(user.personal_workspace_id)
+        assert user.default_workspace_id is not None
+        workspace_id = str(user.default_workspace_id)
 
     response = client.post(
         "/api/v1/auth/tokens",
@@ -1064,8 +1064,8 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service, api_token_c
             select(User).where(User.email == "paged-keys@example.com")
         )
         assert user is not None
-        assert user.personal_workspace_id is not None
-        workspace_id = str(user.personal_workspace_id)
+        assert user.default_workspace_id is not None
+        workspace_id = str(user.default_workspace_id)
 
     def issue(name: str):
         payload = {
@@ -1252,7 +1252,7 @@ def test_user_tokens_cursor_traverses_more_than_one_default_page_exactly_once(
             select(User).where(User.email == "many-keys@example.com")
         )
         assert user is not None
-        assert user.personal_workspace_id is not None
+        assert user.default_workspace_id is not None
         rows = []
         for index in range(23):
             row = ApiToken(
@@ -1271,7 +1271,7 @@ def test_user_tokens_cursor_traverses_more_than_one_default_page_exactly_once(
             session.add(
                 ApiTokenWorkspace(
                     token_id=row.id,
-                    workspace_id=user.personal_workspace_id,
+                    workspace_id=user.default_workspace_id,
                     desired_scopes=["mcp:read"],
                     revision=1,
                     sync_state="synced",
@@ -1467,8 +1467,8 @@ def test_session_lifecycle_audit_is_system_scoped_not_workspace_scoped(page_serv
         owner = session.scalar(
             select(User).where(User.email == "scope-owner@example.com")
         )
-        assert owner is not None and owner.personal_workspace_id is not None
-        workspace_id = owner.personal_workspace_id
+        assert owner is not None and owner.default_workspace_id is not None
+        workspace_id = owner.default_workspace_id
 
     shared = owner_client.post(
         f"/api/v1/workspaces/{workspace_id}/members",

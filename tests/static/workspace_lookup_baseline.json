@@ -1473,8 +1473,6 @@
   "backend/services/page_service.py|select_inline_comment_rows|select|ChangeOperation|af59ee95c438291f": 1,
   "backend/services/page_service.py|select_inline_comment_rows|select|ReviewItem|af59ee95c438291f": 1,
   "backend/services/page_service.py|select_inline_comment_rows|where|ChangeOperation|e198356e2b791c17": 1,
-  "backend/services/personal_workspace_service.py|_ensure_minimal_tree|select|WorkspaceTreeNode|2e5f95d5902e7203": 1,
-  "backend/services/personal_workspace_service.py|_ensure_minimal_tree|where|WorkspaceTreeNode|73d44dcf1592a737": 1,
   "backend/services/preview_manifest_service.py|LibraryPreviewManifestService._generated_variants|join|LibraryArtifactPreviewDetail|f53883c9c54cf16f": 1,
   "backend/services/preview_manifest_service.py|LibraryPreviewManifestService._generated_variants|join|LibraryArtifact|f53883c9c54cf16f": 1,
   "backend/services/preview_manifest_service.py|LibraryPreviewManifestService._generated_variants|select|LibraryArtifact|47c1b91d0882d6d9": 1,

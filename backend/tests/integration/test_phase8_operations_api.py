@@ -14,7 +14,7 @@ from backend.models.job import Job
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.review import ReviewItem
 from backend.models.user import User
-from backend.models.workspace import MCPClient, Workspace
+from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.policy.rbac import grant_workspace_membership
 from backend.services.activity_service import _decode_activity_cursor
 from backend.services.library_service import LibraryService
@@ -612,8 +612,11 @@ def test_settings_policy_patch_updates_workspace_and_literal_values(
         user = session.scalar(select(User).where(User.email == "test@example.com"))
         assert target is not None
         assert user is not None
-        personal = session.get(Workspace, user.personal_workspace_id)
-        assert personal is not None
+        personal = session.scalars(
+            select(Workspace)
+            .join(WorkspaceMembership, WorkspaceMembership.workspace_id == Workspace.id)
+            .where(WorkspaceMembership.user_id == user.id, Workspace.id != target.id)
+        ).one()
         personal.created_at = target.created_at + timedelta(seconds=personal_offset)
 
     language = client.patch(

@@ -146,7 +146,6 @@
     "password_recovery_unavailable",
     "password_reset_token_expired",
     "password_reset_token_used",
-    "personal_workspace_owner_locked",
     "purge_grant_required",
     "purge_unavailable",
     "rate_limited",
