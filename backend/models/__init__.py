@@ -10,9 +10,6 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
 from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
     constraints_for as _input_constraints_for,
 )
-
-# Registers the flush guard that refuses new rows naming an inactive user.
-from backend.models import user_attribution as _user_attribution  # noqa: F401
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.api_token import ApiToken, ApiTokenWorkspace
 from backend.models.app_metadata import AppMetadata

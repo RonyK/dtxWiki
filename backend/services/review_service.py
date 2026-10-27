@@ -18,7 +18,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.mcp_chat import McpChatSession
 from backend.models.review import ReviewAudienceKind, ReviewDecision, ReviewItem
 from backend.models.user import User
-from backend.models.workspace import Workspace, WorkspaceMembership, default_actor_id
+from backend.models.workspace import Workspace, default_actor_id
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import role_allows
 from backend.policy.trust_boundaries import actor_can_read_drafts
@@ -1184,8 +1184,9 @@ class ReviewService:
         # approve/reject/reroute it out from under them. The holder's own
         # decision proceeds (and clears the claim below); an expired claim does
         # not block.
-        claim_holder = self._effective_claim_holder(session, review)
-        if claim_holder is not None and claim_holder != parse_uuid_or_none(actor_id):
+        if self._claim_is_live(review) and review.claimed_by != parse_uuid_or_none(
+            actor_id
+        ):
             raise ReviewAlreadyClaimedError(
                 "this review is being worked by another collaborator; it must "
                 "be released before you can decide it"
@@ -1444,8 +1445,7 @@ class ReviewService:
                 "only the routed recipient (or an editor on a broadcast route) "
                 "can claim this review"
             )
-        claim_holder = self._effective_claim_holder(session, review)
-        if claim_holder is not None and claim_holder != claimant:
+        if self._claim_is_live(review) and review.claimed_by != claimant:
             raise ReviewAlreadyClaimedError(
                 "this review is already being worked by another collaborator"
             )
@@ -1484,8 +1484,7 @@ class ReviewService:
         # claim is rejected with review_already_claimed (409).
         review = self._require_review_for_update(session, workspace_id, review_item_id)
         actor_uuid = parse_uuid_or_none(actor_id)
-        claim_holder = self._effective_claim_holder(session, review)
-        if claim_holder is not None and claim_holder != actor_uuid:
+        if self._claim_is_live(review) and review.claimed_by != actor_uuid:
             raise ReviewAlreadyClaimedError(
                 "this review is claimed by another collaborator"
             )
@@ -1512,33 +1511,17 @@ class ReviewService:
             actor=actor,
         )
 
-    def _effective_claim_holder(
-        self, session: Session, review: ReviewItem
-    ) -> UUID | None:
+    @staticmethod
+    def _claim_is_live(review: ReviewItem) -> bool:
         if review.claimed_by is None or review.claimed_at is None:
-            return None
+            return False
         claimed_at = review.claimed_at
         # SQLite round-trips DateTime(timezone=True) as offset-naive; treat a
         # naive value as UTC so the comparison with the aware utc_now() works
         # on both SQLite and Postgres.
         if claimed_at.tzinfo is None:
             claimed_at = claimed_at.replace(tzinfo=UTC)
-        if claimed_at <= utc_now() - timedelta(minutes=CLAIM_TTL_MINUTES):
-            return None
-        holder_role = session.scalar(
-            select(WorkspaceMembership.role)
-            .join(User, User.id == WorkspaceMembership.user_id)
-            .where(
-                WorkspaceMembership.workspace_id == review.workspace_id,
-                WorkspaceMembership.user_id == review.claimed_by,
-                User.status == "active",
-            )
-        )
-        if holder_role is None or not self._principal_in_current_audience(
-            session, review, review.claimed_by, holder_role
-        ):
-            return None
-        return review.claimed_by
+        return claimed_at > utc_now() - timedelta(minutes=CLAIM_TTL_MINUTES)
 
     # ------------------------------------------------------------------
     # MCP review surface (T15b / item 11-c)
@@ -1737,8 +1720,7 @@ class ReviewService:
             )
 
         # Soft-claim (T4): block a competing live claim by another principal.
-        claim_holder = self._effective_claim_holder(session, review)
-        if claim_holder is not None and claim_holder != principal:
+        if self._claim_is_live(review) and review.claimed_by != principal:
             raise ReviewAlreadyClaimedError(
                 "this review is already being worked by another collaborator"
             )
@@ -2114,8 +2096,7 @@ class ReviewService:
             session, review, actor_user_id, actor_role
         ):
             return False
-        claim_holder = self._effective_claim_holder(session, review)
-        return claim_holder is None or claim_holder == actor_user_id
+        return not self._claim_is_live(review) or review.claimed_by == actor_user_id
 
     def _detail(
         self,
@@ -2263,7 +2244,6 @@ class ReviewService:
                             )
                             if chat is not None:
                                 reconciliation_chat_session_id = chat.id
-        claim_holder = self._effective_claim_holder(session, review)
         return ReviewItemDetail(
             id=review.id,
             workspace_id=review.workspace_id,
@@ -2279,9 +2259,11 @@ class ReviewService:
             decision_summary_code=review.decision_summary_code,
             current_audience_kind=_current_audience_kind(session, review, decisions),
             chat_owner_available=chat_owner_available,
-            # Expired, inactive or out-of-audience holders do not block takeover.
-            claimed_by=claim_holder,
-            claimed_at=review.claimed_at if claim_holder is not None else None,
+            # Expose the claim only while it is LIVE (P2): an expired/TTL'd claim
+            # is available for takeover, so it must read as unclaimed rather than
+            # render a stale claimed_by/claimed_at as if still active.
+            claimed_by=review.claimed_by if self._claim_is_live(review) else None,
+            claimed_at=review.claimed_at if self._claim_is_live(review) else None,
             can_decide=can_decide,
             can_claim=self._can_claim_review(
                 session=session,

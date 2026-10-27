@@ -155,11 +155,10 @@ Server admins can schedule account deletion and set the retention period in
 **Settings > User accounts** after password reauthentication. The default is
 30 days; 0 days makes the request immediately eligible for cleanup. Each request
 keeps its original deadline when the policy changes. Access is revoked at once;
-the worker removes the personal workspace, credentials, personal preferences,
-private unsubmitted edits, and stored files after the deadline, retrying failed
-file cleanup. Unreferenced uploads in shared workspaces use the existing media
-garbage collection flow. Shared
-workspace documents and append-only audit history remain, with author names
+the worker removes the personal workspace and its contents, credentials, and
+personal preferences after the deadline, retrying failed file cleanup. Documents,
+drafts, attachments, and conversation history in other workspaces remain, along
+with append-only audit history, with author names
 falling back to a generic label after account removal. When the last active
 owner of a shared workspace leaves, every active server admin becomes an owner,
 and changes routed to the departed user go to the workspace owners. The last

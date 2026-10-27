@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -11,10 +10,13 @@ from backend.app.settings import Settings
 from backend.models import (
     ApiToken,
     AppMetadata,
+    ChangeSet,
     ContextMediaAsset,
     ContextMediaUsage,
     ContextPage,
     ContextPageVersion,
+    McpChatSession,
+    MCPClient,
     User,
     UserFavorite,
     Workspace,
@@ -22,7 +24,6 @@ from backend.models import (
     WorkspaceMembership,
     WorkspaceTreeNode,
 )
-from backend.models.user_attribution import ActorInactiveError
 from backend.schemas.context_write import ReviewDecisionRequest, WriteDraftRequest
 from backend.services.context_write_service import ContextWriteService
 from backend.services.credential_hashing import CredentialHasher
@@ -58,6 +59,20 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         shared = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         shared_id = shared.id
         shared_title = shared.title
+        client_id = session.scalar(
+            select(MCPClient.id).where(MCPClient.workspace_id == shared_id)
+        )
+        shared_chat = McpChatSession(
+            workspace_id=shared_id,
+            client_id=client_id,
+            owner_user_id=target.user_id,
+            mcp_session_id="retained-team-conversation",
+            title="Shared conversation",
+            summary="Shared work must survive account removal",
+        )
+        session.add(shared_chat)
+        session.flush()
+        shared_chat_id = shared_chat.id
         session.add(
             WorkspaceMembership(
                 user_id=target.user_id, workspace_id=shared_id, role="owner"
@@ -183,7 +198,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         session.add(foreign_version)
         session.flush()
         foreign_version_id = foreign_version.id
-    # The leaver reviewed a change, routed the fix to themself and claimed it.
+    # The leaver reviewed a change and routed the fix to themself.
     reviews = ReviewService()
     with factory.begin() as session:
         draft = ContextWriteService().write_draft(
@@ -200,6 +215,8 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             actor_role="owner",
         )
         review_id = draft.review_item_id
+        shared_change_id = draft.change_set_id
+        session.get(ChangeSet, shared_change_id).origin_chat_session_id = shared_chat_id
         reviews.apply_decision(
             session=session,
             workspace_id=shared_id,
@@ -213,14 +230,6 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             actor_id=str(target.user_id),
             actor_role="owner",
             actor_provenance="browser_session",
-        )
-        reviews.claim_review(
-            session=session,
-            workspace_id=shared_id,
-            review_item_id=review_id,
-            actor_kind="human",
-            actor_id=str(target.user_id),
-            actor_role="owner",
         )
 
     assert (
@@ -316,18 +325,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             "owner"
         )
         assert session.get(Workspace, shared_id).owner_user_id == admin.user_id
-    # A write that authenticated before the request can no longer attribute rows.
-    with pytest.raises(ActorInactiveError):
-        with factory.begin() as session:
-            session.add(
-                UserFavorite(
-                    user_id=target.user_id,
-                    workspace_id=shared_id,
-                    target_kind="context_page",
-                    target_id=private_page_id,
-                )
-            )
-    # The owner takes over the routed change despite the leaver's live claim.
+    # The workspace owner can work on the routed change after withdrawal.
     with factory.begin() as session:
         claimed = reviews.claim_review(
             session=session,
@@ -435,12 +433,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         b"retained personal content", workspace_id=personal_id, max_bytes=1024
     )
     provider = BlobStoreProvider(None, store=store)
-    service = UserDeletionService(
-        factory,
-        context_media_repository_factory=(
-            app.state.container.get_services().context_media_repository_factory
-        ),
-    )
+    service = UserDeletionService(factory)
     assert (
         service.purge_due(
             blob_store_provider=provider, now=deadline - timedelta(seconds=1)
@@ -485,16 +478,32 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         assert foreign.body_md == "Contributed before leaving"
         assert foreign.actor_display_name is None
         private_version = session.get(ContextPageVersion, private_version_id)
-        assert private_version.version_status == "discarded"
-        assert private_version.body_md == ""
-        assert session.get(ContextPage, page_id).current_version_id == version_id
-        assert session.get(ContextMediaAsset, (shared_id, private_asset_id)) is None
+        assert private_version.version_status == "editing"
+        assert private_version.body_md == "Private unsent edit"
+        assert (
+            session.get(ContextPage, page_id).current_version_id == private_version_id
+        )
+        assert session.get(ContextMediaAsset, (shared_id, private_asset_id)) is not None
+        assert (
+            session.get(
+                ContextMediaUsage,
+                (shared_id, page_id, private_asset_id, private_version_id),
+            ).reference_count
+            == 1
+        )
         private_page = session.get(ContextPage, private_page_id)
-        assert private_page.lifecycle_status == "archived"
+        assert private_page.lifecycle_status == "draft"
         private_node = session.get(WorkspaceTreeNode, private_node_id)
-        assert private_node.title == private_page.title != "Private title"
-        assert private_node.slug == private_page.slug != "private-title"
+        assert private_node.title == private_page.title == "Private title"
+        assert private_node.slug == private_page.slug == "private-title"
         assert session.get(Workspace, shared_id) is not None
+        shared_chat = session.get(McpChatSession, shared_chat_id)
+        assert shared_chat.owner_user_id is None
+        assert shared_chat.title == "Shared conversation"
+        assert shared_chat.summary == "Shared work must survive account removal"
+        assert session.get(ChangeSet, shared_change_id).origin_chat_session_id == (
+            shared_chat_id
+        )
         assert (
             session.scalar(
                 select(UserFavorite).where(UserFavorite.user_id == target.user_id)

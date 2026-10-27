@@ -9,9 +9,9 @@
   status. The confirmation dialog lists what will be deleted or handed over.
 - When the last active owner of a shared workspace leaves, every active server
   administrator becomes an owner. Changes routed to an inactive recipient go to
-  the workspace owners, and a departed user's claim no longer blocks them.
-- Writes that authenticated before an account was deactivated or deleted are
-  refused instead of recreating rows for that user.
+  the workspace owners. Existing claim lifetimes are unchanged.
+- Account cleanup preserves documents, drafts, attachments, and conversation
+  history outside the user's personal workspace.
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin
