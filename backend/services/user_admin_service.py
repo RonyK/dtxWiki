@@ -7,7 +7,7 @@ from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.oauth_service import revoke_live_token_grant_families
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.services.session_service import (
     AuthenticatedUser,
     DuplicateEmailError,
@@ -57,7 +57,7 @@ class UserAdminService:
             # workspace. Membership in an existing workspace is an explicit,
             # separate administration action and never comes from a
             # process-wide slug.
-            ensure_personal_workspace(session, user=user)
+            create_personal_workspace(session, user=user)
             self.audit_service.emit(
                 session=session,
                 workspace_id=None,
@@ -66,7 +66,7 @@ class UserAdminService:
                 action="auth.user.admin_created",
                 target_kind="user",
                 target_id=user.id,
-                payload={"email": user.email, "display_name": user.display_name},
+                payload={"display_name": user.display_name},
                 event_summary="A server operator created a local account",
                 retention_class="sensitive",
             )

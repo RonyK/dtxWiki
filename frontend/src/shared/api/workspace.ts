@@ -17,8 +17,8 @@ export type WorkspaceSummary = {
   join_policy?: string;
   role?: string | null;
   member_count?: number | null;
-  // WS-09: distinguishes two shared Personal workspaces (same default
-  // title, same initials) in the switcher when viewing someone else's.
+  // WS-09: distinguishes workspaces with the same title (and initials) in
+  // the switcher by naming who owns each one.
   owner_display_name?: string | null;
 };
 
@@ -26,7 +26,6 @@ export type WorkspaceListData = {
   workspaces: WorkspaceSummary[];
   current_workspace_id: string | null;
   default_workspace_id?: string | null;
-  personal_workspace_id?: string | null;
 };
 
 export type WorkspaceListResponse = {
@@ -353,15 +352,6 @@ export function resolveSelectedWorkspaceId(data: WorkspaceListData) {
   if (defaultWorkspace) {
     setSelectedWorkspace(defaultWorkspace);
     return defaultWorkspace.id;
-  }
-  const personalWorkspace = data.personal_workspace_id
-    ? data.workspaces.find(
-        (workspace) => workspace.id === data.personal_workspace_id,
-      )
-    : null;
-  if (personalWorkspace) {
-    setSelectedWorkspace(personalWorkspace);
-    return personalWorkspace.id;
   }
   const fallback = data.workspaces.length === 1 ? data.workspaces[0] : null;
   setSelectedWorkspace(fallback);

@@ -308,7 +308,10 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
 
       const reviewFavorite = fixtures[5];
       const focusedRow = treeRow(rail, reviewFavorite.id);
-      await focusedRow.focus();
+      // Switch from the earlier pointer expansion to real keyboard navigation;
+      // programmatic focus alone does not establish keyboard tooltip ownership.
+      await focusedRow.press("ArrowUp");
+      await page.keyboard.press("ArrowDown");
       await expect(focusedRow).toBeFocused();
       await expect(focusedRow).toHaveAccessibleDescription(/Pending review.*Review requested.*My favorite/);
       const tooltip = page.getByRole("tooltip").filter({ hasText: reviewFavorite.title });
@@ -358,8 +361,6 @@ test.describe("TreeRail document states and personal favorites @cross-browser", 
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 1280, height: 900 });
     await authenticatePage(page, testInfo, "tree-favorite-sections");
-    // Personal workspaces provision Context and Library only. A regular
-    // workspace supplies the Agent roots required by its write contract.
     const workspace = await responseData<{ id: string; slug: string }>(await page.request.post(
       `${backendBaseUrl}/api/v1/workspaces`,
       { data: { title: `TreeRail all sections ${randomUUID()}` } },

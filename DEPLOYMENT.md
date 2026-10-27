@@ -179,7 +179,24 @@ IP에서만 접근하게 제한하세요(`--tls external --forwarded-ip <proxy I
 
 `team`과 `solo_remote` 모드는 self-signup이 기본 off입니다. 조직 내 자유 가입이 의도라면
 `DTXWIKI_SIGNUP_ENABLED=true`를 명시하고 서비스를 재시작하세요. 가입이 허용된 `team` 모드의
-신규 사용자는 다른 공유 workspace에 자동 가입하지 않고 private `Personal Workspace`의 owner가 됩니다.
+신규 사용자는 다른 공유 workspace에 자동 가입하지 않고, 가입과 함께 만들어지는 private workspace
+하나의 owner가 됩니다. 이 workspace는 가입 직후 바로 쓰도록 만들어 주는 일반 private workspace이며,
+이후에는 다른 workspace와 똑같이 이름·slug·공개 범위를 바꾸거나 멤버를 초대하거나 삭제할 수
+있습니다. 삭제해도 다시 만들어지지 않으며, 필요하면 workspace 전환 메뉴에서 새로 만들면 됩니다.
+
+만들 때의 이름은 `<표시 이름>'s Personal Workspace`이고, slug는 `personal-<이메일 토큰>`입니다
+(예: `rony@example.com` → `personal-rony`). 이메일 토큰은 이메일 주소의 `@` 앞부분만 영문
+소문자·숫자·하이픈으로 정규화하여 최대 32자로 만들며, 도메인은 넣지 않습니다. 악센트가 붙은
+라틴 문자는 기본 문자로 바뀝니다(`josé` → `jose`). 이메일이 없거나 정규화 결과가 비면 임의의
+8자리 16진수를 사용합니다(예: `personal-82da8c7d`). 같은 slug가 이미 있으면 `personal-rony-2`,
+`personal-rony-3`처럼 2부터 숫자를 붙여 사용 가능한 slug를 선택합니다.
+이메일 앞부분이 slug에 들어가므로, 이 workspace를 public으로 바꾸기 전에 slug 변경을
+검토하세요. `personal-`로 시작하는 slug는 가입 시 만드는 workspace에만 붙습니다. 일반 workspace
+생성과 설정의 slug 변경은 이 prefix를 거부합니다. 제목에서 자동으로 만든 slug가 이 prefix로
+시작하면 앞에 `ws-`를 붙입니다(예: `Personal Notes` → `ws-personal-notes`, `Team Notes` →
+`team-notes`). 이미 쓰고 있는 slug는 그대로 둘 수 있습니다.
+이 규칙은 신규 생성에 적용하며 기존 workspace의 이름과 slug는 유지합니다.
+생성 후 표시 이름이나 이메일을 바꿔도 workspace의 이름과 slug는 자동 변경되지 않습니다.
 `solo_local`은 설정을 생략하면 기본 on이며,
 모든 모드에서 명시한 true/false 값이 mode 기본값보다 우선합니다. 외부에서는 80/443만 열고
 기본 설정에서는 app port 21080이 loopback에 남아 있는지 `ss -ltnp | grep 21080`으로 확인합니다.
@@ -615,6 +632,38 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 같은 dtxWiki version을 설치한 뒤 `/health/ready`, 로그인, 첨부파일 읽기를 확인하세요. 복구할 때는
 서비스를 중지하고 `/var/lib/dtxwiki`와 `/etc/dtxwiki`를 함께 복원한 뒤 ownership을 확인하고
 `dtxwiki bootstrap`을 실행합니다.
+
+### 정기 작업 이력과 SQLite 파일 용량
+
+worker는 시작할 때와 정기 작업 등록 시점(기본 약 5분)에 완료된 정기 점검 이력을
+점진적으로 정리합니다. 완료 후 7일이 지났고 등록 키에 기록된 주기도 끝난 행만
+대상입니다. 실패·수동 실행, 알 수 없는 키, Library 처리와 임베딩 이력은 보존합니다.
+만료된 MCP 쓰기 재시도 결과 기록도 함께 정리합니다. 등록 주기는 유지하며 번들 만료,
+미디어 설치 복구·파일 정리, 자격증명 복제 점검은 처리 대상이 있을 때만 작업을 만듭니다.
+
+정리는 workspace마다 200개 단위로 짧게 커밋하고, 전체 정리 시간 예산은 등록 회차당
+1초입니다. 이미 시작한 배치는 마친 뒤 예산을 확인하므로 DB 응답이 느리면 1초를 넘을 수
+있습니다. 큰 기존 이력은 여러 회차에 걸쳐 줄어듭니다. 스키마 변경이나 자동 `VACUUM`은
+없습니다. 개발용 PostgreSQL의 삭제 공간은 autovacuum이 재사용하도록 정리합니다.
+사전 조회에서 삭제할 대상이 없으면 쓰기 잠금을 잡지 않습니다. 미디어 보존 정책이
+잘못된 workspace도 완료 작업과 만료 MCP 기록의 정리 대상에는 포함됩니다.
+
+SQLite는 삭제한 페이지를 재사용하므로 행 수가 줄어도 파일 크기가 바로 줄지는 않습니다.
+파일 용량 회수가 필요하면 위 백업 절차로 복구 가능한 백업을 만든 뒤, app·worker와
+같은 DB를 사용하는 모든 프로세스를 멈추고 실행합니다. 아래 경로는 이 문서의 systemd
+설치 예시이며 실제 `DTXWIKI_DATABASE_URL`의 SQLite 파일 경로에 맞춥니다. 재작성에
+필요한 여유 디스크 공간(최대 현재 DB 크기의 약 두 배)을 먼저 확보합니다.
+
+```bash
+sudo systemctl stop dtxwiki-worker dtxwiki
+sudo -u dtxwiki sqlite3 /var/lib/dtxwiki/dtxwiki.sqlite 'VACUUM;'
+sudo -u dtxwiki sqlite3 /var/lib/dtxwiki/dtxwiki.sqlite 'PRAGMA integrity_check;'
+# integrity_check가 ok인지 확인한 뒤 재시작한다.
+sudo systemctl start dtxwiki dtxwiki-worker
+```
+
+다른 프로세스가 DB를 열고 있으면 먼저 종료한 뒤 다시 진행합니다. 정기 점검 행 정리만
+목적이라면 `VACUUM`을 실행할 필요는 없습니다.
 
 ### Context History 정합성 복구
 

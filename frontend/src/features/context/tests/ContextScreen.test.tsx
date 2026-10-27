@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import {
+  Link,
   MemoryRouter,
   Route,
   Routes,
@@ -492,6 +493,99 @@ describe("ContextScreen", () => {
   // The former single mega-test drove every surface in one 5s budget and timed
   // out under full-suite load (review R-9 / Codex F-8). Each surface now keeps
   // its own budget over the same fixture.
+  it("refreshes the overview and tree after leaving the reader and clicking its menu again", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    let pages = [contextPage(PAGE_ID, "Decision Log", "decision-log")];
+    let listReads = 0;
+    let treeReads = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+        listReads += 1;
+        return jsonResponse({ data: pages, total: pages.length });
+      }
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/tree`) {
+        treeReads += 1;
+        return jsonResponse({ data: treeResponse("context", pages.map((page) =>
+          treeNode(`node-${page.id}`, page.id, page.title),
+        )) });
+      }
+      return originalFetch(input, init);
+    });
+    const view = render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+        <Link to="/context">Main menu Context</Link>
+        <Routes>
+          <Route path="/context" element={<ContextScreen />} />
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<ContextScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Needle body");
+    const main = within(view.container.querySelector(".feature-main") as HTMLElement);
+    expect([listReads, treeReads]).toEqual([1, 1]);
+
+    pages = [contextPage("fresh-1", "Fresh after reader", "fresh-1"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await screen.findByRole("treeitem", { name: "Fresh after reader" });
+    expect(await main.findByRole("button", { name: /Fresh after reader/ })).toBeInTheDocument();
+    expect(screen.queryByText("Needle body")).not.toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([2, 2]);
+
+    pages = [contextPage("fresh-2", "Fresh while home", "fresh-2"), ...pages];
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await screen.findByRole("treeitem", { name: "Fresh while home" });
+    expect(await main.findByRole("button", { name: /Fresh while home/ })).toBeInTheDocument();
+    expect([listReads, treeReads]).toEqual([3, 3]);
+  });
+
+  it("drops appended and in-flight pages when a menu refresh returns the same first page and cursor", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const stalePage = deferredResponse();
+    let firstPageReads = 0;
+    let moreReads = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `/api/v1/workspaces/${WORKSPACE_ID}/context/pages`) {
+        if (url.searchParams.has("cursor")) {
+          moreReads += 1;
+          return moreReads === 1 ? jsonResponse({
+            data: [contextPage("old-tail", "Previously loaded tail", "old-tail")],
+            next_cursor: null, total: 3, has_more: false,
+          }) : stalePage.promise;
+        }
+        firstPageReads += 1;
+        const response = await originalFetch(input, init);
+        const body = await response.json();
+        return jsonResponse({ ...body, next_cursor: "same-cursor", total: 3, has_more: true });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={["/context"]}>
+        <Link to="/context">Main menu Context</Link>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await screen.findByText("Previously loaded tail");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await waitFor(() => expect(screen.queryByText("Previously loaded tail")).not.toBeInTheDocument());
+    expect(firstPageReads).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Context" }));
+    await waitFor(() => expect(firstPageReads).toBe(3));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled());
+    await act(async () => stalePage.resolve(jsonResponse({
+      data: [contextPage("stale-tail", "Stale in-flight tail", "stale-tail")],
+      next_cursor: null, total: 3, has_more: false,
+    })));
+    expect(screen.queryByText("Stale in-flight tail")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
+  });
+
   it("renders the tree and hides the Details rail before any selection", async () => {
     await renderDecisionLog();
     expect(document.title).toBe("dtxWiki");

@@ -1336,7 +1336,6 @@ describe("PageEditor", () => {
           data: {
             current_workspace_id: "workspace-personal",
             default_workspace_id: "workspace-personal",
-            personal_workspace_id: "workspace-personal",
             workspaces: [
               {
                 id: "workspace-personal",

@@ -37,6 +37,17 @@
   revokes sessions, pending challenges, and API/OAuth credentials.
 - Plugin provisioning returns constrained membership requests; worker handlers use
   typed public inputs and results instead of core database/runtime objects.
+- Skip periodic bundle expiration, media recovery/GC, and credential replica
+  jobs when their read-only checks find no work. Registration cadence stays
+  unchanged; a failed check still registers the repair job. Gradually remove
+  completed scheduled checks older than seven days after their encoded period
+  ends, plus expired MCP write retry receipts, in bounded worker batches.
+  Failed/manual jobs and content-processing history remain retained. SQLite
+  reuses freed pages; operators can reclaim file space with the offline
+  `VACUUM` procedure in [DEPLOYMENT.md](DEPLOYMENT.md#정기-작업-이력과-sqlite-파일-용량).
+- Apply MCP Access Key workspace edits to existing streamable MCP sessions
+  on the next request instead of keeping the workspaces granted at
+  initialize.
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin
@@ -56,6 +67,24 @@
   precedence when both the base and save-time content checks would fail.
 - Keep legacy citation-only updates and patch previews compatible with stored
   frontmatter, and verify reconciliation independently of current fixer settings.
+- The workspace a new account starts with is an ordinary private workspace.
+  It gets the same initial content as any created workspace, and nothing treats
+  it specially afterwards: its owner can be changed like any other owner, it is
+  not a landing fallback, and it is not recreated after deletion. The
+  `users.personal_workspace_id` column is dropped; existing workspaces keep
+  their data and memberships.
+- The REST workspace list and MCP `list_my_workspaces` no longer return
+  `personal_workspace_id`, and workspace members no longer carry
+  `is_personal_anchor_owner`. MCP tool contract revision 16: clients that
+  read `personal_workspace_id` should use `default_workspace_id` or
+  `current_workspace_id` and refresh `tools/list`.
+- Name a new account's workspace `<display name>'s Personal Workspace` with a
+  `personal-<email local part>` slug, numbered on collision. Accounts without a
+  usable local part get a random eight-character hex token.
+- Reserve the `personal-` slug prefix for those workspaces. Workspace creation
+  and slug changes refuse it; a slug generated from a title that would start
+  with it gets a `ws-` prefix instead. All workspace slugs fold accented Latin
+  letters to ASCII.
 
 ## 0.1.4 — 2026-10-23
 

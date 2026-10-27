@@ -21,7 +21,7 @@ from backend.services.password_recovery_service import (
     PasswordRecoveryAuthorizationError,
     PasswordRecoveryService,
 )
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
 
@@ -101,8 +101,8 @@ def test_postgres_admin_demotion_serializes_before_reset_issue():
             )
             session.add_all((admin, target))
             session.flush()
-            ensure_personal_workspace(session, user=admin)
-            ensure_personal_workspace(session, user=target)
+            create_personal_workspace(session, user=admin)
+            create_personal_workspace(session, user=target)
             server_admin_service.grant_server_admin(
                 session,
                 admin.id,

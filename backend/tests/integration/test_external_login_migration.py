@@ -21,6 +21,7 @@ from backend.services.ops.input_maintenance import audit_inputs
 PARENT = "ef53a0a7061c"
 REVISION = "7e2b9c4d6a18"
 EMAIL_REVISION = "c31a6d907e42"
+MERGE_REVISION = "a42d98c710e3"
 
 
 @pytest.mark.parametrize(
@@ -226,11 +227,6 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
                 return name in auth_tables
             return getattr(getattr(obj, "table", None), "name", None) in auth_tables
 
-        with engine.connect() as connection:
-            context = MigrationContext.configure(
-                connection, opts={"include_object": include_auth_object}
-            )
-            assert compare_metadata(context, Base.metadata) == []
         assert "auth_pending_signups" not in inspect(engine).get_table_names()
         metadata = sa.MetaData()
         challenges = sa.Table(
@@ -416,13 +412,43 @@ def test_external_login_upgrade_downgrade_reupgrade(tmp_path, dialect):
         assert not columns["password_hash"]["nullable"]
         assert "pending_email" not in columns
         command.upgrade(config, EMAIL_REVISION)
-        users, _, _ = _tables()
+        users, identities, transactions = _tables()
+        with engine.begin() as connection:
+            connection.execute(users.insert(), _user(external_id, None, None))
+            connection.execute(identities.insert(), identity)
+            connection.execute(transactions.insert(), transaction)
+        # Existing auth databases must also receive the independent pointer drop
+        # without losing identities or login transactions during SQLite rebuild.
+        command.upgrade(config, MERGE_REVISION)
+        assert audit_inputs(database_url) == []
+        assert "personal_workspace_id" not in {
+            column["name"] for column in inspect(engine).get_columns("users")
+        }
         with engine.connect() as connection:
             assert (
-                connection.scalar(sa.select(users.c.password_hash))
+                connection.scalar(
+                    sa.select(users.c.password_hash).where(users.c.id == existing_id)
+                )
                 == "preserved-local-hash"
             )
-            assert connection.scalar(sa.select(users.c.pending_email)) is None
+            assert (
+                connection.scalar(sa.select(sa.func.count()).select_from(identities))
+                == 1
+            )
+            assert (
+                connection.scalar(sa.select(sa.func.count()).select_from(transactions))
+                == 1
+            )
+            assert (
+                connection.scalar(
+                    sa.select(users.c.pending_email).where(users.c.id == existing_id)
+                )
+                is None
+            )
+            context = MigrationContext.configure(
+                connection, opts={"include_object": include_auth_object}
+            )
+            assert compare_metadata(context, Base.metadata) == []
     finally:
         if upgraded:
             # Dedicated DB starts empty. Cleanup includes downgrade-refusing data.

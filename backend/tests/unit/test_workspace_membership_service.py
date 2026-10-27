@@ -9,7 +9,7 @@ from backend.models.audit import AuditEvent
 from backend.models.base import Base
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.services.workspace_membership_service import (
     WorkspaceLastOwnerLockedError,
     WorkspaceMembershipService,
@@ -30,7 +30,7 @@ def _create_user(session, email: str) -> User:
     )
     session.add(user)
     session.flush()
-    ensure_personal_workspace(session, user=user)
+    create_personal_workspace(session, user=user)
     return user
 
 
@@ -61,8 +61,8 @@ def test_non_default_self_removal_preserves_and_returns_accessible_default(
     with session_factory.begin() as session:
         owner = _create_user(session, "fallback-owner@example.com")
         target = _create_user(session, "fallback-target@example.com")
-        personal_workspace_id = target.personal_workspace_id
-        assert personal_workspace_id is not None
+        starter_workspace_id = target.default_workspace_id
+        assert starter_workspace_id is not None
         default_workspace = _create_owned_workspace(
             session, owner, "persisted-default"
         )
@@ -101,7 +101,7 @@ def test_non_default_self_removal_preserves_and_returns_accessible_default(
         assert persisted_target is not None
         assert persisted_target.default_workspace_id == default_workspace_id
         assert session.get(
-            WorkspaceMembership, (target_id, personal_workspace_id)
+            WorkspaceMembership, (target_id, starter_workspace_id)
         ) is not None
         assert session.get(
             WorkspaceMembership, (target_id, default_workspace_id)
@@ -111,14 +111,12 @@ def test_non_default_self_removal_preserves_and_returns_accessible_default(
         ) is None
 
 
-def test_removal_uses_another_membership_when_default_is_removed_and_personal_missing(
-    session_factory,
-):
+def test_removal_uses_another_membership_when_default_is_removed(session_factory):
     with session_factory.begin() as session:
         owner = _create_user(session, "fallback-guard-owner@example.com")
         target = _create_user(session, "fallback-guard-target@example.com")
-        personal_workspace_id = target.personal_workspace_id
-        assert personal_workspace_id is not None
+        starter_workspace_id = target.default_workspace_id
+        assert starter_workspace_id is not None
         fallback_workspace = _create_owned_workspace(
             session, owner, "fallback-guard-default"
         )
@@ -140,11 +138,11 @@ def test_removal_uses_another_membership_when_default_is_removed_and_personal_mi
             ]
         )
         target.default_workspace_id = removed_workspace.id
-        personal_membership = session.get(
-            WorkspaceMembership, (target.id, personal_workspace_id)
+        starter_membership = session.get(
+            WorkspaceMembership, (target.id, starter_workspace_id)
         )
-        assert personal_membership is not None
-        session.delete(personal_membership)
+        assert starter_membership is not None
+        session.delete(starter_membership)
         target_id = target.id
         fallback_workspace_id = fallback_workspace.id
         removed_workspace_id = removed_workspace.id
@@ -212,7 +210,7 @@ def test_membership_and_audit_roll_back_together(session_factory):
     with session_factory.begin() as session:
         owner = _create_user(session, "owner-rollback@example.com")
         target = _create_user(session, "target-rollback@example.com")
-        workspace_id = owner.personal_workspace_id
+        workspace_id = owner.default_workspace_id
         assert workspace_id is not None
         owner_id = owner.id
         target_id = target.id

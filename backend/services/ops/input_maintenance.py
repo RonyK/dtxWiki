@@ -36,7 +36,14 @@ from backend.services.ops.migration_preflight import (
 # auth revisions allow absent native email; all present addresses retain the
 # frozen scalar policy, and every named CHECK remains required.
 CONSTRAINED_REVISIONS = frozenset(
-    {REVISION, "ef53a0a7061c", "7e2b9c4d6a18", "c31a6d907e42"}
+    {
+        REVISION,
+        "ef53a0a7061c",
+        "5c3395a75eb0",
+        "7e2b9c4d6a18",
+        "c31a6d907e42",
+        "a42d98c710e3",
+    }
 )
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
     {
@@ -44,7 +51,9 @@ SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
         "efcbcf724889",
     }
 )
-_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset({"7e2b9c4d6a18", "c31a6d907e42"})
+_OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
+    {"7e2b9c4d6a18", "c31a6d907e42", "a42d98c710e3"}
+)
 FIELDS = {
     "api-token": ("api_tokens", {"name": 128}),
     "workspace": ("workspace", {"title": 128, "name": 128, "goal": 512, "slug": 80}),

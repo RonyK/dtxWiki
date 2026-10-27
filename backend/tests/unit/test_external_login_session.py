@@ -33,8 +33,7 @@ def test_passwordless_user_requires_external_auth_and_generation_bound_step_up(
             session, email="external@example.com", email_verified_at=now
         )
         result = service.issue_session(user, amr=("oidc",), idp="example")
-        assert user.personal_workspace_id == user.default_workspace_id
-        assert user.personal_workspace_id is not None
+        assert user.default_workspace_id is not None
         proof = service.issue_external_reauthentication(
             session,
             user_id=user.id,

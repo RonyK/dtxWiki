@@ -2146,7 +2146,7 @@ describe("ReviewScreen", () => {
   });
 
   it("clears the review param when a deep-linked review fails to load", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2193,6 +2193,13 @@ describe("ReviewScreen", () => {
         "review=",
       ),
     );
+    // Flush the router repair and all async loader continuations; the notice
+    // must remain after ?review is removed, without another collection load.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(screen.getByText("The requested item could not be found.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`,
+    )).toHaveLength(1);
   });
 
   it("shows the resolution timestamp on Resolved rows to match the date grouping", async () => {

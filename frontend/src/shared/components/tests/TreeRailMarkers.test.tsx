@@ -121,6 +121,7 @@ describe("TreeRail document status and personal favorites", () => {
       onExpandedNodeIdsChange={onExpandedNodeIdsChange} />);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     act(() => { screen.getByRole("searchbox").focus(); });
+    fireEvent.pointerMove(screen.getByRole("searchbox"), { clientX: 40, clientY: 100 });
     fireEvent.mouseEnter(row, { clientX: 40, clientY: 165 });
     fireEvent.pointerMove(row, { clientX: 40, clientY: 165 });
     expect(screen.getByRole("tooltip")).toHaveTextContent("Inbox");

@@ -594,19 +594,16 @@ export function TreeRail({
     });
   }
 
+  function restoreMenuFocus(nodeId: string, invoker: HTMLElement | null) {
+    window.requestAnimationFrame(() => {
+      tooltip.restoreFocus(invoker?.isConnected ? invoker : rowRefs.current.get(nodeId));
+    });
+  }
+
   function handleContextMenuAction(action: TreeNodeContextMenuAction) {
     const invoker = contextMenuInvokerRef.current;
     contextMenuInvokerRef.current = null;
     setContextMenu(null);
-    const restoreInvokerFocus = () => {
-      window.requestAnimationFrame(() => {
-        if (invoker?.isConnected) {
-          invoker.focus();
-          return;
-        }
-        rowRefs.current.get(action.node.id)?.focus();
-      });
-    };
     if (action.type === "new-item") {
       if (onCreateItem) {
         onCreateItem({
@@ -640,7 +637,7 @@ export function TreeRail({
           direction === "up" ? "before" : "after",
         );
       }
-      restoreInvokerFocus();
+      restoreMenuFocus(action.node.id, invoker);
       return;
     }
     if (action.type === "delete") {
@@ -656,11 +653,11 @@ export function TreeRail({
           }
         });
       }
-      restoreInvokerFocus();
+      restoreMenuFocus(action.node.id, invoker);
       return;
     }
     onCopyNodeLink?.(action.node);
-    restoreInvokerFocus();
+    restoreMenuFocus(action.node.id, invoker);
   }
 
   function registerRowRef(nodeId: string) {
@@ -675,7 +672,9 @@ export function TreeRail({
 
   function focusTreeNode(nodeId: string) {
     setFocusedNodeId(nodeId);
-    rowRefs.current.get(nodeId)?.focus();
+    const row = rowRefs.current.get(nodeId);
+    row?.focus();
+    if (row) tooltip.focus(nodeId, row);
   }
 
   function invokePrimaryAction(node: TreeNodePayload) {
@@ -969,13 +968,7 @@ export function TreeRail({
             const invoker = contextMenuInvokerRef.current;
             contextMenuInvokerRef.current = null;
             setContextMenu(null);
-            window.requestAnimationFrame(() => {
-              if (invoker?.isConnected) {
-                invoker.focus();
-                return;
-              }
-              rowRefs.current.get(nodeId)?.focus();
-            });
+            restoreMenuFocus(nodeId, invoker);
           }}
         />
       ) : null}

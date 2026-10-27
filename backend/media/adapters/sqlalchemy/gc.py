@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import exists, select
+from sqlalchemy import Select, exists, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.media.domain import BlobEpoch, BlobReference, BlobState
@@ -42,6 +42,28 @@ _RESTORABLE_STATES = (BlobState.GC_PENDING.value, BlobState.TRASHED.value)
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _due_candidates(workspace_id: UUID, now: datetime) -> Select[tuple[UUID, int]]:
+    return select(
+        MediaBlobGcCandidate.blob_id,
+        MediaBlobGcCandidate.blob_epoch,
+    ).where(
+        MediaBlobGcCandidate.workspace_id == workspace_id,
+        MediaBlobGcCandidate.eligible_at <= now,
+    )
+
+
+def _owned_restorable_incarnations(workspace_id: UUID) -> Select[tuple[UUID, int]]:
+    return select(BlobIncarnationRow.blob_id, BlobIncarnationRow.blob_epoch).where(
+        BlobIncarnationRow.workspace_id == workspace_id,
+        BlobIncarnationRow.state.in_(_RESTORABLE_STATES),
+        exists().where(
+            MediaBlobReference.workspace_id == BlobIncarnationRow.workspace_id,
+            MediaBlobReference.blob_id == BlobIncarnationRow.blob_id,
+            MediaBlobReference.blob_epoch == BlobIncarnationRow.blob_epoch,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +136,29 @@ class SqlAlchemyBlobGcService:
         self._hold_is_active = hold_is_active
         self._clock = clock or _utc_now
 
+    @staticmethod
+    def has_due_work(
+        session: Session,
+        *,
+        workspace_id: UUID,
+        now: datetime | None = None,
+    ) -> bool:
+        """Probe collection and owner repair without locks or filesystem I/O."""
+        if not isinstance(workspace_id, UUID):
+            raise ValueError("workspace_id must be a UUID")
+        now = now or _utc_now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("GC clock must return a timezone-aware datetime")
+        with session.no_autoflush:
+            return bool(
+                session.scalar(
+                    select(
+                        _due_candidates(workspace_id, now).exists()
+                        | _owned_restorable_incarnations(workspace_id).exists()
+                    )
+                )
+            )
+
     def sweep(
         self,
         *,
@@ -135,14 +180,7 @@ class SqlAlchemyBlobGcService:
         )
         with self._session_for(workspace_id)() as session:
             identities = session.execute(
-                select(
-                    MediaBlobGcCandidate.blob_id,
-                    MediaBlobGcCandidate.blob_epoch,
-                )
-                .where(
-                    MediaBlobGcCandidate.workspace_id == workspace_id,
-                    MediaBlobGcCandidate.eligible_at <= run_at,
-                )
+                _due_candidates(workspace_id, run_at)
                 .order_by(
                     MediaBlobGcCandidate.eligible_at,
                     MediaBlobGcCandidate.requested_at,
@@ -257,17 +295,7 @@ class SqlAlchemyBlobGcService:
 
         with self._session_for(workspace_id)() as session:
             stranded = session.execute(
-                select(BlobIncarnationRow.blob_id, BlobIncarnationRow.blob_epoch)
-                .where(
-                    BlobIncarnationRow.workspace_id == workspace_id,
-                    BlobIncarnationRow.state.in_(_RESTORABLE_STATES),
-                    exists().where(
-                        MediaBlobReference.workspace_id
-                        == BlobIncarnationRow.workspace_id,
-                        MediaBlobReference.blob_id == BlobIncarnationRow.blob_id,
-                        MediaBlobReference.blob_epoch == BlobIncarnationRow.blob_epoch,
-                    ),
-                )
+                _owned_restorable_incarnations(workspace_id)
                 .order_by(BlobIncarnationRow.blob_id, BlobIncarnationRow.blob_epoch)
                 .limit(limit)
             ).all()

@@ -56,7 +56,6 @@ type WorkspaceSettingsTarget = {
   role: WorkspaceMemberRole;
   visibility: WorkspaceVisibility;
   joinPolicy: WorkspaceJoinPolicy;
-  isPersonal: boolean;
 };
 
 type MemberMutationScope = { workspaceId: string; generation: number };
@@ -666,7 +665,6 @@ export function WorkspaceMembersSection() {
                   </strong>
                   {member.email ? <span>{member.email}</span> : <WorkspaceMemberId userId={member.user_id} name={member.display_name || member.user_id} />}
                   <span className="visually-hidden">{t("workspaceMembers.joined", { date: formatDisplayDateTime(member.joined_at, i18n.language) })}</span>
-                  {member.is_personal_anchor_owner ? <span className="visually-hidden">{t("workspaceMembers.personalAnchor")}</span> : null}
                 </div>
                 <div className="workspace-member-actions">
                   <label className="visually-hidden" htmlFor={`member-role-${member.user_id}`}>
@@ -675,10 +673,7 @@ export function WorkspaceMembersSection() {
                     })}
                   </label>
                   <select
-                    disabled={
-                      member.is_personal_anchor_owner ||
-                      memberBusyId === member.user_id
-                    }
+                    disabled={memberBusyId === member.user_id}
                     id={`member-role-${member.user_id}`}
                     onChange={(event) =>
                       requestRoleChange(
@@ -693,11 +688,8 @@ export function WorkspaceMembersSection() {
                   <button
                     className="icon-button danger-action workspace-member-remove"
                     aria-label={t("workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
-                    title={t(member.is_personal_anchor_owner ? "workspaceMembers.personalAnchor" : "workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
-                    disabled={
-                      member.is_personal_anchor_owner ||
-                      memberBusyId === member.user_id
-                    }
+                    title={t("workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
+                    disabled={memberBusyId === member.user_id}
                     onClick={() => setPendingAction({
                       kind: "remove", member, workspaceId: target.id,
                       generation: memberMutationGeneration.current,
@@ -832,7 +824,6 @@ export function WorkspaceMembersSection() {
         <MemberActionDialog
           action={pendingAction}
           busy={memberBusyId !== null}
-          isPersonal={target.isPersonal}
           restoreFocusFallback={() => addMemberButtonRef.current}
           onCancel={() => {
             if (memberBusyId === null) {
@@ -1374,7 +1365,6 @@ function LeaveWorkspaceDialog({
 function MemberActionDialog({
   action,
   busy,
-  isPersonal,
   onCancel,
   onConfirm,
   restoreFocusFallback,
@@ -1382,7 +1372,6 @@ function MemberActionDialog({
 }: {
   action: PendingMemberAction;
   busy: boolean;
-  isPersonal: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   restoreFocusFallback: () => HTMLElement | null;
@@ -1427,11 +1416,7 @@ function MemberActionDialog({
           </StatusBanner>
           <p>{t("workspaceMembers.dialog.firstShareScope")}</p>
           <p>{t("workspaceMembers.dialog.collaborativeRecommendation")}</p>
-          <p>
-            {isPersonal
-              ? t("workspaceMembers.dialog.renamePersonalRecommendation")
-              : t("workspaceMembers.dialog.renameRecommendation")}
-          </p>
+          <p>{t("workspaceMembers.dialog.renameRecommendation")}</p>
         </>
       ) : isRemove ? (
         <p>
@@ -1608,7 +1593,6 @@ function useWorkspaceSettingsTarget() {
   const context = useOptionalWorkspaceContext();
   const selectedContextId = context?.selectedWorkspace?.id ?? "";
   const selectedContextWorkspace = context?.selectedWorkspace ?? null;
-  const personalWorkspaceId = context?.personalWorkspaceId ?? null;
   const [target, setTarget] = useState<WorkspaceSettingsTarget | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1618,9 +1602,7 @@ function useWorkspaceSettingsTarget() {
     setLoading(true);
     setError(null);
     if (selectedContextWorkspace) {
-      setTarget(
-        targetFromSummary(selectedContextWorkspace, personalWorkspaceId),
-      );
+      setTarget(targetFromSummary(selectedContextWorkspace));
       setLoading(false);
       return () => {
         cancelled = true;
@@ -1636,9 +1618,7 @@ function useWorkspaceSettingsTarget() {
           throw new Error("Workspace not found");
         }
         if (!cancelled) {
-          setTarget(
-            targetFromSummary(workspace, response.data.personal_workspace_id),
-          );
+          setTarget(targetFromSummary(workspace));
         }
       })
       .catch((caught) => {
@@ -1655,14 +1635,13 @@ function useWorkspaceSettingsTarget() {
     return () => {
       cancelled = true;
     };
-  }, [personalWorkspaceId, selectedContextId, selectedContextWorkspace]);
+  }, [selectedContextId, selectedContextWorkspace]);
 
   return { error, loading, target };
 }
 
 function targetFromSummary(
   workspace: WorkspaceSummary,
-  personalWorkspaceId: string | null | undefined,
 ): WorkspaceSettingsTarget {
   return {
     id: workspace.id,
@@ -1670,7 +1649,6 @@ function targetFromSummary(
     role: normalizeRole(workspace.role),
     visibility: normalizeVisibility(workspace.visibility),
     joinPolicy: normalizeJoinPolicy(workspace.join_policy),
-    isPersonal: workspace.id === personalWorkspaceId,
   };
 }
 

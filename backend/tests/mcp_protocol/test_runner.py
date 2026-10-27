@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import anyio
@@ -24,6 +25,7 @@ from backend.models.workspace import MCPClient, Workspace
 from backend.models.workspace_credential_grant import WorkspaceCredentialGrant
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import grant_workspace_membership
+from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.mcp_client_service import runtime_binding_key_for_actor
 from backend.tests.conftest import captured_log_messages
 
@@ -379,6 +381,119 @@ def test_credential_replica_gap_is_denied_before_client_trace_or_chat(
         )
         assert session.scalar(select(func.count()).select_from(MCPToolCall)) == 0
         assert session.scalar(select(func.count()).select_from(McpChatSession)) == 0
+
+
+@pytest.mark.parametrize("tool_name", ("list_my_workspaces", "guide"))
+def test_grant_removed_after_authentication_is_not_an_internal_error(
+    page_service,
+    mcp_default_actor,
+    monkeypatch,
+    tool_name,
+):
+    actor = _pat_actor(
+        mcp_default_actor,
+        actor_id="preflight-grant-removal",
+        scopes=("mcp:read",),
+    )
+    workspace_a = actor.workspace_id
+    assert workspace_a is not None
+    with page_service.session_factory.begin() as session:
+        workspace_b = seed_default_workspace(
+            session,
+            slug="preflight-grant-removal-b",
+            title="Preflight grant removal B",
+        ).id
+        grant_workspace_membership(
+            session,
+            user_id=actor.user_id,
+            workspace_id=workspace_b,
+            role="owner",
+        )
+        session.add_all(
+            [
+                ApiTokenWorkspace(
+                    token_id=actor.token_id,
+                    workspace_id=workspace_b,
+                    desired_scopes=["mcp:read"],
+                    revision=1,
+                    sync_state="synced",
+                ),
+                WorkspaceCredentialGrant(
+                    workspace_id=workspace_b,
+                    credential_kind="pat",
+                    credential_id=actor.token_id,
+                    user_id=actor.user_id,
+                    granted_scopes=["mcp:read"],
+                    synced_revision=1,
+                ),
+            ]
+        )
+    actor = replace(actor, token_workspace_ids=(workspace_a, workspace_b))
+    protected_models = (MCPClient, MCPToolCall, McpChatSession)
+    with page_service.session_factory() as session:
+        before = {
+            model: session.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.workspace_id == workspace_a)
+            )
+            for model in protected_models
+        }
+
+    original_preflight = runner_module._scope_runtime_actor_to_live_grant
+    removed = False
+
+    def _remove_a_before_live_grant_check(**kwargs):
+        nonlocal removed
+        if kwargs["workspace_id"] == workspace_a and not removed:
+            # The actor already passed snapshot/membership checks. Commit the
+            # edit separately before the real preflight reads the live grant.
+            with page_service.session_factory.begin() as session:
+                grant = session.get(ApiTokenWorkspace, (actor.token_id, workspace_a))
+                assert grant is not None
+                grant.removed_at = utc_now()
+            removed = True
+        return original_preflight(**kwargs)
+
+    monkeypatch.setattr(
+        runner_module,
+        "_scope_runtime_actor_to_live_grant",
+        _remove_a_before_live_grant_check,
+    )
+
+    async def run():
+        return await call_tool_async(
+            tool_name,
+            {"workspace_id": str(workspace_a)} if tool_name == "guide" else {},
+            actor=actor,
+            page_service=page_service,
+        )
+
+    result = anyio.run(run)
+    assert removed is True
+    payload = result.structuredContent
+    assert payload is not None
+    if tool_name == "list_my_workspaces":
+        assert result.isError is False
+        assert payload["envelope"]["result_status"] == "succeeded"
+        assert [workspace["id"] for workspace in payload["data"]["workspaces"]] == [
+            str(workspace_b)
+        ]
+    else:
+        assert result.isError is True
+        assert payload["envelope"]["result_status"] == "rejected_by_policy"
+        assert payload["envelope"]["error_code"] == "token_workspace_denied"
+        assert payload["envelope"]["retryable"] is False
+    with page_service.session_factory() as session:
+        for model, expected_count in before.items():
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.workspace_id == workspace_a)
+                )
+                == expected_count
+            )
 
 
 def test_missing_workspace_target_never_reads_page_directory(

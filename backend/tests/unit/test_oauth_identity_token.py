@@ -416,15 +416,12 @@ def test_list_my_workspaces_pat_stays_credential_scoped(page_service):
     assert envelope["data"]["other_membership_count"] == 1
 
 
-def test_list_my_workspaces_oauth_hides_personal_workspace_id_outside_roster(
+def test_list_my_workspaces_oauth_hides_default_workspace_id_outside_roster(
     page_service,
 ):
-    """Real-Codex review finding (2026-09-06): ``personal_workspace_id`` used
-    to escape the response unconditionally, unlike ``default_workspace_id``
-    -- so a credential-scoped OAuth caller could learn the user's Personal
-    workspace id even when that workspace fell outside its own visible
-    roster. Assert the pointer is hidden the same way default_workspace_id
-    already was."""
+    """A credential-scoped OAuth caller must not learn the id of the user's
+    persisted default workspace when that workspace falls outside its own
+    visible roster."""
     client = _make_client(page_service)
     service = OAuthService(
         session_factory=page_service.session_factory,
@@ -436,7 +433,7 @@ def test_list_my_workspaces_oauth_hides_personal_workspace_id_outside_roster(
     )
     with page_service.session_factory.begin() as session:
         user = session.get(User, user_id)
-        user.personal_workspace_id = workspace_b
+        user.default_workspace_id = workspace_b
     _oauth_client, result = _register_and_authorize(
         service, user_id=user_id, workspace_ids=[workspace_a]
     )
@@ -446,7 +443,7 @@ def test_list_my_workspaces_oauth_hides_personal_workspace_id_outside_roster(
     assert response.status_code == 200
     data = response.json()["result"]["structuredContent"]["data"]
     assert {item["id"] for item in data["workspaces"]} == {str(workspace_a)}
-    assert data["personal_workspace_id"] is None
+    assert data["default_workspace_id"] is None
 
 
 def test_revoke_consent_invalidates_the_access_token_immediately(page_service):

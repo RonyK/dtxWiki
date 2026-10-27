@@ -650,7 +650,7 @@ def test_browser_bound_login_replay_account_and_oauth_return(
     assert "sso_transaction_invalid" in complete(client, state).headers["location"]
     with page_service.session_factory() as session:
         native = session.get(User, UUID(user["user_id"]))
-        assert native.personal_workspace_id is not None
+        assert native.default_workspace_id is not None
         assert (
             session.scalar(
                 select(func.count())

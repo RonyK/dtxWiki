@@ -20851,18 +20851,6 @@
             "title": "Other Membership Count",
             "type": "integer"
           },
-          "personal_workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Personal Workspace Id"
-          },
           "workspaces": {
             "items": {
               "$ref": "#/components/schemas/WorkspaceSummary"
@@ -21057,10 +21045,6 @@
             "title": "Is Current User",
             "type": "boolean"
           },
-          "is_personal_anchor_owner": {
-            "title": "Is Personal Anchor Owner",
-            "type": "boolean"
-          },
           "joined_at": {
             "format": "date-time",
             "title": "Joined At",
@@ -21092,7 +21076,6 @@
           "status",
           "role",
           "joined_at",
-          "is_personal_anchor_owner",
           "is_current_user"
         ],
         "title": "WorkspaceMemberItem",

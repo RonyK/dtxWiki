@@ -340,6 +340,9 @@ def test_unowned_install_without_an_association_hold_is_immediately_purgeable(
         )
         assert candidate is not None
         eligible_at = candidate.eligible_at
+        assert SqlAlchemyBlobGcService.has_due_work(
+            session, workspace_id=installed_blob.workspace_id, now=eligible_at
+        )
 
     result = SqlAlchemyBlobGcService(
         session_for=lambda _workspace_id: installed_blob.factory,
@@ -1207,6 +1210,10 @@ def test_sweep_restores_an_owned_blob_stranded_mid_collection(
     """No queue candidate is left to find it: registration deleted it."""
 
     _strand_owned_blob(installed_blob, state=state)
+    with installed_blob.factory() as session:
+        assert SqlAlchemyBlobGcService.has_due_work(
+            session, workspace_id=installed_blob.workspace_id
+        )
 
     result = _gc_service(installed_blob).sweep(workspace_id=installed_blob.workspace_id)
 

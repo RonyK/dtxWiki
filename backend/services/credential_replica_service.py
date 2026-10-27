@@ -52,7 +52,8 @@ orphans, and do NOT run on any schedule.
 
 T4.6 adds exactly that missing half, in the second section of this file:
 ``reconcile_workspace_credential_replicas`` -- the body of the worker job
-type ``credential_replica_reconcile`` (seeded per workspace, per minute, by
+type ``credential_replica_reconcile`` (checked once per workspace at each
+periodic seed pass, by
 ``backend.worker.tick.seed_jobs_for_workspace``; dispatched by
 ``backend.worker.runtime.OneShotWorker._business_credential_replica_
 reconcile``). It re-reads the control index FRESH and calls
@@ -602,6 +603,120 @@ class _ReplicaSnapshot:
     revoked_at: datetime | None
 
 
+@dataclass(frozen=True)
+class CredentialReplicaReconcilePlan:
+    """Detached, read-only comparison of one workspace's two planes.
+
+    The seeder may use ``has_due_work`` before opening its registration
+    write transaction. Execution always computes a fresh plan so changes
+    between that advisory check and dispatch are observed.
+    """
+
+    workspace_id: UUID
+    index_row_count: int
+    replica_count: int
+    not_ready_count: int
+    apply_requests: tuple[CredentialReplicaFanOutRequest, ...]
+    orphan_ids: tuple[UUID, ...]
+
+    @property
+    def has_due_work(self) -> bool:
+        return bool(self.apply_requests or self.orphan_ids)
+
+
+def plan_workspace_credential_reconciliation(
+    database_provider: CredentialReplicaDatabaseProvider,
+    *,
+    workspace_id: UUID,
+) -> CredentialReplicaReconcilePlan:
+    """Read both planes sequentially and compare without issuing writes.
+
+    Read the workspace first so an unavailable shard raises before any
+    per-credential attempt. Close that session before reading control;
+    neither session may overlap a scheduling write transaction on SQLite.
+    Include already-synced control rows: a restored workspace may have
+    lost their replicas. Reuse the execution predicates for missing,
+    revoked and orphan replicas instead of trusting control sync flags.
+    """
+
+    replicas = _read_workspace_replicas(database_provider, workspace_id)
+    with database_provider.control_session_factory().begin() as control_session:
+        snapshots = _control_index_snapshots(control_session, workspace_id)
+        orphan_ids = _orphan_replica_ids(control_session, workspace_id, replicas)
+
+    return _build_credential_replica_reconcile_plan(
+        workspace_id, replicas, snapshots, orphan_ids
+    )
+
+
+def _build_credential_replica_reconcile_plan(
+    workspace_id: UUID,
+    replicas: list[_ReplicaSnapshot],
+    snapshots: list[_ControlIndexSnapshot],
+    orphan_ids: list[UUID],
+) -> CredentialReplicaReconcilePlan:
+    replica_by_target = {
+        (replica.credential_kind, replica.credential_id): replica
+        for replica in replicas
+    }
+    apply_requests: list[CredentialReplicaFanOutRequest] = []
+    not_ready_count = 0
+    for snapshot in snapshots:
+        if snapshot.request.credential_id is None:
+            # Record a not-yet-exchanged OAuth family's diagnostic once.
+            # An already-recorded "not ready" is not work for another job.
+            not_ready_count += 1
+            if snapshot.sync_state != "failed":
+                apply_requests.append(snapshot.request)
+            continue
+        replica = replica_by_target.get(
+            (snapshot.request.credential_kind, snapshot.request.credential_id)
+        )
+        if _needs_apply(snapshot, replica):
+            apply_requests.append(snapshot.request)
+
+    return CredentialReplicaReconcilePlan(
+        workspace_id=workspace_id,
+        index_row_count=len(snapshots),
+        replica_count=len(replicas),
+        not_ready_count=not_ready_count,
+        apply_requests=tuple(apply_requests),
+        orphan_ids=tuple(orphan_ids),
+    )
+
+
+def has_due_credential_replica_work(
+    database_provider: CredentialReplicaDatabaseProvider,
+    *,
+    workspace_id: UUID,
+) -> bool:
+    """Advisory precheck; call before opening a registration write session."""
+
+    return plan_workspace_credential_reconciliation(
+        database_provider, workspace_id=workspace_id
+    ).has_due_work
+
+
+def has_due_credential_replica_work_in_session(
+    session: Session,
+    *,
+    workspace_id: UUID,
+) -> bool:
+    """The same comparison for the explicitly single-DB seeding wrapper.
+
+    This session contains both planes. Routed deployments must use the
+    provider version before opening their workspace write transaction.
+    """
+
+    replicas = _read_workspace_replicas_from_session(session, workspace_id)
+    return _build_credential_replica_reconcile_plan(
+        workspace_id,
+        replicas,
+        _control_index_snapshots(session, workspace_id),
+        _orphan_replica_ids(session, workspace_id, replicas),
+    ).has_due_work
+
+
 def reconcile_workspace_credential_replicas(
     database_provider: CredentialReplicaDatabaseProvider,
     *,
@@ -630,7 +745,7 @@ def reconcile_workspace_credential_replicas(
        immediately -- before any per-row apply attempt. That matters: with
        the workspace DB down, every apply would fail identically and write
        one ``credential_replica.sync_failed`` audit row per credential per
-       minute, forever. Raising here instead surfaces the outage ONCE, as a
+       pass, forever. Raising here instead surfaces the outage ONCE, as a
        failed job (see the job_type's ``NOISY_UNTIL_FAILED_JOB_TYPES``
        registration in ``backend.services.job_queue``), and leaves the
        control rows' existing diagnostics alone.
@@ -651,48 +766,24 @@ def reconcile_workspace_credential_replicas(
     converges on the same row.
     """
 
-    replicas = _read_workspace_replicas(database_provider, workspace_id)
-    replica_by_target: dict[tuple[str, UUID], _ReplicaSnapshot] = {
-        (replica.credential_kind, replica.credential_id): replica
-        for replica in replicas
-    }
-
-    with database_provider.control_session_factory().begin() as control_session:
-        snapshots = _control_index_snapshots(control_session, workspace_id)
-        orphan_ids = _orphan_replica_ids(control_session, workspace_id, replicas)
-
+    plan = plan_workspace_credential_reconciliation(
+        database_provider, workspace_id=workspace_id
+    )
     reapplied_count = 0
-    not_ready_count = 0
-    for snapshot in snapshots:
-        if snapshot.request.credential_id is None:
-            # An OAuth (user, client) family that has never exchanged a
-            # token has no grant_id to fan out under -- a legitimate "not
-            # ready", not a failure to retry. Record it exactly once (the
-            # apply marks the row failed with that diagnostic) and then stop
-            # touching it, or every tick would re-emit the same audit event
-            # for a consent that is simply waiting on its first token
-            # exchange. See resolve_oauth_replica_credential_id.
-            not_ready_count += 1
-            if snapshot.sync_state != "failed":
-                apply_credential_replica_fan_out(database_provider, snapshot.request)
-            continue
-        replica = replica_by_target.get(
-            (snapshot.request.credential_kind, snapshot.request.credential_id)
-        )
-        if not _needs_apply(snapshot, replica):
-            continue
-        apply_credential_replica_fan_out(database_provider, snapshot.request)
-        reapplied_count += 1
+    for request in plan.apply_requests:
+        apply_credential_replica_fan_out(database_provider, request)
+        if request.credential_id is not None:
+            reapplied_count += 1
 
     orphan_tombstoned_count = _tombstone_orphan_replicas(
-        database_provider, workspace_id, orphan_ids
+        database_provider, workspace_id, plan.orphan_ids
     )
 
     return CredentialReplicaReconcileResult(
-        index_row_count=len(snapshots),
-        replica_count=len(replicas),
+        index_row_count=plan.index_row_count,
+        replica_count=plan.replica_count,
         reapplied_count=reapplied_count,
-        not_ready_count=not_ready_count,
+        not_ready_count=plan.not_ready_count,
         orphan_tombstoned_count=orphan_tombstoned_count,
     )
 
@@ -722,9 +813,8 @@ def _needs_apply(
     * disagreement with the workspace side (no replica at all, or a
       tombstoned replica under a live control row).
 
-    A ``synced`` row whose replica is present and live returns False and the
-    pass writes nothing -- which is what keeps a per-minute job on a healthy
-    workspace free.
+    A ``synced`` row whose replica is present and live returns False, so a
+    healthy workspace needs no reconciliation job.
     """
 
     if snapshot.request.removed_at is not None:
@@ -752,25 +842,33 @@ def _read_workspace_replicas(
     try:
         workspace_session_factory = database_provider.session_for(workspace_id)
         with workspace_session_factory.begin() as workspace_session:
-            rows = workspace_session.scalars(
-                select(WorkspaceCredentialGrant).where(
-                    WorkspaceCredentialGrant.workspace_id == workspace_id
-                )
-            ).all()
-            return [
-                _ReplicaSnapshot(
-                    id=row.id,
-                    credential_kind=row.credential_kind,
-                    credential_id=row.credential_id,
-                    synced_revision=row.synced_revision,
-                    revoked_at=row.revoked_at,
-                )
-                for row in rows
-            ]
+            return _read_workspace_replicas_from_session(
+                workspace_session, workspace_id
+            )
     except SQLAlchemyError as exc:
         if is_database_schema_mismatch(exc):
             raise
         raise WorkspacePlaneUnavailableError(workspace_id=workspace_id) from exc
+
+
+def _read_workspace_replicas_from_session(
+    session: Session, workspace_id: UUID
+) -> list[_ReplicaSnapshot]:
+    rows = session.scalars(
+        select(WorkspaceCredentialGrant).where(
+            WorkspaceCredentialGrant.workspace_id == workspace_id
+        )
+    ).all()
+    return [
+        _ReplicaSnapshot(
+            id=row.id,
+            credential_kind=row.credential_kind,
+            credential_id=row.credential_id,
+            synced_revision=row.synced_revision,
+            revoked_at=row.revoked_at,
+        )
+        for row in rows
+    ]
 
 
 def _control_index_snapshots(
@@ -942,7 +1040,7 @@ def _oauth_family_has_consent(
 def _tombstone_orphan_replicas(
     database_provider: CredentialReplicaDatabaseProvider,
     workspace_id: UUID,
-    orphan_ids: list[UUID],
+    orphan_ids: tuple[UUID, ...],
 ) -> int:
     """Set ``revoked_at`` on the orphans, in ONE workspace transaction.
 

@@ -42,6 +42,7 @@ from backend.services.credential_hashing import CredentialHasher
 from backend.services.credential_replica_service import (
     CredentialReplicaFanOutRequest,
     apply_credential_replica_fan_out,
+    has_due_credential_replica_work,
     reconcile_workspace_credential_replicas,
 )
 from backend.services.job_queue import JobQueueService
@@ -252,6 +253,7 @@ def test_orphan_pat_replica_without_a_control_row_is_tombstoned(session_factory)
         )
 
     provider = _stamped_provider(session_factory)
+    assert has_due_credential_replica_work(provider, workspace_id=workspace_id)
     result = reconcile_workspace_credential_replicas(
         provider, workspace_id=workspace_id
     )
@@ -357,6 +359,7 @@ def test_live_oauth_replica_is_not_tombstoned(session_factory):
         )
 
     provider = _stamped_provider(session_factory)
+    assert not has_due_credential_replica_work(provider, workspace_id=workspace_id)
     result = reconcile_workspace_credential_replicas(
         provider, workspace_id=workspace_id
     )
@@ -453,6 +456,7 @@ def test_synced_control_row_with_a_missing_replica_is_repaired(session_factory):
         assert control_row.sync_state == "synced"
         session.delete(_replica(session, workspace_id, "pat", token_id))
 
+    assert has_due_credential_replica_work(provider, workspace_id=workspace_id)
     result = reconcile_workspace_credential_replicas(
         provider, workspace_id=workspace_id
     )
@@ -645,7 +649,9 @@ def test_oauth_consent_without_a_token_exchange_is_not_churned(session_factory):
         user_id = user.id
 
     provider = _stamped_provider(session_factory)
+    assert has_due_credential_replica_work(provider, workspace_id=workspace_id)
     first = reconcile_workspace_credential_replicas(provider, workspace_id=workspace_id)
+    assert not has_due_credential_replica_work(provider, workspace_id=workspace_id)
     second = reconcile_workspace_credential_replicas(
         provider, workspace_id=workspace_id
     )

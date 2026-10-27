@@ -136,6 +136,7 @@ import {
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import {
@@ -248,8 +249,6 @@ export function ContextScreen() {
   );
   const requestedTargetId =
     searchParams.get(TREE_TARGET_PARAM) ?? routedPageId ?? null;
-  const previousSearchRef = useRef(location.search);
-  const searchChangedRef = useRef(false);
   const expansionWorkspaceRef = useRef<string | null>(null);
   const routeRevealKeyRef = useRef<string | null>(null);
   // Removing a selected page updates the in-memory tree before React Router
@@ -270,7 +269,9 @@ export function ContextScreen() {
         );
         return;
       }
-      setSearchParams(nextParams, { replace: true });
+      if (nextParams.toString() !== searchParams.toString()) {
+        setSearchParams(nextParams, { replace: true });
+      }
     },
     [navigate, routedPageId, searchParams, setSearchParams],
   );
@@ -313,7 +314,9 @@ export function ContextScreen() {
   ]);
   const {
     data: state,
+    revision: overviewRevision,
     error,
+    reload,
     setData: setState,
     setError,
   } = useAsyncLoad<ContextState>(
@@ -430,12 +433,18 @@ export function ContextScreen() {
     },
   );
 
+  useScreenEntryRefresh("/context", reload, {
+    isHome: requestedTargetId === null && !searchParams.has(TREE_NEW_FOLDER_PARAM),
+    queryDeps: [pageSize, draftFilter, ambientSelectedId],
+    readArrivalNotice: readContextPublishNotice,
+  });
+
   const workspaceId = state?.workspaceId ?? "";
   // The loader fetches page 1 (state.pages); these accumulate the appended
   // pages on top of it. Keyed on the base page so a fresh first page (page-size
   // change / reload) drops the appended tail. Derived synchronously so Load
   // more always reads the live cursor rather than a one-render-stale one.
-  const overviewBaseKey = `${workspaceId}:${pageSize}:${draftFilter}:${
+  const overviewBaseKey = `${workspaceId}:${pageSize}:${draftFilter}:${overviewRevision}:${
     state?.pages.length ?? 0
   }:${state?.pages[0]?.id ?? ""}`;
   const [appended, setAppended] = useState<{
@@ -444,13 +453,16 @@ export function ContextScreen() {
     cursor: string | null;
   }>({ key: overviewBaseKey, items: [], cursor: state?.pagesCursor ?? null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const overviewGenerationRef = useRef(0);
   useEffect(() => {
+    overviewGenerationRef.current += 1;
+    setLoadingMore(false);
     setAppended({
       key: overviewBaseKey,
       items: [],
       cursor: state?.pagesCursor ?? null,
     });
-  }, [overviewBaseKey, state?.pagesCursor]);
+  }, [overviewBaseKey, state?.pages, state?.pagesCursor]);
 
   // When the accumulator key matches the current base its cursor is
   // authoritative (it starts at the base cursor and advances/exhausts to null);
@@ -505,6 +517,7 @@ export function ContextScreen() {
       return;
     }
     const requestCursor = overviewCursor;
+    const requestGeneration = overviewGenerationRef.current;
     setLoadingMore(true);
     try {
       const next = await listContextPages(workspaceId, {
@@ -513,12 +526,10 @@ export function ContextScreen() {
         cursor: requestCursor,
       });
       setAppended((current) =>
-        // Skip the append when a fresh first page replaced the base mid-flight.
-        // The base key must still match AND the live cursor must still be the
-        // one this request paged from: the key alone is a length+first-id
-        // heuristic, so a reload that preserves it while advancing the cursor
-        // would otherwise graft a stale page on. Matches useLoadMore's
-        // next_cursor guard so all four list surfaces gate identically.
+        // The successful-load revision distinguishes refreshes even when the
+        // first item and cursor are unchanged. Older requests belong to that
+        // prior first page and must not append to the refreshed overview.
+        overviewGenerationRef.current === requestGeneration &&
         current.key === overviewBaseKey && current.cursor === requestCursor
           ? {
               key: current.key,
@@ -527,8 +538,14 @@ export function ContextScreen() {
             }
           : current,
       );
+    } catch (exc) {
+      if (requestGeneration === overviewGenerationRef.current) {
+        setError(apiErrorMessage(exc, t("errors.load")));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === overviewGenerationRef.current) {
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -642,7 +659,7 @@ export function ContextScreen() {
     if (pageData) {
       const pages = pageData.data;
       setAppended({
-        key: `${state.workspaceId}:${pageSize}:${draftFilter}:${pages.length}:${pages[0]?.id ?? ""}`,
+        key: `${state.workspaceId}:${pageSize}:${draftFilter}:${overviewRevision}:${pages.length}:${pages[0]?.id ?? ""}`,
         items: [],
         cursor: pageData.next_cursor,
       });
@@ -695,7 +712,7 @@ export function ContextScreen() {
     setTreeRefreshing(true);
     setError(null);
     try {
-      await refreshTree();
+      await refreshTree({ refreshOverview: true });
     } catch (exc) {
       setError(
         apiErrorMessage(
@@ -931,11 +948,6 @@ export function ContextScreen() {
   }
 
   useEffect(() => {
-    searchChangedRef.current = previousSearchRef.current !== location.search;
-    previousSearchRef.current = location.search;
-  }, [location.search]);
-
-  useEffect(() => {
     if (
       unavailableTargetIdRef.current &&
       requestedTargetId !== unavailableTargetIdRef.current
@@ -956,7 +968,6 @@ export function ContextScreen() {
     if (!targetNodeId) {
       routeRevealKeyRef.current = `${state.workspaceId}:${requestedTargetId ?? ""}:${searchParams.get(TREE_EXPANDED_PARAM) ?? ""}`;
       if (
-        (requestedTargetId || searchChangedRef.current) &&
         (state.selectedNodeId ||
           state.detail ||
           state.history ||

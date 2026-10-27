@@ -23,6 +23,7 @@ import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { ACTIVITY_SUBTYPES } from "../../shared/lib/activityLabels";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { isEditorRole } from "../../shared/workspace/permissions";
@@ -83,6 +84,7 @@ export function ActivityScreen() {
   const { t } = useTranslation("activity");
   const { query, update, reset } = useActivityQuery();
   const { data, error, loading, reload, queryKey, loadGroup } = useFeed(query);
+  useScreenEntryRefresh("/activity", reload, { queryDeps: [queryKey] });
   if (!data || data.queryKey !== queryKey) {
     if (error && !loading) return <ActivityLoadError error={error} reload={reload} />;
     return <RouteLoading />;

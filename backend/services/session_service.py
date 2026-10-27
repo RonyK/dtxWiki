@@ -47,7 +47,7 @@ from backend.services.auth.session_issuer import (
 )
 from backend.services.auth.session_issuer import issue_native_session
 from backend.services.credential_hashing import CredentialHasher
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.utils.database_errors import is_single_column_unique_violation
 
 logger = logging.getLogger("dtxwiki.session")
@@ -545,7 +545,7 @@ class SessionService:
     credential_hasher: CredentialHasher
     token_codec: SessionTokenCodec
     # Deployment mode still controls whether signup is exposed, but not the
-    # Personal-only workspace grant performed after account creation.
+    # starter workspace every new account receives.
     app_mode: str = "solo_local"
     # AUTH-09: fail closed. HEAD's only production factory
     # (get_session_service in backend/api/auth.py) always passes
@@ -635,7 +635,7 @@ class SessionService:
         session.flush()
         # Every login method starts in an ordinary private Personal workspace
         # and receives no implicit global or installation workspace membership.
-        ensure_personal_workspace(session, user=user)
+        create_personal_workspace(session, user=user)
         self._emit_session_audit(
             session,
             user_id=user.id,

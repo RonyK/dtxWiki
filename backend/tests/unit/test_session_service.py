@@ -109,11 +109,10 @@ def test_signup_creates_user_and_session_without_plaintext_password(
         assert user is not None
         assert user.password_hash.startswith("$argon2id$")
         assert "correct-password" not in user.password_hash
-        assert user.personal_workspace_id is not None
-        assert user.default_workspace_id == user.personal_workspace_id
-        personal = session.get(Workspace, user.personal_workspace_id)
+        assert user.default_workspace_id is not None
+        personal = session.get(Workspace, user.default_workspace_id)
         assert personal is not None
-        assert personal.title == "Personal Workspace"
+        assert personal.title == "Example User's Personal Workspace"
         assert personal.visibility == "private"
         assert personal.join_policy == "invite_only"
 
@@ -227,7 +226,7 @@ def test_signup_rolls_back_user_when_personal_provisioning_fails(
         raise RuntimeError("simulated Personal provisioning failure")
 
     monkeypatch.setattr(
-        "backend.services.session_service.ensure_personal_workspace",
+        "backend.services.session_service.create_personal_workspace",
         fail_provisioning,
     )
 

@@ -95,7 +95,7 @@ def users_add(
     db: str | None = typer.Option(None, help="Override database URL."),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Create a local user account and its Personal workspace."""
+    """Create a local user account and the workspace it starts with."""
     try:
         email = _cli_normalize_email(email)
         validate_password(password)
