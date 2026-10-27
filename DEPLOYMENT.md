@@ -480,6 +480,38 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 서비스를 중지하고 `/var/lib/dtxwiki`와 `/etc/dtxwiki`를 함께 복원한 뒤 ownership을 확인하고
 `dtxwiki bootstrap`을 실행합니다.
 
+### 정기 작업 이력과 SQLite 파일 용량
+
+worker는 시작할 때와 정기 작업 등록 시점(기본 약 5분)에 완료된 정기 점검 이력을
+점진적으로 정리합니다. 완료 후 7일이 지났고 등록 키에 기록된 주기도 끝난 행만
+대상입니다. 실패·수동 실행, 알 수 없는 키, Library 처리와 임베딩 이력은 보존합니다.
+만료된 MCP 쓰기 재시도 결과 기록도 함께 정리합니다. 등록 주기는 유지하며 번들 만료,
+미디어 설치 복구·파일 정리, 자격증명 복제 점검은 처리 대상이 있을 때만 작업을 만듭니다.
+
+정리는 workspace마다 200개 단위로 짧게 커밋하고, 전체 정리 시간 예산은 등록 회차당
+1초입니다. 이미 시작한 배치는 마친 뒤 예산을 확인하므로 DB 응답이 느리면 1초를 넘을 수
+있습니다. 큰 기존 이력은 여러 회차에 걸쳐 줄어듭니다. 스키마 변경이나 자동 `VACUUM`은
+없습니다. 개발용 PostgreSQL의 삭제 공간은 autovacuum이 재사용하도록 정리합니다.
+사전 조회에서 삭제할 대상이 없으면 쓰기 잠금을 잡지 않습니다. 미디어 보존 정책이
+잘못된 workspace도 완료 작업과 만료 MCP 기록의 정리 대상에는 포함됩니다.
+
+SQLite는 삭제한 페이지를 재사용하므로 행 수가 줄어도 파일 크기가 바로 줄지는 않습니다.
+파일 용량 회수가 필요하면 위 백업 절차로 복구 가능한 백업을 만든 뒤, app·worker와
+같은 DB를 사용하는 모든 프로세스를 멈추고 실행합니다. 아래 경로는 이 문서의 systemd
+설치 예시이며 실제 `DTXWIKI_DATABASE_URL`의 SQLite 파일 경로에 맞춥니다. 재작성에
+필요한 여유 디스크 공간(최대 현재 DB 크기의 약 두 배)을 먼저 확보합니다.
+
+```bash
+sudo systemctl stop dtxwiki-worker dtxwiki
+sudo -u dtxwiki sqlite3 /var/lib/dtxwiki/dtxwiki.sqlite 'VACUUM;'
+sudo -u dtxwiki sqlite3 /var/lib/dtxwiki/dtxwiki.sqlite 'PRAGMA integrity_check;'
+# integrity_check가 ok인지 확인한 뒤 재시작한다.
+sudo systemctl start dtxwiki dtxwiki-worker
+```
+
+다른 프로세스가 DB를 열고 있으면 먼저 종료한 뒤 다시 진행합니다. 정기 점검 행 정리만
+목적이라면 `VACUUM`을 실행할 필요는 없습니다.
+
 ### Context History 정합성 복구
 
 `dtxwiki context history repair`는 legacy Context version의 canonical published pointer와

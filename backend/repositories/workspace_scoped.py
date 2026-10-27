@@ -1,6 +1,6 @@
-"""Workspace-scoped lookup for one supported workspace-plane model shape.
+"""Workspace-scoped statements for one supported workspace-plane model shape.
 
-This helper is deliberately narrower than "any model with an ``id`` and a
+These helpers are deliberately narrower than "any model with an ``id`` and a
 ``workspace_id`` column". The table must be explicitly classified on the
 workspace plane, its workspace scope must be required, and its exact primary
 key must be the single ``id`` column. Workspace-plane composite identities and
@@ -10,7 +10,7 @@ control- or mixed-plane tables need purpose-specific lookup APIs.
 from collections.abc import Collection, Iterable
 from uuid import UUID
 
-from sqlalchemy import Select, inspect, select
+from sqlalchemy import Delete, Select, delete, inspect, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -84,6 +84,17 @@ def select_in_workspace[Model](
     """
     _validate_workspace_model(model, operation="select_in_workspace")
     return select(model).where(model.workspace_id == workspace_id, *conditions)
+
+
+def delete_in_workspace[Model](
+    model: type[Model],
+    *,
+    workspace_id: UUID,
+    conditions: Iterable[ColumnElement[bool]] = (),
+) -> Delete:
+    """Build a validated delete that always includes its workspace scope."""
+    _validate_workspace_model(model, operation="delete_in_workspace")
+    return delete(model).where(model.workspace_id == workspace_id, *conditions)
 
 
 def list_in_workspace[Model](

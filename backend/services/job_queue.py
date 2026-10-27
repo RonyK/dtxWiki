@@ -42,10 +42,10 @@ HIDDEN_JOB_TYPES = frozenset(
         "embed",
         "email_delivery",
         "context_reconciliation_reminder",
-        # P10.3 T4.6: credential_replica_reconcile is seeded once per
-        # workspace per MINUTE and does nothing at all on a healthy
-        # workspace, so its successes are pure feed noise (1440 silent rows
-        # per workspace per day) -- exactly the flood this constant exists
+        # P10.3 T4.6: credential_replica_reconcile is checked per workspace at each
+        # registration tick (normally every five minutes), with a read-only
+        # precheck skipping healthy workspaces. Its routine successes are
+        # feed noise -- exactly the flood this constant exists
         # to keep out of Activity. Its FAILURES are surfaced instead through
         # NOISY_UNTIL_FAILED_JOB_TYPES below and the owner failure email, the
         # same split embed already has.
@@ -84,7 +84,7 @@ ALWAYS_HIDDEN_JOB_TYPES = frozenset({"email_delivery"})
 # failed reconcile therefore means "MCP access to this workspace may be
 # silently broken and nothing is fixing it" -- while the Settings sync chip
 # only reports rows the reconcile managed to reach, so it cannot report the
-# reconcile itself dying. Its per-minute successes stay hidden (see
+# reconcile itself dying. Its routine successes stay hidden (see
 # HIDDEN_JOB_TYPES).
 NOISY_UNTIL_FAILED_JOB_TYPES = frozenset(
     {"embed", "context_reconciliation_reminder", "credential_replica_reconcile"}

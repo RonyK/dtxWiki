@@ -3,8 +3,10 @@ import logging
 import os
 import signal
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -18,13 +20,14 @@ from backend.app.container import BlobStoreProvider, DatabaseProvider
 from backend.app.runtime_resources import RuntimeResources
 from backend.app.settings import Settings
 from backend.models.workspace import Workspace
-from backend.services.bundle_expiration import BundleExpirationService
+from backend.services.background_job_retention import prune_background_history
 from backend.services.context_media_policy import resolve_context_media_policy
 from backend.services.job_queue import JobQueueService
 from backend.services.mail_delivery import EmailDeliveryService
 from backend.services.ops import runtime_lock
+from backend.worker.periodic import due_job_types
 from backend.worker.runtime import OneShotWorker, WorkerShutdownRequested
-from backend.worker.tick import seed_jobs_for_workspace, tick_schedules
+from backend.worker.tick import seed_jobs_for_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,16 @@ app = typer.Typer(no_args_is_help=True, help="Run dtxWiki background worker jobs
 
 _DISPATCH_ERROR_BACKOFF_CAP_SECONDS = 30.0
 _EMAIL_SWEEP_MIN_INTERVAL_SECONDS = 1.0
+_HISTORY_SWEEP_BUDGET_SECONDS = 1.0
+_HISTORY_BATCH_SIZE = 200
+
+
+@dataclass
+class _HistorySweepState:
+    cursors: dict[UUID, UUID | None] = field(default_factory=dict)
+    next_workspace: int = 0
+
+
 #: The database is not this code's schema, or was written by a newer release.
 DATABASE_NOT_CURRENT_EXIT_CODE = 3
 #: ``dtxwiki update``/``rollback``/``migrate-data`` holds the runtime lock.
@@ -342,6 +355,7 @@ def _run_loop(
         blob_store_provider=blob_store_provider,
     )
     worker.business_phase_guard = shutdown.interruptible
+    history_state = _HistorySweepState()
     processed_count = 0
     idle_count = 0
     job_types = set(job_type) if job_type else None
@@ -379,7 +393,7 @@ def _run_loop(
         on_ready()
     # Periodic registration and external mail delivery are not prerequisites
     # for accepting jobs. In particular, SMTP must not delay the ready packet.
-    _seed_due_jobs(database_provider, settings)
+    _seed_due_jobs(database_provider, settings, history_state)
     _sweep_email_outbox(database_provider, settings)
     last_reclaim_monotonic = time.monotonic()
     last_full_sweep_monotonic = time.monotonic()
@@ -399,7 +413,7 @@ def _run_loop(
                 session_factory=factory,
                 lease_timeout_seconds=lease_timeout_seconds,
             )
-            _seed_due_jobs(database_provider, settings)
+            _seed_due_jobs(database_provider, settings, history_state)
             last_reclaim_monotonic = time.monotonic()
         # The outbox sweep is NOT on reclaim's cadence any more. It used to
         # be, because an email_delivery Job carried the latency and the sweep
@@ -471,7 +485,11 @@ def main() -> None:
     app()
 
 
-def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> None:
+def _seed_due_jobs(
+    database_provider: DatabaseProvider,
+    settings: Settings,
+    history_state: _HistorySweepState | None = None,
+) -> None:
     """Fan out periodic job seeding across every workspace's plane (Epic-2
     Phase 6a, plan §4 Phase 6): reads the workspace roster from the control
     plane once, then seeds each workspace's periodic jobs in its own
@@ -487,10 +505,12 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
     """
     try:
         with database_provider.control_session_factory().begin() as control_session:
+            workspace_ids = []
             workspace_policies = []
             for workspace in control_session.scalars(
                 select(Workspace).order_by(Workspace.id)
             ):
+                workspace_ids.append(workspace.id)
                 try:
                     policy = resolve_context_media_policy(
                         workspace, settings.context_media_orphan_retention_hours
@@ -505,23 +525,95 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
         return
 
     queue = JobQueueService()
-    bundle_expiration = BundleExpirationService(job_queue=queue)
     now = datetime.now(UTC)
+    failed_workspaces: set[UUID] = set()
     for workspace_id, policy in workspace_policies:
         try:
-            with database_provider.session_for(workspace_id).begin() as ws_session:
-                seed_jobs_for_workspace(
-                    ws_session,
-                    workspace_id,
-                    now=now,
-                    job_queue=queue,
-                    bundle_expiration=bundle_expiration,
-                    schedules=tick_schedules(settings, policy),
-                    context_media_policy_revision=policy.revision,
-                )
+            # Close every precheck read before beginning registration writes.
+            # Credential reconciliation reads both planes sequentially here.
+            due_types = due_job_types(
+                workspace_id,
+                now=now,
+                settings=settings,
+                policy=policy,
+                database_provider=database_provider,
+            )
+            if due_types:
+                with database_provider.session_for(workspace_id).begin() as ws_session:
+                    seed_jobs_for_workspace(
+                        ws_session,
+                        workspace_id,
+                        now=now,
+                        job_queue=queue,
+                        settings=settings,
+                        policy=policy,
+                        due_types=due_types,
+                    )
         except Exception:
+            failed_workspaces.add(workspace_id)
             logger.exception(
                 "periodic job seeding failed for workspace %s", workspace_id
+            )
+    _prune_background_history(
+        database_provider,
+        [
+            workspace_id
+            for workspace_id in workspace_ids
+            if workspace_id not in failed_workspaces
+        ],
+        now,
+        history_state if history_state is not None else _HistorySweepState(),
+    )
+
+
+def _prune_background_history(
+    database_provider: DatabaseProvider,
+    workspace_ids: list[UUID],
+    now: datetime,
+    state: _HistorySweepState,
+) -> None:
+    """Short round-robin batches; dispatch gets control back within the budget.
+
+    Check the shared deadline before each transaction. One in-flight batch
+    may finish beyond it. Carry cursors across ticks so unknown/protected keys
+    and large workspaces cannot indefinitely hide other eligible history.
+    No cleanup Job is created, and no automatic VACUUM is issued.
+    """
+    deadline = time.monotonic() + _HISTORY_SWEEP_BUDGET_SECONDS
+    if not workspace_ids:
+        return
+    positions = {
+        workspace_id: index for index, workspace_id in enumerate(workspace_ids)
+    }
+    state.cursors = {
+        workspace_id: cursor
+        for workspace_id, cursor in state.cursors.items()
+        if workspace_id in positions
+    }
+    start = state.next_workspace % len(workspace_ids)
+    pending = deque(workspace_ids[start:] + workspace_ids[:start])
+    while pending and time.monotonic() < deadline:
+        workspace_id = pending.popleft()
+        # Resume the next tick with the workspace after this one, even if
+        # this transaction exhausts the shared budget or fails.
+        state.next_workspace = (positions[workspace_id] + 1) % len(workspace_ids)
+        try:
+            batch = prune_background_history(
+                database_provider.session_for(workspace_id),
+                workspace_id,
+                now=now,
+                batch_size=_HISTORY_BATCH_SIZE,
+                job_cursor=state.cursors.get(workspace_id),
+            )
+            state.cursors[workspace_id] = batch.next_job_cursor
+            if (
+                batch.next_job_cursor is not None
+                or batch.receipts_deleted == _HISTORY_BATCH_SIZE
+            ):
+                pending.append(workspace_id)
+        except Exception:
+            logger.exception(
+                "background history pruning failed for workspace %s", workspace_id
             )
 
 

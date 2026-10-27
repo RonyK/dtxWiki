@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 from backend.models.base import utc_now
 from backend.models.bundle import AgentInputBundle
 from backend.models.job import Job
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.services.audit_service import AuditService
 from backend.services.job_queue import JobQueueService
+from backend.services.periodic_job_keys import minute_bucket, periodic_job_key
 
 
 @dataclass(frozen=True)
@@ -28,19 +30,50 @@ class BundleExpirationService:
         self.job_queue = job_queue or JobQueueService()
         self.audit_service = audit_service or AuditService()
 
+    @staticmethod
+    def _due_predicates(now: datetime):
+        return (
+            AgentInputBundle.status != "expired",
+            AgentInputBundle.valid_until <= now,
+        )
+
+    @classmethod
+    def has_due_work(
+        cls, session: Session, *, workspace_id: UUID, now: datetime
+    ) -> bool:
+        # The worker executes this job at its minute bucket, so probing must
+        # use the same cutoff rather than include later seconds in the minute.
+        cutoff = now.replace(second=0, microsecond=0)
+        with session.no_autoflush:
+            return (
+                session.scalar(
+                    select_in_workspace(
+                        AgentInputBundle,
+                        workspace_id=workspace_id,
+                        conditions=cls._due_predicates(cutoff),
+                    )
+                    .with_only_columns(AgentInputBundle.id)
+                    .limit(1)
+                )
+                is not None
+            )
+
     def enqueue_sweep(
         self,
         session: Session,
         workspace_id: UUID,
         at: datetime | None = None,
     ) -> Job:
-        bucket = self._minute_bucket(at or utc_now())
+        run_at = at or utc_now()
+        bucket = minute_bucket(run_at)
         return self.job_queue.enqueue(
             session=session,
             workspace_id=workspace_id,
             job_type="bundle_expiration_sweep",
             trigger_type="schedule",
-            idempotency_key=f"{workspace_id}:{bucket}",
+            idempotency_key=periodic_job_key(
+                "bundle_expiration_sweep", workspace_id, run_at
+            ),
             target_ref={
                 "workspace_id": str(workspace_id),
                 "minute_bucket": bucket,
@@ -57,10 +90,7 @@ class BundleExpirationService:
         actor_id: UUID | None = None,
     ) -> BundleExpirationSweepResult:
         run_at = now or utc_now()
-        statement = select(AgentInputBundle).where(
-            AgentInputBundle.status != "expired",
-            AgentInputBundle.valid_until <= run_at,
-        )
+        statement = select(AgentInputBundle).where(*self._due_predicates(run_at))
         if workspace_id is not None:
             statement = statement.where(AgentInputBundle.workspace_id == workspace_id)
 
@@ -97,7 +127,3 @@ class BundleExpirationService:
             inspected_count=len(due_bundles),
             run_at=run_at,
         )
-
-    @staticmethod
-    def _minute_bucket(at: datetime) -> str:
-        return at.replace(second=0, microsecond=0).isoformat()

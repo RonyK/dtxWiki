@@ -18,9 +18,35 @@ from backend.app.settings import Settings
 from backend.spi.context import ToolCallContext
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from backend.services.lint.base import LintModule
 
 logger = logging.getLogger(__name__)
+
+
+def has_due_media_install_work(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    """Compose the read-only install probe without creating storage adapters."""
+    from backend.media.adapters.sqlalchemy.reconcile import (
+        SqlAlchemyMediaInstallReconciler,
+    )
+
+    return SqlAlchemyMediaInstallReconciler.has_due_work(
+        session, workspace_id=workspace_id, now=now
+    )
+
+
+def has_due_media_gc_work(
+    session: Session, *, workspace_id: UUID, now: datetime
+) -> bool:
+    """Compose the read-only GC probe independently of filesystem services."""
+    from backend.media.adapters.sqlalchemy.gc import SqlAlchemyBlobGcService
+
+    return SqlAlchemyBlobGcService.has_due_work(
+        session, workspace_id=workspace_id, now=now
+    )
 
 __all__ = [
     "PER_WORKSPACE_DATABASE_TOPOLOGY",

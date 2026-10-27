@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Skip periodic bundle expiration, media recovery/GC, and credential replica
+  jobs when their read-only checks find no work. Registration cadence stays
+  unchanged; a failed check still registers the repair job. Gradually remove
+  completed scheduled checks older than seven days after their encoded period
+  ends, plus expired MCP write retry receipts, in bounded worker batches.
+  Failed/manual jobs and content-processing history remain retained. SQLite
+  reuses freed pages; operators can reclaim file space with the offline
+  `VACUUM` procedure in [DEPLOYMENT.md](DEPLOYMENT.md#정기-작업-이력과-sqlite-파일-용량).
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin
