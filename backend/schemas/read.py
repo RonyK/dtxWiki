@@ -38,9 +38,9 @@ class WorkspaceSummary(BaseModel):
     join_policy: str = "invite_only"
     member_count: int = 0
     role: str | None = None
-    # Show the live owner independently of the workspace title. Older or
-    # customized Personal workspaces can share a title, and display names
-    # can change after the initial owner-prefixed title is created.
+    # Show the live owner independently of the workspace title: titles can
+    # repeat across owners, and display names can change after a title that
+    # includes one was created.
     owner_display_name: str | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -60,7 +60,6 @@ class WorkspaceListData(BaseModel):
     workspaces: list[WorkspaceSummary]
     current_workspace_id: UUID | None = None
     default_workspace_id: UUID | None = None
-    personal_workspace_id: UUID | None = None
     # D-01v2 (P10.3 T2, section 2.2): count of the actor's live
     # WorkspaceMembership rows that fall OUTSIDE a pat/oauth_jwt credential's
     # allowed set (no id/title -- the credential is not allowed to know

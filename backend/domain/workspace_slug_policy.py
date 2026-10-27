@@ -4,12 +4,12 @@ import re
 import unicodedata
 
 WORKSPACE_SLUG_MAX_LENGTH = 80
-# Personal provisioning is the only issuer of this prefix. Ordinary creates and
-# renames cannot take a Personal slug or probe which Personal slugs exist.
+# Only the workspace created with a new account receives this prefix. Ordinary
+# creates and renames cannot take such a slug or probe which ones exist.
 PERSONAL_WORKSPACE_SLUG_PREFIX = "personal-"
 RESERVED_WORKSPACE_SLUG_MESSAGE = (
     f"workspace slug prefix '{PERSONAL_WORKSPACE_SLUG_PREFIX}' is reserved "
-    "for Personal workspaces"
+    "for the workspace each new account starts with"
 )
 
 

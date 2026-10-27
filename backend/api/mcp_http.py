@@ -987,8 +987,6 @@ def _resolve_and_check_mcp_workspace(
 
     requested_workspace_id = _mcp_requested_workspace_id(body)
     session_factory = get_session_factory_from_app(request)
-    # Workspace resolution may repair the user's default to their live Personal
-    # workspace, so this read-side policy boundary must commit on success.
     with session_factory.begin() as session:
         try:
             workspace = resolve_workspace_for_actor(

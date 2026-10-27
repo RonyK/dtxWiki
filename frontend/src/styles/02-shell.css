@@ -581,16 +581,11 @@
   gap: 3px 8px;
 }
 
-.workspace-mini-badge,
 .workspace-default-mini-badge {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   color: var(--ink-muted);
-}
-
-.workspace-mini-badge {
-  color: var(--context);
 }
 
 .workspace-menu-meta .workspace-default-mini-badge {

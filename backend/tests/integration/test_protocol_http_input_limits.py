@@ -201,7 +201,7 @@ def test_legacy_oversized_cimd_id_is_manageable_via_consent_endpoints(page_servi
             OAuthConsent(
                 user_id=user.id,
                 client_id=client_id,
-                workspace_id=user.personal_workspace_id,
+                workspace_id=user.default_workspace_id,
                 scope="mcp:read",
             )
         )
@@ -242,7 +242,7 @@ def test_repeated_resources_survive_consent_and_duplicate_singleton_fails(
     assert consent.text.count('name="resource"') == 2
     with page_service.session_factory() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        workspace_id = str(user.personal_workspace_id)
+        workspace_id = str(user.default_workspace_id)
     submitted = client.post(
         "/oauth/authorize",
         content=urlencode(
@@ -292,7 +292,7 @@ def test_existing_257_oauth_grants_survive_auth_readback_and_ttl_only_update(
     with page_service.session_factory() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
         user_id = user.id
-        initial_workspace = user.personal_workspace_id
+        initial_workspace = user.default_workspace_id
     service = oauth_service.OAuthService(
         session_factory=page_service.session_factory,
         settings=client.app.state.settings,

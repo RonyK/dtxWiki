@@ -5,13 +5,11 @@ from sqlalchemy import func, select
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
-from backend.models.agent import AgentPage
 from backend.models.ask import AskSession
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
-from backend.models.workspace import MCPClient
 
 
-def test_personal_workspace_lazily_creates_only_ask_tree(page_service):
+def test_personal_workspace_ask_sessions_reuse_its_seeded_root(page_service):
     client = TestClient(
         create_app(
             settings=Settings(
@@ -30,15 +28,6 @@ def test_personal_workspace_lazily_creates_only_ask_tree(page_service):
         client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
     )
 
-    with page_service.session_factory() as session:
-        assert session.get(TreePolicy, (workspace_id, "ask")) is None
-        assert session.scalar(
-            select(WorkspaceTreeNode.id).where(
-                WorkspaceTreeNode.workspace_id == workspace_id,
-                WorkspaceTreeNode.section == "ask",
-            )
-        ) is None
-
     for title in ("First Personal Ask", "Second Personal Ask"):
         created = client.post(
             f"/api/v1/workspaces/{workspace_id}/ask/sessions",
@@ -52,7 +41,6 @@ def test_personal_workspace_lazily_creates_only_ask_tree(page_service):
                 WorkspaceTreeNode.workspace_id == workspace_id,
                 WorkspaceTreeNode.section == "ask",
                 WorkspaceTreeNode.parent_id.is_(None),
-                WorkspaceTreeNode.slug == "ask",
             )
         ).all()
         assert len(roots) == 1
@@ -68,9 +56,3 @@ def test_personal_workspace_lazily_creates_only_ask_tree(page_service):
             .select_from(AskSession)
             .where(AskSession.workspace_id == workspace_id)
         ) == 2
-        assert session.scalar(
-            select(MCPClient.id).where(MCPClient.workspace_id == workspace_id)
-        ) is None
-        assert session.scalar(
-            select(AgentPage.id).where(AgentPage.workspace_id == workspace_id)
-        ) is None

@@ -31,7 +31,7 @@ from backend.domain.credential_input import (
 from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.utils.database_errors import is_single_column_unique_violation
 
 logger = logging.getLogger("dtxwiki.session")
@@ -453,7 +453,7 @@ class SessionService:
     credential_hasher: CredentialHasher
     token_codec: SessionTokenCodec
     # Deployment mode still controls whether signup is exposed, but not the
-    # Personal-only workspace grant performed after account creation.
+    # starter workspace every new account receives.
     app_mode: str = "solo_local"
     # AUTH-09: fail closed. HEAD's only production factory
     # (get_session_service in backend/api/auth.py) always passes
@@ -500,10 +500,9 @@ class SessionService:
                     raise
                 raise DuplicateEmailError("email already exists") from exc
             # Onboarding is decoupled from the installation's legacy/default
-            # content workspace.  Every signup mode starts in an ordinary,
-            # private Personal workspace and receives no implicit global
-            # membership.
-            ensure_personal_workspace(session, user=user)
+            # content workspace.  Every signup mode starts in its own ordinary
+            # private workspace and receives no implicit global membership.
+            create_personal_workspace(session, user=user)
             self._emit_session_audit(
                 session,
                 user_id=user.id,

@@ -491,19 +491,6 @@
             "title": "Other Membership Count",
             "type": "integer"
           },
-          "personal_workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Personal Workspace Id"
-          },
           "workspaces": {
             "items": {
               "$ref": "#/$defs/WorkspaceSummary"

@@ -1094,8 +1094,8 @@ class SettingsService:
             normalized = _normalize_workspace_slug(value)
             if normalized != workspace.slug:
                 # Checked before the uniqueness probe so the reply never
-                # reveals whether a Personal slug exists. An existing slug,
-                # including a Personal workspace's own, may be kept unchanged.
+                # reveals whether a starter workspace's slug exists. A slug
+                # that already uses the prefix may be kept unchanged.
                 if is_reserved_workspace_slug(normalized):
                     raise SettingsPolicyUpdateRejected(RESERVED_WORKSPACE_SLUG_MESSAGE)
                 existing = control_session.scalar(

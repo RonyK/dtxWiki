@@ -257,7 +257,7 @@ def test_postgres_unique_error_detection_requires_the_actual_constraint():
     for state, constraint, expected in (
         ("23505", "users_email_key", True),
         ("23514", "users_email_key", False),
-        ("23505", "uq_users_personal_workspace_id", False),
+        ("23505", "workspace_slug_key", False),
     ):
         for driver_error in (
             SimpleNamespace(args=({"C": state, "n": constraint},)),

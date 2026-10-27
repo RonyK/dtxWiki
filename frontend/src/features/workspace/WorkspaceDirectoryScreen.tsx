@@ -169,7 +169,7 @@ export function WorkspaceDirectoryScreen() {
             <p className="feature-subtitle">
               {t("workspaceDirectory.description", {
                 defaultValue:
-                  "Browse discoverable workspaces. Private Personal workspaces and member-only details are never listed here.",
+                  "Browse discoverable workspaces. Private workspaces and member-only details are never listed here.",
               })}
             </p>
           </div>

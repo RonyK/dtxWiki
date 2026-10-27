@@ -146,7 +146,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        Optional filters.include_agents defaults true; false excludes Agent
 #        pages before result counts and pagination. Refresh tools/list.
 #        Explicit read_concept and write-target ambiguity policies are retained.
-MCP_TOOL_CONTRACT_REVISION = 15
+#  16 -- list_my_workspaces no longer returns personal_workspace_id: the
+#        workspace an account starts with is an ordinary workspace. Use
+#        default_workspace_id or current_workspace_id. Refresh tools/list.
+MCP_TOOL_CONTRACT_REVISION = 16
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

@@ -52,13 +52,9 @@ export async function currentWorkspace(request: APIRequestContext) {
   const data = body.data as {
     current_workspace_id: string | null;
     default_workspace_id?: string | null;
-    personal_workspace_id?: string | null;
     workspaces: Array<{ id: string; slug: string; title: string }>;
   };
-  const resolvedId =
-    data.current_workspace_id ??
-    data.default_workspace_id ??
-    data.personal_workspace_id;
+  const resolvedId = data.current_workspace_id ?? data.default_workspace_id;
   const workspace = data.workspaces.find(
     (candidate) => candidate.id === resolvedId,
   );

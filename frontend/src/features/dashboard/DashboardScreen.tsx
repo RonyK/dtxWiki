@@ -482,14 +482,14 @@ function DashboardWelcome({
           <div className="dashboard-welcome-workspaces">
             <div>
               <strong>
-                {t("setup.personalWorkspaceTitle", {
-                  defaultValue: "Make your Personal Workspace yours",
+                {t("setup.customizeWorkspaceTitle", {
+                  defaultValue: "Make this workspace yours",
                 })}
               </strong>
               <p>
-                {t("setup.personalWorkspaceDescription", {
+                {t("setup.customizeWorkspaceDescription", {
                   defaultValue:
-                    "You can rename your Personal Workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
+                    "You can rename this workspace. For ongoing team work, create a separate collaborative workspace from the workspace switcher.",
                 })}
               </p>
             </div>
@@ -497,8 +497,8 @@ function DashboardWelcome({
               className="icon-button text-button"
               to="/settings?section=workspace"
             >
-              {t("setup.renamePersonalAction", {
-                defaultValue: "Rename Personal",
+              {t("setup.renameWorkspaceAction", {
+                defaultValue: "Rename workspace",
               })}
             </Link>
           </div>

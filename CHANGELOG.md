@@ -21,12 +21,23 @@
   precedence when both the base and save-time content checks would fail.
 - Keep legacy citation-only updates and patch previews compatible with stored
   frontmatter, and verify reconciliation independently of current fixer settings.
-- Name new Personal workspaces `<display name>'s Personal Workspace` with a
+- The workspace a new account starts with is an ordinary private workspace.
+  It gets the same initial content as any created workspace, and nothing treats
+  it specially afterwards: its owner can be changed like any other owner, it is
+  not a landing fallback, and it is not recreated after deletion. The
+  `users.personal_workspace_id` column is dropped; existing workspaces keep
+  their data and memberships.
+- The REST workspace list and MCP `list_my_workspaces` no longer return
+  `personal_workspace_id`, and workspace members no longer carry
+  `is_personal_anchor_owner`. MCP tool contract revision 16: clients that
+  read `personal_workspace_id` should use `default_workspace_id` or
+  `current_workspace_id` and refresh `tools/list`.
+- Name a new account's workspace `<display name>'s Personal Workspace` with a
   `personal-<email local part>` slug, numbered on collision. Accounts without a
-  usable local part get the first eight characters of the workspace id.
-- Reserve the `personal-` slug prefix for Personal workspaces. Workspace
-  creation and slug changes refuse it; slugs generated from a title get a `ws-`
-  prefix instead. All workspace slugs fold accented Latin letters to ASCII.
+  usable local part get a random eight-character hex token.
+- Reserve the `personal-` slug prefix for those workspaces. Workspace creation
+  and slug changes refuse it; slugs generated from a title get a `ws-` prefix
+  instead. All workspace slugs fold accented Latin letters to ASCII.
 
 ## 0.1.4 — 2026-10-23
 

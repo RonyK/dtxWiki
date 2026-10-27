@@ -179,15 +179,19 @@ IP에서만 접근하게 제한하세요(`--tls external --forwarded-ip <proxy I
 
 `team`과 `solo_remote` 모드는 self-signup이 기본 off입니다. 조직 내 자유 가입이 의도라면
 `DTXWIKI_SIGNUP_ENABLED=true`를 명시하고 서비스를 재시작하세요. 가입이 허용된 `team` 모드의
-신규 사용자는 다른 공유 workspace에 자동 가입하지 않고 private `<표시 이름>'s Personal Workspace`의
-owner가 됩니다. 초기 slug는 `personal-<이메일 토큰>`입니다(예: `rony@example.com` →
-`personal-rony`). 이메일 토큰은 이메일 주소의 `@` 앞부분만 영문 소문자·숫자·하이픈으로
-정규화하여 최대 32자로 만들며, 도메인은 넣지 않습니다. 악센트가 붙은 라틴 문자는 기본 문자로
-바뀝니다(`josé` → `jose`). 이메일이 없거나 정규화 결과가 비면 workspace UUID 앞 8자리를
-사용합니다(예: `personal-82da8c7d`). 같은 slug가 이미 있으면 `personal-rony-2`,
+신규 사용자는 다른 공유 workspace에 자동 가입하지 않고, 가입과 함께 만들어지는 private workspace
+하나의 owner가 됩니다. 이 workspace는 가입 직후 바로 쓰도록 만들어 주는 일반 private workspace이며,
+이후에는 다른 workspace와 똑같이 이름·slug·공개 범위를 바꾸거나 멤버를 초대하거나 삭제할 수
+있습니다. 삭제해도 다시 만들어지지 않으며, 필요하면 workspace 전환 메뉴에서 새로 만들면 됩니다.
+
+만들 때의 이름은 `<표시 이름>'s Personal Workspace`이고, slug는 `personal-<이메일 토큰>`입니다
+(예: `rony@example.com` → `personal-rony`). 이메일 토큰은 이메일 주소의 `@` 앞부분만 영문
+소문자·숫자·하이픈으로 정규화하여 최대 32자로 만들며, 도메인은 넣지 않습니다. 악센트가 붙은
+라틴 문자는 기본 문자로 바뀝니다(`josé` → `jose`). 이메일이 없거나 정규화 결과가 비면 임의의
+8자리 16진수를 사용합니다(예: `personal-82da8c7d`). 같은 slug가 이미 있으면 `personal-rony-2`,
 `personal-rony-3`처럼 2부터 숫자를 붙여 사용 가능한 slug를 선택합니다.
-이메일 앞부분이 slug에 들어가므로, Personal workspace를 public으로 바꾸기 전에 slug 변경을
-검토하세요. `personal-`로 시작하는 slug는 Personal workspace 전용입니다. 일반 workspace
+이메일 앞부분이 slug에 들어가므로, 이 workspace를 public으로 바꾸기 전에 slug 변경을
+검토하세요. `personal-`로 시작하는 slug는 가입 시 만드는 workspace에만 붙습니다. 일반 workspace
 생성과 설정의 slug 변경은 이 prefix를 거부하고, 제목에서 자동으로 만든 slug는 앞에 `ws-`를
 붙입니다(예: `Personal Notes` → `ws-personal-notes`). 이미 쓰고 있는 slug는 그대로 둘 수 있습니다.
 이 규칙은 신규 생성에 적용하며 기존 workspace의 이름과 slug는 유지합니다.
