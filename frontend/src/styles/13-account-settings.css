@@ -1,0 +1,171 @@
+.account-security-screen .account-layout {
+  --account-gap: 20px;
+}
+
+.account-security-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.65fr);
+  gap: var(--account-gap);
+  align-items: start;
+  margin-bottom: var(--account-gap);
+}
+
+.account-security-grid:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.account-security-grid .account-profile-panel {
+  grid-column: 1;
+  grid-row: 1;
+  padding: 22px;
+  gap: 20px;
+}
+
+.account-security-grid > .login-methods-panel {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.account-security-grid .auth-summary {
+  grid-template-columns: 42px minmax(0, 1fr);
+}
+
+.account-security-grid .auth-summary > svg {
+  width: 42px;
+  height: 42px;
+  padding: 10px;
+  border-radius: 50%;
+  color: var(--context);
+  background: var(--surface-subtle);
+}
+
+.account-security-grid .auth-summary strong {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.account-user-id {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 14px 0;
+  border-block: 1px solid var(--border);
+  min-width: 0;
+}
+
+.account-user-id > span,
+.account-user-id > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.account-user-id > code {
+  font-size: 12px;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+.account-user-id .icon-button {
+  min-height: 36px;
+  padding-inline: 8px;
+}
+
+.account-security-grid .account-actions {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.account-security-grid .account-language-note {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.account-resources-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--account-gap);
+  align-items: start;
+}
+
+.account-resources-grid > .auth-panel {
+  grid-area: auto;
+  padding: 22px;
+}
+
+.account-resources-grid .account-quick-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.account-resources-grid .metric-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  padding: 14px;
+}
+
+.account-resources-grid .metric-card > strong {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+}
+
+.account-resources-grid .metric-card > p {
+  margin: 0;
+}
+
+.settings-screen > .feature-header {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.settings-screen .settings-layout {
+  gap: 24px;
+}
+
+.settings-screen .settings-content {
+  min-width: 0;
+}
+
+@media (max-width: 1024px) {
+  .account-security-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-security-grid > .login-methods-panel,
+  .account-security-grid > .account-profile-panel {
+    grid-area: auto;
+  }
+
+  .account-security-grid .account-profile-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .account-security-grid .account-profile-panel > .account-actions,
+  .account-security-grid .account-profile-panel > .account-language-note,
+  .account-security-grid .account-profile-panel > .status-banner {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .account-security-screen .account-layout {
+    --account-gap: 16px;
+  }
+
+  .account-security-grid .account-profile-panel,
+  .account-resources-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-security-grid .account-profile-panel,
+  .account-resources-grid > .auth-panel {
+    padding: 16px;
+  }
+
+  .settings-screen .settings-layout {
+    gap: 16px;
+  }
+}

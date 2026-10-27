@@ -22,6 +22,7 @@ from backend.domain.oauth_input import (
     validate_scope_input,
     validate_supported_metadata,
 )
+from backend.utils.http_security import PinnedNetworkBackend, address_is_forbidden
 
 CIMD_CACHE_TTL_SECONDS = 300
 CIMD_CACHE_MAX_ENTRIES = 256
@@ -41,13 +42,6 @@ CIMD_FAILURE_TTL_SECONDS = 60
 # simultaneously pay for a real fetch, so a handful of slow/malicious
 # client_ids cannot each pin a request thread for the full 5s timeout.
 CIMD_MAX_INFLIGHT = 4
-
-_CLOUD_METADATA_ADDRESSES = frozenset(
-    {
-        ipaddress.ip_address("169.254.169.254"),
-        ipaddress.ip_address("fd00:ec2::254"),
-    }
-)
 
 
 class CIMDFetchError(RuntimeError):
@@ -98,26 +92,6 @@ def clear_cimd_cache() -> None:
     with _CIMD_CACHE_LOCK:
         _CIMD_CACHE.clear()
         _CIMD_FETCH_LOCKS.clear()
-
-
-def address_is_forbidden(
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-) -> bool:
-    """Reject every non-global or explicitly dangerous destination address."""
-
-    mapped = getattr(address, "ipv4_mapped", None)
-    return (
-        address in _CLOUD_METADATA_ADDRESSES
-        or address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_reserved
-        or address.is_unspecified
-        or bool(getattr(address, "is_site_local", False))
-        or not address.is_global
-        or (mapped is not None and address_is_forbidden(mapped))
-    )
 
 
 def fetch_client_metadata_document(client_id: str) -> CIMDClientMetadata:
@@ -310,53 +284,11 @@ def _resolve_public_destination(
     return ascii_host, tuple(addresses)
 
 
-class _PinnedNetworkBackend(httpcore.SyncBackend):
-    def __init__(
-        self,
-        *,
-        expected_host: str,
-        addresses: tuple[str, ...],
-        deadline: float | None = None,
-    ) -> None:
-        self._expected_host = expected_host
-        self._addresses = addresses
-        self._deadline = deadline
-        self._backend = httpcore.SyncBackend()
+class _PinnedNetworkBackend(PinnedNetworkBackend):
+    """Keep CIMD failures at the service boundary."""
 
-    def connect_tcp(
-        self,
-        host: str,
-        port: int,
-        timeout: float | None = None,
-        local_address: str | None = None,
-        socket_options=None,
-    ):
-        if host.lower() != self._expected_host:
-            raise CIMDFetchError()
-        last_error: Exception | None = None
-        for address in self._addresses:
-            connect_timeout = timeout
-            if self._deadline is not None:
-                remaining = self._deadline - time.monotonic()
-                if remaining <= 0:
-                    raise CIMDFetchError()
-                connect_timeout = min(timeout, remaining) if timeout else remaining
-            try:
-                return self._backend.connect_tcp(
-                    address,
-                    port,
-                    timeout=connect_timeout,
-                    local_address=local_address,
-                    socket_options=socket_options,
-                )
-            except Exception as exc:  # httpcore maps the final error for httpx
-                last_error = exc
-        if last_error is not None:
-            raise last_error
-        raise CIMDFetchError()
-
-    def connect_unix_socket(self, *args, **kwargs):
-        raise CIMDFetchError()
+    def __init__(self, **kwargs) -> None:
+        super().__init__(error_factory=CIMDFetchError, **kwargs)
 
 
 class _PinnedHTTPTransport(httpx.HTTPTransport):

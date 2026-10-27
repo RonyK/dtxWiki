@@ -160,6 +160,7 @@ def test_lint_batch_decision_requires_draft_write_scope():
 
 def test_exempt_prefixes_match_expected_surface():
     assert SCOPE_EXEMPT_PREFIXES == (
+        "/api/v1/capabilities",
         "/api/v1/auth",
         "/api/v1/admin",
         "/api/v1/public",

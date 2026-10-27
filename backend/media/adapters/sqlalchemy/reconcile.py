@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.orm import Session
 
 from backend.media.domain import (
@@ -47,6 +47,33 @@ _TERMINAL_STAGING_FAILURE_CODES = {
     "media_staging_integrity",
     "media_staging_missing",
 }
+
+
+def _due_leases(workspace_id: UUID, now: datetime) -> Select[tuple[MediaStagingLease]]:
+    """The same expired, reclaimable installs for probing and execution."""
+    return (
+        select(MediaStagingLease)
+        .join(
+            MediaInstallRequest,
+            and_(
+                MediaInstallRequest.workspace_id == MediaStagingLease.workspace_id,
+                MediaInstallRequest.staging_id == MediaStagingLease.id,
+                MediaInstallRequest.staging_generation == MediaStagingLease.generation,
+            ),
+        )
+        .where(
+            MediaStagingLease.workspace_id == workspace_id,
+            MediaStagingLease.state.in_(_RESUMABLE_LEASE_STATES),
+            MediaStagingLease.expires_at <= now,
+            MediaInstallRequest.state.in_(_RESUMABLE_REQUEST_STATES),
+            or_(
+                MediaInstallRequest.state != "publishing",
+                MediaInstallRequest.claim_token.is_(None),
+                MediaInstallRequest.claim_expires_at.is_(None),
+                MediaInstallRequest.claim_expires_at <= now,
+            ),
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +125,22 @@ class SqlAlchemyMediaInstallReconciler:
         self._store_for = store_for
         self._batch_size = batch_size
 
+    @staticmethod
+    def has_due_work(
+        session: Session,
+        *,
+        workspace_id: UUID,
+        now: datetime | None = None,
+    ) -> bool:
+        """Read without locks or storage access before scheduling a sweep."""
+        if not isinstance(workspace_id, UUID):
+            raise ValueError("workspace_id must be a UUID")
+        now = now or datetime.now(UTC)
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("media reconcile now must be timezone-aware")
+        with session.no_autoflush:
+            return bool(session.scalar(select(_due_leases(workspace_id, now).exists())))
+
     def sweep_expired(
         self,
         session: Session,
@@ -116,28 +159,7 @@ class SqlAlchemyMediaInstallReconciler:
         # sweepers with upload, install completion, quota, security, and GC.
         journal._lock_operation_intent(session, workspace_id)
         leases = session.scalars(
-            select(MediaStagingLease)
-            .join(
-                MediaInstallRequest,
-                and_(
-                    MediaInstallRequest.workspace_id == MediaStagingLease.workspace_id,
-                    MediaInstallRequest.staging_id == MediaStagingLease.id,
-                    MediaInstallRequest.staging_generation
-                    == MediaStagingLease.generation,
-                ),
-            )
-            .where(
-                MediaStagingLease.workspace_id == workspace_id,
-                MediaStagingLease.state.in_(_RESUMABLE_LEASE_STATES),
-                MediaStagingLease.expires_at <= now,
-                MediaInstallRequest.state.in_(_RESUMABLE_REQUEST_STATES),
-                or_(
-                    MediaInstallRequest.state != "publishing",
-                    MediaInstallRequest.claim_token.is_(None),
-                    MediaInstallRequest.claim_expires_at.is_(None),
-                    MediaInstallRequest.claim_expires_at <= now,
-                ),
-            )
+            _due_leases(workspace_id, now)
             .order_by(MediaStagingLease.expires_at, MediaStagingLease.id)
             .limit(self._batch_size)
         ).all()

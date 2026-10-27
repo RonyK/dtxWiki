@@ -94,8 +94,8 @@
     }
   },
   "crossLinks": {
-    "toUsers": "이 워크스페이스에 접근할 수 있는 사람들입니다. 서버 전체에서 사람을 찾거나 계정 복구를 시작하려면 다음으로 이동하세요:",
-    "toMembers": "서버 전체의 계정을 조회합니다. 이 워크스페이스의 구성원이나 역할을 바꾸려면 다음으로 이동하세요:"
+    "toUsers": "서버 전체 계정 검색·복구는",
+    "toMembers": "이 워크스페이스의 멤버·역할 관리는"
   },
   "workspaceMembers": {
     "title": "멤버",
@@ -121,23 +121,30 @@
       "owner": "소유자"
     },
     "add": {
-      "email": "정확한 로그인 이메일",
-      "emailPlaceholder": "person@example.com",
       "role": "초기 역할",
       "action": "멤버 추가",
       "adding": "추가 중…",
-      "fromSearchTitle": "정확한 로그인 이메일 추가",
-      "fromSearchReady": "{{email}} 사용자를 워크스페이스 멤버로 추가합니다.",
-      "fromSearchHint": "위 입력란에 기존 활성 사용자의 전체 로그인 이메일을 입력하세요."
+      "fromSearchReady": "{{email}} 계정을 추가합니다.",
+      "fromSearchHint": "기존 계정을 추가하려면 정확한 계정 UUID 또는 native 로그인 이메일을 입력하세요.",
+      "title": "멤버 추가",
+      "selector": "사용자 ID 또는 계정 이메일",
+      "selectorPlaceholder": "사용자 ID 또는 name@example.com",
+      "identityHint": "계정에 등록된 이메일을 정확히 입력하세요. 이메일이 없는 계정은 사용자 ID로 추가합니다.",
+      "description": "이 워크스페이스를 함께 사용할 기존 계정을 추가합니다.",
+      "methods": "멤버 추가 방법",
+      "directTab": "직접 입력",
+      "close": "멤버 추가 닫기",
+      "workspaceScope": "추가하면 워크스페이스 전체에 접근할 수 있습니다. 처음 공유할 때는 한 번 더 확인합니다."
     },
     "filters": {
-      "query": "멤버 찾기 또는 추가",
-      "queryPlaceholder": "이름 또는 정확한 로그인 이메일",
-      "queryHelp": "현재 멤버 목록을 검색합니다. 전체 로그인 이메일을 입력하면 같은 입력란에서 멤버를 추가할 수 있습니다.",
+      "query": "현재 멤버 검색",
+      "queryPlaceholder": "이름 또는 계정 이메일",
+      "queryHelp": "이미 이 워크스페이스에 접근할 수 있는 멤버를 검색합니다.",
       "role": "역할 필터",
       "search": "검색",
       "active": "표시 중: {{query}} · {{role}}",
-      "anyQuery": "모든 멤버"
+      "anyQuery": "모든 멤버",
+      "title": "현재 멤버"
     },
     "empty": {
       "title": "일치하는 멤버가 없습니다",
@@ -199,7 +206,25 @@
       "confirmSelfDemote": "소유자 권한 포기",
       "confirmOwner": "소유자 권한 부여",
       "confirmRemove": "멤버 제거"
-    }
+    },
+    "directory": {
+      "title": "회사 디렉터리",
+      "hint": "회사 SSO 연동과 디렉터리 검색이 허용된 경우에만 표시됩니다.",
+      "loading": "회사 계정 검색 중…",
+      "add": "{{name}} 추가",
+      "refine": "일치하는 계정이 더 있습니다. 검색 범위를 좁혀 주세요.",
+      "query": "같은 회사에서 이름 검색",
+      "queryPlaceholder": "2자 이상 입력",
+      "search": "디렉터리 검색",
+      "empty": "검색어와 일치하는 회사 계정이 없습니다.",
+      "verified": "회사 계정 확인됨",
+      "resultCount": "검색 결과 {{count}}명",
+      "distinguish": "동명이인은 사용자 ID로 구분하세요.",
+      "addAction": "추가",
+      "verifiedShort": "회사 계정 확인됨"
+    },
+    "userIdFor": "{{name}}의 전체 사용자 ID",
+    "removeFor": "{{name}} 멤버 제거"
   },
   "workspaceAccess": {
     "title": "검색 노출, 가입 및 웹 게시",
@@ -1059,7 +1084,7 @@
     "serverAdminOnlyNotice": "사용자 검색과 계정 복구는 서버 관리자만 볼 수 있습니다.",
     "eyebrow": "서버 관리",
     "title": "계정 복구",
-    "description": "인스턴스 사용자를 찾아 일회용 복구 절차를 시작합니다. 관리자는 사용자의 새 비밀번호를 정하거나 볼 수 없습니다.",
+    "description": "계정을 찾아 SSO 계정을 다시 연결하거나 이메일 로그인 비밀번호 복구를 도와주세요.",
     "serverAdminOnly": "서버 관리자 전용",
     "boundary": "재설정이 완료되면 사용자의 모든 브라우저 세션이 종료됩니다. PAT/MCP 토큰은 별도 자격 증명이며 아래에서 선택한 경우에만 폐기됩니다.",
     "unlock": {
@@ -1071,10 +1096,10 @@
       "unlocked": "{{date}}까지 보호된 사용자 검색을 사용할 수 있습니다.",
       "shortTime": "짧은 확인 시간이 끝날 때",
       "error": "비밀번호를 확인하지 못했습니다. 다시 시도하세요.",
-      "expired": "최근 본인 확인이 만료되었습니다. 사용자를 다시 검색하려면 비밀번호를 입력하세요."
+      "expired": "최근 본인 인증이 만료되었습니다. 사용자를 다시 검색하려면 본인 인증을 다시 진행하세요."
     },
     "searchLabel": "사용자 검색",
-    "searchHint": "이메일, 표시 이름 또는 워크스페이스 이름",
+    "searchHint": "이름·계정 이메일·사용자 ID·워크스페이스",
     "searchPlaceholder": "예: alex@example.com 또는 연구",
     "searchAction": "검색",
     "searching": "검색 중…",
@@ -1110,7 +1135,7 @@
     "mailUnavailableActionHint": "서버의 메일 복구 준비가 완료되지 않아 이메일 전달을 사용할 수 없습니다.",
     "capabilityLoading": "서버 복구 가능 여부를 확인하는 중…",
     "capabilityError": "복구 가능 여부를 확인하지 못했습니다. 재설정을 발급하기 전에 페이지를 새로고침하세요.",
-    "adminRecoveryUnavailable": "공식 HTTPS 공개 URL이 준비될 때까지 관리자 지원 복구를 사용할 수 없습니다.",
+    "adminRecoveryUnavailable": "이메일 로그인 비밀번호 복구 링크에는 공식 HTTPS 공개 URL이 필요합니다. SSO 계정은 계속 다시 연결할 수 있습니다.",
     "emailQueued": "{{email}} 주소로 보낼 복구 메일을 대기열에 추가했습니다.",
     "linkMissing": "서버가 복구 링크를 반환하지 않았습니다. 새 재설정을 발급하세요.",
     "linkDismissed": "일회용 링크를 숨겼습니다. 다른 링크가 필요하면 새 재설정을 발급하세요.",
@@ -1155,6 +1180,69 @@
       "reauthentication": "현재 비밀번호가 올바르지 않습니다. 다시 시도하세요.",
       "unavailable": "이 전달 방법을 사용할 수 없습니다. 창을 닫고 사용 가능한 복구 작업을 명시적으로 선택하세요.",
       "generic": "비밀번호 재설정을 발급하지 못했습니다. 다시 시도하세요."
+    },
+    "rebind": {
+      "action": "SSO identity 다시 연결",
+      "title": "선택한 계정의 SSO identity 다시 연결",
+      "warning": "먼저 조직의 별도 신뢰할 수 있는 절차로 본인과 새 identity를 확인하세요. 선택한 SSO identity를 변경하고 기존 세션을 무효화합니다. 임시 로그인 링크를 만들거나 native 이메일 로그인을 변경하지 않습니다.",
+      "noEmail": "등록된 계정 이메일이 없는 SSO 계정입니다. 이메일 복구 대신 identity 재연결로 복구하세요.",
+      "currentIdentity": "현재 SSO identity",
+      "provider": "새 제공자 slug",
+      "issuer": "새 issuer",
+      "subject": "새 subject",
+      "reason": "변경 이유와 별도 본인 확인 근거",
+      "confirmUser": "확인하려면 대상 계정 UUID를 입력하세요",
+      "complete": "선택한 SSO identity를 다시 연결하고 기존 세션을 무효화했습니다.",
+      "failed": "SSO identity를 다시 연결하지 못했습니다. 관리자 본인 확인과 identity 정보를 확인하세요."
+    },
+    "optionsSummary": "복구 방법과 세션에 미치는 영향",
+    "conflicts": {
+      "title": "이메일 충돌로 대기 중인 SSO 가입",
+      "description": "제공자가 확인한 주소를 이메일 확인을 마치지 않은 기존 계정이 사용하고 있어 계정을 만들지 않았습니다. 승인하면 그 계정을 비활성화하고 주소를 해제합니다. 데이터는 보존됩니다. 서버 관리자 계정은 목록에 나오지 않습니다.",
+      "load": "대기 중인 요청 보기",
+      "empty": "대기 중인 요청이 없습니다.",
+      "requester": "{{provider}}로 요청함 (subject {{subject}})",
+      "holder": "현재 사용 계정: {{name}} ({{status}})",
+      "reason": "사유와 확인 방법",
+      "approve": "주소 해제",
+      "reject": "기존 계정 유지",
+      "failed": "요청을 불러오거나 처리하지 못했습니다. 다시 시도하세요."
+    },
+    "audit": {
+      "title": "서버 감사 기록",
+      "description": "계정·자격 증명·서버 관리자 권한 변경과 운영자 CLI 작업 기록입니다. 서버 관리자만 볼 수 있으며, 조회한 사실도 기록됩니다.",
+      "actionPrefix": "작업 접두어",
+      "targetUserId": "대상 사용자 UUID",
+      "load": "기록 보기",
+      "more": "더 보기",
+      "empty": "조건에 맞는 기록이 없습니다.",
+      "actor": "실행: {{actor}}",
+      "failed": "감사 기록을 불러오지 못했습니다. 다시 시도하세요."
+    },
+    "accountCard": {
+      "details": "계정 정보 보기",
+      "actions": "{{name}} 계정 작업",
+      "noEmail": "등록된 계정 이메일 없음",
+      "shortId": "ID",
+      "copyId": "{{name}} 전체 사용자 ID 복사",
+      "copied": "사용자 ID를 복사했습니다.",
+      "copyUnavailable": "복사할 수 없습니다. 계정 정보에서 전체 ID를 복사하세요.",
+      "sso": "SSO",
+      "noSso": "연결 없음",
+      "workspaces": "워크스페이스"
+    },
+    "accountDetails": {
+      "title": "계정 정보",
+      "close": "계정 정보 닫기",
+      "displayName": "표시 이름",
+      "userId": "사용자 ID",
+      "email": "계정 이메일",
+      "emailVerifiedAt": "이메일 검증 시각",
+      "status": "상태",
+      "provider": "제공자",
+      "issuer": "발급자",
+      "subject": "주체 식별자",
+      "identityId": "연결 ID"
     }
   },
   "jobs": {

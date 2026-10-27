@@ -30,7 +30,6 @@ describe("Settings account recovery surfaces", () => {
     expect(
       await screen.findByRole("heading", { name: "Account recovery" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Server admin only")).toBeInTheDocument();
   });
 
   it("hides the User accounts tab and gates a direct link for a non-admin", async () => {

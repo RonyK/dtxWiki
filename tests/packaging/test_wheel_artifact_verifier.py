@@ -576,6 +576,7 @@ def test_verifier_rejects_missing_or_rewritten_historical_release_mappings(tmp_p
         ("0.1.4", "19db79d3e622"),
         ("0.1.4", None),
     ):
+
         def rewrite(stage, release=release, head=head):
             path = stage / "backend/migrations/release_manifest.json"
             payload = json.loads(path.read_text())

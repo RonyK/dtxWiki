@@ -12,6 +12,7 @@ from alembic.script import ScriptDirectory
 from backend.app import versioning
 from backend.app.data_dir import db_dir, logs_dir
 from backend.app.db import make_engine, make_session_factory
+from backend.app.plugins import load_plugins
 from backend.app.settings import Settings
 from backend.services.ops import runtime_lock
 from backend.services.ops.migration_preflight import (
@@ -82,6 +83,7 @@ def bootstrap_core(settings: Settings) -> None:
     validation belongs to the init entry; explicit maintenance may legitimately
     enable migrations even when production serving forbids auto-bootstrap.
     """
+    registry = load_plugins(settings)
     settings.validate_session_secret_invariant()
     if not settings.auto_bootstrap:
         logger.info("auto_bootstrap=false; verifying the database without migrating")
@@ -89,6 +91,7 @@ def bootstrap_core(settings: Settings) -> None:
         return
     ensure_data_dirs()
     ensure_app_version_synced(settings)
+    registry.migrate(settings, allow_upgrade=True)
 
 
 def _hold_runtime_lock(app) -> runtime_lock.RuntimeLock | None:
@@ -251,6 +254,7 @@ def verify_database_current(
             "implicitly when DTXWIKI_AUTO_BOOTSTRAP is false. Back up the "
             "database, then run 'dtxwiki bootstrap' (see DEPLOYMENT.md)."
         )
+    load_plugins(settings).migrate(settings, allow_upgrade=False)
 
 
 def _blocked_refusal(

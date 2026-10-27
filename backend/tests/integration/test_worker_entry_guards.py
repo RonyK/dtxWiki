@@ -312,8 +312,8 @@ def test_sigterm_during_a_job_releases_it_without_charging_a_retry(
     factory = make_session_factory_from_settings(Settings(database_url=database_url))
     created_at = datetime(2026, 1, 1, tzinfo=UTC)
 
-    def _seed_with_the_queued_job_first(database_provider, settings):
-        seed_due_jobs(database_provider, settings)
+    def _seed_with_the_queued_job_first(database_provider, settings, history_state):
+        seed_due_jobs(database_provider, settings, history_state)
         with factory.begin() as session:
             for job in session.scalars(select(Job).where(Job.job_type == "lint_tick")):
                 job.created_at = (

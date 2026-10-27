@@ -21,6 +21,7 @@ import {
   logout as logoutRequest,
   type AuthSession,
   type AuthUser,
+  type LoginMethod,
 } from "../api/auth";
 import { clearPersistedWorkspaceId, invalidateWorkspaceListCache } from "../api/workspace";
 import { setTreeFavoriteActor } from "../api/treeFavorites";
@@ -40,6 +41,9 @@ type AuthContextValue = {
   sessionError: string | null;
   capabilitiesChecked: boolean;
   signupEnabled: boolean;
+  passwordLoginEnabled: boolean;
+  emailEnrollmentEnabled: boolean;
+  loginMethods: LoginMethod[];
   passwordRecoveryMode: PasswordRecoveryMode;
   passwordRecoveryAdminAssisted: boolean;
   capabilitiesError: string | null;
@@ -69,6 +73,9 @@ export function AuthProvider({
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [capabilitiesChecked, setCapabilitiesChecked] = useState(false);
   const [signupEnabled, setSignupEnabled] = useState(false);
+  const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(true);
+  const [emailEnrollmentEnabled, setEmailEnrollmentEnabled] = useState(false);
+  const [loginMethods, setLoginMethods] = useState<LoginMethod[]>([]);
   const [passwordRecoveryMode, setPasswordRecoveryMode] =
     useState<PasswordRecoveryMode>("disabled");
   const [passwordRecoveryAdminAssisted, setPasswordRecoveryAdminAssisted] =
@@ -170,12 +177,17 @@ export function AuthProvider({
     // form visible after the server disables self-service registration.
     setCapabilitiesChecked(false);
     setSignupEnabled(false);
+    setEmailEnrollmentEnabled(false);
+    setLoginMethods([]);
     setPasswordRecoveryMode("disabled");
     setPasswordRecoveryAdminAssisted(false);
     setCapabilitiesError(null);
     try {
       const capabilities = await getAuthCapabilities();
       setSignupEnabled(capabilities.signup_enabled === true);
+      setPasswordLoginEnabled(capabilities.password_login?.enabled ?? true);
+      setEmailEnrollmentEnabled(capabilities.password_login?.email_enrollment_enabled === true);
+      setLoginMethods(capabilities.login_methods ?? []);
       setPasswordRecoveryMode(
         capabilities.password_recovery?.mode ?? "disabled",
       );
@@ -186,6 +198,7 @@ export function AuthProvider({
       return capabilities.signup_enabled === true;
     } catch (error) {
       setSignupEnabled(false);
+      setLoginMethods([]);
       setPasswordRecoveryMode("disabled");
       setPasswordRecoveryAdminAssisted(false);
       setCapabilitiesChecked(true);
@@ -289,6 +302,9 @@ export function AuthProvider({
       sessionError,
       capabilitiesChecked,
       signupEnabled,
+      passwordLoginEnabled,
+      emailEnrollmentEnabled,
+      loginMethods,
       passwordRecoveryMode,
       passwordRecoveryAdminAssisted,
       capabilitiesError,
@@ -310,6 +326,9 @@ export function AuthProvider({
       signOut,
       status,
       signupEnabled,
+      passwordLoginEnabled,
+      emailEnrollmentEnabled,
+      loginMethods,
       passwordRecoveryMode,
       passwordRecoveryAdminAssisted,
       user,

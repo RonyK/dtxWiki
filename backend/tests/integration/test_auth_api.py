@@ -125,14 +125,20 @@ def test_auth_capabilities_exposes_effective_signup_and_recovery_policy(page_ser
     assert solo_local.json()["data"] == {
         "signup_enabled": True,
         "password_recovery": {"mode": "disabled", "admin_assisted": False},
+        "password_login": {"enabled": True, "email_enrollment_enabled": False},
+        "login_methods": [],
     }
     assert team_default.json()["data"] == {
         "signup_enabled": False,
         "password_recovery": {"mode": "disabled", "admin_assisted": False},
+        "password_login": {"enabled": True, "email_enrollment_enabled": False},
+        "login_methods": [],
     }
     assert team_explicit.json()["data"] == {
         "signup_enabled": True,
         "password_recovery": {"mode": "disabled", "admin_assisted": False},
+        "password_login": {"enabled": True, "email_enrollment_enabled": False},
+        "login_methods": [],
     }
     assert solo_local.headers["cache-control"] == "no-store"
     assert solo_local.headers["pragma"] == "no-cache"
@@ -157,6 +163,7 @@ def test_signup_sets_session_cookie_and_me_returns_user(page_service):
     data = response.json()["data"]
     assert data["user"]["email"] == "user@example.com"
     assert data["user"]["display_name"] == "Example User"
+    assert data["user"]["username"] != data["user"]["display_name"]
     assert "session_token" not in data
 
     me = client.get("/api/v1/auth/me")
@@ -168,6 +175,7 @@ def test_signup_sets_session_cookie_and_me_returns_user(page_service):
     # is_server_admin) that the signup response leaves at schema defaults;
     # compare the user identity rather than the whole payload (merged I5).
     assert me_data["user_id"] == data["user"]["user_id"]
+    assert me_data["username"] == data["user"]["username"]
     assert me_data["email"] == data["user"]["email"]
     assert me_data["display_name"] == data["user"]["display_name"]
     assert me_data["status"] == data["user"]["status"]
@@ -289,7 +297,7 @@ def test_omitted_remember_me_fails_closed_to_a_browser_session(page_service):
     assert token is not None
     verified = client.app.state.session_service.token_codec.verify_session(token)
     assert verified.remember_me is False
-    assert verified.authenticated_at is None
+    assert verified.authenticated_at is not None
     # The 3600s ordinary ttl, not the 100s remembered one.
     assert verified.expires_at - issued_at == timedelta(seconds=3600)
 
@@ -368,15 +376,17 @@ def test_remembered_refresh_emits_a_renewal_audit_event(page_service):
         )
     assert event is not None
     assert event.workspace_id is None
-    assert event.payload["previous_expires_at"] == (
-        datetime(2030, 6, 1, tzinfo=UTC) + timedelta(seconds=100)
-    ).isoformat()
-    assert event.payload["expires_at"] == (
-        clock[0] + timedelta(seconds=100)
-    ).isoformat()
-    assert event.payload["authenticated_at"] == datetime(
-        2030, 6, 1, tzinfo=UTC
-    ).isoformat()
+    assert (
+        event.payload["previous_expires_at"]
+        == (datetime(2030, 6, 1, tzinfo=UTC) + timedelta(seconds=100)).isoformat()
+    )
+    assert (
+        event.payload["expires_at"] == (clock[0] + timedelta(seconds=100)).isoformat()
+    )
+    assert (
+        event.payload["authenticated_at"]
+        == datetime(2030, 6, 1, tzinfo=UTC).isoformat()
+    )
 
 
 def test_unrecordable_renewal_keeps_the_presented_cookie(page_service):
@@ -581,10 +591,13 @@ def test_signup_marks_session_cookie_secure_for_forwarded_https(page_service):
 def test_signup_rejects_duplicate_email(page_service):
     client = make_client(page_service)
 
-    assert client.post(
-        "/api/v1/auth/signup",
-        json={"email": "same@example.com", "password": "first-password-123"},
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/auth/signup",
+            json={"email": "same@example.com", "password": "first-password-123"},
+        ).status_code
+        == 201
+    )
     duplicate = client.post(
         "/api/v1/auth/signup",
         json={"email": " SAME@example.com ", "password": "second-password-123"},
@@ -823,7 +836,7 @@ def test_password_change_preserves_session_only_cookie_policy(page_service):
         changed_token
     )
     assert verified.remember_me is False
-    assert verified.authenticated_at is None
+    assert verified.authenticated_at is not None
 
 
 def test_password_reset_confirm_is_single_use_and_does_not_auto_login(page_service):
@@ -856,15 +869,32 @@ def test_password_reset_confirm_is_single_use_and_does_not_auto_login(page_servi
     assert confirmed.headers["pragma"] == "no-cache"
     assert "dtxwiki_session=" in confirmed.headers["set-cookie"]
     assert "Max-Age=0" in confirmed.headers["set-cookie"]
+    proof_cookies = confirmed.headers.get_list("set-cookie")
+    assert any(
+        "dtxwiki_session_reauth_account=" in value
+        and "Path=/api/v1/auth" in value
+        and "Max-Age=0" in value
+        for value in proof_cookies
+    )
+    assert any(
+        "dtxwiki_session_reauth=" in value and "Path=/api/v1/admin" in value
+        for value in proof_cookies
+    )
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"email": "reset-web@example.com", "password": "original-password"},
-    ).status_code == 401
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"email": "reset-web@example.com", "password": "replacement-password"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "reset-web@example.com", "password": "original-password"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "reset-web@example.com", "password": "replacement-password"},
+        ).status_code
+        == 200
+    )
 
     reused = client.post(
         "/api/v1/auth/password-reset/confirm",
@@ -895,6 +925,10 @@ def test_logout_revokes_presented_session_cookie(page_service):
 
     logout = client.post("/api/v1/auth/logout")
     assert logout.status_code == 200
+    assert any(
+        "dtxwiki_session_reauth_account=" in value and "Max-Age=0" in value
+        for value in logout.headers.get_list("set-cookie")
+    )
 
     stolen_me = stolen_client.get("/api/v1/auth/me")
     assert stolen_me.status_code == 401
@@ -1175,9 +1209,7 @@ def test_user_tokens_paginate_filter_and_delete_record(page_service, api_token_c
     # /record accepts an inactive token -- expired or revoked, matching the
     # deleted workspace-scoped delete_inactive_token's contract exactly. Only
     # a still-active token 422s.
-    active_delete = client.delete(
-        f"{base_url}/{active[0]['api_token']['id']}/record"
-    )
+    active_delete = client.delete(f"{base_url}/{active[0]['api_token']['id']}/record")
     assert active_delete.status_code == 422
     assert active_delete.json()["error_code"] == "invalid_api_token_request"
 
@@ -1248,9 +1280,7 @@ def test_user_tokens_cursor_traverses_more_than_one_default_page_exactly_once(
     assert signup.status_code == 201
     now = utc_now()
     with page_service.session_factory.begin() as session:
-        user = session.scalar(
-            select(User).where(User.email == "many-keys@example.com")
-        )
+        user = session.scalar(select(User).where(User.email == "many-keys@example.com"))
         assert user is not None
         assert user.default_workspace_id is not None
         rows = []
@@ -1409,9 +1439,9 @@ def test_password_change_wrong_guess_is_rate_limited_and_audited(page_service):
     assert len(failed_events) == 1
     assert failed_events[0].payload == {"reason": "invalid_credentials"}
 
-    # Signup already consumed one slot for this email; burn the rest of the
-    # per-email budget (one more consumed above) with further wrong guesses.
-    for _ in range(AUTH_RATE_LIMIT_PER_EMAIL - 2):
+    # Authenticated quotas are keyed by user UUID, separate from anonymous
+    # signup email quotas. Burn the remaining account budget.
+    for _ in range(AUTH_RATE_LIMIT_PER_EMAIL - 1):
         attempt = client.post(
             "/api/v1/auth/password",
             json={
@@ -1437,7 +1467,7 @@ def test_password_change_wrong_guess_is_rate_limited_and_audited(page_service):
     failed_events = _password_change_failure_events(page_service)
     reasons = [event.payload.get("reason") for event in failed_events]
     assert reasons.count("rate_limited") == 1
-    assert reasons.count("invalid_credentials") == AUTH_RATE_LIMIT_PER_EMAIL - 1
+    assert reasons.count("invalid_credentials") == AUTH_RATE_LIMIT_PER_EMAIL
 
 
 def test_session_lifecycle_audit_is_system_scoped_not_workspace_scoped(page_service):

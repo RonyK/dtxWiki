@@ -26,7 +26,7 @@ export type WorkspaceJoinRequestItem = {
   request_id: string;
   workspace_id: string;
   requester_user_id: string;
-  requester_email: string;
+  requester_email: string | null;
   requester_display_name: string;
   status: WorkspaceDirectoryRequestStatus;
   attempt_no: number;

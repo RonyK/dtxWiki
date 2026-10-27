@@ -1,7 +1,7 @@
 """Index review decision history and latest-decision lookups.
 
 Revision ID: 333a67e22cd7
-Revises: 5c3395a75eb0
+Revises: da94025713de
 Create Date: 2026-10-24 23:51:38.941386
 
 Why this index exists
@@ -56,7 +56,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "333a67e22cd7"
-down_revision = "5c3395a75eb0"
+down_revision = "da94025713de"
 branch_labels = None
 depends_on = None
 

@@ -71,7 +71,7 @@ def test_package_exposes_no_stdio_mcp_entry_point():
     assert "dtxwiki-mcp" not in project["project"]["scripts"]
 
 
-def test_version_does_not_start_server(monkeypatch):
+def test_version_does_not_start_server(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_main,
         "run_server",
@@ -82,6 +82,15 @@ def test_version_does_not_start_server(monkeypatch):
 
     assert result.exit_code == 0
     assert result.stdout.startswith("dtxwiki ")
+
+    # The installed entry point must preserve eager version reporting even
+    # when extension discovery cannot configure the serving process.
+    monkeypatch.setenv("DTXWIKI_PLUGINS", "missing_version_test_plugin")
+    monkeypatch.setattr(sys, "argv", ["dtxwiki", "--version"])
+    with pytest.raises(SystemExit) as stopped:
+        cli_main.main()
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out.startswith("dtxwiki ")
 
 
 def test_root_invocation_accepts_serve_options(monkeypatch):
@@ -469,13 +478,21 @@ def test_workspace_members_add_list_and_remove(tmp_path):
     assert listed.exit_code == 0
     assert json.loads(listed.stdout)[0]["role"] == "viewer"
 
+    # Reuse the same traversal to exercise email-less UUID targeting through
+    # Typer parsing and both service wrappers, without another DB/test case.
+    with session_factory.begin() as session:
+        target = session.scalar(select(User).where(User.email == "member@example.com"))
+        target_id = str(target.id)
+        target.email = target.password_hash = None
+
     promoted = runner.invoke(
         cli_main.app,
         [
             "workspace",
             "members",
             "add",
-            "member@example.com",
+            "--user-id",
+            target_id,
             "--workspace",
             "default",
             "--role",
@@ -487,6 +504,15 @@ def test_workspace_members_add_list_and_remove(tmp_path):
     )
     assert promoted.exit_code == 0
     assert json.loads(promoted.stdout)["role"] == "editor"
+    # Text output must still name an email-less member by its UUID selector.
+    text_listed = runner.invoke(
+        cli_main.app,
+        [
+            *("workspace", "members", "list", "--workspace", "default"),
+            *("--db", database_url),
+        ],
+    )
+    assert f"{target_id} (no email) role=editor" in text_listed.stdout
 
     removed = runner.invoke(
         cli_main.app,
@@ -494,7 +520,8 @@ def test_workspace_members_add_list_and_remove(tmp_path):
             "workspace",
             "members",
             "remove",
-            "member@example.com",
+            "--user-id",
+            target_id,
             "--workspace",
             "default",
             "--db",

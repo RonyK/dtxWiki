@@ -31,7 +31,8 @@ INITIAL_REVISION = "bd62193d5cf6"
 CORE_REVISION = "efcbcf724889"
 RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "ef53a0a7061c"
-PERSONAL_WORKSPACE_POINTER_REVISION = "5c3395a75eb0"
+PERSONAL_POINTER_REVISION = "5c3395a75eb0"
+EXTERNAL_LOGIN_REVISION = "da94025713de"
 CURRENT_HEAD = "333a67e22cd7"
 ALEMBIC_REVISION_METADATA = {
     "revision",
@@ -76,8 +77,8 @@ def _revision_graph(script: ScriptDirectory) -> dict[str, object]:
     }
 
 
-def test_graph_has_one_release_revision_after_the_frozen_boundaries():
-    """Keep each release boundary immutable as new schema revisions extend it."""
+def test_graph_preserves_released_boundaries_and_appends_current_head():
+    """Unreleased changes append after immutable published schema boundaries."""
 
     script = _script_directory()
     graph = _revision_graph(script)
@@ -90,8 +91,9 @@ def test_graph_has_one_release_revision_after_the_frozen_boundaries():
         CORE_REVISION: INITIAL_REVISION,
         RELEASE_013_REVISION: CORE_REVISION,
         RELEASE_014_REVISION: RELEASE_013_REVISION,
-        PERSONAL_WORKSPACE_POINTER_REVISION: RELEASE_014_REVISION,
-        CURRENT_HEAD: PERSONAL_WORKSPACE_POINTER_REVISION,
+        PERSONAL_POINTER_REVISION: RELEASE_014_REVISION,
+        EXTERNAL_LOGIN_REVISION: PERSONAL_POINTER_REVISION,
+        CURRENT_HEAD: EXTERNAL_LOGIN_REVISION,
     }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())

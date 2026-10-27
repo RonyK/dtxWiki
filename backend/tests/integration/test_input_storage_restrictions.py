@@ -32,6 +32,7 @@ from backend.services.ops.input_maintenance import (
 )
 
 PRE_INPUT_REVISION = "efcbcf724889"
+CURRENT_HEAD = "333a67e22cd7"
 
 
 def _database(tmp_path, revision=PRE_INPUT_REVISION):
@@ -269,7 +270,15 @@ def test_email_repair_atomically_revokes_recovery_and_pending_mail(tmp_path):
         with pytest.raises(runtime_lock.RuntimeLockHeldError):
             repair_input(url, "user", identity, "display_name", "blocked")
     # A failed multi-path acquisition must release any earlier path guards.
-    repair_input(url, "user", identity, "display_name", "Unlocked")
+    repair_input(url, "user", identity, "display_name", "Unlocked", actor_id="cli:op")
+    with engine.connect() as connection:
+        # Each committed operator change is in server-admin-only history.
+        assert connection.execute(
+            sa.text(
+                "SELECT actor_id, workspace_id FROM audit_event "
+                "WHERE action='auth.user.repaired' ORDER BY created_at"
+            )
+        ).all() == [("system", None), ("cli:op", None)]
     with engine.begin() as connection:
         _user(connection, email="occupied@example.test")
     with pytest.raises(DBAPIError):

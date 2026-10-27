@@ -75,14 +75,18 @@ def test_cli_user_creation_rolls_back_when_personal_provisioning_fails(
 
 def test_admin_password_reset_rolls_back_when_audit_fails(session_factory):
     hasher = CredentialHasher()
+    # Account creation is audited too; create the target with a working audit
+    # sink so only the reset below meets the failure.
+    created = UserAdminService(
+        session_factory=session_factory, credential_hasher=hasher
+    ).add_user(
+        email="rollback@example.com",
+        password="original-password",
+    )
     service = UserAdminService(
         session_factory=session_factory,
         credential_hasher=hasher,
         audit_service=_FailingAuditService(),
-    )
-    created = service.add_user(
-        email="rollback@example.com",
-        password="original-password",
     )
 
     with pytest.raises(RuntimeError, match="simulated audit failure"):

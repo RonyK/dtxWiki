@@ -91,6 +91,9 @@ const VerifyEmailScreen = lazy(() =>
     default: module.VerifyEmailScreen,
   })),
 );
+const IdentityVerificationScreen = lazy(() =>
+  import("../features/auth/IdentityVerificationScreen").then((module) => ({ default: module.IdentityVerificationScreen })),
+);
 const ContextScreen = lazy(() =>
   import("../features/context/ContextScreen").then((module) => ({ default: module.ContextScreen })),
 );
@@ -162,6 +165,7 @@ export const appRoutes = createRoutesFromElements(
       <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
       <Route path="/reset-password" element={<ResetPasswordScreen />} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
+      <Route path="/auth/verify" element={<IdentityVerificationScreen />} />
       <Route
         path="/account"
         element={
@@ -508,6 +512,7 @@ export function isAuthBootstrapPath(pathname: string) {
     "/forgot-password",
     "/reset-password",
     "/verify-email",
+    "/auth/verify",
   ].includes(normalized);
 }
 
