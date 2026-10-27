@@ -1,11 +1,12 @@
 import { codePointLength, inputTextError, textInputLimit } from "../lib/inputPolicy";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { FileText, Folder } from "lucide-react";
 
 import { AdvancedSection } from "./AdvancedSection";
 import { StatusPill } from "./StatusPill";
-import type { TreeNodePayload } from "../api/workspace";
+import type { TreeIndexPreview, TreeNodePayload } from "../api/workspace";
 
 const NAV_SUMMARY_MAX = 160;
 
@@ -42,9 +43,8 @@ export interface FolderSummaryCardProps {
   emptyLabel?: string;
   canEdit?: boolean;
   onSaveNavSummary?: (navSummary: string | null) => Promise<void>;
-  /** collapsible index preview: how the folder renders for agents. */
-  loadIndexPreview?: () => Promise<string>;
-  renderMarkdown?: (markdown: string) => React.ReactNode;
+  /** collapsible index preview: the rows agents read, linked for people. */
+  loadIndexPreview?: () => Promise<TreeIndexPreview>;
   footer?: React.ReactNode;
   /**
    * Optional totals for a caller that renders only one paginated child slice.
@@ -64,7 +64,6 @@ export function FolderSummaryCard({
   canEdit = false,
   onSaveNavSummary,
   loadIndexPreview,
-  renderMarkdown,
   footer,
   totalChildCounts,
 }: FolderSummaryCardProps) {
@@ -90,45 +89,43 @@ export function FolderSummaryCard({
     setSaveError(null);
   }, [node.id, node.nav_summary]);
 
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  // Refs, not state/deps: parent re-renders pass a fresh loadIndexPreview
-  // closure every time — an effect keyed on it would refire in-flight (or
-  // failed) fetches, and a cleanup-based cancel would drop the result of
-  // the request it just started.
-  const previewRequestedRef = useRef(false);
-  const previewNodeRef = useRef(node.id);
+  // The preview belongs to the node it was opened for, so selecting another
+  // node closes it and hides an earlier node's rows without an effect.
+  const [openNodeId, setOpenNodeId] = useState<string | null>(null);
+  const previewOpen = openNodeId === node.id;
+  const [previewState, setPreviewState] = useState<{
+    nodeId: string;
+    data: TreeIndexPreview | null;
+    failed: boolean;
+  } | null>(null);
+  const [previewReload, setPreviewReload] = useState(0);
+  // Parent re-renders pass a fresh loadIndexPreview closure every time; read
+  // it through a ref so only opening, a tree change or an explicit refresh
+  // fetches. Each request is numbered and only the latest may apply.
+  const loadPreviewRef = useRef(loadIndexPreview);
   useEffect(() => {
-    previewNodeRef.current = node.id;
-    previewRequestedRef.current = false;
-    setPreviewOpen(false);
-    setPreview(null);
-    setPreviewError(null);
-  }, [node.id]);
+    loadPreviewRef.current = loadIndexPreview;
+  });
+  const previewRequestRef = useRef(0);
   useEffect(() => {
-    if (!previewOpen || previewRequestedRef.current || !loadIndexPreview) {
-      return;
-    }
-    previewRequestedRef.current = true;
-    const requestedNode = node.id;
-    loadIndexPreview()
-      .then((markdown) => {
-        if (previewNodeRef.current === requestedNode) {
-          setPreview(markdown);
-          setPreviewError(null);
+    const load = loadPreviewRef.current;
+    if (!previewOpen || !load) return;
+    const request = ++previewRequestRef.current;
+    const nodeId = node.id;
+    load().then(
+      (data) => {
+        if (previewRequestRef.current === request) {
+          setPreviewState({ nodeId, data, failed: false });
         }
-      })
-      .catch(() => {
-        if (previewNodeRef.current === requestedNode) {
-          setPreviewError(
-            t("navSummary.previewError", {
-              defaultValue: "Could not load the index preview.",
-            }),
-          );
+      },
+      () => {
+        if (previewRequestRef.current === request) {
+          setPreviewState({ nodeId, data: null, failed: true });
         }
-      });
-  }, [previewOpen, loadIndexPreview, node.id, t]);
+      },
+    );
+  }, [previewOpen, node.id, nodes, previewReload]);
+  const preview = previewState?.nodeId === node.id ? previewState : null;
 
   const isFolder = node.node_kind === "folder";
   const submit = async () => {
@@ -254,20 +251,55 @@ export function FolderSummaryCard({
           label={t("navSummary.previewTitle", {
             defaultValue: "Index preview",
           })}
-          onOpenChange={setPreviewOpen}
+          onOpenChange={(open) => setOpenNodeId(open ? node.id : null)}
           open={previewOpen}
         >
-          {previewError ? (
-            <p className="form-error">{previewError}</p>
-          ) : preview === null ? (
+          {preview?.failed ? (
+            <p className="form-error">
+              {t("navSummary.previewError", {
+                defaultValue: "Could not load the index preview.",
+              })}
+            </p>
+          ) : !preview?.data ? (
             <p className="folder-summary-fallback">
               {t("navSummary.previewLoading", { defaultValue: "Loading…" })}
             </p>
-          ) : renderMarkdown ? (
-            renderMarkdown(preview)
           ) : (
-            <pre className="folder-index-preview">{preview}</pre>
+            <div className="folder-index-preview">
+              <ul>
+                {preview.data.entries.map((entry) => (
+                  <li key={`${entry.kind}:${entry.id}`}>
+                    {entry.href ? (
+                      <Link to={entry.href}>
+                        {entry.title}
+                        {entry.kind === "folder" ? "/" : ""}
+                      </Link>
+                    ) : (
+                      entry.title
+                    )}
+                    {entry.kind === "folder" ? ` (${entry.count ?? 0})` : null}
+                    {entry.draft ? <StatusPill compact status="draft" /> : null}
+                    {entry.summary ? ` — ${entry.summary}` : null}
+                  </li>
+                ))}
+              </ul>
+              {preview.data.overflow > 0 ? (
+                <p className="folder-summary-fallback">
+                  {t("navSummary.previewOverflow", {
+                    count: preview.data.overflow,
+                    defaultValue: "…and {{count}} more",
+                  })}
+                </p>
+              ) : null}
+            </div>
           )}
+          <button
+            className="icon-button"
+            onClick={() => setPreviewReload((count) => count + 1)}
+            type="button"
+          >
+            {t("navSummary.previewRefresh", { defaultValue: "Refresh" })}
+          </button>
         </AdvancedSection>
       ) : null}
 

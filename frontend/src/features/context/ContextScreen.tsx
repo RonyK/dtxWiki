@@ -32,7 +32,6 @@ import { formatContextPageUrl } from "../../shared/lib/contextLinks";
 
 import { NotFoundScreen } from "../errors/NotFoundScreen";
 import { MarkdownView } from "../pages/MarkdownView";
-import { RoutingIndexPreview } from "../pages/RoutingIndexPreview";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
 import { ContextReconciliationWorkbench } from "./ContextReconciliationWorkbench";
 import { citationKeyForSource } from "../pages/editorCompletions";
@@ -1443,13 +1442,6 @@ export function ContextScreen() {
                   saveNavSummary(selectedNode, navSummary)
                 }
                 onSelectNode={selectNode}
-                renderMarkdown={(markdown) => (
-                  <RoutingIndexPreview
-                    body={markdown}
-                    nodes={state.tree}
-                    workspaceId={routeWorkspaceId}
-                  />
-                )}
               />
             ) : contextRoot ? (
               <>
@@ -1464,13 +1456,6 @@ export function ContextScreen() {
                   node={contextRoot}
                   nodes={state.tree}
                   onSelectNode={selectNode}
-                  renderMarkdown={(markdown) => (
-                    <RoutingIndexPreview
-                      body={markdown}
-                      nodes={state.tree}
-                      workspaceId={routeWorkspaceId}
-                    />
-                  )}
                 />
                 <RecentItemsList
                   kind="context"

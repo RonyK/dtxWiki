@@ -142,7 +142,9 @@
     "saveError": "Could not save the folder summary.",
     "previewTitle": "Index preview",
     "previewLoading": "Loading…",
-    "previewError": "Could not load the index preview."
+    "previewError": "Could not load the index preview.",
+    "previewRefresh": "Refresh",
+    "previewOverflow": "…and {{count}} more"
   },
   "favorite": {
     "add": "Add to my favorites",

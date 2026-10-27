@@ -150,7 +150,12 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        and drop concept_path/resource_uri. Page inputs share one locator
 #        grammar; Library lookup paths remain separate. Archived what_changed
 #        links are required-nullable. Refresh tool and result-schema caches.
-MCP_TOOL_CONTRACT_REVISION = 16
+#  17 -- get_index lines start with an internal dtxwiki://index/<kind>/<id>
+#        ref instead of Markdown links; get_index node and read_concept path
+#        accept those refs unchanged, other page inputs reject them. get_index
+#        with node and Library read_concept results add stable_url and
+#        link_markdown. Refresh tool and result-schema caches.
+MCP_TOOL_CONTRACT_REVISION = 17
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

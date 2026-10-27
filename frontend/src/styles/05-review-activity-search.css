@@ -1427,6 +1427,13 @@ a.search-result-row:focus-visible { outline: 2px solid var(--info); outline-offs
   padding: 12px;
   white-space: pre-wrap;
 }
+.folder-index-preview ul {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 
 /* Column labels for the Agent overview table. Same grid as a data row, muted,
    so the four values after the title stop being anonymous. */

@@ -1139,7 +1139,7 @@ def get_tree_node_index_preview(
                 actor=actor,
             )
             try:
-                markdown = build_routing_index(
+                document = build_routing_index(
                     session,
                     workspace_id,
                     actor=actor,
@@ -1149,7 +1149,24 @@ def get_tree_node_index_preview(
                 )
             except IndexNodeNotFoundError as exc:
                 raise ReadNotFoundError("tree node not found") from exc
-            return {"data": {"markdown": markdown}}
+            return {
+                "data": {
+                    "markdown": document.markdown,
+                    "entries": [
+                        {
+                            "kind": entry.kind,
+                            "id": entry.target_id,
+                            "title": entry.title,
+                            "href": entry.href(workspace_id),
+                            "summary": entry.summary,
+                            "count": entry.count,
+                            "draft": entry.draft,
+                        }
+                        for entry in document.entries
+                    ],
+                    "overflow": document.overflow,
+                }
+            }
     except ReadServiceError as exc:
         return read_service_error_response(exc)
 

@@ -1151,24 +1151,6 @@ describe("MarkdownView", () => {
     expect(publicDialog).not.toHaveTextContent(itemHref);
     expect(publicDialog).not.toHaveTextContent(itemId);
     expect(within(publicDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
-
-    // Folder index previews render agent-facing locators; links they cannot
-    // open stay plain text instead of claiming an unavailable reference.
-    rerender(
-      <MemoryRouter>
-        <MarkdownView
-          body={`* [Library item](${itemHref})\n* [Concept](/library/${itemId}.md)\n* [Node folder](node:/context/notes)`}
-          unresolvedLinksAsText
-          wikilinkMode="plain"
-        />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("Library item")).toBeInTheDocument();
-    expect(screen.getByText("Concept")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Concept" })).toHaveAttribute("href", `/library/${itemId}.md`);
-    expect(screen.getByRole("link", { name: "Node folder" })).toHaveAttribute("href", "node:/context/notes");
-    expect(screen.queryByRole("button", { name: /Library item|Concept/ })).toBeNull();
-    expect(document.querySelector(".unavailable-reference")).toBeNull();
   });
 
   it("prefixes fragments on confirmed internal links before sanitization", () => {

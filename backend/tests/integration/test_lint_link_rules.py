@@ -4,10 +4,17 @@ import pytest
 from sqlalchemy import select
 
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
+from backend.models.library import LibraryItem
 from backend.models.lint import LintFinding
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.lint import LintRunCreateRequest
+from backend.services.context_links import (
+    LinkContext,
+    editor_link_actor,
+    rewrite_links_with_report,
+)
+from backend.services.index_refs import format_index_ref
 from backend.services.lint import LintContext, LintRegistry
 from backend.services.lint.scopes import findings_for_target
 from backend.services.lint_service import LintService
@@ -56,7 +63,7 @@ def _check(session, rule_id, page):
 def test_unresolved_and_healthy_links(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
-        _page(session, workspace_id, "healthy-target", "Target.\n")
+        target, _ = _page(session, workspace_id, "healthy-target", "Target.\n")
         broken, _ = _page(
             session, workspace_id, "broken-source", "[[missing-target]]\n"
         )
@@ -71,6 +78,47 @@ def test_unresolved_and_healthy_links(session_factory):
         assert _check(session, "link.internal-noncanonical", broken) == []
         assert _check(session, "link.unresolved", healthy) == []
         assert _check(session, "link.internal-noncanonical", healthy) == []
+
+        # A copied index ref is system-internal: an existing target in this
+        # workspace becomes its canonical link on save, a missing one is
+        # reported instead of guessed.
+        # Other kinds use the reader's route checks, so the canonical Library
+        # route they become is itself a healthy link on the next analysis.
+        item = LibraryItem(
+            workspace_id=workspace_id,
+            connector_type="manual_upload",
+            uri="https://x/source",
+            title="Source",
+            trust_level="unknown",
+            lifecycle_status="ready",
+        )
+        session.add(item)
+        session.flush()
+        target_ref = format_index_ref("context", target.id)
+        item_ref = format_index_ref("library", item.id)
+        missing_ref = format_index_ref("library", uuid4())
+        ref_body = f"[target]({target_ref}) [src]({item_ref}) [gone]({missing_ref})\n"
+        ref_source, _ = _page(session, workspace_id, "index-ref-source", ref_body)
+        canonical = f"/p/{workspace_id}/{target.id}"
+        item_route = f"/workspaces/{workspace_id}/library/items/{item.id}"
+        assert {
+            finding.message_args["replacement"]
+            for finding in _check(session, "link.internal-noncanonical", ref_source)
+        } == {canonical, item_route}
+        [missing] = _check(session, "link.unresolved", ref_source)
+        assert missing.message_args["locator"] == missing_ref
+        writer = editor_link_actor("human", "test")
+        rewritten, _, _ = rewrite_links_with_report(
+            ref_body, LinkContext(session, workspace_id, writer)
+        )
+        assert rewritten == (
+            f"[target]({canonical}) [src]({item_route}) [gone]({missing_ref})\n"
+        )
+        routed, _ = _page(session, workspace_id, "typed-route-source", rewritten)
+        assert [
+            finding.message_args["locator"]
+            for finding in _check(session, "link.unresolved", routed)
+        ] == [missing_ref]
 
         # Queued RUN has an internal editor's shared-draft visibility, while
         # a caller-supplied interactive actor retains its narrower authority.

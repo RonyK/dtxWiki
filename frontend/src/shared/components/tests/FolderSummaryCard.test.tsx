@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import "../../i18n";
@@ -8,7 +9,7 @@ import {
   childNodesFor,
   nodeIdForPage,
 } from "../FolderSummaryCard";
-import type { TreeNodePayload } from "../../api/workspace";
+import type { TreeIndexPreview, TreeNodePayload } from "../../api/workspace";
 
 function node(overrides: Partial<TreeNodePayload> = {}): TreeNodePayload {
   return {
@@ -29,6 +30,23 @@ function node(overrides: Partial<TreeNodePayload> = {}): TreeNodePayload {
     children_count: 0,
     breadcrumb: [],
     ...overrides,
+  };
+}
+
+function preview(title: string): TreeIndexPreview {
+  const id = title.toLowerCase().replace(/ /g, "-");
+  return {
+    markdown: `- dtxwiki://index/context/${id} ${title}`,
+    entries: [{
+      kind: "context",
+      id,
+      title,
+      href: `/workspaces/ws-1/context/pages/${id}`,
+      summary: "",
+      count: null,
+      draft: false,
+    }],
+    overflow: 2,
   };
 }
 
@@ -117,40 +135,48 @@ describe("FolderSummaryCard", () => {
     );
   });
 
-  it("loads the index preview lazily when expanded", async () => {
+  it("loads the index preview lazily and keeps only the latest response", async () => {
     const user = userEvent.setup();
+    let resolveFirst: (value: TreeIndexPreview) => void = () => {};
     const loadPreview = vi
       .fn()
-      .mockResolvedValue("# index\n* [Doc](/context/doc.md)");
+      .mockImplementationOnce(
+        () => new Promise<TreeIndexPreview>((resolve) => (resolveFirst = resolve)),
+      )
+      .mockResolvedValueOnce(preview("New Doc"));
     render(
-      <FolderSummaryCard
-        {...baseProps}
-        loadIndexPreview={loadPreview}
-        node={node()}
-      />,
+      <MemoryRouter>
+        <FolderSummaryCard {...baseProps} loadIndexPreview={loadPreview} node={node()} />
+      </MemoryRouter>,
     );
     expect(loadPreview).not.toHaveBeenCalled();
     await user.click(
       screen.getByRole("button", { name: /Index preview|인덱스 미리보기/ }),
     );
-    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/\/context\/doc\.md/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Refresh|새로고침/ }));
+    expect(await screen.findByRole("link", { name: "New Doc" })).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/context/pages/new-doc",
+    );
+    expect(screen.getByText(/…and 2 more|…외 2개/)).toBeInTheDocument();
+    // The first request answers late; it must not replace the newer rows.
+    resolveFirst(preview("Old Doc"));
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Old Doc")).not.toBeInTheDocument();
   });
 
   it("does not refire the preview fetch on re-renders or after an error", async () => {
     const user = userEvent.setup();
-    let resolveFirst: (value: string) => void = () => {};
+    let resolveFirst: (value: TreeIndexPreview) => void = () => {};
     const loadPreview = vi
       .fn()
       .mockImplementationOnce(
-        () => new Promise<string>((resolve) => (resolveFirst = resolve)),
+        () => new Promise<TreeIndexPreview>((resolve) => (resolveFirst = resolve)),
       );
     const { rerender } = render(
-      <FolderSummaryCard
-        {...baseProps}
-        loadIndexPreview={loadPreview}
-        node={node()}
-      />,
+      <MemoryRouter>
+        <FolderSummaryCard {...baseProps} loadIndexPreview={loadPreview} node={node()} />
+      </MemoryRouter>,
     );
     await user.click(
       screen.getByRole("button", { name: /Index preview|인덱스 미리보기/ }),
@@ -158,15 +184,17 @@ describe("FolderSummaryCard", () => {
     // parent re-render with a NEW closure identity while the fetch is
     // in-flight must not fire a duplicate request
     rerender(
-      <FolderSummaryCard
-        {...baseProps}
-        loadIndexPreview={(() => loadPreview()) as () => Promise<string>}
-        node={node()}
-      />,
+      <MemoryRouter>
+        <FolderSummaryCard
+          {...baseProps}
+          loadIndexPreview={(() => loadPreview()) as () => Promise<TreeIndexPreview>}
+          node={node()}
+        />
+      </MemoryRouter>,
     );
     expect(loadPreview).toHaveBeenCalledTimes(1);
-    resolveFirst("# index\n* [Doc](/context/doc.md)");
-    expect(await screen.findByText(/\/context\/doc\.md/)).toBeInTheDocument();
+    resolveFirst(preview("Doc"));
+    expect(await screen.findByRole("link", { name: "Doc" })).toBeInTheDocument();
     expect(loadPreview).toHaveBeenCalledTimes(1);
   });
 

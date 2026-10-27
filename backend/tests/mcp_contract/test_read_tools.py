@@ -17,6 +17,7 @@ from backend.policy.rbac import grant_workspace_membership
 from backend.schemas.read import SEARCH_QUERY_MAX_LENGTH
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
 from backend.services.extraction_service import ExtractionService
+from backend.services.index_refs import format_index_ref
 from backend.services.library_service import LibraryService
 from backend.services.retrieval.outline_location import raw_body_sha256
 from backend.spi.tool_presentation import MCP_CONTEXT_LINK_GUIDANCE
@@ -208,7 +209,22 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
         actor=actor,
         page_service=page_service,
     )
-    assert f"* {link_markdown} — Needle body" in index.index
+    # The index carries a ref, not the answer link; read results carry that.
+    ref = format_index_ref("context", written.id)
+    assert f"- {ref} MCP \\[Read\\] \\\\Context — Needle body" in index.index
+    # Inputs the router normalizes keep the repair hint instead of a bare error.
+    misrouted = dispatch(
+        "read",
+        {
+            "workspace_id": str(workspace_id),
+            "target_type": "context_page",
+            "target_id": ref,
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert misrouted.envelope.error_code == "validation_failed"
+    assert "read_concept" in misrouted.envelope.result_summary
     assert (
         "stable_url:" not in index.index
         and "/context/mcp-read-context.md" not in index.index
@@ -972,14 +988,14 @@ def test_read_concept_resolves_library_paths(
     )
     assert bare.envelope.error_code == "not_found"
 
-    # index advertises the same path — parity check
+    # index advertises the same item as a ref — parity check
     index = dispatch(
         "get_index",
         {"workspace_id": str(workspace_id), "sections": ["library"]},
         actor=actor,
         page_service=page_service,
     )
-    assert f"/library/{item_id}.md" in index.index
+    assert f"- {format_index_ref('library', item_id)} A8 Source" in index.index
 
 
 def test_read_concept_library_gates_return_not_found(page_service, actor):

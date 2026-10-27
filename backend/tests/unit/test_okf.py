@@ -7,6 +7,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import (
     build_workspace_index,
     parse_concept_path,
@@ -221,12 +222,12 @@ def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
             workspace_slug="default",
         )
 
-    assert f"[Published](/p/{workspace_id}/{pub.id})" in editor_index
-    assert f"[Draftive](/p/{workspace_id}/{draft.id})" in editor_index
-    assert "*(draft)*" in editor_index
+    pub_line = f"- {format_index_ref('context', pub.id)} Published"
+    assert pub_line in editor_index
+    assert f"- {format_index_ref('context', draft.id)} Draftive (draft)" in editor_index
     # Viewer sees the published concept but not the draft-only one.
-    assert f"[Published](/p/{workspace_id}/{pub.id})" in viewer_index
-    assert f"/p/{workspace_id}/{draft.id}" not in viewer_index
+    assert pub_line in viewer_index
+    assert str(draft.id) not in viewer_index
 
 
 def test_index_restricted_library_filtered_by_actor(session_factory):
@@ -328,5 +329,4 @@ def test_draft_capable_actor_reads_draft_head_over_published(session_factory):
 
     assert editor_version.body_md == "Draft body."
     assert viewer_version.body_md == "Published body."
-    assert f"[Dual Head](/p/{workspace_id}/{page.id})" in editor_index
-    assert "*(draft)*" in editor_index
+    assert f"- {format_index_ref('context', page.id)} Dual Head (draft)" in editor_index

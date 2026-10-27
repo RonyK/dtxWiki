@@ -15,6 +15,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.tree import TreeFolderCreateRequest
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import build_workspace_index
 from backend.services.okf_index import (
     GET_INDEX_NODE_TOKEN_BUDGET,
@@ -130,8 +131,8 @@ def scale_workspace(session_factory_module):
                                 page.title,
                                 [
                                     "/context",
-                                    f"/context/domain-{d1}",
-                                    f"/context/domain-{d1}/area-{d1}-{d2}",
+                                    format_index_ref("folder", level1.id),
+                                    format_index_ref("folder", level2.id),
                                 ],
                             )
                         )
@@ -191,7 +192,7 @@ def test_index_token_budget_per_node(session_factory_module, scale_workspace):
             f"node {name} estimates {estimated} tokens > {GET_INDEX_NODE_TOKEN_BUDGET}"
         )
     # sanity: this is genuinely the routing mode over 1,000+ pages
-    assert "(node:" in renders["root"]
+    assert "- dtxwiki://index/folder/" in renders["root"]
 
 
 def test_golden_pages_reachable_within_three_hops(
@@ -222,12 +223,13 @@ def test_golden_pages_reachable_within_three_hops(
             # each hop's folder appears in the parent hop's render
             for parent_ref, child_ref in zip(hops, hops[1:], strict=False):
                 parent_render = render(parent_ref)
-                assert f"(node:{child_ref})" in parent_render, (
+                assert f"- {child_ref} " in parent_render, (
                     f"{child_ref} missing from {parent_ref} render"
                 )
             # the page itself appears in the leaf render
             leaf_render = render(hops[-1])
-            assert f"* [{title}](/p/{workspace_id}/{page_id}) — " in leaf_render
+            page_ref = format_index_ref("context", page_id)
+            assert f"- {page_ref} {title} — " in leaf_render
 
 
 def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):
@@ -243,7 +245,7 @@ def test_fanout_truncation_is_honest(session_factory_module, scale_workspace):
             workspace_slug="default",
             node="/context/domain-0/area-0-0",
         )
-        assert leaf.count("* [Doc 0-0-") == PAGES_PER_LEAF
+        assert leaf.count("- dtxwiki://index/context/") == PAGES_PER_LEAF
         assert "…and" not in leaf
 
 

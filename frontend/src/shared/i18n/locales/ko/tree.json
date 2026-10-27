@@ -142,7 +142,9 @@
     "saveError": "폴더 요약을 저장하지 못했습니다.",
     "previewTitle": "인덱스 미리보기",
     "previewLoading": "불러오는 중…",
-    "previewError": "인덱스 미리보기를 불러오지 못했습니다."
+    "previewError": "인덱스 미리보기를 불러오지 못했습니다.",
+    "previewRefresh": "새로고침",
+    "previewOverflow": "…외 {{count}}개"
   },
   "favorite": {
     "add": "내 즐겨찾기에 추가",

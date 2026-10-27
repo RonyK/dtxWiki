@@ -4,7 +4,16 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from backend.services.context_links import format_stable_url, link_markdown
+from backend.services.context_links import (
+    escape_link_label,
+    format_stable_url,
+    link_markdown,
+)
+from backend.services.workspace_urls import (
+    folder_url,
+    library_item_url,
+    workspace_path,
+)
 
 
 def page_links(workspace_id: UUID, page_id: UUID, title: str) -> dict[str, str]:
@@ -12,6 +21,25 @@ def page_links(workspace_id: UUID, page_id: UUID, title: str) -> dict[str, str]:
         "stable_url": format_stable_url(workspace_id, page_id),
         "link_markdown": link_markdown(workspace_id, page_id, title),
     }
+
+
+def library_links(workspace_id: UUID, item_id: UUID, title: str) -> dict[str, str]:
+    return _links(library_item_url(workspace_id, item_id), title)
+
+
+def folder_links(workspace_id: UUID, node) -> dict[str, str]:
+    """A section root opens its section; any other folder opens its route."""
+    href = (
+        f"{workspace_path(workspace_id)}/{node.section}"
+        if node.parent_id is None
+        else folder_url(workspace_id, node.section, node.id)
+    )
+    return _links(href, node.title)
+
+
+def _links(href: str, title: str) -> dict[str, str]:
+    label = escape_link_label(title)
+    return {"stable_url": href, "link_markdown": f"[{label}]({href})"}
 
 
 def _context_references(

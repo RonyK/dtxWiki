@@ -37,6 +37,7 @@ from backend.policy.trust_boundaries import (
 from backend.services import mcp_surface_service as surface
 from backend.services import okf
 from backend.services.entity_ref import parse_context_resource_uri
+from backend.services.index_refs import looks_like_index_ref
 from backend.services.mcp_surface_service import McpSurfaceNotFoundError
 from backend.services.workspace_read import WorkspaceReadService
 from backend.utils.uuid import parse_uuid_or_none
@@ -788,6 +789,13 @@ def _agent_policy_resource_uri(workspace_id: UUID) -> str:
 
 
 def _parse_resource_uri(raw_uri: str) -> tuple[UUID, str, str | None]:
+    if looks_like_index_ref(raw_uri):
+        # An index ref has no workspace; only tools with an explicit
+        # workspace_id may read it.
+        raise ValueError(
+            "index refs are not resources; pass them to get_index (folder) or "
+            "read_concept (context/library) with the same workspace_id"
+        )
     # Context-page URIs go through the shared resolver first (G0-2) so
     # read_concept/search/trace/resources agree on one grammar.
     context_ref = parse_context_resource_uri(raw_uri)

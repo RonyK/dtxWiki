@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import func, select, update
 
@@ -19,6 +21,7 @@ from backend.services.agent_page_service import (
     AgentPageService,
 )
 from backend.services.bundle_service import AgentInputBundleService
+from backend.services.index_refs import format_index_ref
 from backend.services.read_errors import ScopeDeniedError, StaleBaseVersionError
 from backend.services.review_service import ReviewService
 
@@ -121,6 +124,14 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
 
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
+        root_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.parent_id.is_(None),
+            )
+        )
+        missing_ref = format_index_ref("library", uuid4())
         result = service.write_draft(
             session=session,
             workspace_id=workspace_id,
@@ -128,7 +139,11 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
                 category="persona",
                 title="Research Persona",
                 slug="research-persona",
-                body_markdown="# Research Persona\n\nPrefer source-grounded notes.",
+                body_markdown=(
+                    "# Research Persona\n\nPrefer source-grounded notes in "
+                    f"[Context]({format_index_ref('folder', root_id)}), not "
+                    f"[gone]({missing_ref})."
+                ),
                 reason="add persona draft",
             ),
             actor_kind="human",
@@ -152,6 +167,12 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
     assert page.injection_policy == "default_on"
     assert version.version_status == "draft"
     assert version.version_no == 1
+    # Index refs never persist: the existing folder is stored canonically and
+    # an unknown ref keeps its authored bytes.
+    assert (
+        f"[Context](/workspaces/{workspace_id}/context/folders/{root_id})"
+        f", not [gone]({missing_ref})" in version.body_markdown
+    )
     assert change_set.trigger_type == "agent_page_draft"
     assert change_set.risk_level == "low"
     assert operation.operation == "create_draft"

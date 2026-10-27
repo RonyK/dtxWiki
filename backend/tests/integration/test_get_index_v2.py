@@ -13,7 +13,9 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import build_workspace_index, render_export_manifest
+from backend.services.okf_index import IndexNodeNotFoundError
 from backend.services.page_service import sync_page_projections
 from backend.services.tree_service import TreeService, ensure_primary_tree_placement
 
@@ -187,10 +189,10 @@ def test_small_workspace_stays_flat(session_factory, page_service):
         index = build_workspace_index(
             session, _workspace_id(session), actor=None, workspace_slug="default"
         )
-    # flat mode: full catalog sections, no routing node headers
+    # flat mode: full catalog sections, no routing folder rows
     assert "## Context" in index
-    assert "(node:" not in index
-    assert f"[Flat Page](/p/{page.workspace_id}/{page.id})" in index
+    assert "dtxwiki://index/folder/" not in index
+    assert f"- {format_index_ref('context', page.id)} Flat Page" in index
     assert "/context/flat-page.md" not in index
 
 
@@ -201,12 +203,13 @@ def test_large_workspace_routes_and_descends(large_workspace):
         root_index = build_workspace_index(
             session, workspace_id, actor=None, workspace_slug="default"
         )
-        # routing root: folder line with subtree count + node link
-        assert "📁 [Payments/](node:/context/payments) (60)" in root_index
-        emitted_node_href = re.search(
-            r"\]\((node:/context/payments)\)", root_index
+        # routing root: folder line with subtree count; its ref is the first field
+        folder_ref = re.search(
+            r"^- (dtxwiki://index/folder/[0-9a-f-]{36}) Payments/ \(60\)",
+            root_index,
+            re.MULTILINE,
         )
-        assert emitted_node_href is not None
+        assert folder_ref is not None
         # fanout: root has 150+ direct pages -> truncated with honest tail
         assert "…and" in root_index and "more — narrow via a child folder" in (
             root_index
@@ -215,7 +218,7 @@ def test_large_workspace_routes_and_descends(large_workspace):
         assert "includes Payment Doc 000" in root_index
         assert "mostly concept" in root_index
 
-        # Budget exception: this additional database traversal joins a link
+        # Budget exception: this additional database traversal joins a ref
         # emitted from the actual tree projection to the next index response;
         # a pure parser test cannot prove that generator-to-consumer contract.
         node_index = build_workspace_index(
@@ -223,19 +226,20 @@ def test_large_workspace_routes_and_descends(large_workspace):
             workspace_id,
             actor=None,
             workspace_slug="default",
-            node=emitted_node_href.group(1),
+            node=folder_ref.group(1),
         )
-        bare_node_index = build_workspace_index(
+        # Legacy node paths stay accepted input for the same folder.
+        legacy_node_index = build_workspace_index(
             session,
             workspace_id,
             actor=None,
             workspace_slug="default",
-            node="/context/payments",
+            node="node:/context/payments",
         )
-        assert node_index == bare_node_index
-        assert "(node: /context/payments)" in node_index
+        assert node_index == legacy_node_index
+        assert "knowledge index (Payments/)" in node_index
         # 60 children -> exactly 50 entries + "…and 10 more"
-        assert node_index.count("* [Payment Doc") == 50
+        assert node_index.count("- dtxwiki://index/context/") == 50
         assert "…and 10 more" in node_index
         # entries carry write-time nav descriptions
         assert "body paragraph." in node_index
@@ -245,8 +249,19 @@ def test_large_workspace_routes_and_descends(large_workspace):
                 ContextPage.slug == "pay-000",
             )
         )
-        assert f"[Payment Doc 000](/p/{workspace_id}/{page.id})" in node_index
-        assert "stable_url:" not in node_index
+        assert f"- {format_index_ref('context', page.id)} Payment Doc 000 — " in (
+            node_index
+        )
+        # A ref of another kind never selects a folder.
+        with pytest.raises(IndexNodeNotFoundError):
+            build_workspace_index(
+                session,
+                workspace_id,
+                actor=None,
+                workspace_slug="default",
+                node=format_index_ref("context", page.id),
+            )
+        assert "](" not in node_index
 
 
 def test_stored_nav_summary_beats_heuristic(large_workspace_clone):

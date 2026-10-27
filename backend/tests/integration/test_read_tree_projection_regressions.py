@@ -1449,16 +1449,20 @@ def test_llms_txt_uses_published_heading_not_mutable_draft_title(
 
 
 def test_index_preview_renders_agent_section_folder(page_service, session_factory):
+    from backend.models.agent import AgentPage
+
     with session_factory() as session:
         workspace_id = _workspace_id(session)
-        persona = session.scalar(
-            select(WorkspaceTreeNode).where(
+        guide_folder_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
                 WorkspaceTreeNode.workspace_id == workspace_id,
                 WorkspaceTreeNode.section == "agent",
-                WorkspaceTreeNode.slug == "persona",
+                WorkspaceTreeNode.slug == "agent_guide",
             )
         )
-        persona_id = persona.id
+        agent_page_id = session.scalar(
+            select(AgentPage.id).where(AgentPage.workspace_id == workspace_id)
+        )
     client = _llms_app(page_service)
     authenticate_test_client_in_workspace(
         client,
@@ -1466,11 +1470,17 @@ def test_index_preview_renders_agent_section_folder(page_service, session_factor
         email="agent-preview@example.com",
     )
     response = client.get(
-        f"/api/v1/workspaces/{workspace_id}/tree/nodes/{persona_id}/index-preview"
+        f"/api/v1/workspaces/{workspace_id}/tree/nodes/{guide_folder_id}"
+        "/index-preview"
     )
     assert response.status_code == 200, response.text
     # before the section fix the (context, library) projection 404'd here
-    assert "(node: /agent/persona)" in response.json()["data"]["markdown"]
+    data = response.json()["data"]
+    assert "knowledge index (Agent Guide/)" in data["markdown"]
+    # The UI links the same rows by browser route; refs stay in the text only.
+    [entry] = data["entries"]
+    assert entry["href"] == f"/workspaces/{workspace_id}/agent/pages/{agent_page_id}"
+    assert f"- dtxwiki://index/agent/{agent_page_id} " in data["markdown"]
 
 
 # --- A-5 defensive scope: agent lane joins the visibility family ---------------

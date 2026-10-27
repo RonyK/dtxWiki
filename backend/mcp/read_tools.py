@@ -87,16 +87,19 @@ from backend.services.coverage_service import (
     resolve_coverage_gap,
 )
 from backend.services.grep_wiki import grep_wiki as grep_wiki_service
+from backend.services.index_refs import parse_index_ref
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
 from backend.services.mcp_context_projection import (
     context_record,
+    folder_links,
     guide_payload,
+    library_links,
     page_links,
     search_payload,
 )
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
-    build_workspace_index,
+    build_workspace_index_document,
     parse_concept_path,
     project_context_frontmatter,
     render_context_concept,
@@ -824,7 +827,7 @@ def get_index(payload: dict, ctx: ToolCallContext) -> GetIndexOutput:
         if workspace_slug is None:
             return GetIndexOutput(envelope=error_envelope(actor, "not_found"))
         try:
-            index = build_workspace_index(
+            document = build_workspace_index_document(
                 session,
                 ctx.workspace_id,
                 actor=actor,
@@ -834,7 +837,17 @@ def get_index(payload: dict, ctx: ToolCallContext) -> GetIndexOutput:
             )
         except IndexNodeNotFoundError:
             return GetIndexOutput(envelope=error_envelope(actor, "not_found"))
-    return GetIndexOutput(envelope=ok_envelope(actor), index=index)
+    return GetIndexOutput(
+        envelope=ok_envelope(actor),
+        index=document.markdown,
+        # Legacy UUID input may select a non-folder node; only a folder has
+        # a folder route to offer as the answer link.
+        **(
+            folder_links(ctx.workspace_id, document.node)
+            if document.node is not None and document.node.node_kind == "folder"
+            else {}
+        ),
+    )
 
 
 def _concept_neighbors(session, ctx, page, actor):
@@ -946,7 +959,19 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
                 actor, exc, allowed_fields=ReadConceptInput.model_fields
             )
         )
-    parsed = parse_concept_path(request.path)
+    # An index ref names its target inside this workspace only; map it onto
+    # the existing scoped readers instead of a shared resolver.
+    index_ref = parse_index_ref(request.path)
+    page_path = (
+        str(index_ref.target_id)
+        if index_ref is not None and index_ref.kind == "context"
+        else request.path
+    )
+    parsed = (
+        ("library", str(index_ref.target_id))
+        if index_ref is not None and index_ref.kind == "library"
+        else parse_concept_path(request.path)
+    )
     if parsed is not None and parsed[0] == "library":
         section, slug = parsed
         # A-8: get_index advertises /library/<id>.md — read_concept must
@@ -959,6 +984,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
             content, frontmatter = render_library_concept(item)
             item_id = item.id
+            links = library_links(ctx.workspace_id, item.id, item.title or item.uri)
         frontmatter = {
             key: (value.isoformat() if isinstance(value, datetime) else value)
             for key, value in frontmatter.items()
@@ -969,6 +995,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             path=request.path,
             target_kind="library_item",
             target_id=item_id,
+            **links,
             content=content,
             frontmatter=frontmatter,
         )
@@ -976,7 +1003,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         workspace_slug = resolve_workspace_slug(session, ctx.workspace_id)
         if workspace_slug is None:
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
-        locator = parse_page_input(request.path)
+        locator = parse_page_input(page_path)
         if locator.kind == "concept_path":
             result = resolve_context_concept(
                 session, ctx.workspace_id, identifier=locator.slug, actor=actor
@@ -984,7 +1011,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         else:
             try:
                 page_id = resolve_page_input(
-                    request.path, LinkContext(session, ctx.workspace_id, actor)
+                    page_path, LinkContext(session, ctx.workspace_id, actor)
                 )
             except PageLocatorNotFound:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))

@@ -11,6 +11,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
@@ -25,6 +26,12 @@ from backend.models.context import (
 )
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.context_visibility import visible_context_version_id
+from backend.services.index_refs import (
+    PAGE_INPUT_REF_GUIDANCE,
+    IndexRefInputError,
+    looks_like_index_ref,
+    parse_index_ref,
+)
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MCP_PAGE_INPUT_PATTERN = rf"^(?:{_UUID}|/p/{_UUID}(?:/{_UUID})?(?:#[^\s]*)?)$"
@@ -234,6 +241,8 @@ def classify(href: str, self_origins=()) -> Locator:
 
 
 def parse_page_input(value: str | UUID) -> Locator:
+    if looks_like_index_ref(value):
+        raise IndexRefInputError(PAGE_INPUT_REF_GUIDANCE)
     locator = classify(str(value))
     # Legacy MCP paths historically accepted a title/alias containing spaces.
     # This is input compatibility, never a second body-URL classification rule.
@@ -827,27 +836,156 @@ def decide(
     return LinkDecision("keep")
 
 
-def rewrite_links_with_report(
-    body: str, ctx: LinkContext
-) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
-    """Apply only proved destination edits; all other source bytes are reused."""
-    changes = []
-    details = []
-    for occurrence in extract_links(body):
-        locator = classify(occurrence.href, ctx.self_origins)
-        resolution = resolve(locator, ctx)
-        decision = decide(
+def editor_link_actor(actor_kind: str, actor_id: str) -> SimpleNamespace:
+    """The link authority of an authorized writer: its identity, editor role.
+
+    A write context carries provenance, not an ActorContext; the ingress has
+    already authorized the write, so link checks see the writer as an editor.
+    """
+    return SimpleNamespace(
+        actor_kind=actor_kind,
+        actor_id=actor_id,
+        workspace_role="editor",
+        role="editor",
+    )
+
+
+def _live_route(
+    ctx: LinkContext, kind: str, target_id: UUID, section: str | None = None
+) -> str | None:
+    """Canonical route of a live Library item, Agent page or folder in W.
+
+    Only existence and lifecycle are checked here; who may open the target is
+    decided by its own reader when the link is followed.
+    """
+    from backend.models.agent import AgentPage
+    from backend.models.library import LibraryItem
+    from backend.models.tree import WorkspaceTreeNode
+    from backend.repositories.workspace_scoped import get_in_workspace
+    from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
+    from backend.services.workspace_urls import (
+        agent_page_url,
+        folder_url,
+        library_item_url,
+    )
+
+    model = {"library": LibraryItem, "agent": AgentPage, "folder": WorkspaceTreeNode}
+    target = get_in_workspace(
+        ctx.session, model[kind], workspace_id=ctx.workspace_id, resource_id=target_id
+    )
+    if target is None:
+        return None
+    if kind == "library":
+        if target.lifecycle_status in EXCLUDED_LIBRARY_LIFECYCLE_STATUSES:
+            return None
+        return library_item_url(ctx.workspace_id, target.id)
+    if kind == "agent":
+        if target.lifecycle_status == "archived":
+            return None
+        return agent_page_url(ctx.workspace_id, target.id)
+    if (
+        target.node_kind != "folder"
+        or target.visibility_status != "visible"
+        or (section is not None and target.section != section)
+    ):
+        return None
+    return folder_url(ctx.workspace_id, target.section, target.id)
+
+
+def _workspace_route(href: str, ctx: LinkContext) -> tuple[bool, str | None]:
+    """Typed Library item, Agent page and folder routes in an authored body.
+
+    Another workspace's route is kept as written; that workspace decides when
+    it is followed. Other product routes keep the Context resolver's result.
+    """
+    from backend.services.context_link_targets import (
+        _parse_workspace_navigation_reference,
+    )
+
+    reference = _parse_workspace_navigation_reference(
+        href, self_origins=ctx.self_origins
+    )
+    if reference is None:
+        return False, None
+    section, kind, target_id, workspace_id = reference
+    route_kind = {
+        ("library", "item"): "library",
+        ("agent", "page"): "agent",
+        ("agent", "page_edit"): "agent",
+        ("context", "folder"): "folder",
+        ("library", "folder"): "folder",
+        ("agent", "folder"): "folder",
+    }.get((section, kind))
+    if route_kind is None or workspace_id is None or target_id is None:
+        return False, None
+    if workspace_id != ctx.workspace_id:
+        return True, href
+    return True, _live_route(ctx, route_kind, target_id, section)
+
+
+def decide_link(
+    href: str, ctx: LinkContext
+) -> tuple[Locator, Resolution | None, LinkDecision]:
+    """One decision for an authored link, shared by lint findings and fixes.
+
+    An index ref is system-internal and names a target in the source
+    workspace only, so it is never kept: a live target becomes its canonical
+    link and anything else is reported as unresolved. A Context ref resolves
+    like ``/p/<id>``; other kinds check existence and lifecycle in W only.
+    """
+    ref = parse_index_ref(href)
+    if ref is not None and ref.kind == "context":
+        locator = Locator("index_ref", page_id=ref.target_id, href=href)
+    elif ref is not None:
+        locator = Locator("index_ref", href=href)
+        target = _live_route(ctx, ref.kind, ref.target_id)
+        if target is None:
+            return locator, None, LinkDecision("finding", finding="link.unresolved")
+        return locator, None, LinkDecision("fix", target, "link.internal-noncanonical")
+    else:
+        locator = classify(href, ctx.self_origins)
+        if locator.kind == "unknown":
+            handled, target = _workspace_route(href, ctx)
+            if handled:
+                return locator, None, (
+                    LinkDecision("keep")
+                    if target is not None
+                    else LinkDecision("finding", finding="link.unresolved")
+                )
+    resolution = resolve(locator, ctx)
+    return (
+        locator,
+        resolution,
+        decide(
             locator,
             resolution,
             context_workspace_id=ctx.workspace_id,
             source_is_published=ctx.source_is_published,
-        )
+        ),
+    )
+
+
+def rewrite_links_with_report(
+    body: str, ctx: LinkContext, *, index_refs_only: bool = False
+) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+    """Apply only proved destination edits; all other source bytes are reused.
+
+    ``index_refs_only`` limits the edit to index refs, for bodies outside the
+    Context link contract (Agent drafts).
+    """
+    changes = []
+    details = []
+    for occurrence in extract_links(body):
+        if index_refs_only and parse_index_ref(occurrence.href) is None:
+            continue
+        locator, resolution, decision = decide_link(occurrence.href, ctx)
         if decision.action != "fix" or not decision.href:
             continue
         # A draft-only destination cannot be newly disclosed by a published
         # source; retain its written bytes and let the info finding explain it.
         if (
-            ctx.source_is_published
+            resolution is not None
+            and ctx.source_is_published
             and resolution.state == "ok"
             and not resolution.published
         ):
@@ -864,7 +1002,10 @@ def rewrite_links_with_report(
             label = occurrence.label or occurrence.slug or occurrence.href
             replacement = f"[{escape_link_label(label)}]({decision.href})"
         after_locator = classify(decision.href, ctx.self_origins)
-        if locator.kind == "canonical_route" and resolution.state == "foreign":
+        if resolution is None:
+            # decide_link proved the index ref's target exists in this workspace.
+            same_target = True
+        elif locator.kind == "canonical_route" and resolution.state == "foreign":
             same_target = (
                 after_locator.page_id == locator.page_id
                 and after_locator.workspace_id == locator.workspace_id
@@ -887,7 +1028,13 @@ def rewrite_links_with_report(
                     "after": decision.href,
                     "category": "format"
                     if locator.kind
-                    in {"stable_full", "stable_short", "canonical_route", "wikilink"}
+                    in {
+                        "stable_full",
+                        "stable_short",
+                        "canonical_route",
+                        "wikilink",
+                        "index_ref",
+                    }
                     else "repair",
                 }
             )

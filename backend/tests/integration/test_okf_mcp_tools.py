@@ -4,10 +4,12 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.container import DatabaseProvider, ServiceRegistry, ToolCallContext
-from backend.mcp.read_tools import get_index, read_concept
+from backend.mcp.read_tools import get_index, read_concept, read_context_outline
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.library import LibraryItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.services.index_refs import format_index_ref
 from backend.services.okf import project_context_frontmatter, render_frontmatter
 from backend.services.page_service import sync_page_projections
 
@@ -89,15 +91,46 @@ def _default_workspace_id(session_factory):
 
 def test_get_index_tool_filters_drafts_by_role(session_factory):
     wsid = _default_workspace_id(session_factory)
+    with session_factory.begin() as session:
+        pub_id = session.scalar(select(ContextPage.id).where(ContextPage.slug == "pub"))
+        item = LibraryItem(
+            workspace_id=wsid,
+            connector_type="manual_upload",
+            uri="https://x/source",
+            title="Source",
+            trust_level="unknown",
+            lifecycle_status="ready",
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
     payload = {"workspace_id": str(wsid)}
     editor = get_index(payload, _ctx(_actor(wsid, "editor"), session_factory))
     viewer = get_index(payload, _ctx(_actor(wsid, "viewer"), session_factory))
 
+    pub_ref = format_index_ref("context", pub_id)
     assert editor.envelope.result_status == "succeeded"
-    assert f"[Pub](/p/{wsid}/" in editor.index
-    assert f"[Wip](/p/{wsid}/" in editor.index  # editor sees the draft-only concept
-    assert f"[Pub](/p/{wsid}/" in viewer.index
-    assert "[Wip](" not in viewer.index  # viewer does not
+    assert f"- {pub_ref} Pub" in editor.index
+    assert "Wip (draft)" in editor.index  # editor sees the draft-only concept
+    assert f"- {pub_ref} Pub" in viewer.index
+    assert "Wip" not in viewer.index  # viewer does not
+
+    # Each emitted ref, passed back unchanged with the same workspace, reads
+    # its own target and returns the user-facing link alongside it.
+    viewer_ctx = _ctx(_actor(wsid, "viewer"), session_factory)
+    page = read_concept({"workspace_id": str(wsid), "path": pub_ref}, viewer_ctx)
+    assert (page.target_id, page.stable_url) == (pub_id, f"/p/{wsid}/{pub_id}")
+    library_ref = format_index_ref("library", item_id)
+    assert f"- {library_ref} Source" in viewer.index
+    source = read_concept({"workspace_id": str(wsid), "path": library_ref}, viewer_ctx)
+    source_url = f"/workspaces/{wsid}/library/items/{item_id}"
+    assert source.link_markdown == f"[Source]({source_url})"
+    # Other page tools reject a ref with guidance instead of guessing its target.
+    outline = read_context_outline(
+        {"workspace_id": str(wsid), "target": {"page_id": pub_ref}}, viewer_ctx
+    )
+    assert outline.envelope.error_code == "validation_failed"
+    assert "read_concept" in outline.envelope.error_details[0].message
 
 
 def test_read_concept_tool_returns_frontmatter_and_body(session_factory):

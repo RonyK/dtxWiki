@@ -9,6 +9,15 @@
   target lookup; connection management is available at `/account/integrations`.
   Stored links are projected from their source workspace without rewriting
   historical bytes. Ask activates only server-confirmed internal links.
+- Advance the MCP tool contract to revision 17. `get_index` lines start with
+  an internal `dtxwiki://index/<kind>/<id>` ref followed by the title and
+  summary, instead of Markdown links. Pass folder refs to `get_index` `node`
+  and Context or Library refs to `read_concept` `path` unchanged with the same
+  `workspace_id`; other page inputs reject refs. `node:/...` paths remain
+  accepted. Answer with `link_markdown`, now also returned for Library reads
+  and for the folder selected by `node`. Refs copied into Context or Agent
+  bodies are stored as canonical links. Clients on revision 16 must refresh
+  `tools/list` and cached output schemas.
 - Advance the MCP tool contract to revision 16. Context results use
   `/p/<workspace_id>/<page_id>` links and no longer expose `concept_path` or
   `resource_uri`; Library lookup paths remain available. Clients using an older

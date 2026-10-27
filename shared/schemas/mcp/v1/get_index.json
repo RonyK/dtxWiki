@@ -28,6 +28,7 @@
           }
         ],
         "default": null,
+        "description": "Folder to descend into: pass a dtxwiki://index/folder/<id> ref from a line of the previous index unchanged, with the same workspace_id.",
         "title": "Node"
       },
       "sections": {
@@ -522,6 +523,32 @@
         ],
         "default": null,
         "title": "Index"
+      },
+      "link_markdown": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Copyable Markdown link to the selected folder for answers.",
+        "title": "Link Markdown"
+      },
+      "stable_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Browser URL of the folder selected by node; null without node.",
+        "title": "Stable Url"
       }
     },
     "required": [

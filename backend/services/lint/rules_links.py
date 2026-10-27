@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from backend.services.context_links import (
     LinkContext,
-    classify,
     configured_self_origins,
-    decide,
+    decide_link,
+    editor_link_actor,
     extract_links,
-    resolve,
     rewrite_links_with_report,
 )
 from backend.services.lint.base import (
@@ -29,12 +26,7 @@ def link_context(ctx: LintContext) -> LinkContext | None:
     # WriteContext carries authenticated write provenance, not an ActorContext.
     # The ingress already authorized it; retain identity for private own edits.
     if actor is not None and hasattr(actor, "actor_provenance"):
-        actor = SimpleNamespace(
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-            workspace_role="editor",
-            role="editor",
-        )
+        actor = editor_link_actor(actor.actor_kind, actor.actor_id)
     return LinkContext(
         ctx.session,
         ctx.workspace_id,
@@ -55,17 +47,9 @@ def _decisions(body: str, ctx: LintContext):
             []
             if context is None
             else [
-                (
-                    locator,
-                    decide(
-                        locator,
-                        resolve(locator, context),
-                        context_workspace_id=context.workspace_id,
-                        source_is_published=context.source_is_published,
-                    ),
-                )
+                (locator, decision)
                 for occurrence in extract_links(body)
-                for locator in [classify(occurrence.href, context.self_origins)]
+                for locator, _, decision in [decide_link(occurrence.href, context)]
             ]
         )
     return ctx.body_analysis[key]

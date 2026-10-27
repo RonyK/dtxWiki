@@ -36,6 +36,7 @@ from backend.schemas.read import (
     SearchFilters,
     WorkspaceListData,
 )
+from backend.services.index_refs import looks_like_index_ref, parse_index_ref
 
 
 class ListMyWorkspacesInput(BaseModel):
@@ -175,14 +176,20 @@ class GetIndexInput(MCPConversationInput):
     # OKF navigational catalog (Tier-1 retrieval): returns an index.md the agent
     # surveys before READing concepts. Per-actor filtered (restricted/drafts).
     # Small workspaces render one flat catalog; larger ones render routing
-    # nodes — pass the exact emitted ``node:/context/payments`` or
-    # ``node:/library/research`` link target to descend. Bare slash paths and
-    # node UUIDs remain accepted as well. The workspace_id always scopes lookup.
+    # nodes. Legacy ``node:/context/...`` paths, bare paths and node UUIDs
+    # remain accepted. The workspace_id always scopes lookup.
     workspace_id: UUID
     sections: list[Literal["context", "library"]] = Field(
         default_factory=lambda: ["context", "library"]
     )
-    node: str | None = Field(default=None, max_length=512)
+    node: str | None = Field(
+        default=None,
+        max_length=512,
+        description=(
+            "Folder to descend into: pass a dtxwiki://index/folder/<id> ref from "
+            "a line of the previous index unchanged, with the same workspace_id."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -190,6 +197,14 @@ class GetIndexInput(MCPConversationInput):
 class GetIndexOutput(BaseModel):
     envelope: MCPResultEnvelope
     index: str | None = None
+    stable_url: str | None = Field(
+        default=None,
+        description="Browser URL of the folder selected by node; null without node.",
+    )
+    link_markdown: str | None = Field(
+        default=None,
+        description="Copyable Markdown link to the selected folder for answers.",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -204,14 +219,24 @@ class ReadConceptInput(MCPConversationInput):
         min_length=1,
         max_length=512,
         description=(
-            "Context page UUID or stable_url; Library reads use /library/<id>.md."
+            "A dtxwiki://index/context/<id> or dtxwiki://index/library/<id> ref "
+            "from get_index, unchanged; or a Context page UUID or stable_url; "
+            "Library reads also accept /library/<id>.md."
         ),
     )
 
     @field_validator("path", mode="before")
     @classmethod
     def _page_or_library(cls, value):
-        if isinstance(value, str) and value.startswith("/library/"):
+        if looks_like_index_ref(value):
+            ref = parse_index_ref(value)
+            if ref is None or ref.kind not in {"context", "library"}:
+                raise ValueError(
+                    "read_concept accepts dtxwiki://index/context/<id> and "
+                    "dtxwiki://index/library/<id> refs unchanged; pass folder "
+                    "refs to get_index.node."
+                )
+        elif isinstance(value, str) and value.startswith("/library/"):
             if not value.endswith(".md"):
                 raise ValueError("Invalid Library path")
         else:
@@ -267,10 +292,15 @@ class ReadConceptOutput(BaseModel):
     page_id: UUID | None = None
     stable_url: str | None = Field(
         default=None,
-        description="Permanent Context page URL: /p/<workspace_id>/<page_id>.",
+        description=(
+            "Permanent URL of the read target: /p/<workspace_id>/<page_id> for a "
+            "Context page, /workspaces/<workspace_id>/library/items/<id> for a "
+            "Library item."
+        ),
     )
     link_markdown: str | None = Field(
-        default=None, description="Copyable Markdown link to the Context page."
+        default=None,
+        description="Copyable Markdown link to the read target; use it in answers.",
     )
     version_id: UUID | None = None
     version_status: str | None = None

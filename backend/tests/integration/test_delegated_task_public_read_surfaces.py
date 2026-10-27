@@ -434,7 +434,7 @@ def test_index_preview_endpoint_renders_node(page_service, session_factory):
     )
     assert response.status_code == 200, response.text
     markdown = response.json()["data"]["markdown"]
-    assert "(node: /context/preview-folder)" in markdown
+    assert "knowledge index (Preview Folder/)" in markdown
 
     missing = client.get(
         f"/api/v1/workspaces/{workspace_id}/tree/nodes/{uuid4()}/index-preview"

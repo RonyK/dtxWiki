@@ -31,12 +31,13 @@ from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
-from backend.services.context_links import format_stable_url, link_markdown
+from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.entity_ref import (  # canonical (G0-1)
     context_concept_path,
     library_concept_path,
 )
+from backend.services.index_refs import format_index_ref, index_line
 from backend.services.mcp_read_projection import record_served_read
 from backend.utils.page_frontmatter import (
     derive_nav_description,
@@ -199,6 +200,25 @@ def build_workspace_index(
     sections: tuple[str, ...] = ("context", "library"),
     node: str | None = None,
 ) -> str:
+    return build_workspace_index_document(
+        session,
+        workspace_id,
+        actor=actor,
+        workspace_slug=workspace_slug,
+        sections=sections,
+        node=node,
+    ).markdown
+
+
+def build_workspace_index_document(
+    session: Session,
+    workspace_id: UUID,
+    *,
+    actor: ActorContext | None,
+    workspace_slug: str,
+    sections: tuple[str, ...] = ("context", "library"),
+    node: str | None = None,
+):
     """Render the workspace index, auto-selecting flat vs routing mode.
 
     Small workspaces (visible content nodes <= GET_INDEX_FLAT_MAX) keep the
@@ -208,6 +228,7 @@ def build_workspace_index(
     """
     from backend.services.okf_index import (
         GET_INDEX_FLAT_MAX,
+        RoutingIndex,
         build_routing_index,
         count_content_nodes,
     )
@@ -217,13 +238,15 @@ def build_workspace_index(
         session, workspace_id, actor, sections=sections
     )
     if node is None and count_content_nodes(projection) <= GET_INDEX_FLAT_MAX:
-        return render_export_manifest(
-            session,
-            workspace_id,
-            actor=actor,
-            workspace_slug=workspace_slug,
-            sections=sections,
-            include_stable_links=True,
+        return RoutingIndex(
+            render_export_manifest(
+                session,
+                workspace_id,
+                actor=actor,
+                workspace_slug=workspace_slug,
+                sections=sections,
+                index_refs=True,
+            )
         )
     return build_routing_index(
         session,
@@ -243,27 +266,27 @@ def render_export_manifest(
     actor: ActorContext | None,
     workspace_slug: str,
     sections: tuple[str, ...] = ("context", "library"),
-    include_stable_links: bool = False,
+    index_refs: bool = False,
 ) -> str:
     """Complete flat catalog — the export/bundle contract (never truncated).
 
     Navigation may fanout-cap its render; an export that drops entries is
     data loss, so bundles always use this renderer (B-6 contract split).
+    ``index_refs`` renders the get_index line format instead of file paths.
     """
     blocks: list[str] = [f"# {workspace_slug} — knowledge index", ""]
     if "context" in sections:
         blocks.append("## Context")
         blocks.extend(
-            _context_index_lines(
-                session, workspace_id, actor, include_stable_links=include_stable_links
-            )
+            _context_index_lines(session, workspace_id, actor, index_refs=index_refs)
             or ["_(none)_"]
         )
         blocks.append("")
     if "library" in sections:
         blocks.append("## Library")
         blocks.extend(
-            _library_index_lines(session, workspace_id, actor) or ["_(none)_"]
+            _library_index_lines(session, workspace_id, actor, index_refs=index_refs)
+            or ["_(none)_"]
         )
         blocks.append("")
     return "\n".join(blocks).rstrip() + "\n"
@@ -274,7 +297,7 @@ def _context_index_lines(
     workspace_id: UUID,
     actor: ActorContext | None,
     *,
-    include_stable_links: bool = False,
+    index_refs: bool = False,
 ) -> list[str]:
     pages = session.scalars(
         select(ContextPage)
@@ -310,22 +333,30 @@ def _context_index_lines(
     lines: list[str] = []
     for page, version_id, is_draft in chosen:
         description = descriptions.get(version_id) or ""
-        suffix = " *(draft)*" if is_draft else ""
-        path = context_concept_path(page.slug)
-        line = (
-            "* " + link_markdown(workspace_id, page.id, page.title)
-            if include_stable_links
-            else f"* [{page.title}]({path})"
-        )
+        if index_refs:
+            lines.append(
+                index_line(
+                    format_index_ref("context", page.id),
+                    page.title,
+                    suffix=" (draft)" if is_draft else "",
+                    summary=description,
+                )
+            )
+            continue
+        line = f"* [{page.title}]({context_concept_path(page.slug)})"
         if description:
             line += f" — {description}"
-        line += suffix
+        line += " *(draft)*" if is_draft else ""
         lines.append(line)
     return lines
 
 
 def _library_index_lines(
-    session: Session, workspace_id: UUID, actor: ActorContext | None
+    session: Session,
+    workspace_id: UUID,
+    actor: ActorContext | None,
+    *,
+    index_refs: bool = False,
 ) -> list[str]:
     allow_restricted = actor_can_read_restricted_library(actor)
     items = session.scalars(
@@ -340,7 +371,11 @@ def _library_index_lines(
         if item.trust_level in RESTRICTED_TRUST_LEVELS and not allow_restricted:
             continue
         title = item.title or item.uri
-        lines.append(f"* [{title}]({library_concept_path(item.id)}) — {item.uri}")
+        lines.append(
+            index_line(format_index_ref("library", item.id), title, summary=item.uri)
+            if index_refs
+            else f"* [{title}]({library_concept_path(item.id)}) — {item.uri}"
+        )
     return lines
 
 
