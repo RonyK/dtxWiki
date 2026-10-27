@@ -31,6 +31,11 @@ from backend.api.deps import (
 )
 from backend.api.health import _ready_payload as health_ready_payload
 from backend.api.users import user_deletion_error_response, user_deletion_service
+from backend.api.workspace_members import (
+    member_payload,
+    membership_error_response,
+    mutation_payload,
+)
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import oauth_token_lifetime_report
 from backend.mcp.envelope import advisory_warnings
@@ -64,6 +69,12 @@ from backend.schemas.user_deletion import (
     UserDeletionResponse,
     UserDeletionRestoreResponse,
 )
+from backend.schemas.workspace_membership import (
+    WorkspaceMemberAddRequest,
+    WorkspaceMemberListResponse,
+    WorkspaceMemberMutationResponse,
+    WorkspaceMemberRoleUpdateRequest,
+)
 from backend.services import deployment as deployment_service
 from backend.services import update_check_service
 from backend.services.admin_context_media import (
@@ -90,11 +101,21 @@ from backend.services.password_recovery_service import (
 )
 from backend.services.session_service import (
     AuthenticatedUser,
+    EmailInputPolicyError,
+    InvalidCredentialsError,
     VerifiedRecentReauthentication,
 )
 from backend.services.user_deletion_service import (
     UserDeletionError,
     UserDeletionService,
+)
+from backend.services.workspace_membership_service import (
+    WorkspaceMemberCursorInvalidError,
+    WorkspaceMembershipConflictError,
+    WorkspaceMembershipForbiddenError,
+    WorkspaceMembershipNotFoundError,
+    WorkspaceMembershipService,
+    WorkspaceMembershipValidationError,
 )
 from backend.utils.actor_display import resolve_actor_display_names
 
@@ -183,6 +204,9 @@ def admin_delete_user(
             expected_actor_session_generation=admin.session_generation,
             confirmation_email=request_body.confirmation_email,
             expected_retention_days=request_body.expected_retention_days,
+            approved_workspaces=[
+                item.model_dump() for item in request_body.approved_workspaces
+            ],
         )
     except UserDeletionError as exc:
         return user_deletion_error_response(exc)
@@ -208,7 +232,7 @@ def admin_user_deletion_preview(
     try:
         preview = user_deletion_service(
             session_factory, database_provider
-        ).deletion_preview(user_id=user_id)
+        ).deletion_preview(user_id=user_id, admin_request=True)
     except UserDeletionError as exc:
         return user_deletion_error_response(exc)
     response.headers["Cache-Control"] = "no-store"
@@ -242,6 +266,152 @@ def admin_restore_user_deletion(
         return user_deletion_error_response(exc)
     response.headers["Cache-Control"] = "no-store"
     return {"data": result}
+
+
+@router.get(
+    "/workspaces/{workspace_id}/members",
+    response_model=WorkspaceMemberListResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_list_held_workspace_members(
+    workspace_id: Annotated[UUID, Path()],
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+):
+    """Members of a workspace held for account deletion (server admins only)."""
+
+    try:
+        page = WorkspaceMembershipService(
+            session_factory=session_factory
+        ).list_members_page(
+            actor_user_id=admin.user_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            cursor=cursor,
+            server_admin=True,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return membership_error_response(exc, 404)
+    except WorkspaceMembershipForbiddenError as exc:
+        return membership_error_response(exc, 403)
+    except WorkspaceMembershipConflictError as exc:
+        return membership_error_response(exc, 409)
+    except (
+        WorkspaceMembershipValidationError,
+        WorkspaceMemberCursorInvalidError,
+    ) as exc:
+        return membership_error_response(exc, 422)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "data": {
+            "items": [
+                member_payload(member, actor_user_id=admin.user_id)
+                for member in page.items
+            ],
+            "total": page.total,
+            "limit": page.limit,
+            "offset": page.offset,
+            "has_more": page.has_more,
+            "next_cursor": page.next_cursor,
+        }
+    }
+
+
+@router.post(
+    "/workspaces/{workspace_id}/members",
+    response_model=WorkspaceMemberMutationResponse,
+    responses={**REST_ERROR_RESPONSES, 201: {"model": WorkspaceMemberMutationResponse}},
+)
+def admin_add_held_workspace_member(
+    workspace_id: Annotated[UUID, Path()],
+    request_body: WorkspaceMemberAddRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    """Add a viewer or editor to a held workspace before appointing an admin."""
+
+    try:
+        result = WorkspaceMembershipService(
+            session_factory=session_factory
+        ).add_member_with_metadata(
+            actor_user_id=admin.user_id,
+            workspace_id=workspace_id,
+            email=request_body.email,
+            role=request_body.role,
+            confirm_first_share=True,
+            server_admin=True,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return membership_error_response(exc, 404)
+    except WorkspaceMembershipForbiddenError as exc:
+        return membership_error_response(exc, 403)
+    except EmailInputPolicyError as exc:
+        return build_rest_error_response(
+            error_code=exc.error_code, message=str(exc), status_code=422
+        )
+    except InvalidCredentialsError:
+        return build_rest_error_response(
+            error_code="workspace_member_not_found",
+            message="user not found",
+            status_code=404,
+        )
+    except WorkspaceMembershipConflictError as exc:
+        return membership_error_response(exc, 409)
+    except WorkspaceMembershipValidationError as exc:
+        return membership_error_response(exc, 422)
+    response.status_code = 201 if result.created else 200
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": mutation_payload(result, actor_user_id=admin.user_id)}
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/members/{user_id}",
+    response_model=WorkspaceMemberMutationResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def admin_change_held_workspace_member_role(
+    workspace_id: Annotated[UUID, Path()],
+    user_id: Annotated[UUID, Path()],
+    request_body: WorkspaceMemberRoleUpdateRequest,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    """Change a role in a held workspace; an active admin reopens it."""
+
+    try:
+        result = WorkspaceMembershipService(
+            session_factory=session_factory
+        ).change_member_role(
+            actor_user_id=admin.user_id,
+            workspace_id=workspace_id,
+            target_user_id=user_id,
+            role=request_body.role,
+            server_admin=True,
+        )
+    except WorkspaceMembershipNotFoundError as exc:
+        return membership_error_response(exc, 404)
+    except WorkspaceMembershipForbiddenError as exc:
+        return membership_error_response(exc, 403)
+    except WorkspaceMembershipConflictError as exc:
+        return membership_error_response(exc, 409)
+    except WorkspaceMembershipValidationError as exc:
+        return membership_error_response(exc, 422)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": mutation_payload(result, actor_user_id=admin.user_id)}
 
 
 def deployment_status_data(request: Request, session_factory) -> dict:
@@ -405,6 +575,7 @@ def admin_search_users(
                             "slug": membership.slug,
                             "title": membership.title,
                             "role": membership.role,
+                            "deletion_held": membership.deletion_held,
                         }
                         for membership in record.workspaces
                     ],

@@ -14,33 +14,37 @@ class UserDeletionPolicyData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class UserDeletionPersonalWorkspaceData(BaseModel):
+class UserDeletionWorkspaceData(BaseModel):
     workspace_id: UUID
     title: str
+    # Other members whose accounts are active.
     other_member_count: int
 
     model_config = ConfigDict(extra="forbid")
 
 
-class UserDeletionTransferredWorkspaceData(BaseModel):
+class UserDeletionPreviewData(UserDeletionPolicyData):
+    # Workspaces this account is the only admin of: held with the account,
+    # closed to members, and deleted when the account is.
+    target_workspaces: list[UserDeletionWorkspaceData]
+    # Self-withdrawal only: workspaces that still have other active members
+    # must be deleted, or given another admin, first.
+    blocking_workspaces: list[UserDeletionWorkspaceData]
+
+
+class UserDeletionApprovedWorkspace(BaseModel):
     workspace_id: UUID
-    title: str
+    other_member_count: int = Field(strict=True, ge=0)
 
     model_config = ConfigDict(extra="forbid")
-
-
-class UserDeletionPreviewData(UserDeletionPolicyData):
-    # Deleted at cleanup, even when shared with other members.
-    personal_workspace: UserDeletionPersonalWorkspaceData | None
-    # Shared workspaces whose last active owner is leaving; every active
-    # server administrator becomes an owner when the deletion is requested.
-    transferred_workspaces: list[UserDeletionTransferredWorkspaceData]
-    recipient_admin_count: int
 
 
 class AdminUserDeletionRequest(BaseModel):
     confirmation_email: EmailInput
     expected_retention_days: int = Field(strict=True, ge=0, le=36500)
+    # Exactly the target workspaces the preview showed; a mismatch is refused
+    # so nothing is held that the confirming person did not see.
+    approved_workspaces: list[UserDeletionApprovedWorkspace] = Field(max_length=1000)
 
     model_config = ConfigDict(extra="forbid")
 

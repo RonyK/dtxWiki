@@ -463,7 +463,13 @@ class WorkspaceReadService:
         actor=None,
     ) -> list[tuple[Workspace, str | None]]:
         if actor is not None and getattr(actor, "user_id", None) is not None:
-            rows = list_user_workspaces(session, actor.user_id)
+            # A workspace held for an account's deletion is closed to its
+            # members, so it is not listed until an admin reopens it.
+            rows = [
+                (workspace, role)
+                for workspace, role in list_user_workspaces(session, actor.user_id)
+                if workspace.account_deletion_user_id is None
+            ]
             return actor_workspace_filter(actor, rows)
         actor_workspace_id = getattr(actor, "workspace_id", None)
         if actor is not None and actor_workspace_id is not None:

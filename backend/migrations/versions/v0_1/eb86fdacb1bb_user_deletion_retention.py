@@ -25,6 +25,15 @@ def upgrade() -> None:
     op.add_column("users", sa.Column("deletion_failure_count", sa.Integer()))
     op.add_column("users", sa.Column("deletion_last_error", sa.Text()))
     op.create_index("ix_users_purge_after", "users", ["purge_after"], unique=False)
+    op.add_column(
+        "workspace", sa.Column("account_deletion_user_id", sa.Uuid(as_uuid=True))
+    )
+    op.create_index(
+        "ix_workspace_account_deletion_user_id",
+        "workspace",
+        ["account_deletion_user_id"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
@@ -35,6 +44,9 @@ def downgrade() -> None:
             "cannot remove account deletion deadlines while deletion requests "
             "are pending; finish account cleanup before downgrading"
         )
+    op.drop_index("ix_workspace_account_deletion_user_id", table_name="workspace")
+    with op.batch_alter_table("workspace") as batch:
+        batch.drop_column("account_deletion_user_id")
     op.drop_index("ix_users_purge_after", table_name="users")
     with op.batch_alter_table("users") as batch:
         batch.drop_column("deletion_last_error")

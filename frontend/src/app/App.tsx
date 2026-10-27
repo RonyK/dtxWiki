@@ -127,6 +127,11 @@ const SettingsScreen = lazy(() =>
     default: module.SettingsScreen,
   })),
 );
+const WorkspaceScopedSettingsScreen = lazy(() =>
+  import("../features/settings/WorkspaceScopedSettingsScreen").then((module) => ({
+    default: module.WorkspaceScopedSettingsScreen,
+  })),
+);
 const SetupScreen = lazy(() =>
   import("../features/setup/SetupScreen").then((module) => ({ default: module.SetupScreen })),
 );
@@ -148,6 +153,9 @@ export const appRoutes = createRoutesFromElements(
           so an anonymous visitor renders the page without any redirect to /login. */}
       <Route element={<PublicFrame />}>
         <Route path="/w/:workspaceSlug/pages/:slug" element={<PublishedPageReader />} />
+      </Route>
+      <Route element={<ScopedSettingsFrame />}>
+        <Route path="/workspaces/:workspaceId/settings" element={<RequireAuth><WorkspaceScopedSettingsScreen /></RequireAuth>} />
       </Route>
       <Route element={<AppFrame />}>
       <Route
@@ -460,6 +468,14 @@ function PublicFrame() {
         <Outlet />
       </Suspense>
     </div>
+  );
+}
+
+function ScopedSettingsFrame() {
+  return (
+    <AuthProvider>
+      <Suspense fallback={<RouteLoading />}><Outlet /></Suspense>
+    </AuthProvider>
   );
 }
 

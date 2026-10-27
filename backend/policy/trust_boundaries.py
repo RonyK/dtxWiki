@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Literal, TypeVar
 from uuid import UUID
 
-from backend.models.workspace import WorkspaceMembership
+from backend.models.workspace import Workspace, WorkspaceMembership
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -18,6 +18,21 @@ if TYPE_CHECKING:
 
 ROLE_ORDER = {"viewer": 0, "editor": 1, "owner": 2}
 ROLE_ALIASES = {"admin": "owner", "member": "editor", "reviewer": "editor"}
+
+
+def require_workspace_open(session: Session, workspace_id: UUID) -> None:
+    """Deny member access to a workspace held for an account's deletion.
+
+    Server-admin recovery routes do not pass through here; they reopen the
+    workspace by appointing an active admin.
+    """
+
+    workspace = session.get(Workspace, workspace_id)
+    if workspace is not None and workspace.account_deletion_user_id is not None:
+        raise PermissionError(
+            "workspace_deletion_pending: this workspace is closed until a "
+            "server administrator appoints a new admin"
+        )
 
 
 def oauth_consented_workspace_scope(
@@ -140,6 +155,7 @@ def actor_with_target_workspace_scope(
         raise PermissionError(
             "workspace_membership_missing: workspace membership is required"
         )
+    require_workspace_open(session, workspace_id)
     return replace(
         actor,
         workspace_id=workspace_id,
@@ -248,6 +264,7 @@ def check_actor_can_access(
         raise PermissionError(
             "workspace_membership_missing: workspace membership is required"
         )
+    require_workspace_open(session, resource_workspace_id)
     required_role = action_to_required_role(action)
     if not _role_allows(membership.role, required_role):
         raise PermissionError(

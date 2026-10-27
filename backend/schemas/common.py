@@ -581,6 +581,14 @@ class RESTBlocker(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RESTBlockingWorkspace(BaseModel):
+    workspace_id: UUID
+    title: str
+    other_member_count: int = Field(ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RESTConflictErrorBody(RESTErrorBody):
     server_version_id: UUID | None = None
     server_content_hash: str | None = None
@@ -595,3 +603,6 @@ class RESTConflictErrorBody(RESTErrorBody):
     # they are declared fields.
     purge_grant: str | None = None
     purge_grant_expires_at: datetime | None = None
+    # Account withdrawal 409: workspaces with other active members that must
+    # be deleted, or given another admin, before the account can leave.
+    blocking_workspaces: list[RESTBlockingWorkspace] | None = None

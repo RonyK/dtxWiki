@@ -1187,6 +1187,14 @@
       "AdminUserDeletionRequest": {
         "additionalProperties": false,
         "properties": {
+          "approved_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionApprovedWorkspace"
+            },
+            "maxItems": 1000,
+            "title": "Approved Workspaces",
+            "type": "array"
+          },
           "confirmation_email": {
             "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
             "title": "Confirmation Email",
@@ -1203,7 +1211,8 @@
         },
         "required": [
           "confirmation_email",
-          "expected_retention_days"
+          "expected_retention_days",
+          "approved_workspaces"
         ],
         "title": "AdminUserDeletionRequest",
         "type": "object"
@@ -1259,6 +1268,11 @@
       "AdminUserWorkspaceData": {
         "additionalProperties": false,
         "properties": {
+          "deletion_held": {
+            "default": false,
+            "title": "Deletion Held",
+            "type": "boolean"
+          },
           "role": {
             "enum": [
               "viewer",
@@ -15111,6 +15125,32 @@
         "title": "RESTBlocker",
         "type": "object"
       },
+      "RESTBlockingWorkspace": {
+        "additionalProperties": false,
+        "properties": {
+          "other_member_count": {
+            "minimum": 0.0,
+            "title": "Other Member Count",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "title",
+          "other_member_count"
+        ],
+        "title": "RESTBlockingWorkspace",
+        "type": "object"
+      },
       "RESTConflictErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -15127,6 +15167,20 @@
               }
             ],
             "title": "Blockers"
+          },
+          "blocking_workspaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RESTBlockingWorkspace"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Workspaces"
           },
           "candidates": {
             "anyOf": [
@@ -17276,6 +17330,14 @@
       "SelfUserDeletionRequest": {
         "additionalProperties": false,
         "properties": {
+          "approved_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionApprovedWorkspace"
+            },
+            "maxItems": 1000,
+            "title": "Approved Workspaces",
+            "type": "array"
+          },
           "confirmation_email": {
             "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
             "title": "Confirmation Email",
@@ -17299,6 +17361,7 @@
         "required": [
           "confirmation_email",
           "expected_retention_days",
+          "approved_workspaces",
           "current_password"
         ],
         "title": "SelfUserDeletionRequest",
@@ -18524,6 +18587,27 @@
         "title": "TreeSectionPolicyPayload",
         "type": "object"
       },
+      "UserDeletionApprovedWorkspace": {
+        "additionalProperties": false,
+        "properties": {
+          "other_member_count": {
+            "minimum": 0.0,
+            "title": "Other Member Count",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "other_member_count"
+        ],
+        "title": "UserDeletionApprovedWorkspace",
+        "type": "object"
+      },
       "UserDeletionData": {
         "additionalProperties": false,
         "properties": {
@@ -18562,31 +18646,6 @@
         "title": "UserDeletionData",
         "type": "object"
       },
-      "UserDeletionPersonalWorkspaceData": {
-        "additionalProperties": false,
-        "properties": {
-          "other_member_count": {
-            "title": "Other Member Count",
-            "type": "integer"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "workspace_id",
-          "title",
-          "other_member_count"
-        ],
-        "title": "UserDeletionPersonalWorkspaceData",
-        "type": "object"
-      },
       "UserDeletionPolicyData": {
         "additionalProperties": false,
         "properties": {
@@ -18622,19 +18681,12 @@
       "UserDeletionPreviewData": {
         "additionalProperties": false,
         "properties": {
-          "personal_workspace": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UserDeletionPersonalWorkspaceData"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "recipient_admin_count": {
-            "title": "Recipient Admin Count",
-            "type": "integer"
+          "blocking_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/UserDeletionWorkspaceData"
+            },
+            "title": "Blocking Workspaces",
+            "type": "array"
           },
           "retention_days": {
             "maximum": 36500.0,
@@ -18642,19 +18694,18 @@
             "title": "Retention Days",
             "type": "integer"
           },
-          "transferred_workspaces": {
+          "target_workspaces": {
             "items": {
-              "$ref": "#/components/schemas/UserDeletionTransferredWorkspaceData"
+              "$ref": "#/components/schemas/UserDeletionWorkspaceData"
             },
-            "title": "Transferred Workspaces",
+            "title": "Target Workspaces",
             "type": "array"
           }
         },
         "required": [
           "retention_days",
-          "personal_workspace",
-          "transferred_workspaces",
-          "recipient_admin_count"
+          "target_workspaces",
+          "blocking_workspaces"
         ],
         "title": "UserDeletionPreviewData",
         "type": "object"
@@ -18731,9 +18782,13 @@
         "title": "UserDeletionRestoreResponse",
         "type": "object"
       },
-      "UserDeletionTransferredWorkspaceData": {
+      "UserDeletionWorkspaceData": {
         "additionalProperties": false,
         "properties": {
+          "other_member_count": {
+            "title": "Other Member Count",
+            "type": "integer"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -18746,9 +18801,10 @@
         },
         "required": [
           "workspace_id",
-          "title"
+          "title",
+          "other_member_count"
         ],
-        "title": "UserDeletionTransferredWorkspaceData",
+        "title": "UserDeletionWorkspaceData",
         "type": "object"
       },
       "ValidationError": {
@@ -22061,6 +22117,313 @@
           }
         ],
         "summary": "Admin Issue Password Reset",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/workspaces/{workspace_id}/members": {
+      "get": {
+        "description": "Members of a workspace held for account deletion (server admins only).",
+        "operationId": "admin_list_held_workspace_members_api_v1_admin_workspaces__workspace_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "RecentReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin List Held Workspace Members",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Add a viewer or editor to a held workspace before appointing an admin.",
+        "operationId": "admin_add_held_workspace_member_api_v1_admin_workspaces__workspace_id__members_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberMutationResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "RecentReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Add Held Workspace Member",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}": {
+      "patch": {
+        "description": "Change a role in a held workspace; an active admin reopens it.",
+        "operationId": "admin_change_held_workspace_member_role_api_v1_admin_workspaces__workspace_id__members__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberRoleUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "RecentReauthenticationCookie": [],
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Admin Change Held Workspace Member Role",
         "tags": [
           "admin"
         ]

@@ -3735,24 +3735,32 @@ function SettingsScreenBody() {
               // Account-level or per-user preferences — e.g. the user's default
               // workspace — live on the Account page (Workspace access panel),
               // NOT here. Do not reintroduce per-user prefs into this section.
-              <section className="feature-section">
-                <CurrentWorkspaceDefaultStatus />
-                <PolicyGroupView
-                  card={policies.workspace}
-                  fields={workspacePolicyFields(policies.workspace.policy)}
-                  group="workspace"
-                  busyKey={policyBusyKey}
-                  onFieldsSave={onPolicyFieldsSave}
-                  saveNotice={policySaved}
-                  readOnly={!canEditPolicies}
-                  summary={t("summary.workspace")}
-                />
-                <WorkspaceDangerZone
-                  currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
-                  onPoliciesChanged={setPolicies}
-                  readOnly={!canEditPolicies}
-                />
-              </section>
+              <WorkspaceSettingsSection
+                workspace={workspaceContext?.selectedWorkspace ?? null}
+                workspaceLoading={workspaceContext?.loading ?? false}
+                defaultWorkspaceId={workspaceContext?.defaultWorkspaceId ?? null}
+                workspaces={workspaceContext?.workspaces ?? []}
+                onDefaultChanged={async (id) => {
+                  await setDefaultWorkspace(id);
+                  await workspaceContext?.refreshWorkspaces();
+                }}
+                policies={policies}
+                busyKey={policyBusyKey}
+                onFieldsSave={onPolicyFieldsSave}
+                saveNotice={policySaved}
+                readOnly={!canEditPolicies}
+                onPoliciesChanged={setPolicies}
+                onSlugChanged={async () => { await workspaceContext?.refreshWorkspaces(); }}
+                onDelete={async (workspace, options) => {
+                  if (!workspaceContext) return;
+                  const deleted = await deleteWorkspace(workspace.id, options);
+                  const remaining = workspaceContext.workspaces.filter((candidate) => candidate.id !== deleted.deleted_workspace_id);
+                  workspaceContext.removeWorkspace(deleted.deleted_workspace_id);
+                  const refreshed = await workspaceContext.refreshWorkspaces();
+                  navigate((refreshed?.workspaces ?? remaining).length === 0 ? "/workspaces/find" : "/dashboard", { replace: true });
+                }}
+                resolveWorkspaceId={getCurrentWorkspaceId}
+              />
             ) : null}
             {activeSection === "policies" ? (
               <>
@@ -5471,14 +5479,71 @@ function McpClientList({
   );
 }
 
+export function WorkspaceSettingsSection({
+  workspace, workspaceLoading, defaultWorkspaceId, workspaces, onDefaultChanged,
+  policies, busyKey, onFieldsSave, saveNotice, readOnly, onPoliciesChanged,
+  onSlugChanged, onDelete, resolveWorkspaceId,
+}: {
+  workspace: WorkspaceSummary | null;
+  workspaceLoading: boolean;
+  defaultWorkspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  onDefaultChanged: (id: string) => Promise<void>;
+  policies: SettingsPolicies;
+  busyKey: string | null;
+  onFieldsSave: (group: SettingsPolicyGroup, updates: PolicyFieldUpdate[], successLabel: string) => Promise<boolean>;
+  saveNotice: PolicySaveNotice | null;
+  readOnly: boolean;
+  onPoliciesChanged: (policies: SettingsPolicies) => void;
+  onSlugChanged: (slug: string) => Promise<void>;
+  onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
+  resolveWorkspaceId?: () => Promise<string | null>;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <section className="feature-section">
+      <CurrentWorkspaceDefaultStatus
+        workspace={workspace}
+        defaultWorkspaceId={defaultWorkspaceId}
+        workspaces={workspaces}
+        onDefaultChanged={onDefaultChanged}
+      />
+      <PolicyGroupView
+        card={policies.workspace}
+        fields={workspacePolicyFields(policies.workspace.policy)}
+        group="workspace"
+        busyKey={busyKey}
+        onFieldsSave={onFieldsSave}
+        saveNotice={saveNotice}
+        readOnly={readOnly}
+        summary={t("summary.workspace")}
+      />
+      <WorkspaceDangerZone
+        workspace={workspace}
+        workspaceLoading={workspaceLoading}
+        currentSlug={workspaceSlugFromPolicy(policies.workspace.policy)}
+        onPoliciesChanged={onPoliciesChanged}
+        readOnly={readOnly}
+        onSlugChanged={onSlugChanged}
+        onDelete={onDelete}
+        resolveWorkspaceId={resolveWorkspaceId}
+      />
+    </section>
+  );
+}
+
 // S1: Settings > Workspace is scoped to the CURRENT workspace only. It shows
 // whether this workspace is the user's default and offers a single action to
 // make it the default (with a confirm step). The full cross-workspace default
 // picker lives in Account > Workspace access — do not reintroduce a workspace
 // list here.
-function CurrentWorkspaceDefaultStatus() {
+function CurrentWorkspaceDefaultStatus({ workspace: currentWorkspace, defaultWorkspaceId, workspaces, onDefaultChanged }: {
+  workspace: WorkspaceSummary | null;
+  defaultWorkspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  onDefaultChanged: (id: string) => Promise<void>;
+}) {
   const { t } = useTranslation("settings");
-  const workspaceContext = useOptionalWorkspaceContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -5497,9 +5562,6 @@ function CurrentWorkspaceDefaultStatus() {
     }
   }, [confirmOpen]);
 
-  const currentWorkspace = workspaceContext?.selectedWorkspace ?? null;
-  const defaultWorkspaceId = workspaceContext?.defaultWorkspaceId ?? null;
-  const workspaces = workspaceContext?.workspaces ?? [];
   const isCurrentDefault =
     currentWorkspace != null && currentWorkspace.id === defaultWorkspaceId;
   const defaultWorkspace =
@@ -5513,8 +5575,7 @@ function CurrentWorkspaceDefaultStatus() {
     setError(null);
     setStatus(null);
     try {
-      await setDefaultWorkspace(currentWorkspace.id);
-      await workspaceContext?.refreshWorkspaces();
+      await onDefaultChanged(currentWorkspace.id);
       setStatus(
         t("workspaceDefault.statusChanged", {
           title: currentWorkspace.title,
@@ -5669,15 +5730,22 @@ export function WorkspaceDangerZone({
   currentSlug,
   onPoliciesChanged,
   readOnly,
+  workspace,
+  workspaceLoading = false,
+  onSlugChanged,
+  onDelete,
+  resolveWorkspaceId,
 }: {
   currentSlug: string;
   onPoliciesChanged: (policies: SettingsPolicies) => void;
   readOnly: boolean;
+  workspace: WorkspaceSummary | null;
+  workspaceLoading?: boolean;
+  onSlugChanged: (slug: string) => Promise<void>;
+  onDelete: (workspace: WorkspaceSummary, options: { purgeContents?: boolean; purgeGrant?: string }) => Promise<void>;
+  resolveWorkspaceId?: () => Promise<string | null>;
 }) {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
-  const workspaceContext = useOptionalWorkspaceContext();
-  const workspace = workspaceContext?.selectedWorkspace ?? null;
   const activeSlug = workspace?.slug ?? currentSlug;
   const [slugDraft, setSlugDraft] = useState(activeSlug);
   const [slugBusy, setSlugBusy] = useState(false);
@@ -5696,7 +5764,7 @@ export function WorkspaceDangerZone({
           defaultValue: disabledReasonCode,
         })
       : null
-    : workspaceContext?.loading
+    : workspaceLoading
       ? t("dangerZone.loadingWorkspace", {
           defaultValue: "Workspace is still loading.",
         })
@@ -5727,7 +5795,7 @@ export function WorkspaceDangerZone({
     setSlugError(null);
     setSlugStatus(null);
     try {
-      const workspaceId = workspace?.id ?? (await getCurrentWorkspaceId());
+      const workspaceId = workspace?.id ?? (await resolveWorkspaceId?.());
       if (!workspaceId) {
         throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
       }
@@ -5737,7 +5805,7 @@ export function WorkspaceDangerZone({
         value: normalizedSlug,
       });
       onPoliciesChanged(updatedPolicies);
-      await workspaceContext?.refreshWorkspaces();
+      await onSlugChanged(normalizedSlug);
       setSlugStatus(
         t("dangerZone.slugUpdated", {
           defaultValue: "Workspace slug updated",
@@ -5751,7 +5819,7 @@ export function WorkspaceDangerZone({
   }
 
   async function onConfirmDelete() {
-    if (!workspace || disabledReason || !workspaceContext) {
+    if (!workspace || disabledReason) {
       return;
     }
     // `grant_expired` is deliberately excluded: it has no grant left to
@@ -5765,22 +5833,8 @@ export function WorkspaceDangerZone({
         : undefined;
     setDeleteBusy(true);
     try {
-      const deleted = await deleteWorkspace(workspace.id, {
-        purgeContents,
-        purgeGrant,
-      });
-      const localRemainingWorkspaces = workspaceContext.workspaces.filter(
-        (candidate) => candidate.id !== deleted.deleted_workspace_id,
-      );
-      workspaceContext.removeWorkspace(deleted.deleted_workspace_id);
-      const refreshed = await workspaceContext.refreshWorkspaces();
+      await onDelete(workspace, { purgeContents, purgeGrant });
       setDeleteFlow({ kind: "closed" });
-      navigate(
-        (refreshed?.workspaces ?? localRemainingWorkspaces).length === 0
-          ? "/workspaces/find"
-          : "/dashboard",
-        { replace: true },
-      );
     } catch (caught) {
       const blockers = workspaceDeleteBlockers(caught);
       const grant = workspaceDeletePurgeGrant(caught);

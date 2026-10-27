@@ -4,8 +4,9 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceDangerZone } from "../SettingsScreen";
+import type { WorkspaceSummary } from "../../../shared/api/workspace";
 
-// The Danger Zone takes the active slug from the workspace context and falls
+// The Danger Zone takes the active slug from its workspace scope and falls
 // back to the slug in the policy card while there is none.
 const { workspaceContext } = vi.hoisted(() => ({
   workspaceContext: { current: null as Record<string, unknown> | null },
@@ -69,6 +70,9 @@ function dangerZone(
       <EditDuringCommit edit={edit}>
         <WorkspaceDangerZone
           currentSlug={currentSlug}
+          workspace={(workspaceContext.current?.selectedWorkspace as WorkspaceSummary | undefined) ?? null}
+          onSlugChanged={async () => {}}
+          onDelete={async () => {}}
           onPoliciesChanged={() => {}}
           readOnly={false}
         />

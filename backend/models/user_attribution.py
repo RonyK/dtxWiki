@@ -39,12 +39,26 @@ def _no_conditions() -> tuple:
     return ()
 
 
+def _private_version_outstanding() -> tuple:
+    from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
+
+    return (
+        ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
+        or_(
+            ContextPageVersion.version_status == "editing",
+            ContextPageVersion.body_md != "",
+            ContextPageVersion.actor_display_name.is_not(None),
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class UserAttribution:
     """One way a row names a user, and what account cleanup does with it."""
 
     columns: tuple[InstrumentedAttribute, ...]
-    # delete | clear | author_name | api_tokens | owner_projection
+    # delete | clear | private_versions | author_name | api_tokens |
+    # owner_projection
     cleanup: str
     workspace_scoped: bool
     # (attribute, value) that marks the column as a human user id.
@@ -73,7 +87,16 @@ class UserAttribution:
 
 
 USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
-    # Workspace plane, in cleanup order.
+    # Workspace plane, in cleanup order. Unsubmitted private edits go first:
+    # nobody else can open them, so they are deleted rather than kept.
+    UserAttribution(
+        (ContextPageVersion.created_by_actor_id,),
+        "private_versions",
+        workspace_scoped=True,
+        actor_kind=("created_by_actor_kind", "human"),
+        as_text=True,
+        outstanding=_private_version_outstanding,
+    ),
     UserAttribution(
         (ContextPageVersion.actor_id,),
         "author_name",
@@ -131,5 +154,6 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     UserAttribution((WorkspaceJoinRequest.requester_user_id,), "delete", False),
     UserAttribution((WorkspaceJoinRequest.decided_by_user_id,), "clear", False),
     UserAttribution((PasswordResetToken.requested_by_user_id,), "clear", False),
+    UserAttribution((Workspace.account_deletion_user_id,), "clear", False),
     UserAttribution((Workspace.owner_user_id,), "owner_projection", False),
 )

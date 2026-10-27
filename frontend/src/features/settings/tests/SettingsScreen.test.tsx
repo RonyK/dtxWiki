@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { Link, MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -20,6 +20,7 @@ import {
 } from "../../../shared/workspace/WorkspaceContext";
 import { i18n, setLocale } from "../../../shared/i18n";
 import { SettingsScreen } from "../SettingsScreen";
+import { WorkspaceScopedSettingsScreen } from "../WorkspaceScopedSettingsScreen";
 
 const BASE = "https://wiki.example.test";
 const LOOPBACK_BASE = "http://127.0.0.1:21080";
@@ -79,6 +80,38 @@ describe("SettingsScreen", () => {
     cleanup();
     vi.unstubAllEnvs();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it("renders the URL workspace without changing the ambient selection", async () => {
+    window.localStorage.setItem("dtxwiki.selectedWorkspaceId", "ambient");
+    window.localStorage.setItem("dtxwiki.selectedWorkspaceSlug", "ambient-slug");
+    const scrollIntoView = vi.fn();
+    const originalScroll = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")!;
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: "ambient",
+        default_workspace_id: "ambient",
+        workspaces: [workspaceSummary("ambient", "Ambient", "ambient-slug"), workspaceSummary("target", "Target workspace", "target-slug", "viewer")],
+      } },
+      [`${BASE}/api/v1/workspaces/target/settings/policies`]: { data: {
+        ...basicSettingsPolicies(),
+        workspace: policy("workspace", "Workspace policy", { title: "Target workspace", slug: "target-slug" }),
+      } },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspaces/target/settings?section=workspace#workspace-danger-title"]}>
+      <Routes><Route path="/workspaces/:workspaceId/settings" element={<WorkspaceScopedSettingsScreen />} /></Routes>
+    </MemoryRouter>);
+
+    expect(await screen.findByRole("heading", { name: "Target workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Settings" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("button", { name: "Delete workspace…" })).toBeDisabled();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/target/settings/policies`, expect.anything());
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe("ambient");
+    expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug")).toBe("ambient-slug");
+    Object.defineProperty(Element.prototype, "scrollIntoView", originalScroll);
   });
 
   function mockPolicyNavigationAndMcpClients() {

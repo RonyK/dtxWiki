@@ -8,6 +8,7 @@ scalar expressions belong in unit tests. Do not add per-column/stage cases.
 import json
 import os
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -22,7 +23,7 @@ from backend.models.agent import AgentPage
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.favorite import UserFavorite
 from backend.models.library import LibraryItem
-from backend.services.context_media_policy import read_context_media_policy
+from backend.services.context_media_policy import resolve_context_media_policy
 from backend.services.ops.input_maintenance import audit_inputs, repair_input
 
 pytestmark = pytest.mark.xdist_group("postgres")
@@ -349,11 +350,15 @@ def test_consolidated_release_schema_round_trip(migration_database):
         # Existing workspaces keep server inheritance, including a zero-hour
         # default. This folds the former standalone retention migration case.
         factory = sessionmaker(engine)
+        # The Workspace model can be ahead of this intermediate revision, so
+        # resolve the stored policy from the row instead of loading the model.
+        stored = SimpleNamespace(
+            context_media_policy=_row(engine, key)["context_media_policy"]
+        )
         for default in (168, 72, 36, 12, 0):
-            with factory() as session:
-                policy = read_context_media_policy(session, identity, default)
-                assert policy.override_hours is None
-                assert policy.effective_hours == default
+            policy = resolve_context_media_policy(stored, default)
+            assert policy.override_hours is None
+            assert policy.effective_hours == default
         defaults.append(_assert_policy_column_and_server_default(engine, stage))
         for default_key in defaults:
             assert _row(engine, default_key)["context_media_policy"] == {}

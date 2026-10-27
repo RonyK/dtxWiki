@@ -209,6 +209,7 @@ function isPrivilegedReauthentication(path: string, body: ApiErrorBody) {
     body.error_code === "recent_reauthentication_required" &&
     (/^\/api\/v1\/admin\/users(?:\?|$)/.test(path) ||
       /^\/api\/v1\/admin\/users\/[^/]+(?:\/(?:password-reset|deletion-preview|deletion-restore))?$/.test(path) ||
+      /^\/api\/v1\/admin\/workspaces\/[^/]+\/members(?:\/[^/?]+)?(?:\?|$)/.test(path) ||
       path === "/api/v1/admin/user-deletion-policy")
   );
 }

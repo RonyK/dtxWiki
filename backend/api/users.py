@@ -62,7 +62,10 @@ def user_deletion_service(session_factory, database_provider) -> UserDeletionSer
 
 def user_deletion_error_response(exc: UserDeletionError):
     return build_rest_error_response(
-        error_code=exc.error_code, message=str(exc), status_code=exc.status_code
+        error_code=exc.error_code,
+        message=str(exc),
+        status_code=exc.status_code,
+        extra=exc.details,
     )
 
 
@@ -115,6 +118,9 @@ def delete_my_account(
             confirmation_email=request_body.confirmation_email,
             current_password=request_body.current_password,
             expected_retention_days=request_body.expected_retention_days,
+            approved_workspaces=[
+                item.model_dump() for item in request_body.approved_workspaces
+            ],
         )
     except SessionServiceError as exc:
         return auth_error_response(exc)

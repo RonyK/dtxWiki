@@ -17,6 +17,8 @@ class AdminUserWorkspaceData(BaseModel):
     slug: str
     title: str
     role: Literal["viewer", "editor", "owner"]
+    # Held with this user's pending deletion; appoint an admin to keep it.
+    deletion_held: bool = False
 
     model_config = ConfigDict(extra="forbid")
 

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.app.container import BlobStoreProvider
 from backend.app.main import create_app
@@ -11,7 +11,6 @@ from backend.models import (
     ApiToken,
     AppMetadata,
     ChangeSet,
-    ContextMediaAsset,
     ContextMediaUsage,
     ContextPage,
     ContextPageVersion,
@@ -51,6 +50,9 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     admin = users.add_user(email="operator@example.com", password="admin-password")
     target = users.add_user(email="withdraw@example.com", password="user-password")
     dormant = users.add_user(email="dormant@example.com", password="dormant-password")
+    colleague = users.add_user(email="colleague@example.com", password="colleague-pw")
+    teamlead = users.add_user(email="teamlead@example.com", password="teamlead-pw")
+    outsider = users.add_user(email="outsider@example.com", password="outsider-pw")
     with factory.begin() as session:
         grant_server_admin(session, admin.user_id)
         personal_id = session.get(User, target.user_id).personal_workspace_id
@@ -78,6 +80,39 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
                 user_id=target.user_id, workspace_id=shared_id, role="owner"
             )
         )
+        session.add(
+            WorkspaceMembership(
+                user_id=colleague.user_id, workspace_id=shared_id, role="editor"
+            )
+        )
+        # Only active members count: a disabled member does not keep the
+        # leaver's own workspace from being held and deleted.
+        session.add(
+            WorkspaceMembership(
+                user_id=dormant.user_id, workspace_id=personal_id, role="editor"
+            )
+        )
+        team = Workspace(
+            slug="team-held",
+            title="Team held",
+            name="Team held",
+            visibility="team",
+            join_policy="request",
+        )
+        session.add(team)
+        session.flush()
+        team_id = team.id
+        session.add_all(
+            [
+                WorkspaceMembership(
+                    user_id=teamlead.user_id, workspace_id=team_id, role="owner"
+                ),
+                WorkspaceMembership(
+                    user_id=colleague.user_id, workspace_id=team_id, role="editor"
+                ),
+            ]
+        )
+        teamlead_personal_id = session.get(User, teamlead.user_id).personal_workspace_id
         page = ContextPage(
             workspace_id=shared_id,
             slug="shared-history",
@@ -246,6 +281,20 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         ).status_code
         == 200
     )
+    colleague_client = TestClient(app)
+    outsider_client = TestClient(app)
+    for client, account, password in (
+        (colleague_client, colleague, "colleague-pw"),
+        (outsider_client, outsider, "outsider-pw"),
+    ):
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"email": account.email, "password": password},
+            ).status_code
+            == 200
+        )
+    assert users.deactivate_user(email=dormant.email) is True
     png = bytes.fromhex(
         "89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c"
         "020000000b4944415478da6364f80f00010501012718e3660000000049454e44"
@@ -289,24 +338,70 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         ).json()["data"]["retention_days"]
         == 1
     )
+    with factory() as session:
+        shared_others = session.scalar(
+            select(func.count())
+            .select_from(WorkspaceMembership)
+            .join(User, User.id == WorkspaceMembership.user_id)
+            .where(
+                WorkspaceMembership.workspace_id == shared_id,
+                WorkspaceMembership.user_id != target.user_id,
+                User.status == "active",
+            )
+        )
+    personal_target = {
+        "workspace_id": str(personal_id),
+        "title": personal_title,
+        "other_member_count": 0,
+    }
     assert user_client.get("/api/v1/users/me/deletion-preview").json()["data"] == {
         "retention_days": 1,
-        "personal_workspace": {
-            "workspace_id": str(personal_id),
-            "title": personal_title,
-            "other_member_count": 0,
-        },
-        "transferred_workspaces": [
-            {"workspace_id": str(shared_id), "title": shared_title}
+        "target_workspaces": [personal_target],
+        "blocking_workspaces": [
+            {
+                "workspace_id": str(shared_id),
+                "title": shared_title,
+                "other_member_count": shared_others,
+            }
         ],
-        "recipient_admin_count": 1,
     }
-
     deletion_body = {
         "confirmation_email": target.email,
         "current_password": "user-password",
         "expected_retention_days": 1,
+        "approved_workspaces": [
+            {"workspace_id": str(personal_id), "other_member_count": 0}
+        ],
     }
+    # Other active members keep the shared workspace from being decided by the
+    # leaver alone: withdrawal waits until it is deleted or has another admin.
+    blocked = user_client.request("DELETE", "/api/v1/users/me", json=deletion_body)
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["error_code"] == "user_deletion_last_owner"
+    assert [item["workspace_id"] for item in blocked.json()["blocking_workspaces"]] == [
+        str(shared_id)
+    ]
+    assert (
+        user_client.patch(
+            f"/api/v1/workspaces/{shared_id}/members/{colleague.user_id}",
+            json={"role": "owner"},
+        ).status_code
+        == 200
+    )
+    assert (
+        user_client.get("/api/v1/users/me/deletion-preview").json()["data"][
+            "blocking_workspaces"
+        ]
+        == []
+    )
+    stale = user_client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        json={**deletion_body, "approved_workspaces": []},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error_code"] == "user_deletion_targets_changed"
+
     issued = user_client.post(
         "/api/v1/auth/tokens",
         json={
@@ -319,12 +414,11 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
 
     response = user_client.request("DELETE", "/api/v1/users/me", json=deletion_body)
     assert response.status_code == 200, response.text
-    # The last active owner leaves: every active server admin takes over.
     with factory() as session:
-        assert session.get(WorkspaceMembership, (admin.user_id, shared_id)).role == (
-            "owner"
+        assert session.get(Workspace, personal_id).account_deletion_user_id == (
+            target.user_id
         )
-        assert session.get(Workspace, shared_id).owner_user_id == admin.user_id
+        assert session.get(Workspace, shared_id).account_deletion_user_id is None
     # The workspace owner can work on the routed change after withdrawal.
     with factory.begin() as session:
         claimed = reviews.claim_review(
@@ -332,10 +426,10 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             workspace_id=shared_id,
             review_item_id=review_id,
             actor_kind="human",
-            actor_id=str(admin.user_id),
+            actor_id=str(colleague.user_id),
             actor_role="owner",
         )
-        assert claimed.claimed_by == admin.user_id
+        assert claimed.claimed_by == colleague.user_id
         assert claimed.current_audience_kind == "workspace_owners"
     assert user_client.get("/api/v1/auth/me").status_code == 401
     assert (
@@ -366,6 +460,8 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         "user_id": str(target.user_id),
         "status": "active",
     }
+    with factory() as session:
+        assert session.get(Workspace, personal_id).account_deletion_user_id is None
     assert (
         user_client.post(
             "/api/v1/auth/login",
@@ -381,12 +477,24 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         days=1
     )
     # Delete-then-restore cannot reactivate a disabled account.
-    assert users.deactivate_user(email=dormant.email) is True
+    dormant_targets = admin_client.get(
+        f"/api/v1/admin/users/{dormant.user_id}/deletion-preview"
+    ).json()["data"]["target_workspaces"]
     assert (
         admin_client.request(
             "DELETE",
             f"/api/v1/admin/users/{dormant.user_id}",
-            json={"confirmation_email": dormant.email, "expected_retention_days": 1},
+            json={
+                "confirmation_email": dormant.email,
+                "expected_retention_days": 1,
+                "approved_workspaces": [
+                    {
+                        "workspace_id": item["workspace_id"],
+                        "other_member_count": item["other_member_count"],
+                    }
+                    for item in dormant_targets
+                ],
+            },
         ).status_code
         == 200
     )
@@ -410,6 +518,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         json={
             "confirmation_email": target.email,
             "expected_retention_days": 0,
+            "approved_workspaces": [],
         },
     )
     assert repeated.status_code == 200, repeated.text
@@ -418,15 +527,56 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     assert users.deactivate_user(email=target.email) is False
     with factory() as session:
         assert session.get(User, target.user_id).status == "deletion_pending"
-    # A shared Personal scope may project an active co-owner during retention;
-    # its durable personal_workspace_id remains the cleanup ownership anchor.
-    with factory.begin() as session:
-        session.add(
-            WorkspaceMembership(
-                user_id=admin.user_id, workspace_id=personal_id, role="owner"
-            )
-        )
-        session.get(Workspace, personal_id).owner_user_id = admin.user_id
+
+    # A server administrator approves every workspace left without an admin,
+    # members or not. Held workspaces close to their members and to joins
+    # until an active admin is appointed.
+    teamlead_preview = admin_client.get(
+        f"/api/v1/admin/users/{teamlead.user_id}/deletion-preview"
+    ).json()["data"]
+    assert teamlead_preview["blocking_workspaces"] == []
+    assert {
+        (item["workspace_id"], item["other_member_count"])
+        for item in teamlead_preview["target_workspaces"]
+    } == {(str(team_id), 1), (str(teamlead_personal_id), 0)}
+    assert (
+        admin_client.request(
+            "DELETE",
+            f"/api/v1/admin/users/{teamlead.user_id}",
+            json={
+                "confirmation_email": teamlead.email,
+                "expected_retention_days": 0,
+                "approved_workspaces": [
+                    {
+                        "workspace_id": item["workspace_id"],
+                        "other_member_count": item["other_member_count"],
+                    }
+                    for item in teamlead_preview["target_workspaces"]
+                ],
+            },
+        ).status_code
+        == 200
+    )
+    closed = colleague_client.get(f"/api/v1/workspaces/{team_id}/tree")
+    assert closed.status_code == 403, closed.text
+    assert closed.json()["error_code"] == "workspace_deletion_pending"
+    join = outsider_client.post(f"/api/v1/workspaces/{team_id}/join-requests")
+    assert join.status_code == 409, join.text
+    assert join.json()["error_code"] == "workspace_deletion_pending"
+    assert (
+        admin_client.get(f"/api/v1/admin/workspaces/{shared_id}/members").json()[
+            "error_code"
+        ]
+        == "workspace_not_deletion_pending"
+    )
+    appointed = admin_client.patch(
+        f"/api/v1/admin/workspaces/{team_id}/members/{colleague.user_id}",
+        json={"role": "owner"},
+    )
+    assert appointed.status_code == 200, appointed.text
+    assert colleague_client.get(f"/api/v1/workspaces/{team_id}/tree").status_code == (
+        200
+    )
 
     store = FilesystemLibraryBlobStore(root=tmp_path)
     stored = store.put_bytes(
@@ -438,9 +588,12 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         service.purge_due(
             blob_store_provider=provider, now=deadline - timedelta(seconds=1)
         )
-        == 0
+        == 1
     )
     with factory() as session:
+        assert session.get(User, teamlead.user_id) is None
+        assert session.get(Workspace, teamlead_personal_id) is None
+        assert session.get(Workspace, team_id).account_deletion_user_id is None
         assert session.get(User, target.user_id) is not None
         assert session.get(Workspace, personal_id) is not None
     assert store.path_for_key(stored.storage_key).exists()
@@ -477,25 +630,23 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         foreign = session.get(ContextPageVersion, foreign_version_id)
         assert foreign.body_md == "Contributed before leaving"
         assert foreign.actor_display_name is None
+        # Unsubmitted private edits nobody else could open are deleted.
         private_version = session.get(ContextPageVersion, private_version_id)
-        assert private_version.version_status == "editing"
-        assert private_version.body_md == "Private unsent edit"
-        assert (
-            session.get(ContextPage, page_id).current_version_id == private_version_id
-        )
-        assert session.get(ContextMediaAsset, (shared_id, private_asset_id)) is not None
+        assert private_version.version_status == "discarded"
+        assert private_version.body_md == ""
+        assert session.get(ContextPage, page_id).current_version_id == version_id
         assert (
             session.get(
                 ContextMediaUsage,
                 (shared_id, page_id, private_asset_id, private_version_id),
-            ).reference_count
-            == 1
+            )
+            is None
         )
         private_page = session.get(ContextPage, private_page_id)
-        assert private_page.lifecycle_status == "draft"
+        assert private_page.lifecycle_status == "archived"
         private_node = session.get(WorkspaceTreeNode, private_node_id)
-        assert private_node.title == private_page.title == "Private title"
-        assert private_node.slug == private_page.slug == "private-title"
+        assert private_node.title == private_page.title != "Private title"
+        assert private_node.slug == private_page.slug != "private-title"
         assert session.get(Workspace, shared_id) is not None
         shared_chat = session.get(McpChatSession, shared_chat_id)
         assert shared_chat.owner_user_id is None

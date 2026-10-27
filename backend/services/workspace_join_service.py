@@ -52,6 +52,10 @@ class WorkspaceJoinNotAllowedError(WorkspaceJoinServiceError):
     error_code = "workspace_join_not_allowed"
 
 
+class WorkspaceJoinDeletionPendingError(WorkspaceJoinNotAllowedError):
+    error_code = "workspace_deletion_pending"
+
+
 class WorkspaceJoinRequestStaleError(WorkspaceJoinServiceError):
     error_code = "workspace_join_request_stale"
 
@@ -155,6 +159,12 @@ class WorkspaceJoinService:
                 for_update=True,
             )
             self._require_request_policy(workspace)
+            if workspace.account_deletion_user_id is not None:
+                # Checked before the pending-request reply below, so a retry
+                # cannot keep an old request looking accepted.
+                raise WorkspaceJoinDeletionPendingError(
+                    "this workspace is waiting to be deleted and accepts no members"
+                )
             if (
                 session.get(
                     WorkspaceMembership,

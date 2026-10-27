@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from alembic import command
-from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
+from sqlalchemy import MetaData, Table, create_engine, insert, inspect, select, text
 from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeOperation, ChangeSet
@@ -24,6 +24,8 @@ DELETION_COLUMNS = {
     "deletion_failure_count",
     "deletion_last_error",
 }
+HOLD_COLUMN = "account_deletion_user_id"
+HOLD_INDEX = "ix_workspace_account_deletion_user_id"
 
 
 @pytest.mark.parametrize(
@@ -56,13 +58,20 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
             index["name"] for index in inspect(engine).get_indexes("change_operation")
         }
         with Session(engine) as session, session.begin():
-            workspace = Workspace(
-                slug="index-migration", title="Index migration", name="Index migration"
+            # A Core insert names only the given columns and Python defaults,
+            # so workspace columns added by later revisions stay out of it.
+            workspace_id = uuid4()
+            session.execute(
+                insert(Workspace.__table__).values(
+                    id=workspace_id,
+                    slug="index-migration",
+                    title="Index migration",
+                    name="Index migration",
+                    directory_title_key="index migration",
+                )
             )
-            session.add(workspace)
-            session.flush()
             change_set = ChangeSet(
-                workspace_id=workspace.id, trigger_type="manual", actor_type="human"
+                workspace_id=workspace_id, trigger_type="manual", actor_type="human"
             )
             session.add(change_set)
             session.flush()
@@ -71,7 +80,7 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
             # requirement: a mistakenly unique index must fail on this data.
             session.add_all(
                 ChangeOperation(
-                    workspace_id=workspace.id,
+                    workspace_id=workspace_id,
                     change_set_id=change_set_id,
                     target_type="context_page",
                     target_id=uuid4(),
@@ -156,6 +165,15 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
             and index["column_names"] == ["purge_after"]
             for index in inspect(engine).get_indexes("users")
         )
+        workspace_columns = {
+            column["name"]: column
+            for column in inspect(engine).get_columns("workspace")
+        }
+        assert workspace_columns[HOLD_COLUMN]["nullable"]
+        assert any(
+            index["name"] == HOLD_INDEX and index["column_names"] == [HOLD_COLUMN]
+            for index in inspect(engine).get_indexes("workspace")
+        )
         with engine.begin() as connection:
             assert connection.execute(
                 select(
@@ -196,6 +214,9 @@ def test_change_operation_index_round_trip_preserves_existing_rows(
         assert DELETION_COLUMNS.isdisjoint(
             column["name"] for column in inspect(engine).get_columns("users")
         )
+        assert HOLD_COLUMN not in {
+            column["name"] for column in inspect(engine).get_columns("workspace")
+        }
         with engine.connect() as connection:
             assert connection.execute(identity_query).one() == original_identity
         command.upgrade(config, DELETION_REVISION)

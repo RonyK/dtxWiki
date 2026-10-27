@@ -342,6 +342,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/workspaces/{workspace_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin List Held Workspace Members
+         * @description Members of a workspace held for account deletion (server admins only).
+         */
+        get: operations["admin_list_held_workspace_members_api_v1_admin_workspaces__workspace_id__members_get"];
+        put?: never;
+        /**
+         * Admin Add Held Workspace Member
+         * @description Add a viewer or editor to a held workspace before appointing an admin.
+         */
+        post: operations["admin_add_held_workspace_member_api_v1_admin_workspaces__workspace_id__members_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Admin Change Held Workspace Member Role
+         * @description Change a role in a held workspace; an active admin reopens it.
+         */
+        patch: operations["admin_change_held_workspace_member_role_api_v1_admin_workspaces__workspace_id__members__user_id__patch"];
+        trace?: never;
+    };
     "/api/v1/auth/capabilities": {
         parameters: {
             query?: never;
@@ -3341,6 +3385,8 @@ export interface components {
         };
         /** AdminUserDeletionRequest */
         AdminUserDeletionRequest: {
+            /** Approved Workspaces */
+            approved_workspaces: components["schemas"]["UserDeletionApprovedWorkspace"][];
             /**
              * Confirmation Email
              * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
@@ -3367,6 +3413,11 @@ export interface components {
         };
         /** AdminUserWorkspaceData */
         AdminUserWorkspaceData: {
+            /**
+             * Deletion Held
+             * @default false
+             */
+            deletion_held: boolean;
             /**
              * Role
              * @enum {string}
@@ -8453,10 +8504,24 @@ export interface components {
             /** Count */
             count: number;
         };
+        /** RESTBlockingWorkspace */
+        RESTBlockingWorkspace: {
+            /** Other Member Count */
+            other_member_count: number;
+            /** Title */
+            title: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
         /** RESTConflictErrorBody */
         RESTConflictErrorBody: {
             /** Blockers */
             blockers?: components["schemas"]["RESTBlocker"][] | null;
+            /** Blocking Workspaces */
+            blocking_workspaces?: components["schemas"]["RESTBlockingWorkspace"][] | null;
             /** Candidates */
             candidates?: components["schemas"]["PageNameDisambiguationCandidate"][] | null;
             envelope: components["schemas"]["RESTResultEnvelope"];
@@ -9164,6 +9229,8 @@ export interface components {
         };
         /** SelfUserDeletionRequest */
         SelfUserDeletionRequest: {
+            /** Approved Workspaces */
+            approved_workspaces: components["schemas"]["UserDeletionApprovedWorkspace"][];
             /**
              * Confirmation Email
              * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
@@ -9648,6 +9715,16 @@ export interface components {
             /** Allow User Folder Create */
             allow_user_folder_create: boolean;
         };
+        /** UserDeletionApprovedWorkspace */
+        UserDeletionApprovedWorkspace: {
+            /** Other Member Count */
+            other_member_count: number;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
         /** UserDeletionData */
         UserDeletionData: {
             /**
@@ -9673,18 +9750,6 @@ export interface components {
              */
             user_id: string;
         };
-        /** UserDeletionPersonalWorkspaceData */
-        UserDeletionPersonalWorkspaceData: {
-            /** Other Member Count */
-            other_member_count: number;
-            /** Title */
-            title: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-        };
         /** UserDeletionPolicyData */
         UserDeletionPolicyData: {
             /** Retention Days */
@@ -9697,13 +9762,12 @@ export interface components {
         };
         /** UserDeletionPreviewData */
         UserDeletionPreviewData: {
-            personal_workspace: components["schemas"]["UserDeletionPersonalWorkspaceData"] | null;
-            /** Recipient Admin Count */
-            recipient_admin_count: number;
+            /** Blocking Workspaces */
+            blocking_workspaces: components["schemas"]["UserDeletionWorkspaceData"][];
             /** Retention Days */
             retention_days: number;
-            /** Transferred Workspaces */
-            transferred_workspaces: components["schemas"]["UserDeletionTransferredWorkspaceData"][];
+            /** Target Workspaces */
+            target_workspaces: components["schemas"]["UserDeletionWorkspaceData"][];
         };
         /** UserDeletionPreviewResponse */
         UserDeletionPreviewResponse: {
@@ -9733,8 +9797,10 @@ export interface components {
             data: components["schemas"]["UserDeletionRestoreData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
-        /** UserDeletionTransferredWorkspaceData */
-        UserDeletionTransferredWorkspaceData: {
+        /** UserDeletionWorkspaceData */
+        UserDeletionWorkspaceData: {
+            /** Other Member Count */
+            other_member_count: number;
             /** Title */
             title: string;
             /**
@@ -11465,6 +11531,201 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminPasswordResetResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_list_held_workspace_members_api_v1_admin_workspaces__workspace_id__members_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_add_held_workspace_member_api_v1_admin_workspaces__workspace_id__members_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMemberAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberMutationResponse"];
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberMutationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_change_held_workspace_member_role_api_v1_admin_workspaces__workspace_id__members__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMemberRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberMutationResponse"];
                 };
             };
             /** @description Unauthorized */

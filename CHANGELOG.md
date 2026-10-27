@@ -3,15 +3,19 @@
 ## Unreleased
 
 - Users can delete their account, and server administrators can delete any
-  account. Access ends immediately; the personal workspace and the account are
-  removed after a configurable retention period (default 30 days). Until
-  cleanup starts, an administrator can restore the account to its previous
-  status. The confirmation dialog lists what will be deleted or handed over.
-- When the last active owner of a shared workspace leaves, every active server
-  administrator becomes an owner. Changes routed to an inactive recipient go to
-  the workspace owners. Existing claim lifetimes are unchanged.
-- Account cleanup preserves documents, drafts, attachments, and conversation
-  history outside the user's personal workspace.
+  account. Access ends immediately; the account is removed after a
+  configurable retention period (default 30 days). Until cleanup starts, an
+  administrator can restore the account to its previous status.
+- Workspaces whose only admin is the departing account are held with it:
+  closed to members and joins, then deleted with the account. Withdrawal waits
+  until such a workspace with other active members is deleted or has another
+  admin; an administrator deleting an account approves every workspace left
+  without an admin, and can keep one by appointing an active member as admin.
+  Changes routed to an inactive recipient go to the workspace owners. Existing
+  claim lifetimes are unchanged.
+- Account cleanup preserves documents, submitted drafts, attachments, and
+  conversation history in other workspaces, and deletes unsubmitted private
+  edits.
 - Overlays can pass explicit lint modules to `assemble(lint_modules=...)`.
   Writers and readers share that container's registry. Workers passed the same
   `services` use it too; standalone CLI worker processes build their own builtin

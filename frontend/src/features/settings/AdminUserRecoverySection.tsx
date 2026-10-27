@@ -21,13 +21,19 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 
 import {
+  addHeldWorkspaceMember,
+  appointHeldWorkspaceAdmin,
   issueAdminPasswordReset,
+  listHeldWorkspaceMembers,
   searchAdminUsers,
   type AdminPasswordResetDelivery,
   type AdminUser,
+  type AdminUserWorkspace,
+  type HeldWorkspaceMember,
 } from "../../shared/api/adminUsers";
 import { getAuthCapabilities, reauthenticate } from "../../shared/api/auth";
 import {
+  approvedDeletionWorkspaces,
   deleteUserAccount,
   getUserDeletionPreview,
   restoreUserAccount,
@@ -92,6 +98,7 @@ export function AdminUserRecoverySection() {
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<AdminUser | null>(null);
+  const [heldTarget, setHeldTarget] = useState<AdminUserWorkspace | null>(null);
   const [recoveryCapability, setRecoveryCapability] =
     useState<RecoveryCapabilityState>({
       emailReady: false,
@@ -591,6 +598,26 @@ export function AdminUserRecoverySection() {
                         {user.status === "deletion_pending" && user.purge_after ? (
                           <p className="meta-line">{t("userDeletion.scheduled", { date: formatVersionTimestamp(user.purge_after) })}</p>
                         ) : null}
+                        {user.status === "deletion_pending"
+                          && user.workspaces.some((workspace) => workspace.deletion_held) ? (
+                          <div className="admin-user-held-workspaces">
+                            <p className="meta-line">{t("userDeletion.heldWorkspaces")}</p>
+                            <ul>
+                              {user.workspaces
+                                .filter((workspace) => workspace.deletion_held)
+                                .map((workspace) => (
+                                  <li key={workspace.workspace_id}>
+                                    <span>{workspace.title}</span>
+                                    <button
+                                      className="icon-button"
+                                      onClick={() => { setHeldTarget(workspace); setSuccessNotice(null); }}
+                                      type="button"
+                                    >{t("userDeletion.manageHeld")}</button>
+                                  </li>
+                                ))}
+                            </ul>
+                          </div>
+                        ) : null}
                         {user.status === "deletion_pending" && user.deletion_failure_count ? (
                           <p className="meta-line">
                             {t("userDeletion.cleanupFailed", {
@@ -760,6 +787,17 @@ export function AdminUserRecoverySection() {
           }}
         />
       ) : null}
+      {heldTarget ? (
+        <HeldWorkspaceDialog
+          workspace={heldTarget}
+          onClose={() => setHeldTarget(null)}
+          onReopened={() => {
+            setHeldTarget(null);
+            setSuccessNotice(t("userDeletion.heldReopened", { title: heldTarget.title }));
+            void loadUsers(submittedQuery, offset);
+          }}
+        />
+      ) : null}
       {issuedLink ? (
         <OneTimeLinkDialog link={issuedLink} onClose={dismissIssuedLink} />
       ) : null}
@@ -783,12 +821,17 @@ function UserDeletionDialog({ target, onClose, onDeleted }: {
   // The details are behind recent verification, which may have expired while
   // the search results stayed on screen.
   const [needsVerification, setNeedsVerification] = useState(false);
+  // Every workspace left without an admin is held and deleted with the
+  // account, members or not; the administrator approves that list.
+  const [approved, setApproved] = useState(false);
   const retentionDays = preview?.retention_days ?? null;
   const emailConfirmed = sameAccountEmail(confirmationEmail, target.email);
+  const needsApproval = (preview?.target_workspaces.length ?? 0) > 0;
 
   useEffect(() => {
     let active = true;
     setPreview(null);
+    setApproved(false);
     setError(null);
     setCanReload(false);
     setNeedsVerification(false);
@@ -829,18 +872,29 @@ function UserDeletionDialog({ target, onClose, onDeleted }: {
       await verifyAndLoad();
       return;
     }
-    if (retentionDays === null || !emailConfirmed) return;
+    if (preview === null || retentionDays === null || !emailConfirmed) return;
+    if (needsApproval && !approved) return;
     setBusy(true);
     setError(null);
     setCanReload(false);
     try {
       await reauthenticate({ current_password: password });
-      const result = await deleteUserAccount(target.user_id, confirmationEmail, retentionDays);
+      const result = await deleteUserAccount(
+        target.user_id,
+        confirmationEmail,
+        retentionDays,
+        approvedDeletionWorkspaces(preview),
+      );
       await onDeleted(result.purge_after);
     } catch (caught) {
       setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
         || apiErrorMessage(caught, t("userDeletion.failed")));
-      setCanReload(caught instanceof ApiError && caught.body.error_code === "user_deletion_policy_changed");
+      setCanReload(
+        caught instanceof ApiError
+          && ["user_deletion_policy_changed", "user_deletion_targets_changed"].includes(
+            caught.body.error_code,
+          ),
+      );
       setBusy(false);
     } finally {
       setPassword("");
@@ -853,6 +907,12 @@ function UserDeletionDialog({ target, onClose, onDeleted }: {
         <h2 id="admin-user-deletion-title">{t("userDeletion.confirmTitle")}</h2>
         <p>{t("userDeletion.confirmDescription", { email: target.email })}</p>
         {preview !== null ? <><StatusBanner tone="warning">{t("userDeletion.retention", { count: preview.retention_days })}</StatusBanner><UserDeletionImpact preview={preview} /></> : null}
+        {preview !== null && needsApproval ? (
+          <label className="checkbox-row" htmlFor="admin-user-deletion-approve">
+            <input id="admin-user-deletion-approve" checked={approved} disabled={busy} onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
+            <span>{t("userDeletion.approveHeld", { count: preview.target_workspaces.length })}</span>
+          </label>
+        ) : null}
         <p className="meta-line">{t("userDeletion.sharedContent")}</p>
         {needsVerification ? <StatusBanner tone="info">{t("userDeletion.verifyToLoad")}</StatusBanner> : null}
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
@@ -870,12 +930,112 @@ function UserDeletionDialog({ target, onClose, onDeleted }: {
           {needsVerification ? (
             <button className="icon-button primary" disabled={busy || !password} type="submit">{t("userDeletion.verify")}</button>
           ) : (
-            <button className="icon-button danger-action" disabled={busy || retentionDays === null || !emailConfirmed || !password} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
+            <button className="icon-button danger-action" disabled={busy || retentionDays === null || !emailConfirmed || !password || (needsApproval && !approved)} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
           )}
         </div>
       </form>
     </AccessibleDialog>
   );
+}
+
+function HeldWorkspaceDialog({ workspace, onClose, onReopened }: {
+  workspace: AdminUserWorkspace;
+  onClose: () => void;
+  onReopened: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [members, setMembers] = useState<HeldWorkspaceMember[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"viewer" | "editor">("editor");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void listHeldWorkspaceMembers(workspace.workspace_id).then((loaded) => {
+      if (active) setMembers(loaded);
+    }).catch((caught) => {
+      if (active) setError(heldError(caught, t));
+    });
+    return () => { active = false; };
+  }, [attempt, t, workspace.workspace_id]);
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || !email) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await addHeldWorkspaceMember(workspace.workspace_id, email, role);
+      setEmail("");
+      setAttempt((value) => value + 1);
+    } catch (caught) {
+      setError(heldError(caught, t));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function appoint(member: HeldWorkspaceMember) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await appointHeldWorkspaceAdmin(workspace.workspace_id, member.user_id);
+      onReopened();
+    } catch (caught) {
+      setError(heldError(caught, t));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AccessibleDialog busy={busy} labelledBy="admin-held-workspace-title" onCancel={onClose}>
+      <div className="modal-panel admin-recovery-modal">
+        <h2 id="admin-held-workspace-title">{t("userDeletion.heldTitle", { title: workspace.title })}</h2>
+        <p>{t("userDeletion.heldDescription")}</p>
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {members === null && !error ? <p role="status">{t("userDeletion.heldLoading")}</p> : null}
+        {members !== null ? (
+          <ul className="admin-held-members">
+            {members.map((member) => (
+              <li key={member.user_id}>
+                <span>{member.display_name || member.email} · {t(`userRecovery.roles.${member.role}`, { defaultValue: member.role })}</span>
+                {member.status === "active" && member.role !== "owner" ? (
+                  <button className="icon-button primary" disabled={busy} onClick={() => void appoint(member)} type="button">
+                    {t("userDeletion.appointAdmin")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <form className="admin-held-add" onSubmit={addMember}>
+          <label className="field-stack" htmlFor="admin-held-member-email"><span>{t("userDeletion.heldAddEmail")}</span>
+            <input id="admin-held-member-email" autoComplete="off" disabled={busy} onChange={(event) => setEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={email} />
+          </label>
+          <label className="field-stack" htmlFor="admin-held-member-role"><span>{t("userDeletion.heldAddRole")}</span>
+            <select id="admin-held-member-role" disabled={busy} onChange={(event) => setRole(event.target.value as "viewer" | "editor")} value={role}>
+              <option value="viewer">{t("userRecovery.roles.viewer", { defaultValue: "viewer" })}</option>
+              <option value="editor">{t("userRecovery.roles.editor", { defaultValue: "editor" })}</option>
+            </select>
+          </label>
+          <div className="modal-actions">
+            <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
+            <button className="icon-button" disabled={busy || !email} type="submit">{t("userDeletion.heldAdd")}</button>
+          </div>
+        </form>
+      </div>
+    </AccessibleDialog>
+  );
+}
+
+function heldError(caught: unknown, t: TFunction<"settings">) {
+  return caught instanceof ApiError
+    && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+    || apiErrorMessage(caught, t("userDeletion.heldFailed"));
 }
 
 function UserRestoreDialog({ target, onClose, onRestored }: {

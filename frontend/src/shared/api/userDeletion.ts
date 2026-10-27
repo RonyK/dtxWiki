@@ -2,15 +2,39 @@ import { apiRequest } from "./client";
 
 export type UserDeletionPolicy = { retention_days: number };
 
-export type UserDeletionPreview = UserDeletionPolicy & {
-  personal_workspace: {
-    workspace_id: string;
-    title: string;
-    other_member_count: number;
-  } | null;
-  transferred_workspaces: { workspace_id: string; title: string }[];
-  recipient_admin_count: number;
+export type UserDeletionWorkspace = {
+  workspace_id: string;
+  title: string;
+  // Other members whose accounts are active.
+  other_member_count: number;
 };
+
+export type UserDeletionPreview = UserDeletionPolicy & {
+  // Held with the account: closed now, deleted with it after retention.
+  target_workspaces: UserDeletionWorkspace[];
+  // Self-withdrawal only: delete these, or give them another admin, first.
+  blocking_workspaces: UserDeletionWorkspace[];
+};
+
+export type UserDeletionApprovedWorkspace = Pick<
+  UserDeletionWorkspace,
+  "workspace_id" | "other_member_count"
+>;
+
+/** The exact targets a confirmation approves; the server refuses any drift. */
+export function approvedDeletionWorkspaces(
+  preview: UserDeletionPreview,
+): UserDeletionApprovedWorkspace[] {
+  return preview.target_workspaces.map(({ workspace_id, other_member_count }) => ({
+    workspace_id,
+    other_member_count,
+  }));
+}
+
+/** Where the owner deletes a workspace, opened beside the withdrawal form. */
+export function workspaceDeletionSettingsPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/settings?section=workspace#workspace-danger-title`;
+}
 
 export type UserDeletion = {
   user_id: string;
@@ -58,6 +82,7 @@ export async function withdrawAccount(input: {
   confirmation_email: string;
   current_password: string;
   expected_retention_days: number;
+  approved_workspaces: UserDeletionApprovedWorkspace[];
 }) {
   const response = await apiRequest<{ data: UserDeletion }>("/api/v1/users/me", {
     method: "DELETE",
@@ -66,10 +91,22 @@ export async function withdrawAccount(input: {
   return response.data;
 }
 
-export async function deleteUserAccount(userId: string, confirmationEmail: string, expectedRetentionDays: number) {
+export async function deleteUserAccount(
+  userId: string,
+  confirmationEmail: string,
+  expectedRetentionDays: number,
+  approvedWorkspaces: UserDeletionApprovedWorkspace[],
+) {
   const response = await apiRequest<{ data: UserDeletion }>(
     `/api/v1/admin/users/${encodeURIComponent(userId)}`,
-    { method: "DELETE", body: JSON.stringify({ confirmation_email: confirmationEmail, expected_retention_days: expectedRetentionDays }) },
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmation_email: confirmationEmail,
+        expected_retention_days: expectedRetentionDays,
+        approved_workspaces: approvedWorkspaces,
+      }),
+    },
   );
   return response.data;
 }

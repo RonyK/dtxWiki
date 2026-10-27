@@ -91,6 +91,9 @@ OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("DELETE", "/api/v1/admin/users/{user_id}"),
     ("GET", "/api/v1/admin/users/{user_id}/deletion-preview"),
     ("POST", "/api/v1/admin/users/{user_id}/deletion-restore"),
+    ("GET", "/api/v1/admin/workspaces/{workspace_id}/members"),
+    ("POST", "/api/v1/admin/workspaces/{workspace_id}/members"),
+    ("PATCH", "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}"),
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
 }

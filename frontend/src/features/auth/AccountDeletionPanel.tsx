@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import {
+  approvedDeletionWorkspaces,
   getMyDeletionPreview,
   type UserDeletionPreview,
   withdrawAccount,
@@ -33,6 +34,9 @@ export function AccountDeletionPanel({ email }: { email: string }) {
   const [policyAttempt, setPolicyAttempt] = useState(0);
   const retentionDays = preview?.retention_days ?? null;
   const emailConfirmed = sameAccountEmail(confirmationEmail, email);
+  // Workspaces with other active members must be deleted (or given another
+  // admin) in their own Settings first; withdrawal waits for a re-check.
+  const blocked = (preview?.blocking_workspaces.length ?? 0) > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -55,7 +59,9 @@ export function AccountDeletionPanel({ email }: { email: string }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || retentionDays === null || !emailConfirmed) return;
+    if (busy || preview === null || retentionDays === null || blocked || !emailConfirmed) {
+      return;
+    }
     try {
       validateAccountPassword(password);
     } catch (caught) {
@@ -70,6 +76,7 @@ export function AccountDeletionPanel({ email }: { email: string }) {
         confirmation_email: confirmationEmail,
         current_password: password,
         expected_retention_days: retentionDays,
+        approved_workspaces: approvedDeletionWorkspaces(preview),
       });
       setPassword("");
       await signOut();
@@ -82,7 +89,11 @@ export function AccountDeletionPanel({ email }: { email: string }) {
       setError(localized || apiErrorMessage(caught, t("deletion.failed")));
       setCanReload(
         caught instanceof ApiError
-          && caught.body.error_code === "user_deletion_policy_changed",
+          && [
+            "user_deletion_policy_changed",
+            "user_deletion_targets_changed",
+            "user_deletion_last_owner",
+          ].includes(caught.body.error_code),
       );
       setBusy(false);
     }
@@ -118,11 +129,17 @@ export function AccountDeletionPanel({ email }: { email: string }) {
                 {t("deletion.retention", { count: preview.retention_days })}
               </StatusBanner>
               <UserDeletionImpact preview={preview} />
+              <button
+                className="icon-button"
+                disabled={busy || loading}
+                onClick={() => setPolicyAttempt((value) => value + 1)}
+                type="button"
+              >{t("deletion.recheck")}</button>
             </>
           ) : null}
           <p className="field-hint">{t("deletion.sharedContent")}</p>
           {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-          {error && canReload ? (
+          {error && canReload && preview === null ? (
             <button
               className="icon-button"
               disabled={busy || loading}
@@ -163,7 +180,9 @@ export function AccountDeletionPanel({ email }: { email: string }) {
             </button>
             <button
               className="icon-button danger-action"
-              disabled={busy || loading || retentionDays === null || !emailConfirmed || !password}
+              disabled={
+                busy || loading || retentionDays === null || blocked || !emailConfirmed || !password
+              }
               type="submit"
             >{t(busy ? "deletion.submitting" : "deletion.submit")}</button>
           </div>

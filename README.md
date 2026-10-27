@@ -150,24 +150,6 @@ to load the new permissions.
 A server-admin manages the instance. Sharing documents still requires adding
 people to the workspace and assigning their roles.
 
-Users can withdraw from **Account** after confirming their password and email.
-Server admins can schedule account deletion and set the retention period in
-**Settings > User accounts** after password reauthentication. The default is
-30 days; 0 days makes the request immediately eligible for cleanup. Each request
-keeps its original deadline when the policy changes. Access is revoked at once;
-the worker removes the personal workspace and its contents, credentials, and
-personal preferences after the deadline, retrying failed file cleanup. Documents,
-drafts, attachments, and conversation history in other workspaces remain, along
-with append-only audit history, with author names
-falling back to a generic label after account removal. When the last active
-owner of a shared workspace leaves, every active server admin becomes an owner,
-and changes routed to the departed user go to the workspace owners. The last
-active server admin must grant that role to someone else first. Until cleanup
-starts, a server admin can restore the account to its previous status from the
-same screen; revoked sessions and credentials stay revoked.
-`dtxwiki` starts the worker automatically; `make backend-dev` requires a separate
-worker as described in [DEVELOPMENT.md](DEVELOPMENT.md).
-
 <a id="server-access"></a>
 
 ### 3. Access from other devices

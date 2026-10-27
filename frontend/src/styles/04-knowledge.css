@@ -2566,11 +2566,25 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   gap: 12px;
 }
 
-.user-deletion-transfers ul {
+.user-deletion-workspaces ul,
+.admin-user-held-workspaces ul,
+.admin-held-members {
+  display: grid;
+  gap: 6px;
   margin: 4px 0 0;
   padding-left: 20px;
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+.user-deletion-workspaces li,
+.admin-user-held-workspaces li,
+.admin-held-members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .account-panel-hint {
