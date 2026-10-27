@@ -67,7 +67,7 @@ def _seed_identity_recovery_accounts(session_factory) -> None:
     viewport-only account. Context media also needs a verified owner whose
     password remains stable while the recovery spec runs in parallel. The
     normal signup domain service is used so every seeded account receives the
-    same Personal Workspace anchor as a real browser signup.
+    same starter workspace as a real browser signup.
     """
 
     service = SessionService(

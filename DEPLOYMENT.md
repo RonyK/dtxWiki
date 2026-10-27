@@ -192,8 +192,9 @@ IP에서만 접근하게 제한하세요(`--tls external --forwarded-ip <proxy I
 `personal-rony-3`처럼 2부터 숫자를 붙여 사용 가능한 slug를 선택합니다.
 이메일 앞부분이 slug에 들어가므로, 이 workspace를 public으로 바꾸기 전에 slug 변경을
 검토하세요. `personal-`로 시작하는 slug는 가입 시 만드는 workspace에만 붙습니다. 일반 workspace
-생성과 설정의 slug 변경은 이 prefix를 거부하고, 제목에서 자동으로 만든 slug는 앞에 `ws-`를
-붙입니다(예: `Personal Notes` → `ws-personal-notes`). 이미 쓰고 있는 slug는 그대로 둘 수 있습니다.
+생성과 설정의 slug 변경은 이 prefix를 거부합니다. 제목에서 자동으로 만든 slug가 이 prefix로
+시작하면 앞에 `ws-`를 붙입니다(예: `Personal Notes` → `ws-personal-notes`, `Team Notes` →
+`team-notes`). 이미 쓰고 있는 slug는 그대로 둘 수 있습니다.
 이 규칙은 신규 생성에 적용하며 기존 workspace의 이름과 slug는 유지합니다.
 생성 후 표시 이름이나 이메일을 바꿔도 workspace의 이름과 slug는 자동 변경되지 않습니다.
 `solo_local`은 설정을 생략하면 기본 on이며,

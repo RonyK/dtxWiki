@@ -299,17 +299,17 @@ def test_workspace_delete_detaches_audit_history_instead_of_blocking(
     assert recreated.json()["data"]["slug"] == original_slug
 
 
-def test_workspace_delete_allows_last_personal_and_rejects_non_empty_workspace(
+def test_workspace_delete_allows_starter_workspace_and_rejects_non_empty_workspace(
     page_service,
 ):
     client = make_client(page_service, "owner-delete@example.com")
-    personal_workspace_id = client.get("/api/v1/workspaces").json()["data"][
+    starter_workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    personal_delete = client.delete(f"/api/v1/workspaces/{personal_workspace_id}")
-    assert personal_delete.status_code == 200
-    assert personal_delete.json()["data"]["deleted_workspace_id"] == (
-        personal_workspace_id
+    starter_delete = client.delete(f"/api/v1/workspaces/{starter_workspace_id}")
+    assert starter_delete.status_code == 200
+    assert starter_delete.json()["data"]["deleted_workspace_id"] == (
+        starter_workspace_id
     )
     with page_service.session_factory() as session:
         user = session.scalar(

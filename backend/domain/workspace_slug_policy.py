@@ -17,13 +17,15 @@ def slugify_workspace_text(value: str) -> str:
     """Fold text to lowercase ASCII letters, digits, and single hyphens.
 
     NFKD after casefold keeps the base letter of accented and ligature Latin
-    characters (``José`` -> ``jose``, ``Strauß`` -> ``strauss``). Scripts with
-    no ASCII decomposition drop out, so the result can be empty.
+    characters (``José`` -> ``jose``, ``Strauß`` -> ``strauss``). Only the
+    combining accents are dropped; any other character, including scripts with
+    no ASCII form, separates words (``Q1–Q2`` -> ``q1-q2``), so the result can
+    be empty.
     """
 
     folded = unicodedata.normalize("NFKD", value.casefold())
-    ascii_text = folded.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")
+    unaccented = "".join(char for char in folded if not unicodedata.combining(char))
+    return re.sub(r"[^a-z0-9]+", "-", unaccented).strip("-")
 
 
 def is_reserved_workspace_slug(slug: str) -> bool:

@@ -482,11 +482,6 @@
   gap: 4px;
 }
 
-.workspace-menu-group + .workspace-menu-group {
-  padding-top: 7px;
-  border-top: 1px solid var(--border);
-}
-
 .workspace-menu-group-label {
   padding: 2px 7px;
   color: var(--ink-faint);

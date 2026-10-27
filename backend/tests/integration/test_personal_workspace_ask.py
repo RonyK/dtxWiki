@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
@@ -9,7 +9,7 @@ from backend.models.ask import AskSession
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
 
 
-def test_personal_workspace_ask_sessions_reuse_its_seeded_root(page_service):
+def test_ask_sessions_create_a_missing_ask_root_once(page_service):
     client = TestClient(
         create_app(
             settings=Settings(
@@ -27,6 +27,20 @@ def test_personal_workspace_ask_sessions_reuse_its_seeded_root(page_service):
     workspace_id = UUID(
         client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
     )
+    # Starter workspaces created by 0.1.4 and earlier have no Ask root or policy;
+    # the first Ask session must create them, and later sessions reuse them.
+    with page_service.session_factory.begin() as session:
+        session.execute(
+            delete(TreePolicy).where(
+                TreePolicy.workspace_id == workspace_id, TreePolicy.section == "ask"
+            )
+        )
+        session.execute(
+            delete(WorkspaceTreeNode).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.section == "ask",
+            )
+        )
 
     for title in ("First Personal Ask", "Second Personal Ask"):
         created = client.post(
@@ -41,6 +55,7 @@ def test_personal_workspace_ask_sessions_reuse_its_seeded_root(page_service):
                 WorkspaceTreeNode.workspace_id == workspace_id,
                 WorkspaceTreeNode.section == "ask",
                 WorkspaceTreeNode.parent_id.is_(None),
+                WorkspaceTreeNode.slug == "ask",
             )
         ).all()
         assert len(roots) == 1

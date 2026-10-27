@@ -36,8 +36,9 @@
   `personal-<email local part>` slug, numbered on collision. Accounts without a
   usable local part get a random eight-character hex token.
 - Reserve the `personal-` slug prefix for those workspaces. Workspace creation
-  and slug changes refuse it; slugs generated from a title get a `ws-` prefix
-  instead. All workspace slugs fold accented Latin letters to ASCII.
+  and slug changes refuse it; a slug generated from a title that would start
+  with it gets a `ws-` prefix instead. All workspace slugs fold accented Latin
+  letters to ASCII.
 
 ## 0.1.4 — 2026-10-23
 

@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -7,6 +9,7 @@ from backend.models.media import WorkspaceMediaWriteIntent
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
+from backend.services import personal_workspace_service
 from backend.services.personal_workspace_service import create_personal_workspace
 
 
@@ -67,26 +70,36 @@ def test_personal_workspace_is_an_ordinary_private_owned_workspace(session_facto
 
 
 def test_personal_workspace_slug_numbers_email_namesakes_and_falls_back(
-    session_factory,
+    session_factory, monkeypatch
 ):
     with session_factory.begin() as session:
         namesake = _user(session, email="rony@one.example")
         assert create_personal_workspace(session, user=namesake).slug == "personal-rony"
 
+        # A concurrent signup took the slug after the lookup: the savepoint
+        # discards the failed insert and the next lookup picks the next number.
+        lookup = personal_workspace_service._available_personal_slug
+        stale = iter(["personal-rony"])
+        monkeypatch.setattr(
+            personal_workspace_service,
+            "_available_personal_slug",
+            lambda session, base: next(stale, None) or lookup(session, base),
+        )
         user = _user(session, email="rony@two.example")
         user.display_name = "김민아"
         personal = create_personal_workspace(session, user=user)
 
         assert personal.title == personal.name == "김민아's Personal Workspace"
         assert personal.slug == "personal-rony-2"
+        assert user.default_workspace_id == personal.id
 
-        no_ascii = _user(session, email="김민아@three.example")
-        slug = create_personal_workspace(session, user=no_ascii).slug
-        assert slug.startswith("personal-")
-        assert len(slug) == len("personal-") + 8
-        assert slug != create_personal_workspace(
-            session, user=_user(session, email="이영희@four.example")
-        ).slug
+        # The fallback is random, so a second account does not get a number
+        # that would count such accounts.
+        for email in ("김민아@three.example", "이영희@four.example"):
+            workspace = create_personal_workspace(
+                session, user=_user(session, email=email)
+            )
+            assert re.fullmatch(r"personal-[0-9a-f]{8}", workspace.slug)
 
 
 def test_private_workspace_rejects_request_join_policy_at_database(session_factory):

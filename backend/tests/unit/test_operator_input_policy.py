@@ -128,6 +128,8 @@ def test_workspace_slug_writers_share_folding_bounds_and_personal_reservation():
     for normalize in (normalize_workspace_slug, _normalize_workspace_slug):
         assert normalize("Normal Workspace") == "normal-workspace"
         assert normalize("José Strauß") == "jose-strauss"
+        # A character with no ASCII form still separates words.
+        assert normalize("Q1–Q2 Team·Alpha") == "q1-q2-team-alpha"
         assert normalize("a" * 80) == "a" * 80
         for invalid in ("a" * 81, "ß" * 80, "nul\x00slug"):
             with pytest.raises(InputPolicyError):

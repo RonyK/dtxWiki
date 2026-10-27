@@ -30,7 +30,7 @@ def personal_workspace_slug(client: TestClient) -> str:
     return str(workspaces[0]["slug"])
 
 
-def personal_workspace_id(client: TestClient) -> str:
+def starter_workspace_id(client: TestClient) -> str:
     response = client.get("/api/v1/workspaces")
     assert response.status_code == 200
     workspaces = response.json()["data"]["workspaces"]
@@ -47,7 +47,7 @@ def test_rest_auth_accepts_session_cookie(page_service):
     assert signup.status_code == 201
 
     response = client.get(
-        f"/api/v1/workspaces/{personal_workspace_id(client)}/context/pages",
+        f"/api/v1/workspaces/{starter_workspace_id(client)}/context/pages",
     )
 
     assert response.status_code == 200
@@ -74,14 +74,14 @@ def test_rest_auth_accepts_personal_api_token_without_session_cookie(page_servic
     issued = client.post(
         "/api/v1/auth/tokens",
         json={
-            "workspace_grants": [{"workspace_id": personal_workspace_id(client)}],
+            "workspace_grants": [{"workspace_id": starter_workspace_id(client)}],
             "name": "test",
             "scopes": ["mcp:read"],
         },
     )
     assert issued.status_code == 201, issued.text
     token = issued.json()["data"]["plain_token"]
-    workspace_id = personal_workspace_id(client)
+    workspace_id = starter_workspace_id(client)
     client.cookies.clear()
 
     response = client.get(
@@ -99,7 +99,7 @@ def test_personal_api_token_cannot_cross_its_issued_workspace(page_service):
         json={"email": "pat-bound@example.com", "password": "correct-password"},
     )
     assert signup.status_code == 201
-    bound_workspace_id = personal_workspace_id(client)
+    bound_workspace_id = starter_workspace_id(client)
     other = client.post(
         "/api/v1/workspaces",
         json={"title": "Other Workspace", "slug": "pat-other"},
@@ -142,7 +142,7 @@ def test_legacy_workspace_role_header_does_not_override_session_role(page_servic
         "/api/v1/auth/signup",
         json={"email": "role@example.com", "password": "correct-password"},
     )
-    workspace_id = personal_workspace_id(client)
+    workspace_id = starter_workspace_id(client)
 
     response = client.get(
         f"/api/v1/workspaces/{workspace_id}/context/pages",
