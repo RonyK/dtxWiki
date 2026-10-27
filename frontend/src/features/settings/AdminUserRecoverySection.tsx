@@ -1,5 +1,5 @@
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
-import { validateAccountPassword, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
+import { validateAccountPassword, preventCompositionSubmit, sameAccountEmail } from "../../shared/auth/identityPolicy";
 import {
   CheckCircle2,
   Copy,
@@ -27,11 +27,17 @@ import {
   type AdminUser,
 } from "../../shared/api/adminUsers";
 import { getAuthCapabilities, reauthenticate } from "../../shared/api/auth";
-import { deleteUserAccount, getUserDeletionPolicy } from "../../shared/api/userDeletion";
+import {
+  deleteUserAccount,
+  getUserDeletionPreview,
+  restoreUserAccount,
+  type UserDeletionPreview,
+} from "../../shared/api/userDeletion";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
+import { UserDeletionImpact } from "../../shared/components/UserDeletionImpact";
 import {
   SettingsEmptyState,
   SettingsLoadingRow,
@@ -85,6 +91,7 @@ export function AdminUserRecoverySection() {
   const [issuedLink, setIssuedLink] = useState<IssuedLink | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<AdminUser | null>(null);
   const [recoveryCapability, setRecoveryCapability] =
     useState<RecoveryCapabilityState>({
       emailReady: false,
@@ -584,6 +591,14 @@ export function AdminUserRecoverySection() {
                         {user.status === "deletion_pending" && user.purge_after ? (
                           <p className="meta-line">{t("userDeletion.scheduled", { date: formatVersionTimestamp(user.purge_after) })}</p>
                         ) : null}
+                        {user.status === "deletion_pending" && user.deletion_failure_count ? (
+                          <p className="meta-line">
+                            {t("userDeletion.cleanupFailed", {
+                              count: user.deletion_failure_count,
+                              code: user.deletion_last_error ?? "",
+                            })}
+                          </p>
+                        ) : null}
                         {user.status !== "active" && user.status !== "deletion_pending" ? (
                           <p className="meta-line">
                             {t("userRecovery.inactiveHint", {
@@ -623,12 +638,19 @@ export function AdminUserRecoverySection() {
                             defaultValue: "Issue one-time link",
                           })}
                         </button>
-                        <button
-                          className="icon-button danger-action admin-user-recovery-action"
-                          disabled={user.status === "deletion_pending" || user.status === "deleted"}
-                          onClick={() => { setDeleteTarget(user); setSuccessNotice(null); }}
-                          type="button"
-                        >{t("userDeletion.action")}</button>
+                        {user.status === "deletion_pending" ? (
+                          <button
+                            className="icon-button admin-user-recovery-action"
+                            onClick={() => { setRestoreTarget(user); setSuccessNotice(null); }}
+                            type="button"
+                          >{t("userDeletion.restore")}</button>
+                        ) : (
+                          <button
+                            className="icon-button danger-action admin-user-recovery-action"
+                            onClick={() => { setDeleteTarget(user); setSuccessNotice(null); }}
+                            type="button"
+                          >{t("userDeletion.action")}</button>
+                        )}
                         {user.status === "active" && !user.email_verified_at ? (
                           <p className="meta-line">
                             {t("userRecovery.emailUnverifiedActionHint", {
@@ -727,6 +749,17 @@ export function AdminUserRecoverySection() {
           }}
         />
       ) : null}
+      {restoreTarget ? (
+        <UserRestoreDialog
+          target={restoreTarget}
+          onClose={() => setRestoreTarget(null)}
+          onRestored={() => {
+            setRestoreTarget(null);
+            setSuccessNotice(t("userDeletion.restored", { email: restoreTarget.email }));
+            void loadUsers(submittedQuery, offset);
+          }}
+        />
+      ) : null}
       {issuedLink ? (
         <OneTimeLinkDialog link={issuedLink} onClose={dismissIssuedLink} />
       ) : null}
@@ -737,42 +770,77 @@ export function AdminUserRecoverySection() {
 function UserDeletionDialog({ target, onClose, onDeleted }: {
   target: AdminUser;
   onClose: () => void;
-  onDeleted: (purgeAfter: string) => void;
+  onDeleted: (purgeAfter: string) => void | Promise<void>;
 }) {
   const { t } = useTranslation("settings");
   const [confirmationEmail, setConfirmationEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [retentionDays, setRetentionDays] = useState<number | null>(null);
+  const [preview, setPreview] = useState<UserDeletionPreview | null>(null);
   const [policyAttempt, setPolicyAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canReload, setCanReload] = useState(false);
+  // The details are behind recent verification, which may have expired while
+  // the search results stayed on screen.
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const retentionDays = preview?.retention_days ?? null;
+  const emailConfirmed = sameAccountEmail(confirmationEmail, target.email);
 
   useEffect(() => {
     let active = true;
-    setRetentionDays(null);
+    setPreview(null);
     setError(null);
-    void getUserDeletionPolicy(true).then((policy) => {
-      if (active) setRetentionDays(policy.retention_days);
+    setCanReload(false);
+    setNeedsVerification(false);
+    void getUserDeletionPreview(target.user_id).then((loaded) => {
+      if (active) setPreview(loaded);
     }).catch((caught) => {
-      if (active) setError(apiErrorMessage(caught, t("userDeletion.policy.loadFailed")));
+      if (!active) return;
+      if (caught instanceof ApiError && caught.body.error_code === "recent_reauthentication_required") {
+        setNeedsVerification(true);
+        return;
+      }
+      setError(apiErrorMessage(caught, t("userDeletion.previewFailed")));
+      setCanReload(true);
     });
     return () => { active = false; };
-  }, [policyAttempt, t]);
+  }, [policyAttempt, t, target.user_id]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy || retentionDays === null || confirmationEmail !== target.email) return;
-    try { validateAccountPassword(password); }
-    catch (caught) { setError(t((caught as Error).message, { ns: "auth" })); return; }
+  async function verifyAndLoad() {
     setBusy(true);
     setError(null);
     try {
       await reauthenticate({ current_password: password });
+      setPolicyAttempt((value) => value + 1);
+    } catch (caught) {
+      setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+        || apiErrorMessage(caught, t("userDeletion.previewFailed")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    try { validateAccountPassword(password); }
+    catch (caught) { setError(t((caught as Error).message, { ns: "auth" })); return; }
+    if (needsVerification) {
+      await verifyAndLoad();
+      return;
+    }
+    if (retentionDays === null || !emailConfirmed) return;
+    setBusy(true);
+    setError(null);
+    setCanReload(false);
+    try {
+      await reauthenticate({ current_password: password });
       const result = await deleteUserAccount(target.user_id, confirmationEmail, retentionDays);
-      onDeleted(result.purge_after);
+      await onDeleted(result.purge_after);
     } catch (caught) {
       setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
         || apiErrorMessage(caught, t("userDeletion.failed")));
+      setCanReload(caught instanceof ApiError && caught.body.error_code === "user_deletion_policy_changed");
       setBusy(false);
     } finally {
       setPassword("");
@@ -784,18 +852,74 @@ function UserDeletionDialog({ target, onClose, onDeleted }: {
       <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
         <h2 id="admin-user-deletion-title">{t("userDeletion.confirmTitle")}</h2>
         <p>{t("userDeletion.confirmDescription", { email: target.email })}</p>
-        {retentionDays !== null ? <StatusBanner tone="warning">{t("userDeletion.retention", { count: retentionDays })}</StatusBanner> : null}
+        {preview !== null ? <><StatusBanner tone="warning">{t("userDeletion.retention", { count: preview.retention_days })}</StatusBanner><UserDeletionImpact preview={preview} /></> : null}
         <p className="meta-line">{t("userDeletion.sharedContent")}</p>
-        {error ? <><StatusBanner tone="warning">{error}</StatusBanner><button className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("userDeletion.reloadPolicy")}</button></> : null}
-        <label className="field-stack" htmlFor="admin-user-deletion-email"><span>{t("userDeletion.confirmEmail", { email: target.email })}</span>
-          <input id="admin-user-deletion-email" autoComplete="off" disabled={busy} onChange={(event) => setConfirmationEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={confirmationEmail} />
-        </label>
+        {needsVerification ? <StatusBanner tone="info">{t("userDeletion.verifyToLoad")}</StatusBanner> : null}
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        {error && canReload ? <button className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("userDeletion.reloadPolicy")}</button> : null}
+        {needsVerification ? null : (
+          <label className="field-stack" htmlFor="admin-user-deletion-email"><span>{t("userDeletion.confirmEmail", { email: target.email })}</span>
+            <input id="admin-user-deletion-email" autoComplete="off" disabled={busy} onChange={(event) => setConfirmationEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={confirmationEmail} />
+          </label>
+        )}
         <label className="field-stack" htmlFor="admin-user-deletion-password"><span>{t("userDeletion.currentPassword")}</span>
           <input id="admin-user-deletion-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
         </label>
         <div className="modal-actions">
           <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
-          <button className="icon-button danger-action" disabled={busy || retentionDays === null || confirmationEmail !== target.email || !password} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
+          {needsVerification ? (
+            <button className="icon-button primary" disabled={busy || !password} type="submit">{t("userDeletion.verify")}</button>
+          ) : (
+            <button className="icon-button danger-action" disabled={busy || retentionDays === null || !emailConfirmed || !password} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
+          )}
+        </div>
+      </form>
+    </AccessibleDialog>
+  );
+}
+
+function UserRestoreDialog({ target, onClose, onRestored }: {
+  target: AdminUser;
+  onClose: () => void;
+  onRestored: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    try { validateAccountPassword(password); }
+    catch (caught) { setError(t((caught as Error).message, { ns: "auth" })); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await reauthenticate({ current_password: password });
+      await restoreUserAccount(target.user_id);
+      onRestored();
+    } catch (caught) {
+      setError(caught instanceof ApiError && t(`userDeletion.errors.${caught.body.error_code}`, { defaultValue: "" })
+        || apiErrorMessage(caught, t("userDeletion.restoreFailed")));
+      setBusy(false);
+    } finally {
+      setPassword("");
+    }
+  }
+
+  return (
+    <AccessibleDialog busy={busy} labelledBy="admin-user-restore-title" onCancel={onClose}>
+      <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
+        <h2 id="admin-user-restore-title">{t("userDeletion.restoreTitle")}</h2>
+        <p>{t("userDeletion.restoreDescription", { email: target.email })}</p>
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        <label className="field-stack" htmlFor="admin-user-restore-password"><span>{t("userDeletion.currentPassword")}</span>
+          <input id="admin-user-restore-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
+        </label>
+        <div className="modal-actions">
+          <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
+          <button className="icon-button primary" disabled={busy || !password} type="submit">{t(busy ? "userDeletion.restoring" : "userDeletion.restore")}</button>
         </div>
       </form>
     </AccessibleDialog>

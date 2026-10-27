@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -21,8 +22,12 @@ from backend.models import (
     WorkspaceMembership,
     WorkspaceTreeNode,
 )
+from backend.models.user_attribution import ActorInactiveError
+from backend.schemas.context_write import ReviewDecisionRequest, WriteDraftRequest
+from backend.services.context_write_service import ContextWriteService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.library_blob_storage import FilesystemLibraryBlobStore
+from backend.services.review_service import ReviewService
 from backend.services.server_admin_service import grant_server_admin
 from backend.services.user_admin_service import UserAdminService
 from backend.services.user_deletion_service import UserDeletionService
@@ -44,11 +49,15 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     users = UserAdminService(factory, CredentialHasher())
     admin = users.add_user(email="operator@example.com", password="admin-password")
     target = users.add_user(email="withdraw@example.com", password="user-password")
+    dormant = users.add_user(email="dormant@example.com", password="dormant-password")
     with factory.begin() as session:
         grant_server_admin(session, admin.user_id)
         personal_id = session.get(User, target.user_id).personal_workspace_id
+        admin_personal_id = session.get(User, admin.user_id).personal_workspace_id
+        personal_title = session.get(Workspace, personal_id).title
         shared = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         shared_id = shared.id
+        shared_title = shared.title
         session.add(
             WorkspaceMembership(
                 user_id=target.user_id, workspace_id=shared_id, role="owner"
@@ -147,6 +156,72 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
                 target_id=page_id,
             )
         )
+        # Published history in a workspace the user never joined still carries
+        # the author's name and must be part of the cleanup footprint.
+        foreign_page = ContextPage(
+            workspace_id=admin_personal_id,
+            slug="guest-contribution",
+            title="Guest contribution",
+            created_by_actor_type="human",
+            created_by_actor_id=target.user_id,
+        )
+        session.add(foreign_page)
+        session.flush()
+        foreign_version = ContextPageVersion(
+            workspace_id=admin_personal_id,
+            page_id=foreign_page.id,
+            version_no=1,
+            body_md="Contributed before leaving",
+            actor_type="human",
+            actor_id=target.user_id,
+            actor_display_name=target.display_name,
+            version_status="published_snapshot",
+            created_by_actor_kind="human",
+            created_by_actor_id=str(target.user_id),
+            content_hash="foreign-content-hash",
+        )
+        session.add(foreign_version)
+        session.flush()
+        foreign_version_id = foreign_version.id
+    # The leaver reviewed a change, routed the fix to themself and claimed it.
+    reviews = ReviewService()
+    with factory.begin() as session:
+        draft = ContextWriteService().write_draft(
+            session=session,
+            workspace_id=shared_id,
+            request=WriteDraftRequest(
+                title="Needs revision",
+                page_type="overview",
+                body_markdown="# Needs revision\n\nBody.",
+                reason="seed review",
+            ),
+            actor_kind="human",
+            actor_id=str(admin.user_id),
+            actor_role="owner",
+        )
+        review_id = draft.review_item_id
+        reviews.apply_decision(
+            session=session,
+            workspace_id=shared_id,
+            review_item_id=review_id,
+            request=ReviewDecisionRequest(
+                decision_type="request_changes",
+                decision_reason="Please revise.",
+                audience_kind="requester",
+            ),
+            actor_kind="human",
+            actor_id=str(target.user_id),
+            actor_role="owner",
+            actor_provenance="browser_session",
+        )
+        reviews.claim_review(
+            session=session,
+            workspace_id=shared_id,
+            review_item_id=review_id,
+            actor_kind="human",
+            actor_id=str(target.user_id),
+            actor_role="owner",
+        )
 
     assert (
         admin_client.post(
@@ -205,8 +280,17 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         ).json()["data"]["retention_days"]
         == 1
     )
-    assert user_client.get("/api/v1/users/me/deletion-policy").json()["data"] == {
-        "retention_days": 1
+    assert user_client.get("/api/v1/users/me/deletion-preview").json()["data"] == {
+        "retention_days": 1,
+        "personal_workspace": {
+            "workspace_id": str(personal_id),
+            "title": personal_title,
+            "other_member_count": 0,
+        },
+        "transferred_workspaces": [
+            {"workspace_id": str(shared_id), "title": shared_title}
+        ],
+        "recipient_admin_count": 1,
     }
 
     deletion_body = {
@@ -214,15 +298,6 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         "current_password": "user-password",
         "expected_retention_days": 1,
     }
-    blocked = user_client.request("DELETE", "/api/v1/users/me", json=deletion_body)
-    assert blocked.status_code == 409
-    assert blocked.json()["error_code"] == "user_deletion_last_owner"
-    with factory.begin() as session:
-        session.add(
-            WorkspaceMembership(
-                user_id=admin.user_id, workspace_id=shared_id, role="owner"
-            )
-        )
     issued = user_client.post(
         "/api/v1/auth/tokens",
         json={
@@ -235,11 +310,35 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
 
     response = user_client.request("DELETE", "/api/v1/users/me", json=deletion_body)
     assert response.status_code == 200, response.text
-    scheduled = response.json()["data"]
-    deadline = datetime.fromisoformat(scheduled["purge_after"])
-    assert deadline - datetime.fromisoformat(scheduled["requested_at"]) == timedelta(
-        days=1
-    )
+    # The last active owner leaves: every active server admin takes over.
+    with factory() as session:
+        assert session.get(WorkspaceMembership, (admin.user_id, shared_id)).role == (
+            "owner"
+        )
+        assert session.get(Workspace, shared_id).owner_user_id == admin.user_id
+    # A write that authenticated before the request can no longer attribute rows.
+    with pytest.raises(ActorInactiveError):
+        with factory.begin() as session:
+            session.add(
+                UserFavorite(
+                    user_id=target.user_id,
+                    workspace_id=shared_id,
+                    target_kind="context_page",
+                    target_id=private_page_id,
+                )
+            )
+    # The owner takes over the routed change despite the leaver's live claim.
+    with factory.begin() as session:
+        claimed = reviews.claim_review(
+            session=session,
+            workspace_id=shared_id,
+            review_item_id=review_id,
+            actor_kind="human",
+            actor_id=str(admin.user_id),
+            actor_role="owner",
+        )
+        assert claimed.claimed_by == admin.user_id
+        assert claimed.current_audience_kind == "workspace_owners"
     assert user_client.get("/api/v1/auth/me").status_code == 401
     assert (
         user_client.post(
@@ -259,6 +358,46 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             )
         )
         assert replica.revoked_at is not None
+
+    # Restoring returns the prior status; the user signs in again and may
+    # request deletion anew.
+    restored = admin_client.post(
+        f"/api/v1/admin/users/{target.user_id}/deletion-restore"
+    )
+    assert restored.json()["data"] == {
+        "user_id": str(target.user_id),
+        "status": "active",
+    }
+    assert (
+        user_client.post(
+            "/api/v1/auth/login",
+            json={"email": target.email, "password": "user-password"},
+        ).status_code
+        == 200
+    )
+    response = user_client.request("DELETE", "/api/v1/users/me", json=deletion_body)
+    assert response.status_code == 200, response.text
+    scheduled = response.json()["data"]
+    deadline = datetime.fromisoformat(scheduled["purge_after"])
+    assert deadline - datetime.fromisoformat(scheduled["requested_at"]) == timedelta(
+        days=1
+    )
+    # Delete-then-restore cannot reactivate a disabled account.
+    assert users.deactivate_user(email=dormant.email) is True
+    assert (
+        admin_client.request(
+            "DELETE",
+            f"/api/v1/admin/users/{dormant.user_id}",
+            json={"confirmation_email": dormant.email, "expected_retention_days": 1},
+        ).status_code
+        == 200
+    )
+    assert (
+        admin_client.post(
+            f"/api/v1/admin/users/{dormant.user_id}/deletion-restore"
+        ).json()["data"]["status"]
+        == "disabled"
+    )
 
     # An admin repeat after a policy change keeps the already confirmed deadline.
     assert (
@@ -342,6 +481,9 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         retained_version = session.get(ContextPageVersion, version_id)
         assert retained_version.body_md == "Retained team documentation"
         assert retained_version.actor_display_name is None
+        foreign = session.get(ContextPageVersion, foreign_version_id)
+        assert foreign.body_md == "Contributed before leaving"
+        assert foreign.actor_display_name is None
         private_version = session.get(ContextPageVersion, private_version_id)
         assert private_version.version_status == "discarded"
         assert private_version.body_md == ""

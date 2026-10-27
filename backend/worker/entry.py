@@ -240,7 +240,7 @@ def run_once(
         # test_worker_run_once_does_not_seed_periodic_jobs) this creates no
         # work; it only finishes work that is already queued and due.
         _sweep_email_outbox(database_provider, settings)
-        _sweep_user_deletions(database_provider, blob_store_provider)
+        _sweep_user_deletions(database_provider, blob_store_provider, worker.services)
         if shutdown.requested:
             typer.echo(shutdown.stopped_payload())
             return
@@ -390,7 +390,7 @@ def _run_loop(
     # for accepting jobs. In particular, SMTP must not delay the ready packet.
     _seed_due_jobs(database_provider, settings)
     _sweep_email_outbox(database_provider, settings)
-    _sweep_user_deletions(database_provider, blob_store_provider)
+    _sweep_user_deletions(database_provider, blob_store_provider, worker.services)
     last_reclaim_monotonic = time.monotonic()
     last_full_sweep_monotonic = time.monotonic()
     last_email_sweep_monotonic = time.monotonic()
@@ -427,7 +427,9 @@ def _run_loop(
             time.monotonic() - last_user_deletion_sweep_monotonic
             >= _USER_DELETION_SWEEP_INTERVAL_SECONDS
         ):
-            _sweep_user_deletions(database_provider, blob_store_provider)
+            _sweep_user_deletions(
+                database_provider, blob_store_provider, worker.services
+            )
             last_user_deletion_sweep_monotonic = time.monotonic()
         if (
             time.monotonic() - last_email_sweep_monotonic
@@ -543,16 +545,16 @@ def _seed_due_jobs(database_provider: DatabaseProvider, settings: Settings) -> N
 
 
 def _sweep_user_deletions(
-    database_provider: DatabaseProvider, blob_store_provider: BlobStoreProvider
+    database_provider: DatabaseProvider,
+    blob_store_provider: BlobStoreProvider,
+    services: ServiceRegistry,
 ) -> None:
     if declared_storage_topology(database_provider) != SINGLE_DATABASE_TOPOLOGY:
         return
     try:
         UserDeletionService(
             session_factory=database_provider.control_session_factory(),
-            context_media_repository_factory=(
-                ServiceRegistry().context_media_repository_factory
-            ),
+            context_media_repository_factory=services.context_media_repository_factory,
         ).purge_due(blob_store_provider=blob_store_provider)
     except Exception:
         logger.exception("user deletion sweep failed")

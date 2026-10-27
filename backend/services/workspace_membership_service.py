@@ -451,6 +451,60 @@ class WorkspaceMembershipService:
                 member_count=self._member_count(session, workspace.id),
             )
 
+    def transfer_orphaned_ownership(
+        self,
+        session: Session,
+        *,
+        workspace: Workspace,
+        departing_user_id: UUID,
+        recipient_user_ids: list[UUID],
+        actor_user_id: UUID,
+    ) -> None:
+        """Make server admins the owners of a workspace whose last owner leaves.
+
+        Account deletion calls this inside its own transaction after locking
+        the workspace and every recipient's user and server-admin rows, and
+        after moving the departing user out of ``active``. The departing
+        owner's membership stays until final cleanup, so cancelling the
+        deletion gives that ownership back without undoing this transfer.
+        """
+        for user_id in recipient_user_ids:
+            membership = session.get(WorkspaceMembership, (user_id, workspace.id))
+            old_role = normalize_role(membership.role) if membership else None
+            if old_role == "owner":
+                continue
+            if membership is None:
+                session.add(
+                    WorkspaceMembership(
+                        user_id=user_id, workspace_id=workspace.id, role="owner"
+                    )
+                )
+                action = "workspace.member.added"
+            else:
+                membership.role = "owner"
+                action = "workspace.member.role_changed"
+            session.flush()
+            self._close_pending_join_request(
+                session,
+                workspace_id=workspace.id,
+                requester_user_id=user_id,
+                actor_user_id=actor_user_id,
+            )
+            self._emit_membership_audit(
+                session,
+                workspace_id=workspace.id,
+                actor_user_id=actor_user_id,
+                action=action,
+                target_user_id=user_id,
+                old_role=old_role,
+                new_role="owner",
+                extra={
+                    "reason": "user_deletion_transfer",
+                    "previous_owner_user_id": str(departing_user_id),
+                },
+            )
+        self._sync_owner_projection(session, workspace)
+
     def remove_member(self, *, workspace_slug: str, email: str) -> bool:
         """Compatibility wrapper used by the existing operator CLI."""
 

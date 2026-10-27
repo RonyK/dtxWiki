@@ -160,8 +160,12 @@ private unsubmitted edits, and stored files after the deadline, retrying failed
 file cleanup. Unreferenced uploads in shared workspaces use the existing media
 garbage collection flow. Shared
 workspace documents and append-only audit history remain, with author names
-falling back to a generic label after account removal. The last active shared
-workspace owner or server admin must transfer those responsibilities first.
+falling back to a generic label after account removal. When the last active
+owner of a shared workspace leaves, every active server admin becomes an owner,
+and changes routed to the departed user go to the workspace owners. The last
+active server admin must grant that role to someone else first. Until cleanup
+starts, a server admin can restore the account to its previous status from the
+same screen; revoked sessions and credentials stay revoked.
 `dtxwiki` starts the worker automatically; `make backend-dev` requires a separate
 worker as described in [DEVELOPMENT.md](DEVELOPMENT.md).
 

@@ -57,6 +57,7 @@
     "requester": "요청자에게",
     "chat_owner": "채팅 소유자에게",
     "workspace_editors": "편집자에게",
+    "workspace_owners": "워크스페이스 소유자에게(원래 수신자 비활성)",
     "claimed": "담당 지정됨"
   },
   "rail": {

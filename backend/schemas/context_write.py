@@ -707,7 +707,8 @@ class ReviewItemDetail(BaseModel):
     # Current routing audience = audience_kind of the latest request_changes
     # decision while status == 'changes_requested' (derived, not stored).
     current_audience_kind: (
-        Literal["chat_owner", "requester", "workspace_editors"] | None
+        Literal["chat_owner", "requester", "workspace_editors", "workspace_owners"]
+        | None
     )
     # True iff this change has a resolvable chat owner (origin chat session with
     # a known owner_user_id), so the routing dialog can enable "chat owner".

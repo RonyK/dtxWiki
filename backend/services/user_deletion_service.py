@@ -4,15 +4,18 @@ Disabling credentials and scheduling destruction share one transaction. A
 durable blob-purge intent survives the database cleanup so failed physical
 deletion can be retried before the user identity is finally removed. Shared
 workspace content and its append-only audit history remain workspace-owned.
+
+Only the workspaces that hold the user's footprint are locked; the footprint
+comes from the single attribution registry in ``backend.models.user_attribution``.
 """
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from backend.context_media.application import DeleteUnusedMedia
@@ -20,7 +23,6 @@ from backend.context_media.domain import ActorIdentity, AssociationState
 from backend.context_media.ports import ContextMediaRepository
 from backend.domain.identity_policy import EmailPolicyError, normalize_email
 from backend.models import (
-    AgentPageVersion,
     ApiToken,
     ApiTokenWorkspace,
     AppMetadata,
@@ -37,24 +39,23 @@ from backend.models import (
     McpChatSession,
     McpChatToolCallArtifact,
     MCPClient,
-    MCPWriteIdempotency,
-    OAuthCode,
     OAuthConsent,
-    OAuthRefreshToken,
     PageLink,
     PasswordResetToken,
     ServerAdmin,
     User,
-    UserFavorite,
     Workspace,
     WorkspaceCredentialGrant,
-    WorkspaceJoinRequest,
     WorkspaceMembership,
     WorkspacePurgeGrant,
     WorkspaceTreeNode,
 )
 from backend.models.base import utc_now
-from backend.models.oauth import OAuthAccessTokenJti
+from backend.models.user_attribution import (
+    DELETED_USER_KEY_PREFIX,
+    USER_ATTRIBUTIONS,
+    UserAttribution,
+)
 from backend.repositories.context_media_orphans import context_media_orphan_clause
 from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
 from backend.repositories.workspace_scoped import (
@@ -67,7 +68,7 @@ from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.oauth_service import revoke_live_token_grant_families
-from backend.services.server_admin_service import is_server_admin
+from backend.services.workspace_membership_service import WorkspaceMembershipService
 from backend.services.workspace_write import WorkspaceWriteService
 from backend.utils.content_hash import content_hash
 
@@ -76,7 +77,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_RETENTION_DAYS = 30
 MAX_RETENTION_DAYS = 36500
 _POLICY_KEY = "user_deletion_retention_days"
+_POLICY_AUDIT_TARGET = uuid5(NAMESPACE_URL, f"dtxwiki:app-metadata:{_POLICY_KEY}")
 _BLOB_PENDING_PREFIX = "user_deletion_blob_pending:"
+# A request that authenticated before final cleanup cannot outlive this.
+_DELETED_USER_MARKER_TTL = timedelta(days=7)
 # All account deletions serialize the last-active-admin decision, including
 # users who share no workspace. Workspace locks still protect owner changes.
 _LIFECYCLE_LOCK = 0x44545855534552
@@ -87,6 +91,10 @@ class UserDeletionError(RuntimeError):
         super().__init__(message)
         self.error_code = error_code
         self.status_code = status_code
+
+
+class _FootprintChanged(RuntimeError):
+    """New footprint appeared before the user lock; the next sweep retries."""
 
 
 def validate_retention_days(value: object) -> int:
@@ -125,12 +133,31 @@ def _policy(session: Session) -> int:
         ) from exc
 
 
+def _lock_admin_grants(session: Session, user_ids: set[UUID]) -> set[UUID]:
+    """Lock live server-admin grants (after the user rows) and return them."""
+
+    if not user_ids:
+        return set()
+    return set(
+        session.scalars(
+            select(ServerAdmin.user_id)
+            .where(ServerAdmin.user_id.in_(user_ids))
+            .order_by(ServerAdmin.user_id)
+            .with_for_update()
+        )
+    )
+
+
 def _require_admin(
     session: Session,
     user: User | None,
     expected_session_generation: int | None = None,
+    *,
+    granted: set[UUID] | None = None,
 ) -> None:
-    if user is None or user.status != "active" or not is_server_admin(session, user.id):
+    if granted is None and user is not None:
+        granted = _lock_admin_grants(session, {user.id})
+    if user is None or user.status != "active" or user.id not in (granted or set()):
         raise UserDeletionError(
             "an active server administrator is required",
             error_code="server_admin_required",
@@ -155,6 +182,92 @@ def _record(user: User) -> dict:
         "purge_after": user.purge_after,
         "retention_days": user.deletion_retention_days,
     }
+
+
+def _failure_code(exc: Exception) -> str:
+    if isinstance(exc, UserDeletionError):
+        return exc.error_code
+    if isinstance(exc, OSError):
+        return "user_deletion_blob_purge_failed"
+    return "user_deletion_unexpected_error"
+
+
+def _user_footprint(session: Session, user: User) -> set[UUID]:
+    """Workspaces that still hold rows naming ``user`` (read without locks)."""
+
+    workspace_ids: set[UUID] = set()
+    for entry in USER_ATTRIBUTIONS:
+        if entry.model is Workspace or not hasattr(entry.model, "workspace_id"):
+            continue
+        workspace_ids.update(
+            session.scalars(
+                select(entry.model.workspace_id)
+                .where(*entry.pending(user.id))
+                .distinct()
+            )
+        )
+    if user.personal_workspace_id is not None:
+        workspace_ids.add(user.personal_workspace_id)
+    return workspace_ids
+
+
+def _cleanup_page_ids(session: Session, user_id: UUID, workspace_id: UUID) -> set[UUID]:
+    # The pages cleanup locks: those whose private drafts it repairs and those
+    # whose orphaned uploads it reclaims.
+    drafts = select_in_workspace(
+        ContextPageVersion,
+        workspace_id=workspace_id,
+        conditions=(
+            ContextPageVersion.created_by_actor_kind == "human",
+            ContextPageVersion.created_by_actor_id == str(user_id),
+            ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
+        ),
+    ).with_only_columns(ContextPageVersion.page_id)
+    uploads = select_rows_in_workspace(
+        ContextMediaAsset,
+        workspace_id=workspace_id,
+        conditions=(
+            ContextMediaAsset.created_by_actor_kind == "human",
+            ContextMediaAsset.created_by_actor_id == str(user_id),
+            context_media_orphan_clause(),
+        ),
+    ).with_only_columns(ContextMediaAsset.page_id)
+    return set(session.scalars(drafts)) | set(session.scalars(uploads))
+
+
+def _owned_shared_workspace_ids(session: Session, user_id: UUID) -> set[UUID]:
+    personal_id = session.scalar(
+        select(User.personal_workspace_id).where(User.id == user_id)
+    )
+    return {
+        workspace_id
+        for workspace_id in session.scalars(
+            select(WorkspaceMembership.workspace_id).where(
+                WorkspaceMembership.user_id == user_id,
+                WorkspaceMembership.role == "owner",
+            )
+        )
+        if workspace_id != personal_id
+    }
+
+
+def _has_other_active_owner(
+    session: Session, workspace_id: UUID, user_id: UUID
+) -> bool:
+    return (
+        session.scalar(
+            select(User.id)
+            .join(WorkspaceMembership, WorkspaceMembership.user_id == User.id)
+            .where(
+                WorkspaceMembership.workspace_id == workspace_id,
+                WorkspaceMembership.role == "owner",
+                User.id != user_id,
+                User.status == "active",
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 @dataclass(frozen=True)
@@ -191,11 +304,66 @@ class UserDeletionService:
                 actor_kind="human",
                 actor_id=str(actor_user_id),
                 action="auth.user.deletion_policy_changed",
-                target_kind="server",
-                target_id=actor_user_id,
+                target_kind="server_setting",
+                target_id=_POLICY_AUDIT_TARGET,
                 payload={"retention_days": days},
             )
         return days
+
+    def deletion_preview(self, *, user_id: UUID) -> dict:
+        """What a deletion of ``user_id`` would remove or hand over right now.
+
+        Advisory only: ``request_deletion`` recomputes everything under locks.
+        """
+
+        with self.session_factory() as session:
+            user = session.get(User, user_id)
+            if user is None:
+                raise UserDeletionError(
+                    "user not found",
+                    error_code="user_deletion_not_found",
+                    status_code=404,
+                )
+            days = _policy(session)
+            personal = None
+            if user.personal_workspace_id is not None:
+                workspace = session.get(Workspace, user.personal_workspace_id)
+                if workspace is not None:
+                    personal = {
+                        "workspace_id": workspace.id,
+                        "title": workspace.title,
+                        "other_member_count": session.scalar(
+                            select(func.count())
+                            .select_from(WorkspaceMembership)
+                            .where(
+                                WorkspaceMembership.workspace_id == workspace.id,
+                                WorkspaceMembership.user_id != user.id,
+                            )
+                        ),
+                    }
+            transferred = [
+                {"workspace_id": workspace.id, "title": workspace.title}
+                for workspace in session.scalars(
+                    select(Workspace)
+                    .where(
+                        Workspace.id.in_(_owned_shared_workspace_ids(session, user.id))
+                    )
+                    .order_by(Workspace.title, Workspace.id)
+                )
+                if not _has_other_active_owner(session, workspace.id, user.id)
+            ]
+            recipients = session.scalar(
+                select(func.count())
+                .select_from(ServerAdmin)
+                .join(User, User.id == ServerAdmin.user_id)
+                .where(User.id != user.id, User.status == "active")
+            )
+        return {
+            "retention_days": days,
+            "personal_workspace": personal,
+            "transferred_workspaces": transferred,
+            "recipient_admin_count": recipients,
+        }
 
     def request_deletion(
         self,
@@ -210,9 +378,16 @@ class UserDeletionService:
     ) -> dict:
         with self.session_factory.begin() as session:
             _serialize_lifecycle(session)
-            user, actor = self._lock_subject(session, user_id, actor_user_id)
+            user, actor, owned, admin_ids, granted = self._lock_for_request(
+                session, user_id, actor_user_id
+            )
             if admin_request:
-                _require_admin(session, actor, expected_actor_session_generation)
+                _require_admin(
+                    session,
+                    actor,
+                    expected_actor_session_generation,
+                    granted=granted,
+                )
             elif actor_user_id != user_id:
                 raise UserDeletionError(
                     "self withdrawal requires the authenticated account",
@@ -249,7 +424,33 @@ class UserDeletionService:
                 )
             if user.status == "deletion_pending":
                 return _record(user)
-            self._protect_owners(session, user)
+            recipients = sorted(
+                (
+                    admin_id
+                    for admin_id in admin_ids
+                    if admin_id != user.id
+                    and admin_id in granted
+                    and session.get(User, admin_id).status == "active"
+                ),
+                key=lambda value: value.int,
+            )
+            if user.status == "active" and user.id in granted and not recipients:
+                raise UserDeletionError(
+                    "the server must retain another active administrator",
+                    error_code="user_deletion_last_server_admin",
+                    status_code=409,
+                )
+            orphaned = [
+                workspace
+                for workspace in owned
+                if not _has_other_active_owner(session, workspace.id, user.id)
+            ]
+            if orphaned and not recipients:
+                raise UserDeletionError(
+                    "no active server administrator can take over shared workspaces",
+                    error_code="user_deletion_last_owner",
+                    status_code=409,
+                )
             days = _policy(session)
             if expected_retention_days is not None and (
                 validate_retention_days(expected_retention_days) != days
@@ -260,12 +461,35 @@ class UserDeletionService:
                     status_code=409,
                 )
             requested_at = utc_now()
+            user.deletion_prior_status = user.status
             user.status = "deletion_pending"
             user.deletion_requested_at = requested_at
             user.deletion_retention_days = days
             user.purge_after = requested_at + timedelta(days=days)
+            user.deletion_failure_count = None
+            user.deletion_last_error = None
             user.session_generation += 1
-            self._revoke_access(session, user.id, requested_at)
+            # The owner projection prefers active owners, so it must see the
+            # departing user as inactive before it is recomputed below.
+            session.flush()
+            memberships = WorkspaceMembershipService(
+                self.session_factory, audit_service=self.audit_service
+            )
+            orphaned_ids = {workspace.id for workspace in orphaned}
+            for workspace in owned:
+                if workspace.id in orphaned_ids:
+                    memberships.transfer_orphaned_ownership(
+                        session,
+                        workspace=workspace,
+                        departing_user_id=user.id,
+                        recipient_user_ids=recipients,
+                        actor_user_id=actor_user_id,
+                    )
+                else:
+                    WorkspaceMembershipService._sync_owner_projection(
+                        session, workspace
+                    )
+            self._revoke_access(session, user, requested_at)
             self.audit_service.emit(
                 session=session,
                 workspace_id=None,
@@ -278,44 +502,120 @@ class UserDeletionService:
                     "retention_days": days,
                     "purge_after": user.purge_after.isoformat(),
                     "requested_via": "server_admin" if admin_request else "self",
+                    "prior_status": user.deletion_prior_status,
+                    "transferred_workspace_ids": sorted(
+                        str(workspace_id) for workspace_id in orphaned_ids
+                    ),
                 },
                 retention_class="sensitive",
             )
             session.flush()
             return _record(user)
 
+    def restore_deletion(
+        self,
+        *,
+        user_id: UUID,
+        actor_user_id: UUID,
+        expected_actor_session_generation: int | None = None,
+    ) -> dict:
+        """Cancel a pending deletion before final cleanup has started."""
+
+        with self.session_factory.begin() as session:
+            _serialize_lifecycle(session)
+            users = {
+                user.id: user
+                for user in session.scalars(
+                    select(User)
+                    .where(User.id.in_({user_id, actor_user_id}))
+                    .order_by(User.id)
+                    .with_for_update()
+                )
+            }
+            _require_admin(
+                session, users.get(actor_user_id), expected_actor_session_generation
+            )
+            user = users.get(user_id)
+            if user is None:
+                raise UserDeletionError(
+                    "user not found",
+                    error_code="user_deletion_not_found",
+                    status_code=404,
+                )
+            if user.status != "deletion_pending":
+                raise UserDeletionError(
+                    "the account has no pending deletion",
+                    error_code="user_deletion_not_pending",
+                    status_code=409,
+                )
+            if session.get(AppMetadata, f"{_BLOB_PENDING_PREFIX}{user.id}") is not None:
+                raise UserDeletionError(
+                    "account cleanup has already started",
+                    error_code="user_deletion_purge_started",
+                    status_code=409,
+                )
+            purge_after = user.purge_after
+            # Sessions, tokens and grants revoked by the request stay revoked;
+            # the user signs in again. A missing prior status fails closed.
+            user.status = (
+                user.deletion_prior_status
+                if user.deletion_prior_status in {"active", "disabled"}
+                else "disabled"
+            )
+            user.deletion_requested_at = None
+            user.purge_after = None
+            user.deletion_retention_days = None
+            user.deletion_prior_status = None
+            user.deletion_failure_count = None
+            user.deletion_last_error = None
+            self.audit_service.emit(
+                session=session,
+                workspace_id=None,
+                actor_kind="human",
+                actor_id=str(actor_user_id),
+                action="auth.user.deletion_cancelled",
+                target_kind="user",
+                target_id=user.id,
+                payload={
+                    "restored_status": user.status,
+                    "purge_after": purge_after.isoformat() if purge_after else None,
+                },
+                retention_class="sensitive",
+            )
+            session.flush()
+            return {"user_id": user.id, "status": user.status}
+
     @staticmethod
-    def _lock_subject(
+    def _lock_for_request(
         session: Session, user_id: UUID, actor_user_id: UUID
-    ) -> tuple[User, User | None]:
-        # Follow media-intent -> workspace -> user, matching workspace deletion
-        # and membership changes. Never hold a user lock while waiting on a
-        # workspace another mutation may already have locked.
+    ) -> tuple[User, User | None, list[Workspace], set[UUID], set[UUID]]:
+        # Lock order matches membership changes: workspace, then users, then
+        # live server-admin grants (as password recovery does). A deletion
+        # request changes no content, so no media intent is taken.
         personal_id = session.scalar(
             select(User.personal_workspace_id).where(User.id == user_id)
         )
-        # Private drafts and uploads can survive removal of a membership.
-        # Account-wide cleanup therefore takes the complete control roster,
-        # including every media intent, before any workspace or user lock.
-        workspace_ids = set(session.scalars(select(Workspace.id)).all())
-        if personal_id is not None:
-            workspace_ids.add(personal_id)
-        for workspace_id in sorted(workspace_ids, key=lambda value: value.int):
-            WorkspaceWriteService._lock_media_delete_intent(
-                session=session, workspace_id=workspace_id
+        owned_ids = _owned_shared_workspace_ids(session, user_id)
+        admin_ids = set(session.scalars(select(ServerAdmin.user_id)))
+        # NO KEY UPDATE still serializes with membership changes (FOR UPDATE)
+        # without blocking ordinary inserts that reference the workspace.
+        owned = (
+            list(
+                session.scalars(
+                    select(Workspace)
+                    .where(Workspace.id.in_(owned_ids))
+                    .order_by(Workspace.id)
+                    .with_for_update(key_share=True)
+                )
             )
-        if workspace_ids:
-            session.scalars(
-                select(Workspace)
-                .where(Workspace.id.in_(workspace_ids))
-                .order_by(Workspace.id)
-                .with_for_update()
-            ).all()
+            if owned_ids
+            else []
+        )
         users = {
             user.id: user
             for user in session.scalars(
                 select(User)
-                .where(User.id.in_({user_id, actor_user_id}))
+                .where(User.id.in_({user_id, actor_user_id, *admin_ids}))
                 .order_by(User.id)
                 .with_for_update()
             )
@@ -325,74 +625,91 @@ class UserDeletionService:
             raise UserDeletionError(
                 "user not found", error_code="user_deletion_not_found", status_code=404
             )
-        if user.personal_workspace_id != personal_id:
+        if (
+            user.personal_workspace_id != personal_id
+            or _owned_shared_workspace_ids(session, user_id) != owned_ids
+        ):
+            # An ownership arrived before we held the user lock. Retry the
+            # whole workspace-before-user sequence rather than reversing it.
             raise UserDeletionError(
-                "personal workspace changed; retry account deletion",
+                "workspace ownership changed; retry account deletion",
                 error_code="user_deletion_unavailable",
                 status_code=503,
             )
-        current_workspace_ids = set(
-            session.scalars(
-                select(WorkspaceMembership.workspace_id).where(
-                    WorkspaceMembership.user_id == user_id
-                )
-            ).all()
-        )
-        if not current_workspace_ids <= workspace_ids:
-            # A membership may have arrived before we acquired the user lock.
-            # Retry the complete workspace-before-user lock sequence rather
-            # than acquiring its workspace here in the reverse order.
-            raise UserDeletionError(
-                "workspace memberships changed; retry account deletion",
-                error_code="user_deletion_unavailable",
-                status_code=503,
-            )
-        return user, users.get(actor_user_id)
+        granted = _lock_admin_grants(session, admin_ids | {actor_user_id})
+        return user, users.get(actor_user_id), owned, admin_ids, granted
 
     @staticmethod
-    def _protect_owners(session: Session, user: User) -> None:
-        if user.status == "active" and is_server_admin(session, user.id):
-            other_admin = session.scalar(
-                select(User.id)
-                .join(ServerAdmin, ServerAdmin.user_id == User.id)
-                .where(User.id != user.id, User.status == "active")
-                .limit(1)
+    def _lock_for_purge(
+        session: Session, user_id: UUID, *, final: bool
+    ) -> tuple[User, set[UUID]]:
+        # Media intent, then workspace, then the pages cleanup repairs (in
+        # global id order, as history repair locks them) -- the order
+        # workspace deletion and Context writers use -- but only where the
+        # user still has a footprint, so unrelated workspaces keep writing.
+        #
+        # The user row itself is locked only by the final transaction, which
+        # deletes it. Before that no lock is needed: the deletion request took
+        # the row FOR UPDATE, so every attributed write that saw the account
+        # active committed first, and later ones see it pending and are
+        # refused. Not holding the row keeps a stale writer that waits in the
+        # attribution guard from closing a cycle with the rows cleanup locks.
+        user = session.get(User, user_id)
+        personal_id = user.personal_workspace_id
+        footprint = _user_footprint(session, user)
+        ordered = sorted(footprint, key=lambda value: value.int)
+        for workspace_id in ordered:
+            WorkspaceWriteService._lock_media_delete_intent(
+                session=session, workspace_id=workspace_id
             )
-            if other_admin is None:
-                raise UserDeletionError(
-                    "the server must retain another active administrator",
-                    error_code="user_deletion_last_server_admin",
-                    status_code=409,
-                )
-        owned = session.scalars(
-            select(WorkspaceMembership.workspace_id).where(
-                WorkspaceMembership.user_id == user.id,
-                WorkspaceMembership.role == "owner",
+        for workspace_id in ordered:
+            session.scalar(
+                select(Workspace.id)
+                .where(Workspace.id == workspace_id)
+                .with_for_update(key_share=workspace_id != personal_id)
             )
-        ).all()
-        for workspace_id in owned:
-            if workspace_id == user.personal_workspace_id:
-                continue
-            other_owner = session.scalar(
-                select(User.id)
-                .join(WorkspaceMembership, WorkspaceMembership.user_id == User.id)
-                .where(
-                    WorkspaceMembership.workspace_id == workspace_id,
-                    WorkspaceMembership.role == "owner",
-                    User.id != user.id,
-                    User.status == "active",
+        pages = {
+            (page_id, workspace_id)
+            for workspace_id in ordered
+            for page_id in _cleanup_page_ids(session, user_id, workspace_id)
+        }
+        if personal_id in footprint:
+            # Every page goes with the Personal workspace, including pages
+            # other members wrote there; they join the same global order.
+            pages |= {
+                (page_id, personal_id)
+                for page_id in session.scalars(
+                    select_in_workspace(
+                        ContextPage, workspace_id=personal_id, conditions=()
+                    ).with_only_columns(ContextPage.id)
                 )
-                .limit(1)
+            }
+        for page_id, workspace_id in sorted(pages, key=lambda pair: pair[0].int):
+            session.scalar(
+                select_in_workspace(
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    conditions=(ContextPage.id == page_id,),
+                )
+                .with_only_columns(ContextPage.id)
+                .with_for_update()
             )
-            if other_owner is None:
-                raise UserDeletionError(
-                    "transfer shared workspace ownership before deleting the account",
-                    error_code="user_deletion_last_owner",
-                    status_code=409,
-                )
+        session.refresh(user, with_for_update=final)
+        if (
+            user.personal_workspace_id != personal_id
+            or not _user_footprint(session, user) <= footprint
+            or any(
+                (page_id, workspace_id) not in pages
+                for workspace_id in ordered
+                for page_id in _cleanup_page_ids(session, user_id, workspace_id)
+            )
+        ):
+            raise _FootprintChanged(str(user_id))
+        return user, footprint
 
     @staticmethod
-    def _revoke_access(session: Session, user_id: UUID, now: datetime) -> None:
+    def _revoke_access(session: Session, user: User, now: datetime) -> None:
+        user_id = user.id
         for model in (ApiToken, PasswordResetToken):
             session.execute(
                 update(model)
@@ -424,30 +741,30 @@ class UserDeletionService:
         )
         # Keep the control-plane removal intent too: otherwise replica
         # reconciliation could revive a grant we just revoked locally.
-        for workspace_id in session.scalars(select(Workspace.id)).all():
-            session.execute(
-                update_in_workspace(
-                    WorkspaceCredentialGrant,
-                    workspace_id=workspace_id,
-                    conditions=(WorkspaceCredentialGrant.user_id == user_id,),
-                    values={"revoked_at": now},
+        for model, condition, change in (
+            (
+                WorkspaceCredentialGrant,
+                WorkspaceCredentialGrant.user_id == user_id,
+                {"revoked_at": now},
+            ),
+            (WorkspacePurgeGrant, WorkspacePurgeGrant.user_id == user_id, None),
+            (MCPClient, MCPClient.issued_to_user_id == user_id, {"status": "disabled"}),
+        ):
+            for workspace_id in set(
+                session.scalars(select(model.workspace_id).where(condition).distinct())
+            ):
+                session.execute(
+                    delete_in_workspace(
+                        model, workspace_id=workspace_id, conditions=(condition,)
+                    )
+                    if change is None
+                    else update_in_workspace(
+                        model,
+                        workspace_id=workspace_id,
+                        conditions=(condition,),
+                        values=change,
+                    )
                 )
-            )
-            session.execute(
-                delete_in_workspace(
-                    WorkspacePurgeGrant,
-                    workspace_id=workspace_id,
-                    conditions=(WorkspacePurgeGrant.user_id == user_id,),
-                )
-            )
-            session.execute(
-                update_in_workspace(
-                    MCPClient,
-                    workspace_id=workspace_id,
-                    conditions=(MCPClient.issued_to_user_id == user_id,),
-                    values={"status": "disabled"},
-                )
-            )
         session.execute(
             update(EmailOutbox)
             .where(
@@ -485,14 +802,19 @@ class UserDeletionService:
         for user_id in user_ids:
             try:
                 purged += int(self._purge_one(user_id, blob_store_provider, due_at))
-            except Exception:
+            except _FootprintChanged:
+                logger.info(
+                    "account deletion footprint changed; retrying next sweep",
+                    extra={"user_id": str(user_id)},
+                )
+            except Exception as exc:
                 # The user and intent stay pending for a later bounded sweep.
                 logger.exception(
                     "account deletion cleanup failed", extra={"user_id": str(user_id)}
                 )
-                # Move failed work behind untouched due users. A bounded
-                # sweep must not let its first persistent failures starve
-                # the rest of the deletion queue on every later tick.
+                # Record the failure for administrators and move failed work
+                # behind untouched due users, so persistent failures cannot
+                # starve the rest of the deletion queue on every later tick.
                 try:
                     with self.session_factory.begin() as session:
                         session.execute(
@@ -501,14 +823,34 @@ class UserDeletionService:
                                 User.id == user_id,
                                 User.status == "deletion_pending",
                             )
-                            .values(updated_at=utc_now())
+                            .values(
+                                updated_at=utc_now(),
+                                deletion_failure_count=(
+                                    func.coalesce(User.deletion_failure_count, 0) + 1
+                                ),
+                                deletion_last_error=_failure_code(exc),
+                            )
                         )
                 except Exception:
                     logger.exception(
                         "account deletion retry ordering update failed",
                         extra={"user_id": str(user_id)},
                     )
+        self._expire_deleted_user_markers()
         return purged
+
+    def _expire_deleted_user_markers(self) -> None:
+        cutoff = (utc_now() - _DELETED_USER_MARKER_TTL).isoformat()
+        try:
+            with self.session_factory.begin() as session:
+                session.execute(
+                    delete(AppMetadata).where(
+                        AppMetadata.key.startswith(DELETED_USER_KEY_PREFIX),
+                        AppMetadata.value < cutoff,
+                    )
+                )
+        except Exception:
+            logger.exception("expiring deleted-user markers failed")
 
     def _purge_one(
         self, user_id: UUID, blob_store_provider: object, now: datetime
@@ -518,7 +860,7 @@ class UserDeletionService:
             _serialize_lifecycle(session)
             if session.scalar(select(User.id).where(User.id == user_id)) is None:
                 return False
-            user, _ = self._lock_subject(session, user_id, user_id)
+            user, footprint = self._lock_for_purge(session, user_id, final=False)
             if (
                 user.status != "deletion_pending"
                 or user.purge_after is None
@@ -547,11 +889,15 @@ class UserDeletionService:
                         key=intent_key, value=str(workspace_id) if workspace_id else ""
                     )
                 )
+                footprint.discard(workspace_id)
+                self._cleanup_user_resources(session, user_id, footprint)
                 if workspace_id is not None:
+                    # Last: deleting the Personal workspace nulls the user's
+                    # unique pointer, which locks the user row, so nothing
+                    # after it waits on rows a stale writer could still hold.
                     WorkspaceWriteService.purge_personal_workspace_for_deleted_user(
                         session=session, user=user
                     )
-                self._cleanup_user_resources(session, user_id)
                 self.audit_service.emit(
                     session=session,
                     workspace_id=None,
@@ -563,7 +909,8 @@ class UserDeletionService:
                     payload={
                         "personal_workspace_id": str(workspace_id)
                         if workspace_id
-                        else None
+                        else None,
+                        "cleaned_workspace_count": len(footprint),
                     },
                     retention_class="sensitive",
                 )
@@ -574,11 +921,17 @@ class UserDeletionService:
             _serialize_lifecycle(session)
             if session.scalar(select(User.id).where(User.id == user_id)) is None:
                 return False
-            user, _ = self._lock_subject(session, user_id, user_id)
+            # Normally empty: the first transaction already cleaned the
+            # footprint, and new attributions to a pending user are refused.
+            user, footprint = self._lock_for_purge(session, user_id, final=True)
             intent = session.get(AppMetadata, intent_key)
             if user.status != "deletion_pending" or intent is None:
-                raise RuntimeError("account deletion intent changed during cleanup")
-            self._cleanup_user_resources(session, user_id)
+                raise UserDeletionError(
+                    "account deletion intent changed during cleanup",
+                    error_code="user_deletion_intent_changed",
+                    status_code=409,
+                )
+            self._cleanup_user_resources(session, user_id, footprint)
             self.audit_service.emit(
                 session=session,
                 workspace_id=None,
@@ -591,118 +944,138 @@ class UserDeletionService:
             )
             session.execute(delete(User).where(User.id == user_id))
             session.delete(intent)
+            session.add(
+                AppMetadata(
+                    key=f"{DELETED_USER_KEY_PREFIX}{user_id}",
+                    value=utc_now().isoformat(),
+                )
+            )
         return True
 
-    def _cleanup_user_resources(self, session: Session, user_id: UUID) -> None:
+    def _cleanup_user_resources(
+        self, session: Session, user_id: UUID, workspace_ids: set[UUID]
+    ) -> None:
         # Shared content stays; personal preferences, connections and chat
         # projections are explicitly removed even when FK cascades are off.
-        for workspace_id in session.scalars(select(Workspace.id)).all():
+        for workspace_id in sorted(workspace_ids, key=lambda value: value.int):
             self._cleanup_workspace_user_resources(
                 session, user_id=user_id, workspace_id=workspace_id
             )
-        token_ids = select(ApiToken.id).where(ApiToken.user_id == user_id)
-        session.execute(
-            delete(ApiTokenWorkspace).where(ApiTokenWorkspace.token_id.in_(token_ids))
+        projected = list(
+            session.scalars(select(Workspace).where(Workspace.owner_user_id == user_id))
         )
-        session.execute(
-            delete(EmailOutbox).where(EmailOutbox.recipient_user_id == user_id)
-        )
-        for model in (
-            OAuthAccessTokenJti,
-            OAuthCode,
-            OAuthConsent,
-            OAuthRefreshToken,
-            PasswordResetToken,
-            ApiToken,
-            WorkspaceMembership,
-            ServerAdmin,
-        ):
-            session.execute(delete(model).where(model.user_id == user_id))
-        session.execute(
-            delete(WorkspaceJoinRequest).where(
-                WorkspaceJoinRequest.requester_user_id == user_id
-            )
-        )
-        for model, column in (
-            (WorkspaceJoinRequest, WorkspaceJoinRequest.decided_by_user_id),
-            (PasswordResetToken, PasswordResetToken.requested_by_user_id),
-            (Workspace, Workspace.owner_user_id),
-        ):
-            session.execute(
-                update(model).where(column == user_id).values({column.key: None})
-            )
+        for entry in USER_ATTRIBUTIONS:
+            if entry.workspace_scoped:
+                continue
+            if entry.cleanup == "api_tokens":
+                token_ids = select(ApiToken.id).where(*entry.match(user_id))
+                session.execute(
+                    delete(ApiTokenWorkspace).where(
+                        ApiTokenWorkspace.token_id.in_(token_ids)
+                    )
+                )
+                session.execute(delete(ApiToken).where(*entry.match(user_id)))
+            elif entry.cleanup == "delete":
+                session.execute(delete(entry.model).where(*entry.match(user_id)))
+            elif entry.cleanup == "clear":
+                for column in entry.columns:
+                    session.execute(
+                        update(entry.model)
+                        .where(column == user_id)
+                        .values({column.key: None})
+                    )
+            elif entry.cleanup == "owner_projection":
+                # Memberships are gone by now; fall back to a remaining owner.
+                for workspace in projected:
+                    WorkspaceMembershipService._sync_owner_projection(
+                        session, workspace
+                    )
+            else:
+                raise ValueError(f"unknown identity cleanup {entry.cleanup!r}")
         session.flush()
 
     def _cleanup_workspace_user_resources(
         self, session: Session, *, user_id: UUID, workspace_id: UUID
     ) -> None:
-        self._scrub_private_context_versions(
-            session, user_id=user_id, workspace_id=workspace_id
-        )
-        for model in (ContextPageVersion, AgentPageVersion):
+        for entry in USER_ATTRIBUTIONS:
+            if entry.workspace_scoped:
+                self._cleanup_workspace_attribution(
+                    session, entry, user_id=user_id, workspace_id=workspace_id
+                )
+
+    def _cleanup_workspace_attribution(
+        self,
+        session: Session,
+        entry: UserAttribution,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> None:
+        model = entry.model
+        if entry.cleanup == "private_versions":
+            self._scrub_private_context_versions(
+                session, user_id=user_id, workspace_id=workspace_id
+            )
+        elif entry.cleanup == "author_name":
             session.execute(
                 update_in_workspace(
                     model,
                     workspace_id=workspace_id,
-                    conditions=(model.actor_type == "human", model.actor_id == user_id),
+                    conditions=entry.pending(user_id),
                     values={"actor_display_name": None},
                 )
             )
-        chat_ids = select_in_workspace(
-            McpChatSession,
-            workspace_id=workspace_id,
-            conditions=(McpChatSession.owner_user_id == user_id,),
-        ).with_only_columns(McpChatSession.id)
-        session.execute(
-            update_in_workspace(
-                ChangeSet,
-                workspace_id=workspace_id,
-                conditions=(ChangeSet.origin_chat_session_id.in_(chat_ids),),
-                values={"origin_chat_session_id": None},
-            )
-        )
-        for model in (McpChatArtifactLink, McpChatToolCallArtifact):
-            session.execute(
-                delete_in_workspace(
-                    model,
-                    workspace_id=workspace_id,
-                    conditions=(model.chat_session_id.in_(chat_ids),),
-                )
-            )
-        session.execute(
-            delete_in_workspace(
+        elif entry.cleanup == "chat_sessions":
+            chat_ids = select_in_workspace(
                 McpChatSession,
                 workspace_id=workspace_id,
-                conditions=(McpChatSession.owner_user_id == user_id,),
-            )
-        )
-        for model in (WorkspaceCredentialGrant, WorkspacePurgeGrant, UserFavorite):
-            session.execute(
-                delete_in_workspace(
-                    model,
-                    workspace_id=workspace_id,
-                    conditions=(model.user_id == user_id,),
-                )
-            )
-        session.execute(
-            delete_in_workspace(
-                MCPWriteIdempotency,
-                workspace_id=workspace_id,
-                conditions=(
-                    MCPWriteIdempotency.actor_kind == "human",
-                    MCPWriteIdempotency.actor_id == str(user_id),
-                ),
-            )
-        )
-        for column in (MCPClient.created_by, MCPClient.issued_to_user_id):
+                conditions=entry.match(user_id),
+            ).with_only_columns(McpChatSession.id)
             session.execute(
                 update_in_workspace(
-                    MCPClient,
+                    ChangeSet,
                     workspace_id=workspace_id,
-                    conditions=(column == user_id,),
-                    values={column.key: None},
+                    conditions=(ChangeSet.origin_chat_session_id.in_(chat_ids),),
+                    values={"origin_chat_session_id": None},
                 )
             )
+            for link_model in (McpChatArtifactLink, McpChatToolCallArtifact):
+                session.execute(
+                    delete_in_workspace(
+                        link_model,
+                        workspace_id=workspace_id,
+                        conditions=(link_model.chat_session_id.in_(chat_ids),),
+                    )
+                )
+            session.execute(
+                delete_in_workspace(
+                    McpChatSession,
+                    workspace_id=workspace_id,
+                    conditions=entry.match(user_id),
+                )
+            )
+        elif entry.cleanup == "delete":
+            session.execute(
+                delete_in_workspace(
+                    model, workspace_id=workspace_id, conditions=entry.match(user_id)
+                )
+            )
+        elif entry.cleanup == "clear":
+            for column in entry.columns:
+                session.execute(
+                    update_in_workspace(
+                        model,
+                        workspace_id=workspace_id,
+                        conditions=(column == user_id,),
+                        values={column.key: None},
+                    )
+                )
+        elif entry.cleanup == "orphan_media":
+            self._reclaim_orphan_media(
+                session, user_id=user_id, workspace_id=workspace_id
+            )
+        else:
+            raise ValueError(f"unknown workspace cleanup {entry.cleanup!r}")
 
     def _scrub_private_context_versions(
         self, session: Session, *, user_id: UUID, workspace_id: UUID
@@ -739,7 +1112,11 @@ class UserDeletionService:
             or page.public_exposed_version_id in private_ids
             for page in pages
         ):
-            raise RuntimeError("private_context_version_has_public_exposure")
+            raise UserDeletionError(
+                "a private draft is published or publicly exposed",
+                error_code="user_deletion_private_version_exposed",
+                status_code=409,
+            )
         for version in private_versions:
             version.version_status = "discarded"
             version.body_md = ""
@@ -823,7 +1200,7 @@ class UserDeletionService:
                         for version in versions
                         if version.version_status == "draft"
                         and version.graph_status == "linear"
-                        and page_service._draft_still_open(session, page, version)
+                        and page_service.draft_still_open(session, page, version)
                     ),
                     None,
                 )
@@ -863,6 +1240,10 @@ class UserDeletionService:
             session.flush()
             sync_page_projections(session, page=page)
         session.flush()
+
+    def _reclaim_orphan_media(
+        self, session: Session, *, user_id: UUID, workspace_id: UUID
+    ) -> None:
         # Reclaim only this user's unreachable associations. A surviving
         # shared/history usage keeps its asset and deduplicated blob intact.
         orphan_assets = session.scalars(

@@ -60,7 +60,9 @@ from backend.schemas.user_deletion import (
     AdminUserDeletionRequest,
     UserDeletionPolicyData,
     UserDeletionPolicyResponse,
+    UserDeletionPreviewResponse,
     UserDeletionResponse,
+    UserDeletionRestoreResponse,
 )
 from backend.services import deployment as deployment_service
 from backend.services import update_check_service
@@ -181,6 +183,60 @@ def admin_delete_user(
             expected_actor_session_generation=admin.session_generation,
             confirmation_email=request_body.confirmation_email,
             expected_retention_days=request_body.expected_retention_days,
+        )
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": result}
+
+
+@router.get(
+    "/users/{user_id}/deletion-preview",
+    response_model=UserDeletionPreviewResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_user_deletion_preview(
+    user_id: UUID,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+    _: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        preview = user_deletion_service(
+            session_factory, database_provider
+        ).deletion_preview(user_id=user_id)
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": preview}
+
+
+@router.post(
+    "/users/{user_id}/deletion-restore",
+    response_model=UserDeletionRestoreResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def admin_restore_user_deletion(
+    user_id: UUID,
+    response: Response,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+    admin: Annotated[
+        VerifiedRecentReauthentication,
+        Depends(require_recent_server_admin_reauthentication),
+    ],
+):
+    try:
+        result = user_deletion_service(
+            session_factory, database_provider
+        ).restore_deletion(
+            user_id=user_id,
+            actor_user_id=admin.user_id,
+            expected_actor_session_generation=admin.session_generation,
         )
     except UserDeletionError as exc:
         return user_deletion_error_response(exc)
@@ -341,6 +397,8 @@ def admin_search_users(
                     "email_verified_at": record.user.email_verified_at,
                     "deletion_requested_at": record.user.deletion_requested_at,
                     "purge_after": record.user.purge_after,
+                    "deletion_failure_count": record.user.deletion_failure_count,
+                    "deletion_last_error": record.user.deletion_last_error,
                     "workspaces": [
                         {
                             "workspace_id": membership.workspace_id,

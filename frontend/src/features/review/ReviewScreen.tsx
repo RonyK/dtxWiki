@@ -29,6 +29,7 @@ import type {
   ReviewAudienceKind,
   ReviewBulkDecisionResult,
   ReviewCounts,
+  ReviewCurrentAudienceKind,
   ReviewDecisionRecentItem,
   ReviewDecisionType,
   ReviewEvidenceOperation,
@@ -2915,7 +2916,7 @@ function editableTargetSlug(review: ReviewItem): string | null {
 }
 
 function audienceChipLabel(
-  kind: ReviewAudienceKind,
+  kind: ReviewCurrentAudienceKind,
   t: (key: string, options: { defaultValue: string }) => string,
 ) {
   if (kind === "requester") {
@@ -2923,6 +2924,11 @@ function audienceChipLabel(
   }
   if (kind === "chat_owner") {
     return t("audience.chat_owner", { defaultValue: "To chat owner" });
+  }
+  if (kind === "workspace_owners") {
+    return t("audience.workspace_owners", {
+      defaultValue: "To workspace owners (original recipient inactive)",
+    });
   }
   return t("audience.workspace_editors", { defaultValue: "To editors" });
 }

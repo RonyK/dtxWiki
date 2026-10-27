@@ -29,6 +29,8 @@ class AdminUserData(BaseModel):
     email_verified_at: datetime | None = None
     deletion_requested_at: datetime | None = None
     purge_after: datetime | None = None
+    deletion_failure_count: int | None = None
+    deletion_last_error: str | None = None
     workspaces: list[AdminUserWorkspaceData]
 
     model_config = ConfigDict(extra="forbid")

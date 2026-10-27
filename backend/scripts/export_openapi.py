@@ -53,7 +53,7 @@ FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS = {
 # These handlers authenticate by reading the session cookie directly instead of
 # using RestActorDep, so FastAPI cannot infer their actual security contract.
 OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
-    ("GET", "/api/v1/users/me/deletion-policy"),
+    ("GET", "/api/v1/users/me/deletion-preview"),
     ("DELETE", "/api/v1/users/me"),
     ("GET", "/api/v1/admin/user-deletion-policy"),
     ("POST", "/api/v1/auth/reauthenticate"),
@@ -89,6 +89,8 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
 OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("PATCH", "/api/v1/admin/user-deletion-policy"),
     ("DELETE", "/api/v1/admin/users/{user_id}"),
+    ("GET", "/api/v1/admin/users/{user_id}/deletion-preview"),
+    ("POST", "/api/v1/admin/users/{user_id}/deletion-restore"),
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
 }

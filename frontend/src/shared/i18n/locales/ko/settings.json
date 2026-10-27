@@ -1986,7 +1986,7 @@
     "confirmTitle": "사용자 계정을 삭제할까요?",
     "confirmDescription": "확인 후 {{email}} 계정의 모든 세션·API 키·OAuth 접근 권한이 즉시 폐기됩니다.",
     "retention_other": "계정 데이터와 개인 워크스페이스를 {{count}}일 보관한 뒤 서버 워커가 삭제합니다. 0일이면 다음 정리 작업부터 삭제 대상이 됩니다.",
-    "sharedContent": "공동 문서와 검토 이력은 유지되며, 정리 후 작성자 정보가 익명화됩니다. 삭제 요청은 취소할 수 없습니다.",
+    "sharedContent": "공동 문서와 검토 이력은 유지되며, 정리 후에는 작성자 이름이 표시되지 않습니다. 정리 전까지는 이 목록에서 계정을 복구할 수 있습니다.",
     "confirmEmail": "확인을 위해 {{email}} 입력",
     "currentPassword": "현재 관리자 비밀번호",
     "cancel": "취소",
@@ -1995,10 +1995,10 @@
     "scheduled": "{{date}} 이후 데이터 정리 예정",
     "success": "{{email}} 계정의 접근 권한을 폐기했습니다. {{date}} 이후 데이터를 정리합니다.",
     "failed": "계정 삭제를 요청하지 못했습니다.",
-    "reloadPolicy": "보관 기간 다시 불러오기",
+    "reloadPolicy": "삭제 내용 다시 불러오기",
     "policy": {
       "title": "계정 삭제 데이터 보관 기간",
-      "description": "영구 삭제 전 계정 데이터를 보관할 기간입니다. 새 삭제 요청에 적용되며 기존 삭제 예정일은 유지됩니다. 0일이면 다음 워커 정리 작업부터 삭제할 수 있습니다.",
+      "description": "영구 삭제 전 계정 데이터를 보관할 기간입니다. 새 삭제 요청에 적용되며 기존 삭제 예정일은 유지됩니다. 0일이면 다음 워커 정리 작업부터 삭제 대상이 되어 복구를 보장할 수 없습니다.",
       "days": "보관 기간(일)",
       "invalid": "0부터 36500 사이의 정수를 입력하세요.",
       "loading": "보관 기간 불러오는 중…",
@@ -2010,15 +2010,28 @@
       "retry": "다시 시도"
     },
     "errors": {
-      "user_deletion_last_owner": "계정을 삭제하기 전에 공동 워크스페이스 소유권을 다른 활성 구성원에게 이전하세요.",
+      "user_deletion_last_owner": "이 계정의 공동 워크스페이스를 넘겨받을 활성 서버 관리자가 없습니다.",
       "user_deletion_last_server_admin": "계정을 삭제하기 전에 다른 활성 사용자에게 서버 관리자 권한을 부여하세요.",
       "user_deletion_email_mismatch": "확인 이메일이 이 계정과 일치하지 않습니다.",
       "user_deletion_not_found": "계정을 찾을 수 없습니다. 사용자 목록을 새로고침하세요.",
       "invalid_credentials": "현재 비밀번호가 올바르지 않습니다.",
       "user_deletion_unavailable": "이 서버에서는 계정 삭제를 사용할 수 없습니다. 서버 운영자에게 문의하세요.",
-      "user_deletion_policy_changed": "보관 기간이 변경되었습니다. 기간을 다시 불러와 검토한 후 확인하세요."
+      "user_deletion_policy_changed": "보관 기간이 변경되었습니다. 기간을 다시 불러와 검토한 후 확인하세요.",
+      "user_deletion_purge_started": "데이터 정리가 이미 시작되어 계정을 복구할 수 없습니다.",
+      "user_deletion_not_pending": "삭제 대기 중인 계정이 아닙니다. 사용자 목록을 새로고침하세요."
     },
     "retention_one": "계정 데이터와 개인 워크스페이스를 {{count}}일 보관한 뒤 서버 워커가 삭제합니다. 0일이면 다음 정리 작업부터 삭제 대상이 됩니다.",
-    "pending": "삭제 대기"
+    "pending": "삭제 대기",
+    "previewFailed": "삭제 내용을 불러오지 못했습니다.",
+    "cleanupFailed_one": "정리 실패: {{code}} ({{count}}회)",
+    "cleanupFailed_other": "정리 실패: {{code}} ({{count}}회)",
+    "restore": "계정 복구",
+    "restoring": "복구 중…",
+    "restoreTitle": "이 계정을 복구할까요?",
+    "restoreDescription": "{{email}} 계정이 삭제 요청 전 상태로 돌아갑니다. 세션·API 키·OAuth 접근 권한은 폐기된 채로 남으며, 사용자가 다시 로그인해야 합니다.",
+    "restored": "{{email}} 계정을 복구했습니다.",
+    "restoreFailed": "계정을 복구하지 못했습니다.",
+    "verifyToLoad": "최근 본인 확인이 만료되었습니다. 삭제 내용을 불러오려면 비밀번호를 입력하세요.",
+    "verify": "확인 후 내용 불러오기"
   }
 }

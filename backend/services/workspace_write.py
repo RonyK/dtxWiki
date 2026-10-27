@@ -304,10 +304,12 @@ class WorkspaceWriteService:
         workspace = session.scalar(
             select(Workspace).where(Workspace.id == workspace_id).with_for_update()
         )
+        # SHARE keeps the anchor stable without blocking the KEY SHARE that
+        # the attribution guard takes for writes still in flight.
         anchor = session.execute(
             select(User.personal_workspace_id, User.status)
             .where(User.id == user.id)
-            .with_for_update()
+            .with_for_update(read=True)
             .execution_options(autoflush=False)
         ).one_or_none()
         if (

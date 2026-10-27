@@ -21,6 +21,9 @@ def upgrade() -> None:
     )
     op.add_column("users", sa.Column("purge_after", sa.DateTime(timezone=True)))
     op.add_column("users", sa.Column("deletion_retention_days", sa.Integer()))
+    op.add_column("users", sa.Column("deletion_prior_status", sa.Text()))
+    op.add_column("users", sa.Column("deletion_failure_count", sa.Integer()))
+    op.add_column("users", sa.Column("deletion_last_error", sa.Text()))
     op.create_index("ix_users_purge_after", "users", ["purge_after"], unique=False)
 
 
@@ -34,6 +37,9 @@ def downgrade() -> None:
         )
     op.drop_index("ix_users_purge_after", table_name="users")
     with op.batch_alter_table("users") as batch:
+        batch.drop_column("deletion_last_error")
+        batch.drop_column("deletion_failure_count")
+        batch.drop_column("deletion_prior_status")
         batch.drop_column("deletion_retention_days")
         batch.drop_column("purge_after")
         batch.drop_column("deletion_requested_at")

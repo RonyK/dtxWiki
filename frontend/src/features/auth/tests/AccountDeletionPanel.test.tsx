@@ -20,8 +20,15 @@ it("requires the confirmed retention period again when policy changes before wit
   const requests: unknown[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
-    if (url.endsWith("/api/v1/users/me/deletion-policy")) {
-      return json({ data: { retention_days: retentionDays } });
+    if (url.endsWith("/api/v1/users/me/deletion-preview")) {
+      return json({
+        data: {
+          retention_days: retentionDays,
+          personal_workspace: { workspace_id: "ws-personal", title: "My notes", other_member_count: 2 },
+          transferred_workspaces: [{ workspace_id: "ws-team", title: "Team handbook" }],
+          recipient_admin_count: 1,
+        },
+      });
     }
     if (url.endsWith("/api/v1/users/me") && init?.method === "DELETE") {
       expect(init.credentials).toBe("include");
@@ -39,23 +46,26 @@ it("requires the confirmed retention period again when policy changes before wit
   expect(globalThis.fetch).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Review account deletion" }));
   expect(await screen.findByText(/retained for 30 days/)).toBeInTheDocument();
+  expect(screen.getByText(/2 other members also lose its documents/)).toBeInTheDocument();
+  expect(screen.getByText("Team handbook")).toBeInTheDocument();
   const submit = screen.getByRole("button", { name: "Confirm account deletion" });
   expect(submit).toBeDisabled();
-  await user.type(screen.getByLabelText("Type user@example.com to confirm"), "user@example.com");
+  // The server normalizes the address, so a different case still confirms.
+  await user.type(screen.getByLabelText("Type user@example.com to confirm"), " User@Example.com ");
   await user.type(screen.getByLabelText("Current password for account deletion"), "current-password");
   await user.click(submit);
   expect(await screen.findByText("The retention period changed. Reload the period and review it before confirming again.")).toBeInTheDocument();
   expect(signOut).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Current password for account deletion")).toHaveValue("");
-  await user.click(screen.getByRole("button", { name: "Reload retention period" }));
+  await user.click(screen.getByRole("button", { name: "Reload deletion details" }));
   expect(await screen.findByText(/retained for 0 days/)).toBeInTheDocument();
   await user.type(screen.getByLabelText("Current password for account deletion"), "current-password");
   await user.click(submit);
   await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/login"));
   expect(signOut).toHaveBeenCalledOnce();
   expect(requests).toEqual([
-    { confirmation_email: "user@example.com", current_password: "current-password", expected_retention_days: 30 },
-    { confirmation_email: "user@example.com", current_password: "current-password", expected_retention_days: 0 },
+    { confirmation_email: "User@Example.com", current_password: "current-password", expected_retention_days: 30 },
+    { confirmation_email: "User@Example.com", current_password: "current-password", expected_retention_days: 0 },
   ]);
 });
 

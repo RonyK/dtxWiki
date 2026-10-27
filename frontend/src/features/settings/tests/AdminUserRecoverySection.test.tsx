@@ -29,9 +29,10 @@ describe("AdminUserRecoverySection", () => {
     setLocale("en", { persist: false });
   });
 
-  it("requires the target email and fresh admin verification before scheduling deletion", async () => {
+  it("requires the target email and fresh admin verification before scheduling or restoring deletion", async () => {
     const mutations: string[] = [];
     let deleted = false;
+    let previewRequests = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/auth/capabilities`) return jsonResponse(authCapabilities());
@@ -39,13 +40,37 @@ describe("AdminUserRecoverySection", () => {
         mutations.push("reauthenticate");
         return jsonResponse(reauthResponse());
       }
-      if (url === `${BASE}/api/v1/admin/user-deletion-policy`) {
-        return jsonResponse({ data: { retention_days: 30 } });
+      if (url === `${BASE}/api/v1/admin/users/${USER_ID}/deletion-preview`) {
+        previewRequests += 1;
+        // Verification expired while the search results stayed on screen.
+        if (previewRequests === 1) {
+          return jsonResponse({ error_code: "recent_reauthentication_required", message: "verify again", request_id: "test", warnings: [] }, 401);
+        }
+        return jsonResponse({
+          data: {
+            retention_days: 30,
+            personal_workspace: { workspace_id: "ws-personal", title: "Alex notes", other_member_count: 0 },
+            transferred_workspaces: [{ workspace_id: "ws-team", title: "Team handbook" }],
+            recipient_admin_count: 1,
+          },
+        });
       }
       if (url.startsWith(`${BASE}/api/v1/admin/users?`)) {
         const response = userSearchResponse(true);
-        if (deleted) Object.assign(response.data.items[0], { status: "deletion_pending", purge_after: "2026-11-26T00:00:00Z" });
+        if (deleted) {
+          Object.assign(response.data.items[0], {
+            status: "deletion_pending",
+            purge_after: "2026-11-26T00:00:00Z",
+            deletion_failure_count: 2,
+            deletion_last_error: "user_deletion_blob_purge_failed",
+          });
+        }
         return jsonResponse(response);
+      }
+      if (url === `${BASE}/api/v1/admin/users/${USER_ID}/deletion-restore` && init?.method === "POST") {
+        mutations.push("restore");
+        deleted = false;
+        return jsonResponse({ data: { user_id: USER_ID, status: "active" } });
       }
       if (url === `${BASE}/api/v1/admin/users/${USER_ID}` && init?.method === "DELETE") {
         mutations.push("delete");
@@ -61,14 +86,26 @@ describe("AdminUserRecoverySection", () => {
     await user.click(screen.getByRole("button", { name: "Delete account" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete this user account?" });
     const scoped = within(dialog);
+    expect(await scoped.findByText(/recent verification expired/)).toBeInTheDocument();
+    await user.type(scoped.getByLabelText("Your current password"), "admin-current-password");
+    await user.click(scoped.getByRole("button", { name: "Verify and load details" }));
     expect(await scoped.findByText(/retained for 30 days/)).toBeInTheDocument();
+    await user.clear(scoped.getByLabelText("Your current password"));
+    expect(scoped.getByText("Team handbook")).toBeInTheDocument();
     await user.type(scoped.getByLabelText("Your current password"), "admin-current-password");
     expect(scoped.getByRole("button", { name: "Confirm account deletion" })).toBeDisabled();
     await user.type(scoped.getByLabelText("Type alex@example.com to confirm"), "alex@example.com");
     await user.click(scoped.getByRole("button", { name: "Confirm account deletion" }));
     expect(await screen.findByText("Deletion pending")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete account" })).toBeDisabled();
-    expect(mutations).toEqual(["reauthenticate", "reauthenticate", "delete"]);
+    expect(screen.getByText("Cleanup failed: user_deletion_blob_purge_failed (2 attempts)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete account" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Restore account" }));
+    const restoreDialog = within(await screen.findByRole("dialog", { name: "Restore this account?" }));
+    await user.type(restoreDialog.getByLabelText("Your current password"), "admin-current-password");
+    await user.click(restoreDialog.getByRole("button", { name: "Restore account" }));
+    expect(await screen.findByText("Account restored for alex@example.com.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Delete account" })).toBeEnabled();
+    expect(mutations).toEqual(["reauthenticate", "reauthenticate", "reauthenticate", "delete", "reauthenticate", "restore"]);
     expect(fetchMock.mock.calls.some(([input, init]) => input.toString().endsWith("/password-reset") && init?.method === "POST")).toBe(false);
   });
 

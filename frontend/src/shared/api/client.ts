@@ -200,14 +200,16 @@ export async function apiRequest<T>(
 
 // Server Admin recovery surfaces deliberately return 401 when recent
 // reauthentication is missing: the protected directory must relock, and the
-// reset dialog must keep its current-password challenge open. Neither response
-// proves that the browser session itself expired. Every other non-auth 401
-// continues through the normal session-expiry path.
+// reset, deletion and restore dialogs must keep their current-password
+// challenge open. None of these responses proves that the browser session
+// itself expired. Every other non-auth 401 continues through the normal
+// session-expiry path.
 function isPrivilegedReauthentication(path: string, body: ApiErrorBody) {
   return (
     body.error_code === "recent_reauthentication_required" &&
     (/^\/api\/v1\/admin\/users(?:\?|$)/.test(path) ||
-      /^\/api\/v1\/admin\/users\/[^/]+\/password-reset$/.test(path))
+      /^\/api\/v1\/admin\/users\/[^/]+(?:\/(?:password-reset|deletion-preview|deletion-restore))?$/.test(path) ||
+      path === "/api/v1/admin/user-deletion-policy")
   );
 }
 

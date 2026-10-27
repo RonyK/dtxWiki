@@ -28,7 +28,7 @@ export function UserDeletionPolicyCard() {
     let active = true;
     setLoading(true);
     setError(null);
-    void getUserDeletionPolicy(true).then((policy) => {
+    void getUserDeletionPolicy().then((policy) => {
       if (!active) return;
       setDays(String(policy.retention_days));
       setLoaded(true);

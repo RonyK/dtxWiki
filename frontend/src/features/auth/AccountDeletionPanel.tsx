@@ -4,39 +4,49 @@ import { useNavigate } from "react-router-dom";
 
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import {
-  getUserDeletionPolicy,
+  getMyDeletionPreview,
+  type UserDeletionPreview,
   withdrawAccount,
 } from "../../shared/api/userDeletion";
 import { useAuth } from "../../shared/auth/AuthContext";
 import {
   preventCompositionSubmit,
+  sameAccountEmail,
   validateAccountPassword,
 } from "../../shared/auth/identityPolicy";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import { UserDeletionImpact } from "../../shared/components/UserDeletionImpact";
 
 export function AccountDeletionPanel({ email }: { email: string }) {
   const { t } = useTranslation("auth");
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [retentionDays, setRetentionDays] = useState<number | null>(null);
+  const [preview, setPreview] = useState<UserDeletionPreview | null>(null);
   const [confirmationEmail, setConfirmationEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Reloading helps only when the details are missing or out of date.
+  const [canReload, setCanReload] = useState(false);
   const [policyAttempt, setPolicyAttempt] = useState(0);
+  const retentionDays = preview?.retention_days ?? null;
+  const emailConfirmed = sameAccountEmail(confirmationEmail, email);
 
   useEffect(() => {
     if (!open) return;
     let active = true;
     setLoading(true);
-    setRetentionDays(null);
+    setPreview(null);
     setError(null);
-    void getUserDeletionPolicy().then((policy) => {
-      if (active) setRetentionDays(policy.retention_days);
+    setCanReload(false);
+    void getMyDeletionPreview().then((loaded) => {
+      if (active) setPreview(loaded);
     }).catch((caught) => {
-      if (active) setError(apiErrorMessage(caught, t("deletion.policyFailed")));
+      if (!active) return;
+      setError(apiErrorMessage(caught, t("deletion.policyFailed")));
+      setCanReload(true);
     }).finally(() => {
       if (active) setLoading(false);
     });
@@ -45,7 +55,7 @@ export function AccountDeletionPanel({ email }: { email: string }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || retentionDays === null || confirmationEmail !== email) return;
+    if (busy || retentionDays === null || !emailConfirmed) return;
     try {
       validateAccountPassword(password);
     } catch (caught) {
@@ -54,6 +64,7 @@ export function AccountDeletionPanel({ email }: { email: string }) {
     }
     setBusy(true);
     setError(null);
+    setCanReload(false);
     try {
       await withdrawAccount({
         confirmation_email: confirmationEmail,
@@ -69,6 +80,10 @@ export function AccountDeletionPanel({ email }: { email: string }) {
         ? t(`deletion.errors.${caught.body.error_code}`, { defaultValue: "" })
         : "";
       setError(localized || apiErrorMessage(caught, t("deletion.failed")));
+      setCanReload(
+        caught instanceof ApiError
+          && caught.body.error_code === "user_deletion_policy_changed",
+      );
       setBusy(false);
     }
   }
@@ -97,22 +112,23 @@ export function AccountDeletionPanel({ email }: { email: string }) {
           aria-label={t("deletion.title")}
         >
           {loading ? <p role="status">{t("deletion.loading")}</p> : null}
-          {retentionDays !== null ? (
-            <StatusBanner tone="warning">
-              {t("deletion.retention", { count: retentionDays })}
-            </StatusBanner>
+          {preview !== null ? (
+            <>
+              <StatusBanner tone="warning">
+                {t("deletion.retention", { count: preview.retention_days })}
+              </StatusBanner>
+              <UserDeletionImpact preview={preview} />
+            </>
           ) : null}
           <p className="field-hint">{t("deletion.sharedContent")}</p>
-          {error ? (
-            <>
-              <StatusBanner tone="warning">{error}</StatusBanner>
-              <button
-                className="icon-button"
-                disabled={busy || loading}
-                onClick={() => setPolicyAttempt((value) => value + 1)}
-                type="button"
-              >{t("deletion.reloadPolicy")}</button>
-            </>
+          {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+          {error && canReload ? (
+            <button
+              className="icon-button"
+              disabled={busy || loading}
+              onClick={() => setPolicyAttempt((value) => value + 1)}
+              type="button"
+            >{t("deletion.reloadPolicy")}</button>
           ) : null}
           <label className="field-stack" htmlFor="account-deletion-email">
             <span>{t("deletion.confirmEmail", { email })}</span>
@@ -147,7 +163,7 @@ export function AccountDeletionPanel({ email }: { email: string }) {
             </button>
             <button
               className="icon-button danger-action"
-              disabled={busy || loading || retentionDays === null || confirmationEmail !== email || !password}
+              disabled={busy || loading || retentionDays === null || !emailConfirmed || !password}
               type="submit"
             >{t(busy ? "deletion.submitting" : "deletion.submit")}</button>
           </div>

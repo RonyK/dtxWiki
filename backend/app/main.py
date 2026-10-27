@@ -61,6 +61,7 @@ from backend.catalog.library_family_presets import (
 )
 from backend.catalog.mcp_apps import get_mcp_app_catalog_repository
 from backend.domain.input_policy import InputPolicyError
+from backend.models.user_attribution import ActorInactiveError
 
 
 async def http_exception_handler(
@@ -107,6 +108,19 @@ async def input_policy_exception_handler(
         error_code="validation_failed",
         message=str(exc),
         status_code=422,
+    )
+
+
+async def actor_inactive_exception_handler(
+    _request: Request,
+    exc: ActorInactiveError,
+) -> JSONResponse:
+    # A request authenticated before its account left ``active`` tried to
+    # write; the flush guard refused the row it would have attributed.
+    return build_rest_error_response(
+        error_code=exc.error_code,
+        message=str(exc),
+        status_code=401,
     )
 
 
@@ -326,6 +340,7 @@ def create_app(
     )
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.add_exception_handler(InputPolicyError, input_policy_exception_handler)
+    app.add_exception_handler(ActorInactiveError, actor_inactive_exception_handler)
     app.include_router(health_root_router)
     mount_storage_topology_health(app, resolved_container)
     app.include_router(auth_router, prefix="/api/v1")

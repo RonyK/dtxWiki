@@ -15,6 +15,8 @@ export type AdminUser = {
   email_verified_at: string | null;
   deletion_requested_at: string | null;
   purge_after: string | null;
+  deletion_failure_count?: number | null;
+  deletion_last_error?: string | null;
   workspaces: AdminUserWorkspace[];
 };
 

@@ -2139,7 +2139,7 @@ class PageService:
                             )
                             if candidate.id != version.id
                             and candidate.graph_status == "linear"
-                            and self._draft_still_open(session, page, candidate)
+                            and self.draft_still_open(session, page, candidate)
                         ),
                         None,
                     )
@@ -2223,7 +2223,7 @@ class PageService:
                 retry_only=retry_only,
             )
 
-    def _draft_still_open(
+    def draft_still_open(
         self,
         session: Session,
         page: ContextPage,

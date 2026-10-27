@@ -246,6 +246,12 @@ class OneShotWorker:
             nullcontext
         )
 
+    @property
+    def services(self) -> ServiceRegistry:
+        """The worker's single composition graph, overlay rebinding included."""
+
+        return self._services
+
     def dispatch_once(
         self,
         session: Session,

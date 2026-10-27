@@ -20,6 +20,9 @@ DELETION_COLUMNS = {
     "deletion_requested_at",
     "purge_after",
     "deletion_retention_days",
+    "deletion_prior_status",
+    "deletion_failure_count",
+    "deletion_last_error",
 }
 
 

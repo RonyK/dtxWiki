@@ -18,7 +18,7 @@ from backend.schemas.user import (
 )
 from backend.schemas.user_deletion import (
     SelfUserDeletionRequest,
-    UserDeletionPolicyResponse,
+    UserDeletionPreviewResponse,
     UserDeletionResponse,
 )
 from backend.services.session_service import SessionServiceError, consume_auth_slot
@@ -67,25 +67,28 @@ def user_deletion_error_response(exc: UserDeletionError):
 
 
 @router.get(
-    "/me/deletion-policy",
-    response_model=UserDeletionPolicyResponse,
+    "/me/deletion-preview",
+    response_model=UserDeletionPreviewResponse,
     responses=USER_DELETION_ERROR_RESPONSES,
 )
-def my_deletion_policy(
+def my_deletion_preview(
     request: Request,
     response: Response,
     session_service: SessionServiceDep,
     session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
 ):
     try:
-        current_session_user(request, session_service)
-        days = UserDeletionService(session_factory=session_factory).get_policy()
+        user = current_session_user(request, session_service)
+        preview = user_deletion_service(
+            session_factory, database_provider
+        ).deletion_preview(user_id=user.user_id)
     except SessionServiceError as exc:
         return auth_error_response(exc)
     except UserDeletionError as exc:
         return user_deletion_error_response(exc)
     response.headers["Cache-Control"] = "no-store"
-    return {"data": {"retention_days": days}}
+    return {"data": preview}
 
 
 @router.delete(

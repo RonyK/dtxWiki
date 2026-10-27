@@ -45,6 +45,11 @@ export type ActivityFilters = {
 
 export type ReviewDecisionType = "approve" | "reject" | "request_changes";
 export type ReviewAudienceKind = "chat_owner" | "requester" | "workspace_editors";
+// The current audience also reports fallbacks no reviewer can choose, such as
+// workspace owners taking over from an inactive recipient.
+export type ReviewCurrentAudienceKind = NonNullable<
+  components["schemas"]["ReviewItemDetail"]["current_audience_kind"]
+>;
 export type ReviewScope = "to_me" | "from_me" | "all";
 export type ReviewStatusFilter =
   | "pending"

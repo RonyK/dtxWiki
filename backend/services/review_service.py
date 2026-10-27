@@ -18,7 +18,7 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.mcp_chat import McpChatSession
 from backend.models.review import ReviewAudienceKind, ReviewDecision, ReviewItem
 from backend.models.user import User
-from backend.models.workspace import Workspace, default_actor_id
+from backend.models.workspace import Workspace, WorkspaceMembership, default_actor_id
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import role_allows
 from backend.policy.trust_boundaries import actor_can_read_drafts
@@ -87,6 +87,41 @@ RESOLVED_REVIEW_STATUSES = ("approved", "rejected")
 # Soft-claim TTL (D1): a claim older than this is stale and may be taken over
 # by another actor. Mirrors mcp_chat_service.IDLE_CLOSE_MINUTES.
 CLAIM_TTL_MINUTES = 30
+_INDIVIDUAL_AUDIENCE_KINDS = (
+    ReviewAudienceKind.REQUESTER.value,
+    ReviewAudienceKind.CHAT_OWNER.value,
+)
+
+
+def _audience_falls_back_to_owners(decision):
+    return and_(
+        decision.audience_kind.in_(_INDIVIDUAL_AUDIENCE_KINDS),
+        ~select(User.id)
+        .where(User.id == decision.audience_user_id, User.status == "active")
+        .exists(),
+    )
+
+
+def _decision_audience_predicate(
+    decision, *, principal: UUID, principal_role: str | None
+):
+    return or_(
+        and_(
+            decision.audience_kind.in_(_INDIVIDUAL_AUDIENCE_KINDS),
+            decision.audience_user_id == principal,
+        ),
+        and_(
+            role_allows(principal_role or "viewer", "owner"),
+            _audience_falls_back_to_owners(decision),
+        ),
+        and_(
+            role_allows(principal_role or "viewer", "editor"),
+            or_(
+                decision.audience_kind == ReviewAudienceKind.WORKSPACE_EDITORS.value,
+                decision.audience_kind.is_(None),
+            ),
+        ),
+    )
 
 
 def _context_version_id_from_diff_ref(diff_ref: str | None) -> UUID | None:
@@ -657,7 +692,9 @@ class ReviewService:
                     ReviewItem.status == "pending",
                     and_(
                         ReviewItem.status == CHANGES_REQUESTED_STATUS,
-                        self._current_audience_predicate(principal=actor_user_id),
+                        self._current_audience_predicate(
+                            principal=actor_user_id, principal_role=actor_role
+                        ),
                     ),
                 )
             )
@@ -671,26 +708,17 @@ class ReviewService:
             statement = statement.limit(max(1, min(limit, BULK_REVIEW_LIMIT)))
         return list(session.scalars(statement).all())
 
-    def _current_audience_predicate(self, *, principal: UUID):
+    def _current_audience_predicate(
+        self, *, principal: UUID, principal_role: str | None
+    ):
         latest_rc_id = self._latest_request_changes_subquery()
         latest_rc = aliased(ReviewDecision)
         return (
             select(latest_rc.id)
             .where(
                 latest_rc.id == latest_rc_id,
-                or_(
-                    and_(
-                        latest_rc.audience_kind.in_(
-                            [
-                                ReviewAudienceKind.REQUESTER.value,
-                                ReviewAudienceKind.CHAT_OWNER.value,
-                            ]
-                        ),
-                        latest_rc.audience_user_id == principal,
-                    ),
-                    latest_rc.audience_kind
-                    == ReviewAudienceKind.WORKSPACE_EDITORS.value,
-                    latest_rc.audience_kind.is_(None),
+                _decision_audience_predicate(
+                    latest_rc, principal=principal, principal_role=principal_role
                 ),
             )
             .exists()
@@ -761,29 +789,11 @@ class ReviewService:
         if scope == "from_me":
             # Requests I authored (symmetric, trivial on the ledger).
             return statement.where(latest_rc.actor_id == principal)
-        # scope == "to_me": the ⓐ visibility predicate for principal P. The two
-        # named-individual kinds (requester, chat_owner) both snapshot
-        # audience_user_id, so they collapse to a single membership test.
-        is_editor = role_allows(principal_role or "viewer", "editor")
-        targeted = and_(
-            latest_rc.audience_kind.in_(
-                [
-                    ReviewAudienceKind.REQUESTER.value,
-                    ReviewAudienceKind.CHAT_OWNER.value,
-                ]
-            ),
-            latest_rc.audience_user_id == principal,
-        )
-        if is_editor:
-            # kind 3 (workspace_editors) is dynamic membership, and a NULL
-            # audience on a legacy request_changes decision is treated as a
-            # kind-3 broadcast (D2) so historical items never vanish.
-            targeted = or_(
-                targeted,
-                latest_rc.audience_kind == ReviewAudienceKind.WORKSPACE_EDITORS.value,
-                latest_rc.audience_kind.is_(None),
+        return statement.where(
+            _decision_audience_predicate(
+                latest_rc, principal=principal, principal_role=principal_role
             )
-        return statement.where(targeted)
+        )
 
     def get_review(
         self,
@@ -889,14 +899,12 @@ class ReviewService:
             # personally — never the workspace-wide approve/reject broadcast feed.
             if audience_for is None:
                 return []
-            statement = statement.where(ReviewDecision.audience_user_id == audience_for)
-        elif audience_for is not None:
+        if audience_for is not None:
             statement = statement.where(
-                or_(
-                    ReviewDecision.audience_kind.is_(None),
-                    ReviewDecision.audience_kind
-                    == ReviewAudienceKind.WORKSPACE_EDITORS.value,
-                    ReviewDecision.audience_user_id == audience_for,
+                _decision_audience_predicate(
+                    ReviewDecision,
+                    principal=audience_for,
+                    principal_role=actor_role,
                 )
             )
         decision_rows = list(session.execute(statement))
@@ -1176,9 +1184,8 @@ class ReviewService:
         # approve/reject/reroute it out from under them. The holder's own
         # decision proceeds (and clears the claim below); an expired claim does
         # not block.
-        if self._claim_is_live(review) and review.claimed_by != parse_uuid_or_none(
-            actor_id
-        ):
+        claim_holder = self._effective_claim_holder(session, review)
+        if claim_holder is not None and claim_holder != parse_uuid_or_none(actor_id):
             raise ReviewAlreadyClaimedError(
                 "this review is being worked by another collaborator; it must "
                 "be released before you can decide it"
@@ -1437,7 +1444,8 @@ class ReviewService:
                 "only the routed recipient (or an editor on a broadcast route) "
                 "can claim this review"
             )
-        if self._claim_is_live(review) and review.claimed_by != claimant:
+        claim_holder = self._effective_claim_holder(session, review)
+        if claim_holder is not None and claim_holder != claimant:
             raise ReviewAlreadyClaimedError(
                 "this review is already being worked by another collaborator"
             )
@@ -1476,7 +1484,8 @@ class ReviewService:
         # claim is rejected with review_already_claimed (409).
         review = self._require_review_for_update(session, workspace_id, review_item_id)
         actor_uuid = parse_uuid_or_none(actor_id)
-        if self._claim_is_live(review) and review.claimed_by != actor_uuid:
+        claim_holder = self._effective_claim_holder(session, review)
+        if claim_holder is not None and claim_holder != actor_uuid:
             raise ReviewAlreadyClaimedError(
                 "this review is claimed by another collaborator"
             )
@@ -1503,17 +1512,33 @@ class ReviewService:
             actor=actor,
         )
 
-    @staticmethod
-    def _claim_is_live(review: ReviewItem) -> bool:
+    def _effective_claim_holder(
+        self, session: Session, review: ReviewItem
+    ) -> UUID | None:
         if review.claimed_by is None or review.claimed_at is None:
-            return False
+            return None
         claimed_at = review.claimed_at
         # SQLite round-trips DateTime(timezone=True) as offset-naive; treat a
         # naive value as UTC so the comparison with the aware utc_now() works
         # on both SQLite and Postgres.
         if claimed_at.tzinfo is None:
             claimed_at = claimed_at.replace(tzinfo=UTC)
-        return claimed_at > utc_now() - timedelta(minutes=CLAIM_TTL_MINUTES)
+        if claimed_at <= utc_now() - timedelta(minutes=CLAIM_TTL_MINUTES):
+            return None
+        holder_role = session.scalar(
+            select(WorkspaceMembership.role)
+            .join(User, User.id == WorkspaceMembership.user_id)
+            .where(
+                WorkspaceMembership.workspace_id == review.workspace_id,
+                WorkspaceMembership.user_id == review.claimed_by,
+                User.status == "active",
+            )
+        )
+        if holder_role is None or not self._principal_in_current_audience(
+            session, review, review.claimed_by, holder_role
+        ):
+            return None
+        return review.claimed_by
 
     # ------------------------------------------------------------------
     # MCP review surface (T15b / item 11-c)
@@ -1712,7 +1737,8 @@ class ReviewService:
             )
 
         # Soft-claim (T4): block a competing live claim by another principal.
-        if self._claim_is_live(review) and review.claimed_by != principal:
+        claim_holder = self._effective_claim_holder(session, review)
+        if claim_holder is not None and claim_holder != principal:
             raise ReviewAlreadyClaimedError(
                 "this review is already being worked by another collaborator"
             )
@@ -1800,25 +1826,26 @@ class ReviewService:
             return False
         if not role_allows(principal_role or "viewer", "editor"):
             return False
-        latest_rc = session.scalar(
-            select(ReviewDecision)
+        in_audience = session.scalar(
+            select(
+                func.coalesce(
+                    _decision_audience_predicate(
+                        ReviewDecision,
+                        principal=principal,
+                        principal_role=principal_role,
+                    ),
+                    false(),
+                )
+            )
             .where(
                 ReviewDecision.review_item_id == review.id,
                 ReviewDecision.decision_type == "request_changes",
             )
             .order_by(ReviewDecision.created_at.desc(), ReviewDecision.id.desc())
+            .limit(1)
         )
-        if latest_rc is None:
-            # NULL/legacy audience = kind-3 broadcast (D2): editor+ only.
-            return True
-        kind = latest_rc.audience_kind
-        if kind in (
-            ReviewAudienceKind.REQUESTER.value,
-            ReviewAudienceKind.CHAT_OWNER.value,
-        ):
-            return latest_rc.audience_user_id == principal
-        # workspace_editors or NULL audience -> editor broadcast (D2).
-        return True
+        # No decision yet is also a legacy editor broadcast (D2).
+        return in_audience is None or bool(in_audience)
 
     def _prior_revision_result(
         self,
@@ -2087,7 +2114,8 @@ class ReviewService:
             session, review, actor_user_id, actor_role
         ):
             return False
-        return not self._claim_is_live(review) or review.claimed_by == actor_user_id
+        claim_holder = self._effective_claim_holder(session, review)
+        return claim_holder is None or claim_holder == actor_user_id
 
     def _detail(
         self,
@@ -2235,6 +2263,7 @@ class ReviewService:
                             )
                             if chat is not None:
                                 reconciliation_chat_session_id = chat.id
+        claim_holder = self._effective_claim_holder(session, review)
         return ReviewItemDetail(
             id=review.id,
             workspace_id=review.workspace_id,
@@ -2248,13 +2277,11 @@ class ReviewService:
             risk_policy_snapshot=review.risk_policy_snapshot,
             decision_summary=review.decision_summary,
             decision_summary_code=review.decision_summary_code,
-            current_audience_kind=_current_audience_kind(review, decisions),
+            current_audience_kind=_current_audience_kind(session, review, decisions),
             chat_owner_available=chat_owner_available,
-            # Expose the claim only while it is LIVE (P2): an expired/TTL'd claim
-            # is available for takeover, so it must read as unclaimed rather than
-            # render a stale claimed_by/claimed_at as if still active.
-            claimed_by=review.claimed_by if self._claim_is_live(review) else None,
-            claimed_at=review.claimed_at if self._claim_is_live(review) else None,
+            # Expired, inactive or out-of-audience holders do not block takeover.
+            claimed_by=claim_holder,
+            claimed_at=review.claimed_at if claim_holder is not None else None,
             can_decide=can_decide,
             can_claim=self._can_claim_review(
                 session=session,
@@ -2760,6 +2787,7 @@ def _encode_cursor(offset: int) -> str:
 
 
 def _current_audience_kind(
+    session: Session,
     review: ReviewItem,
     decisions: list[ReviewDecision],
 ) -> str | None:
@@ -2771,6 +2799,16 @@ def _current_audience_kind(
         return None
     for decision in decisions:
         if decision.decision_type == "request_changes":
+            # Same fallback as _audience_falls_back_to_owners, evaluated on the
+            # already-loaded decision.
+            if decision.audience_kind in _INDIVIDUAL_AUDIENCE_KINDS:
+                recipient = (
+                    session.get(User, decision.audience_user_id)
+                    if decision.audience_user_id is not None
+                    else None
+                )
+                if recipient is None or recipient.status != "active":
+                    return "workspace_owners"
             return decision.audience_kind
     return None
 

@@ -291,6 +291,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin User Deletion Preview */
+        get: operations["admin_user_deletion_preview_api_v1_admin_users__user_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}/deletion-restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Restore User Deletion */
+        post: operations["admin_restore_user_deletion_api_v1_admin_users__user_id__deletion_restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{user_id}/password-reset": {
         parameters: {
             query?: never;
@@ -704,15 +738,15 @@ export interface paths {
         patch: operations["update_my_default_workspace_api_v1_users_me_default_workspace_patch"];
         trace?: never;
     };
-    "/api/v1/users/me/deletion-policy": {
+    "/api/v1/users/me/deletion-preview": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** My Deletion Policy */
-        get: operations["my_deletion_policy_api_v1_users_me_deletion_policy_get"];
+        /** My Deletion Preview */
+        get: operations["my_deletion_preview_api_v1_users_me_deletion_preview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3281,6 +3315,10 @@ export interface components {
         };
         /** AdminUserData */
         AdminUserData: {
+            /** Deletion Failure Count */
+            deletion_failure_count?: number | null;
+            /** Deletion Last Error */
+            deletion_last_error?: string | null;
             /** Deletion Requested At */
             deletion_requested_at?: string | null;
             /** Display Name */
@@ -8899,7 +8937,7 @@ export interface components {
              */
             created_at: string;
             /** Current Audience Kind */
-            current_audience_kind: ("chat_owner" | "requester" | "workspace_editors") | null;
+            current_audience_kind: ("chat_owner" | "requester" | "workspace_editors" | "workspace_owners") | null;
             /** Decision Summary */
             decision_summary: string | null;
             /** Decision Summary Code */
@@ -9635,6 +9673,18 @@ export interface components {
              */
             user_id: string;
         };
+        /** UserDeletionPersonalWorkspaceData */
+        UserDeletionPersonalWorkspaceData: {
+            /** Other Member Count */
+            other_member_count: number;
+            /** Title */
+            title: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
         /** UserDeletionPolicyData */
         UserDeletionPolicyData: {
             /** Retention Days */
@@ -9645,10 +9695,53 @@ export interface components {
             data: components["schemas"]["UserDeletionPolicyData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** UserDeletionPreviewData */
+        UserDeletionPreviewData: {
+            personal_workspace: components["schemas"]["UserDeletionPersonalWorkspaceData"] | null;
+            /** Recipient Admin Count */
+            recipient_admin_count: number;
+            /** Retention Days */
+            retention_days: number;
+            /** Transferred Workspaces */
+            transferred_workspaces: components["schemas"]["UserDeletionTransferredWorkspaceData"][];
+        };
+        /** UserDeletionPreviewResponse */
+        UserDeletionPreviewResponse: {
+            data: components["schemas"]["UserDeletionPreviewData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
         /** UserDeletionResponse */
         UserDeletionResponse: {
             data: components["schemas"]["UserDeletionData"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** UserDeletionRestoreData */
+        UserDeletionRestoreData: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** UserDeletionRestoreResponse */
+        UserDeletionRestoreResponse: {
+            data: components["schemas"]["UserDeletionRestoreData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** UserDeletionTransferredWorkspaceData */
+        UserDeletionTransferredWorkspaceData: {
+            /** Title */
+            title: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -11140,6 +11233,158 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserDeletionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_user_deletion_preview_api_v1_admin_users__user_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionPreviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    admin_restore_user_deletion_api_v1_admin_users__user_id__deletion_restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDeletionRestoreResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -13155,7 +13400,7 @@ export interface operations {
             };
         };
     };
-    my_deletion_policy_api_v1_users_me_deletion_policy_get: {
+    my_deletion_preview_api_v1_users_me_deletion_preview_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -13170,7 +13415,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserDeletionPolicyResponse"];
+                    "application/json": components["schemas"]["UserDeletionPreviewResponse"];
                 };
             };
             /** @description Unauthorized */
