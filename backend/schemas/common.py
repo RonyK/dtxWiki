@@ -146,12 +146,15 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        Optional filters.include_agents defaults true; false excludes Agent
 #        pages before result counts and pagination. Refresh tools/list.
 #        Explicit read_concept and write-target ambiguity policies are retained.
-#  16 -- list_requested_changes evidence adds independently authorized document
+#  16 -- list_my_workspaces no longer returns personal_workspace_id: the
+#        workspace an account starts with is an ordinary workspace. Use
+#        default_workspace_id or current_workspace_id. Refresh tools/list.
+#  17 -- list_requested_changes evidence adds independently authorized document
 #        destinations and exact candidate/baseline content descriptors,
 #        including the earlier draft a candidate was written on. Clients may
 #        ignore these additive fields and keep using the existing target and
 #        diff_ref fields; no tool or input schema changed.
-#  17 -- what_changed reports each move of a page's published version
+#  18 -- what_changed reports each move of a page's published version
 #        (before -> after). It adds unpublished when an undone first
 #        publication leaves no published version: invalidate the page's cached
 #        publication by page_id; version_id is null. created now also covers
@@ -161,7 +164,7 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        set on updated, unpublished and archived entries. reason says why
 #        the version moved. Restoring an archived page is reported as created.
 #        Existing visibility rules still apply, including draft visibility.
-MCP_TOOL_CONTRACT_REVISION = 17
+MCP_TOOL_CONTRACT_REVISION = 18
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

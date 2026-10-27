@@ -27,7 +27,7 @@ from backend.services.session_service import InvalidCredentialsError, normalize_
 FIRST_SHARE_WARNING_CODE = "workspace_first_share_confirmation_required"
 FIRST_SHARE_WARNING = (
     "Adding the first non-owner shares the whole workspace through role-based "
-    "access. Confirm the share and consider renaming a default Personal Workspace."
+    "access. Confirm the share."
 )
 _SQLITE_WRITE_RESERVATION_KEY = "workspace_membership_sqlite_write_reservation"
 
@@ -77,15 +77,6 @@ class WorkspaceFirstShareConfirmationRequiredError(WorkspaceMembershipConflictEr
         super().__init__(FIRST_SHARE_WARNING, error_code=FIRST_SHARE_WARNING_CODE)
 
 
-class WorkspacePersonalOwnerLockedError(WorkspaceMembershipConflictError):
-    def __init__(self) -> None:
-        super().__init__(
-            "a Personal Workspace owner cannot be demoted or removed; "
-            "delete the workspace instead",
-            error_code="personal_workspace_owner_locked",
-        )
-
-
 class WorkspaceLastOwnerLockedError(WorkspaceMembershipConflictError):
     def __init__(self) -> None:
         super().__init__(
@@ -104,7 +95,6 @@ class WorkspaceMemberView:
     workspace_slug: str
     role: str
     joined_at: datetime
-    is_personal_anchor_owner: bool
 
 
 @dataclass(frozen=True)
@@ -494,8 +484,6 @@ class WorkspaceMembershipService:
             target, membership = self._require_member(
                 session, workspace.id, target_user_id, for_update=True
             )
-            if self._is_personal_anchor(workspace, target):
-                raise WorkspacePersonalOwnerLockedError()
             old_role = normalize_role(membership.role)
             if old_role == "owner":
                 self._protect_owner_removal(session, workspace, target)
@@ -689,14 +677,8 @@ class WorkspaceMembershipService:
         workspace: Workspace,
         target: User,
     ) -> None:
-        if self._is_personal_anchor(workspace, target):
-            raise WorkspacePersonalOwnerLockedError()
         if not self._has_other_active_owner(session, workspace.id, target.id):
             raise WorkspaceLastOwnerLockedError()
-
-    @staticmethod
-    def _is_personal_anchor(workspace: Workspace, user: User) -> bool:
-        return user.personal_workspace_id == workspace.id
 
     @staticmethod
     def _has_non_owner(session: Session, workspace_id: UUID) -> bool:
@@ -748,18 +730,16 @@ class WorkspaceMembershipService:
         user: User,
         removed_workspace_id: UUID,
     ) -> UUID | None:
-        """Choose the next landing workspace without requiring a Personal anchor."""
+        """Keep an accessible default, else take the oldest remaining workspace."""
 
-        for candidate_id in (
-            user.default_workspace_id,
-            user.personal_workspace_id,
+        candidate_id = user.default_workspace_id
+        if (
+            candidate_id is not None
+            and candidate_id != removed_workspace_id
+            and session.get(Workspace, candidate_id) is not None
+            and session.get(WorkspaceMembership, (user.id, candidate_id)) is not None
         ):
-            if candidate_id is None or candidate_id == removed_workspace_id:
-                continue
-            if session.get(Workspace, candidate_id) is None:
-                continue
-            if session.get(WorkspaceMembership, (user.id, candidate_id)) is not None:
-                return candidate_id
+            return candidate_id
 
         return session.scalar(
             select(WorkspaceMembership.workspace_id)
@@ -806,7 +786,6 @@ class WorkspaceMembershipService:
             workspace_slug=workspace.slug,
             role=normalize_role(membership.role),
             joined_at=membership.joined_at,
-            is_personal_anchor_owner=(user.personal_workspace_id == workspace.id),
         )
 
     def _emit_membership_audit(

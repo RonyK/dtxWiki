@@ -101,8 +101,8 @@ def signed_up_workspace_id(session_factory, signed_up_user):
     with session_factory() as session:
         user = session.get(User, signed_up_user.user_id)
         assert user is not None
-        assert user.personal_workspace_id is not None
-        return user.personal_workspace_id
+        assert user.default_workspace_id is not None
+        return user.default_workspace_id
 
 
 def _grant(

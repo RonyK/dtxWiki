@@ -62,7 +62,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access`) {
         return accessRequest;
@@ -93,19 +93,26 @@ describe("Workspace Settings membership and access", () => {
       .not.toBeInTheDocument();
   });
 
-  it("requires the whole-workspace confirmation before first-sharing Personal", async () => {
+  it("requires the whole-workspace confirmation before the first share", async () => {
     const user = userEvent.setup();
     const postBodies: Array<Record<string, unknown>> = [];
     let memberCount = 1;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "private", "invite_only", true));
+        return jsonResponse(
+          workspaceList(
+            "owner",
+            "private",
+            "invite_only",
+            "Mina's Personal Workspace",
+          ),
+        );
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", true)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: memberCount,
             limit: 25,
             offset: 0,
@@ -139,7 +146,6 @@ describe("Workspace Settings membership and access", () => {
                 "person@example.com",
                 "Person",
                 "viewer",
-                false,
               ),
               created: true,
               first_share: true,
@@ -188,7 +194,7 @@ describe("Workspace Settings membership and access", () => {
       within(dialog).getByText(/shares all of Mina's Personal Workspace/),
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByText(/rename the Personal Workspace before sharing/),
+      within(dialog).getByText(/use a workspace name that makes its shared purpose clear/),
     ).toBeInTheDocument();
     expect(
       within(dialog).getByText(/create a new collaborative Workspace/),
@@ -215,13 +221,13 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?limit=25`
       ) {
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
         ]);
       }
       if (
@@ -230,7 +236,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         filteredReads += 1;
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
         ]);
       }
       if (
@@ -253,7 +259,6 @@ describe("Workspace Settings membership and access", () => {
                 "person@example.com",
                 "Person",
                 "viewer",
-                false,
               ),
               created: true,
               first_share: false,
@@ -300,14 +305,14 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?limit=25`
       ) {
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+          member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
         ]);
       }
       if (
@@ -316,7 +321,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         filteredReads += 1;
         return memberPage([
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
         ]);
       }
       if (
@@ -339,7 +344,6 @@ describe("Workspace Settings membership and access", () => {
                 "viewer@example.com",
                 "Viewer",
                 "viewer",
-                false,
               ),
               created: true,
               first_share: false,
@@ -383,14 +387,13 @@ describe("Workspace Settings membership and access", () => {
   it("resets member pagination after add so Load more cannot duplicate the new row", async () => {
     const user = userEvent.setup();
     const firstPageMembers = [
-      member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
+      member(OWNER_ID, "owner@example.com", "Owner", "owner"),
       ...Array.from({ length: 24 }, (_, index) =>
         member(
           `00000000-0000-0000-0000-${String(index + 10).padStart(12, "0")}`,
           `member-${index + 1}@example.com`,
           `Page 1 member ${index + 1}`,
           "viewer",
-          false,
         ),
       ),
     ];
@@ -399,14 +402,12 @@ describe("Workspace Settings membership and access", () => {
       "tail@example.com",
       "Tail member",
       "viewer",
-      false,
     );
     const addedMember = member(
       "00000000-0000-0000-0000-000000000091",
       "added@example.com",
       "Added member",
       "viewer",
-      false,
     );
     let created = false;
     let firstPageReads = 0;
@@ -414,7 +415,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?limit=25`
@@ -514,12 +515,12 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return memberPage([
-          member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-          member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+          member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+          member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
         ]);
       }
       if (
@@ -540,7 +541,6 @@ describe("Workspace Settings membership and access", () => {
               "editor@example.com",
               "Editor",
               "editor",
-              false,
             ),
             created: false,
             first_share: false,
@@ -576,14 +576,14 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
             ],
             total: 2,
             limit: 25,
@@ -616,7 +616,6 @@ describe("Workspace Settings membership and access", () => {
               "editor@example.com",
               "Editor",
               "owner",
-              false,
             ),
             created: false,
             first_share: false,
@@ -684,14 +683,14 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -713,7 +712,7 @@ describe("Workspace Settings membership and access", () => {
         mutationBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return jsonResponse({
           data: {
-            member: member(OWNER_ID, "owner@example.com", "Owner", "viewer", false),
+            member: member(OWNER_ID, "owner@example.com", "Owner", "viewer"),
             created: false,
             first_share: false,
             first_share_warning_code: null,
@@ -756,7 +755,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.includes(`/join-requests?status=pending&offset=0&limit=50`)) {
         return jsonResponse({
@@ -768,7 +767,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", false)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: 2,
             limit: 25,
             offset: 0,
@@ -783,7 +782,7 @@ describe("Workspace Settings membership and access", () => {
       ) {
         return jsonResponse({
           data: {
-            items: [member(MEMBER_ID, "editor@example.com", "Editor", "viewer", false)],
+            items: [member(MEMBER_ID, "editor@example.com", "Editor", "viewer")],
             total: 2,
             limit: 25,
             offset: 0,
@@ -799,7 +798,7 @@ describe("Workspace Settings membership and access", () => {
         patchCalls += 1;
         return jsonResponse({
           data: {
-            member: member(MEMBER_ID, "editor@example.com", "Editor", "editor", false),
+            member: member(MEMBER_ID, "editor@example.com", "Editor", "editor"),
             created: false,
             first_share: false,
             first_share_warning_code: null,
@@ -849,12 +848,12 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", false)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: 1,
             limit: 25,
             offset: 0,
@@ -906,7 +905,7 @@ describe("Workspace Settings membership and access", () => {
       const url = input.toString();
       requested.push(url);
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("editor", "team", "request", false));
+        return jsonResponse(workspaceList("editor", "team", "request"));
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -946,7 +945,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        const target = workspaceList("viewer", "team", "request", false).data
+        const target = workspaceList("viewer", "team", "request").data
           .workspaces[0];
         const fallback = {
           ...target,
@@ -959,7 +958,6 @@ describe("Workspace Settings membership and access", () => {
           data: {
             current_workspace_id: removed ? fallbackId : WORKSPACE_ID,
             default_workspace_id: null,
-            personal_workspace_id: fallbackId,
             workspaces: removed ? [fallback] : [target, fallback],
           },
         });
@@ -1034,11 +1032,10 @@ describe("Workspace Settings membership and access", () => {
                   data: {
                     current_workspace_id: null,
                     default_workspace_id: null,
-                    personal_workspace_id: null,
                     workspaces: [],
                   },
                 }
-              : workspaceList("viewer", "team", "request", false),
+              : workspaceList("viewer", "team", "request"),
           );
         }
         if (
@@ -1111,7 +1108,7 @@ describe("Workspace Settings membership and access", () => {
     }) => {
       const user = userEvent.setup();
       let removed = false;
-      const initial = workspaceList("viewer", "team", "request", false).data;
+      const initial = workspaceList("viewer", "team", "request").data;
       const staleWorkspace = {
         ...initial.workspaces[0],
         id: "00000000-0000-0000-0000-000000000097",
@@ -1195,7 +1192,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", visibility, "request", false));
+        return jsonResponse(workspaceList("owner", visibility, "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access` &&
@@ -1248,7 +1245,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "public", "request", false));
+        return jsonResponse(workspaceList("owner", "public", "request"));
       }
       if (
         url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access` &&
@@ -1318,7 +1315,7 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/access` && !init?.method) {
         accessReads += 1;
@@ -1368,14 +1365,14 @@ describe("Workspace Settings membership and access", () => {
         if (workspaceCalls > 1) {
           return jsonResponse({ error_code: "temporary_failure" }, 503);
         }
-        return jsonResponse(workspaceList(role, "team", "request", false));
+        return jsonResponse(workspaceList(role, "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -1402,7 +1399,6 @@ describe("Workspace Settings membership and access", () => {
               "owner@example.com",
               "Owner",
               "viewer",
-              false,
             ),
             created: false,
             first_share: false,
@@ -1435,17 +1431,17 @@ describe("Workspace Settings membership and access", () => {
   it("consumes the self-removal fallback, refreshes context, and remounts safely", async () => {
     const user = userEvent.setup();
     const defaultId = "00000000-0000-0000-0000-000000000098";
-    const personalId = "00000000-0000-0000-0000-000000000099";
+    const fallbackId = "00000000-0000-0000-0000-000000000099";
     const requestSequence: string[] = [];
     let removed = false;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        const target = workspaceList("owner", "team", "request", false).data
+        const target = workspaceList("owner", "team", "request").data
           .workspaces[0];
-        const personal = {
+        const fallback = {
           ...target,
-          id: personalId,
+          id: fallbackId,
           slug: "personal",
           title: "Personal Workspace",
           name: "Personal Workspace",
@@ -1466,10 +1462,9 @@ describe("Workspace Settings membership and access", () => {
           data: {
             current_workspace_id: removed ? defaultId : WORKSPACE_ID,
             default_workspace_id: defaultId,
-            personal_workspace_id: personalId,
             workspaces: removed
-              ? [persistedDefault, personal]
-              : [target, persistedDefault, personal],
+              ? [persistedDefault, fallback]
+              : [target, persistedDefault, fallback],
           },
         });
       }
@@ -1477,8 +1472,8 @@ describe("Workspace Settings membership and access", () => {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -1504,7 +1499,7 @@ describe("Workspace Settings membership and access", () => {
             removed_user_id: OWNER_ID,
             previous_role: "owner",
             default_workspace_id: defaultId,
-            fallback_workspace_id: personalId,
+            fallback_workspace_id: fallbackId,
             member_count: 1,
           },
         });
@@ -1528,13 +1523,13 @@ describe("Workspace Settings membership and access", () => {
 
     expect(await screen.findByText("Fallback route")).toBeInTheDocument();
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceId")).toBe(
-      personalId,
+      fallbackId,
     );
     expect(window.localStorage.getItem("dtxwiki.selectedWorkspaceSlug")).toBe(
       "personal",
     );
     expect(screen.getByTestId("selected-workspace")).toHaveTextContent(
-      personalId,
+      fallbackId,
     );
     expect(screen.getByTestId("default-workspace")).toHaveTextContent(defaultId);
     expect(screen.getByTestId("workspace-ids")).not.toHaveTextContent(
@@ -1550,7 +1545,7 @@ describe("Workspace Settings membership and access", () => {
     expect(await screen.findByText("Fallback route")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("selected-workspace")).toHaveTextContent(
-        personalId,
+        fallbackId,
       );
     });
     expect(screen.getByTestId("default-workspace")).toHaveTextContent(defaultId);
@@ -1572,13 +1567,12 @@ describe("Workspace Settings membership and access", () => {
         if (workspaceCalls > 1) {
           return jsonResponse({ error_code: "temporary_failure" }, 503);
         }
-        const target = workspaceList("owner", "team", "request", false).data
+        const target = workspaceList("owner", "team", "request").data
           .workspaces[0];
         return jsonResponse({
           data: {
             current_workspace_id: WORKSPACE_ID,
             default_workspace_id: WORKSPACE_ID,
-            personal_workspace_id: fallbackId,
             workspaces: [
               target,
               {
@@ -1597,8 +1591,8 @@ describe("Workspace Settings membership and access", () => {
         return jsonResponse({
           data: {
             items: [
-              member(OWNER_ID, "owner@example.com", "Owner", "owner", false),
-              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner", false),
+              member(OWNER_ID, "owner@example.com", "Owner", "owner"),
+              member(MEMBER_ID, "coowner@example.com", "Co-owner", "owner"),
             ],
             total: 2,
             limit: 25,
@@ -1665,12 +1659,12 @@ describe("Workspace Settings membership and access", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return jsonResponse(workspaceList("owner", "team", "request", false));
+        return jsonResponse(workspaceList("owner", "team", "request"));
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/members?`)) {
         return jsonResponse({
           data: {
-            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner", false)],
+            items: [member(OWNER_ID, "owner@example.com", "Owner", "owner")],
             total: 1,
             limit: 25,
             offset: 0,
@@ -1783,19 +1777,18 @@ function workspaceList(
   role: "viewer" | "editor" | "owner",
   visibility: "private" | "team" | "public",
   joinPolicy: "invite_only" | "request",
-  personal: boolean,
+  title = "Team Workspace",
 ) {
   return {
     data: {
       current_workspace_id: WORKSPACE_ID,
       default_workspace_id: WORKSPACE_ID,
-      personal_workspace_id: personal ? WORKSPACE_ID : null,
       workspaces: [
         {
           id: WORKSPACE_ID,
           slug: "workspace",
-          title: personal ? "Mina's Personal Workspace" : "Team Workspace",
-          name: personal ? "Mina's Personal Workspace" : "Team Workspace",
+          title,
+          name: title,
           goal: "Test",
           default_language: "en",
           visibility,
@@ -1813,7 +1806,6 @@ function member(
   email: string,
   displayName: string,
   role: "viewer" | "editor" | "owner",
-  anchor: boolean,
 ) {
   return {
     user_id: userId,
@@ -1822,7 +1814,6 @@ function member(
     status: "active",
     role,
     joined_at: "2026-07-30T09:00:00Z",
-    is_personal_anchor_owner: anchor,
     is_current_user: userId === OWNER_ID,
   };
 }

@@ -33,9 +33,9 @@ def _users_and_owner_workspace(page_service):
         member = session.scalar(
             select(User).where(User.email == "member@example.com")
         )
-        assert owner is not None and owner.personal_workspace_id is not None
-        assert member is not None and member.personal_workspace_id is not None
-        workspace = session.get(Workspace, owner.personal_workspace_id)
+        assert owner is not None and owner.default_workspace_id is not None
+        assert member is not None and member.default_workspace_id is not None
+        workspace = session.get(Workspace, owner.default_workspace_id)
         assert workspace is not None
         return owner, member, workspace
 
@@ -74,7 +74,6 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
             "status": "active",
             "role": "viewer",
             "joined_at": added.json()["data"]["member"]["joined_at"],
-            "is_personal_anchor_owner": False,
             "is_current_user": False,
         },
         "created": True,
@@ -100,7 +99,7 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
     with page_service.session_factory() as session:
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
-        assert persisted_member.default_workspace_id == member.personal_workspace_id
+        assert persisted_member.default_workspace_id == member.default_workspace_id
         events = list(
             session.scalars(
                 select(AuditEvent).where(
@@ -123,15 +122,13 @@ def test_first_share_requires_confirmation_and_duplicate_add_is_idempotent(
         assert persisted_workspace.owner_user_id == owner.id
         assert persisted_workspace.visibility == "private"
         assert persisted_workspace.join_policy == "invite_only"
-        assert persisted_workspace.title == "Personal Workspace"
+        assert persisted_workspace.title == f"{owner.display_name}'s Personal Workspace"
 
 
 def test_shared_personal_workspace_summary_carries_owner_display_name(page_service):
-    # WS-09: every Personal workspace defaults to the exact same title
-    # ("Personal Workspace"). Once shared, the member's own `GET
-    # /workspaces` list contains two rows with identical titles (their own
-    # Personal workspace and the owner's) unless something disambiguates
-    # them — owner_display_name is that something.
+    # Shared Personal workspaces retain the owner's display name alongside
+    # their initial owner-prefixed title. This projection also disambiguates
+    # older or customized workspaces whose titles can still be identical.
     owner_client, member_client = _client_pair(page_service)
     owner, member, workspace = _users_and_owner_workspace(page_service)
     added = owner_client.post(
@@ -146,8 +143,9 @@ def test_shared_personal_workspace_summary_carries_owner_display_name(page_servi
         row["id"]: row for row in listed.json()["data"]["workspaces"]
     }
     shared_row = rows[str(workspace.id)]
-    own_personal_row = rows[str(member.personal_workspace_id)]
-    assert shared_row["title"] == own_personal_row["title"] == "Personal Workspace"
+    own_personal_row = rows[str(member.default_workspace_id)]
+    assert shared_row["title"] == f"{owner.display_name}'s Personal Workspace"
+    assert own_personal_row["title"] == f"{member.display_name}'s Personal Workspace"
     assert shared_row["owner_display_name"] == owner.display_name
     # The member's own Personal workspace must not claim an owner other than
     # (or in addition to) the obvious — this pins the field is populated
@@ -299,9 +297,10 @@ def test_member_list_cursor_filters_normalize_without_read_audit_noise(
         assert list_events == []
 
 
-def test_role_change_owner_locks_and_self_remove_default_fallback(page_service):
+def test_role_change_and_self_remove_default_fallback(page_service):
     owner_client, member_client = _client_pair(page_service)
     owner, member, workspace = _users_and_owner_workspace(page_service)
+    member_starter_id = member.default_workspace_id
     endpoint = f"/api/v1/workspaces/{workspace.id}/members"
     assert owner_client.post(
         endpoint,
@@ -315,16 +314,6 @@ def test_role_change_owner_locks_and_self_remove_default_fallback(page_service):
     assert changed.status_code == 200
     assert changed.json()["data"]["member"]["role"] == "editor"
     assert changed.json()["data"]["member"]["is_current_user"] is False
-
-    anchor_locked = owner_client.patch(
-        f"{endpoint}/{owner.id}",
-        json={"role": "viewer"},
-    )
-    assert anchor_locked.status_code == 409
-    assert anchor_locked.json()["error_code"] == "personal_workspace_owner_locked"
-    anchor_remove = owner_client.delete(f"{endpoint}/{owner.id}")
-    assert anchor_remove.status_code == 409
-    assert anchor_remove.json()["error_code"] == "personal_workspace_owner_locked"
 
     with page_service.session_factory.begin() as session:
         persisted_member = session.get(User, member.id)
@@ -341,14 +330,14 @@ def test_role_change_owner_locks_and_self_remove_default_fallback(page_service):
     assert removed.json()["data"] == {
         "removed_user_id": str(member.id),
         "previous_role": "editor",
-        "default_workspace_id": str(member.personal_workspace_id),
-        "fallback_workspace_id": str(member.personal_workspace_id),
+        "default_workspace_id": str(member_starter_id),
+        "fallback_workspace_id": str(member_starter_id),
         "member_count": 1,
     }
     with page_service.session_factory() as session:
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
-        assert persisted_member.default_workspace_id == member.personal_workspace_id
+        assert persisted_member.default_workspace_id == member_starter_id
         assert session.get(WorkspaceMembership, (member.id, workspace.id)) is None
         event = session.scalar(
             select(AuditEvent).where(
@@ -403,10 +392,10 @@ def test_self_remove_non_default_preserves_and_reports_accessible_default(
         )
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
+        starter_workspace_id = persisted_member.default_workspace_id
+        assert starter_workspace_id is not None
         persisted_member.default_workspace_id = default_workspace.id
         default_workspace_id = default_workspace.id
-        personal_workspace_id = persisted_member.personal_workspace_id
-        assert personal_workspace_id is not None
 
     removed = member_client.delete(f"{endpoint}/{member.id}")
 
@@ -423,7 +412,7 @@ def test_self_remove_non_default_preserves_and_reports_accessible_default(
         assert persisted_member is not None
         assert persisted_member.default_workspace_id == default_workspace_id
         assert session.get(
-            WorkspaceMembership, (member.id, personal_workspace_id)
+            WorkspaceMembership, (member.id, starter_workspace_id)
         ) is not None
         assert session.get(
             WorkspaceMembership, (member.id, default_workspace_id)
@@ -448,15 +437,14 @@ def test_self_remove_returns_null_fallback_when_no_workspace_remains(page_servic
     with page_service.session_factory.begin() as session:
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
-        personal_workspace_id = persisted_member.personal_workspace_id
-        assert personal_workspace_id is not None
-        personal_membership = session.get(
+        starter_workspace_id = persisted_member.default_workspace_id
+        assert starter_workspace_id is not None
+        starter_membership = session.get(
             WorkspaceMembership,
-            (member.id, personal_workspace_id),
+            (member.id, starter_workspace_id),
         )
-        assert personal_membership is not None
-        session.delete(personal_membership)
-        persisted_member.personal_workspace_id = None
+        assert starter_membership is not None
+        session.delete(starter_membership)
         persisted_member.default_workspace_id = workspace.id
 
     removed = member_client.delete(f"{endpoint}/{member.id}")
@@ -506,7 +494,7 @@ def test_add_rejects_inactive_user_and_bearer_token(page_service):
     assert bearer.json()["error_code"] == "scope_denied"
 
 
-def test_last_owner_cannot_leave_non_personal_workspace(page_service):
+def test_last_owner_cannot_leave_workspace(page_service):
     owner_client, _ = _client_pair(page_service)
     owner, _, _ = _users_and_owner_workspace(page_service)
     with page_service.session_factory.begin() as session:

@@ -10405,8 +10405,6 @@ export interface components {
              * @default 0
              */
             other_membership_count: number;
-            /** Personal Workspace Id */
-            personal_workspace_id?: string | null;
             /** Workspaces */
             workspaces: components["schemas"]["WorkspaceSummary"][];
         };
@@ -10441,8 +10439,6 @@ export interface components {
             email: string;
             /** Is Current User */
             is_current_user: boolean;
-            /** Is Personal Anchor Owner */
-            is_personal_anchor_owner: boolean;
             /**
              * Joined At
              * Format: date-time

@@ -7,7 +7,7 @@ from backend.models.user import User
 from backend.services.audit_service import AuditService
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.oauth_service import revoke_live_token_grant_families
-from backend.services.personal_workspace_service import ensure_personal_workspace
+from backend.services.personal_workspace_service import create_personal_workspace
 from backend.services.session_service import (
     AuthenticatedUser,
     DuplicateEmailError,
@@ -52,11 +52,10 @@ class UserAdminService:
                 ):
                     raise
                 raise DuplicateEmailError("email already exists") from exc
-            # Account creation owns only its newly provisioned Personal
-            # workspace. Membership in an existing workspace is an explicit,
-            # separate administration action and never comes from a
-            # process-wide slug.
-            ensure_personal_workspace(session, user=user)
+            # Account creation owns only its newly created workspace.
+            # Membership in an existing workspace is an explicit, separate
+            # administration action and never comes from a process-wide slug.
+            create_personal_workspace(session, user=user)
             return authenticated_user(user)
 
     def reset_password(

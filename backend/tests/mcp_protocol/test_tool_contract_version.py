@@ -75,8 +75,11 @@ TOOL_CONTRACT_DIGESTS = {
     13: "ca756c4fe38d",
     14: "eb5ad6da1809",
     15: "4fcf64184875",
-    16: "50760a9d365b",
-    17: "3039663d5677",
+    16: "b8e18b04b7bb",
+    # 17 and 18 ship together; 17 is the catalog before 18's what_changed
+    # descriptions, never released on its own.
+    17: "5dcb74dc06ee",
+    18: "a31838390269",
 }
 
 

@@ -8,11 +8,11 @@
   exact reviewed Context version and its comparison baseline. Group approvals
   use a fixed, signed selection and preserve individual results across batches;
   single decisions accept a durable receipt ID for safe retries.
-- MCP tool contract revision 16 adds authorized document and content descriptors
+- MCP tool contract revision 17 adds authorized document and content descriptors
   to `list_requested_changes` evidence, including the earlier draft a candidate
   was written on. Existing clients can ignore these additive fields and
   continue using the existing target and `diff_ref` fields.
-- MCP tool contract revision 17 makes each `what_changed` entry one move of a
+- MCP tool contract revision 18 makes each `what_changed` entry one move of a
   page's published version. It adds `unpublished` when an undone first
   publication leaves no published version: invalidate the cached publication
   by `page_id`; `version_id` is null. `created` also covers a page published
@@ -70,6 +70,24 @@
   precedence when both the base and save-time content checks would fail.
 - Keep legacy citation-only updates and patch previews compatible with stored
   frontmatter, and verify reconciliation independently of current fixer settings.
+- The workspace a new account starts with is an ordinary private workspace.
+  It gets the same initial content as any created workspace, and nothing treats
+  it specially afterwards: its owner can be changed like any other owner, it is
+  not a landing fallback, and it is not recreated after deletion. The
+  `users.personal_workspace_id` column is dropped; existing workspaces keep
+  their data and memberships.
+- The REST workspace list and MCP `list_my_workspaces` no longer return
+  `personal_workspace_id`, and workspace members no longer carry
+  `is_personal_anchor_owner`. MCP tool contract revision 16: clients that
+  read `personal_workspace_id` should use `default_workspace_id` or
+  `current_workspace_id` and refresh `tools/list`.
+- Name a new account's workspace `<display name>'s Personal Workspace` with a
+  `personal-<email local part>` slug, numbered on collision. Accounts without a
+  usable local part get a random eight-character hex token.
+- Reserve the `personal-` slug prefix for those workspaces. Workspace creation
+  and slug changes refuse it; a slug generated from a title that would start
+  with it gets a `ws-` prefix instead. All workspace slugs fold accented Latin
+  letters to ASCII.
 
 ## 0.1.4 — 2026-10-23
 

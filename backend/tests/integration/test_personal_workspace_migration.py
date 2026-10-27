@@ -11,6 +11,10 @@ from sqlalchemy import create_engine, inspect, select
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 
+# The 0.1.1 backfill writes users.personal_workspace_id, which 5c3395a75eb0
+# later drops, so the backfill is checked at the revision that ran it.
+BACKFILL_REVISION = "efcbcf724889"
+
 
 def _config(database_url: str) -> Config:
     config = Config(str(resolve_alembic_ini()))
@@ -24,27 +28,13 @@ def sqlite_templates(tmp_path_factory):
     return shared_templates(tmp_path_factory)
 
 
-def test_personal_workspace_schema_constraints_at_head(tmp_path, sqlite_templates):
+def test_workspace_access_schema_constraints_at_head(tmp_path, sqlite_templates):
     database_url = sqlite_templates.clone("head", tmp_path / "personal-schema.db")
     engine = create_engine(database_url)
     try:
         inspector = inspect(engine)
-        assert "personal_workspace_id" in {
-            column["name"] for column in inspector.get_columns("users")
-        }
         assert "join_policy" in {
             column["name"] for column in inspector.get_columns("workspace")
-        }
-        personal_fk = next(
-            fk
-            for fk in inspector.get_foreign_keys("users")
-            if fk["constrained_columns"] == ["personal_workspace_id"]
-        )
-        assert personal_fk["referred_table"] == "workspace"
-        assert personal_fk["options"].get("ondelete") == "SET NULL"
-        assert ("personal_workspace_id",) in {
-            tuple(constraint["column_names"])
-            for constraint in inspector.get_unique_constraints("users")
         }
         assert {
             constraint["name"]
@@ -141,7 +131,7 @@ def test_personal_workspace_backfill_includes_suspended_and_preserves_live_defau
         )
     engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, BACKFILL_REVISION)
     engine = create_engine(database_url)
     try:
         migration = import_module(

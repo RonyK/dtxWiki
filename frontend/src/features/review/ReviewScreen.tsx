@@ -60,6 +60,7 @@ import { StatusPill } from "../../shared/components/StatusPill";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { WorkspacePanelChrome } from "../../shared/components/WorkspacePanelChrome";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import {
   formatRelativeTimestamp,
   formatVersionTimestamp,
@@ -277,6 +278,7 @@ export function ReviewScreen() {
   const {
     data: state,
     error,
+    reload,
     setData: setState,
     setError,
   } = useAsyncLoad<ReviewState>(loadReviews, [
@@ -289,7 +291,9 @@ export function ReviewScreen() {
     errorMessage: t("errors.load", { defaultValue: "Failed to load Review" }),
     formatError: reviewErrorMessage,
     onSuccess: () => {
+      // A reloaded queue starts over: drop pages requested for the old one.
       queuePageRef.current += 1;
+      setLoadingMore(false);
     },
     fallbackData: {
       workspaceId: "",
@@ -321,6 +325,11 @@ export function ReviewScreen() {
     setReasonDrafts((current) => ({ ...current, [draftKey]: value }));
     if (auth?.user) writeReviewDraft(draftKey, value);
   }
+
+  useScreenEntryRefresh("/review", reload, {
+    isHome: !reviewParam,
+    queryDeps: [activeReviewStatus, riskFilter, activeScopeFilter, includeDeferredReconciliations],
+  });
 
   useEffect(() => {
     setCollapsedGroups(new Set());

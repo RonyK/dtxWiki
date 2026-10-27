@@ -89,6 +89,7 @@ import {
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
@@ -184,6 +185,7 @@ export function LibraryScreen() {
   const requestedTargetId = searchParams.get(TREE_TARGET_PARAM);
   const {
     data: state,
+    revision: overviewRevision,
     error,
     reload,
     setData: setState,
@@ -276,12 +278,17 @@ export function LibraryScreen() {
     },
   );
 
+  useScreenEntryRefresh("/library", reload, {
+    isHome: requestedTargetId === null,
+    queryDeps: [pageSize, t],
+  });
+
   const libraryWorkspaceId = state?.workspaceId ?? "";
   // The loader fetches page 1 (state.items); these accumulate the appended
   // pages on top of it. Keyed on the base page so a fresh first page (page-size
   // change / upload / delete) drops the appended tail. Derived synchronously so
   // Load more always reads the live cursor rather than a one-render-stale one.
-  const overviewBaseKey = `${libraryWorkspaceId}:${pageSize}:${
+  const overviewBaseKey = `${libraryWorkspaceId}:${pageSize}:${overviewRevision}:${
     state?.items.length ?? 0
   }:${state?.items[0]?.id ?? ""}`;
   const [appended, setAppended] = useState<{
@@ -290,7 +297,10 @@ export function LibraryScreen() {
     cursor: string | null;
   }>({ key: overviewBaseKey, items: [], cursor: state?.itemsCursor ?? null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const overviewGenerationRef = useRef(0);
   useEffect(() => {
+    overviewGenerationRef.current += 1;
+    setLoadingMore(false);
     setAppended({
       key: overviewBaseKey,
       items: [],
@@ -341,6 +351,7 @@ export function LibraryScreen() {
       return;
     }
     const requestCursor = overviewCursor;
+    const requestGeneration = overviewGenerationRef.current;
     setLoadingMore(true);
     try {
       const next = await listLibraryItems(libraryWorkspaceId, {
@@ -348,12 +359,10 @@ export function LibraryScreen() {
         cursor: requestCursor,
       });
       setAppended((current) =>
-        // Skip the append when a fresh first page replaced the base mid-flight.
-        // The base key must still match AND the live cursor must still be the
-        // one this request paged from: the key alone is a length+first-id
-        // heuristic, so a reload that preserves it while advancing the cursor
-        // would otherwise graft a stale page on. Matches useLoadMore's
-        // next_cursor guard so all four list surfaces gate identically.
+        // The successful-load revision distinguishes refreshes even when the
+        // first item and cursor are unchanged. Older requests belong to that
+        // prior first page and must not append to the refreshed overview.
+        overviewGenerationRef.current === requestGeneration &&
         current.key === overviewBaseKey && current.cursor === requestCursor
           ? {
               key: current.key,
@@ -362,8 +371,14 @@ export function LibraryScreen() {
             }
           : current,
       );
+    } catch (exc) {
+      if (requestGeneration === overviewGenerationRef.current) {
+        setError(libraryErrorMessage(exc, t("errors.load")));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === overviewGenerationRef.current) {
+        setLoadingMore(false);
+      }
     }
   }
 

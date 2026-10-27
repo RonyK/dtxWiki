@@ -445,7 +445,6 @@ def list_workspaces(
     actor: RestActorDep,
     session_factory: SessionFactoryDep,
 ):
-    # Listing also repairs a stale/null default to a live Personal workspace.
     with session_factory.begin() as session:
         return {
             "data": svc.workspace_read.list_workspaces(

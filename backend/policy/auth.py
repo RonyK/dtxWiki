@@ -17,7 +17,6 @@ from backend.models.oauth import OAuthConsent
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.rbac import get_workspace_access
-from backend.policy.workspace_resolution import repair_default_workspace_to_personal
 from backend.services.api_token_service import (
     ApiTokenService,
     InvalidApiTokenError,
@@ -239,18 +238,18 @@ def _default_workspace_access(session_factory, user_id: UUID):
         if user is None:
             return None
 
-        repair_default_workspace_to_personal(session=session, user=user)
-        for workspace_id in (user.default_workspace_id, user.personal_workspace_id):
-            if workspace_id is None or session.get(Workspace, workspace_id) is None:
-                continue
+        workspace_id = user.default_workspace_id
+        if (
+            workspace_id is not None
+            and session.get(Workspace, workspace_id) is not None
+        ):
             access = get_workspace_access(
                 session,
                 user_id=user_id,
                 workspace_id=workspace_id,
             )
-            if access is None:
-                continue
-            return access
+            if access is not None:
+                return access
 
         membership_workspace_ids = list(
             session.scalars(

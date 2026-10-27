@@ -11,7 +11,6 @@ export type WorkspaceMember = {
   status: string;
   role: WorkspaceMemberRole;
   joined_at: string;
-  is_personal_anchor_owner: boolean;
   is_current_user: boolean;
 };
 

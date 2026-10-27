@@ -2374,7 +2374,7 @@ describe("ReviewScreen", () => {
   it("retains a failed deep link for an explicit detail retry", async () => {
     const user = userEvent.setup();
     let retry = false;
-    mockReviewFetch(async (input) => {
+    const fetchMock = mockReviewFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse(workspaceResponse("editor"));
@@ -2413,6 +2413,11 @@ describe("ReviewScreen", () => {
     expect(await screen.findByText("The requested item could not be found.")).toBeInTheDocument();
     expect(screen.getByTestId("location-search")).toHaveTextContent("review=review-404");
     expect(screen.queryByText(i18n.t("review:workflow.outsideFilters"))).not.toBeInTheDocument();
+    // Flush every loader continuation: entering the screen loads the queue once.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`,
+    )).toHaveLength(1);
     retry = true;
     await user.click(screen.getByRole("button", { name: i18n.t("review:workflow.retryDetail") }));
     expect(await screen.findByRole("heading", { name: "Feedback Target", level: 2 })).toBeVisible();

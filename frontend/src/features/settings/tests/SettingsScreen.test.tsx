@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
+import { Link, MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -402,6 +402,105 @@ describe("SettingsScreen", () => {
     expect(
       screen.getByText(/Read - view sources and pages/),
     ).toBeInTheDocument();
+  });
+
+
+
+  it("adopts a conflicting save's server revision while the form is dirty and retries with that revision", async () => {
+    const revisions = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
+    let policyReads = 0;
+    const saves: Array<{ expected_revision: string; changes: { title: string } }> = [];
+    const policies = (title: string, revision: string) => ({
+      ...basicSettingsPolicies(),
+      workspace: {
+        ...policy("workspace", "Workspace basics", {
+          title, goal: "Existing goal", default_language: "en", visibility: "private",
+        }),
+        revision,
+      },
+    });
+    const fetchMock = mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: WORKSPACE_ID,
+        workspaces: [workspaceSummary(WORKSPACE_ID, "Original workspace", "default")],
+      } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: () => {
+        policyReads += 1;
+        return { data: policyReads === 1
+          ? policies("Original workspace", revisions[0])
+          : policies("New server workspace", revisions[1]) };
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    const originalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (input.toString().endsWith("/settings/policies/batch") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        saves.push(body);
+        return saves.length === 1
+          ? jsonResponse({ error_code: "settings_revision_conflict", message: "Conflict", request_id: "conflict-probe", warnings: [] }, 409)
+          : jsonResponse({ data: policies(body.changes.title, revisions[2]) });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const title = await screen.findByDisplayValue("Original workspace");
+    await userEvent.clear(title);
+    await userEvent.type(title, "Conflicting local title");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const current = await screen.findByDisplayValue("New server workspace");
+    expect(policyReads).toBe(2);
+    await userEvent.clear(current);
+    await userEvent.type(current, "Retried local title");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled());
+    expect(saves.map((save) => save.expected_revision)).toEqual(revisions.slice(0, 2));
+    expect(screen.getByDisplayValue("Retried local title")).toBeInTheDocument();
+  });
+
+  it("preserves unsaved settings when a menu refresh is pending or requested again", async () => {
+    let policyReads = 0;
+    let releaseRefresh!: (value: unknown) => void;
+    const refresh = new Promise((resolve) => { releaseRefresh = resolve; });
+    const policies = (title: string) => ({
+      ...basicSettingsPolicies(),
+      workspace: policy("workspace", "Workspace basics", {
+        title, goal: "Existing goal", default_language: "en", visibility: "private",
+      }),
+    });
+    mockFetch({
+      [`${BASE}/api/v1/workspaces`]: { data: {
+        current_workspace_id: WORKSPACE_ID,
+        workspaces: [workspaceSummary(WORKSPACE_ID, "Original workspace", "default")],
+      } },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`]: () => {
+        policyReads += 1;
+        return policyReads === 1 ? { data: policies("Original workspace") } : refresh;
+      },
+      [`${BASE}/api/v1/auth/tokens`]: { data: [] },
+      [`${BASE}/oauth/consents`]: { data: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <Link to="/settings">Main menu Settings</Link>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    const title = await screen.findByDisplayValue("Original workspace");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Settings" }));
+    await waitFor(() => expect(policyReads).toBe(2));
+    await userEvent.clear(title);
+    await userEvent.type(title, "Unsaved local title");
+    await act(async () => releaseRefresh({ data: policies("Remote workspace") }));
+    expect(title).toHaveValue("Unsaved local title");
+    await userEvent.click(screen.getByRole("link", { name: "Main menu Settings" }));
+    expect(policyReads).toBe(2);
+    expect(title).toHaveValue("Unsaved local title");
   });
 
   it("localizes system policy titles and edit states without changing workspace data", async () => {
@@ -1112,7 +1211,6 @@ describe("SettingsScreen", () => {
               data: {
                 current_workspace_id: "workspace-1",
                 default_workspace_id: null,
-                personal_workspace_id: null,
                 workspaces: [
                   workspaceSummary(
                     "workspace-1",
@@ -1207,10 +1305,10 @@ describe("SettingsScreen", () => {
     { caseName: "the authoritative empty list loads", refreshFails: false },
     { caseName: "the authoritative refresh fails", refreshFails: true },
   ])(
-    "deletes the only Personal workspace and opens discovery when $caseName",
+    "deletes the only workspace and opens discovery when $caseName",
     async ({ refreshFails }) => {
       const user = userEvent.setup();
-      const personalWorkspaceId = "workspace-personal";
+      const onlyWorkspaceId = "workspace-personal";
       let workspaceListReads = 0;
       const fetchMock = mockFetch({
         [`${BASE}/api/v1/workspaces`]: () => {
@@ -1218,12 +1316,11 @@ describe("SettingsScreen", () => {
           if (workspaceListReads === 1) {
             return {
               data: {
-                current_workspace_id: personalWorkspaceId,
-                default_workspace_id: personalWorkspaceId,
-                personal_workspace_id: personalWorkspaceId,
+                current_workspace_id: onlyWorkspaceId,
+                default_workspace_id: onlyWorkspaceId,
                 workspaces: [
                   workspaceSummary(
-                    personalWorkspaceId,
+                    onlyWorkspaceId,
                     "Personal Workspace",
                     "personal-space",
                   ),
@@ -1238,12 +1335,11 @@ describe("SettingsScreen", () => {
             data: {
               current_workspace_id: null,
               default_workspace_id: null,
-              personal_workspace_id: null,
               workspaces: [],
             },
           };
         },
-        [`${BASE}/api/v1/workspaces/${personalWorkspaceId}/settings/policies`]: {
+        [`${BASE}/api/v1/workspaces/${onlyWorkspaceId}/settings/policies`]: {
           data: {
             workspace: policy("workspace", "Workspace policy", {
               default_language: "en",
@@ -1260,8 +1356,8 @@ describe("SettingsScreen", () => {
             mcp_clients: [],
           },
         },
-        [`DELETE ${BASE}/api/v1/workspaces/${personalWorkspaceId}`]: {
-          data: { deleted_workspace_id: personalWorkspaceId },
+        [`DELETE ${BASE}/api/v1/workspaces/${onlyWorkspaceId}`]: {
+          data: { deleted_workspace_id: onlyWorkspaceId },
         },
         [`${BASE}/api/v1/auth/tokens`]: {
           data: [],
@@ -1309,15 +1405,12 @@ describe("SettingsScreen", () => {
         ).toHaveTextContent("REPLACE");
       });
       expect(fetchMock).toHaveBeenCalledWith(
-        `${BASE}/api/v1/workspaces/${personalWorkspaceId}`,
+        `${BASE}/api/v1/workspaces/${onlyWorkspaceId}`,
         expect.objectContaining({ method: "DELETE" }),
       );
       expect(screen.getByTestId("settings-workspace-count")).toHaveTextContent(
         "0",
       );
-      expect(
-        screen.getByTestId("settings-personal-workspace"),
-      ).toHaveTextContent("none");
       expect(
         window.localStorage.getItem("dtxwiki.selectedWorkspaceId"),
       ).toBeNull();
@@ -10082,15 +10175,12 @@ describe("SettingsScreen", () => {
 function WorkspaceDeletionProbe() {
   const location = useLocation();
   const navigationType = useNavigationType();
-  const { personalWorkspaceId, workspaces } = useWorkspaceContext();
+  const { workspaces } = useWorkspaceContext();
   return (
     <>
       <span data-testid="settings-location">{location.pathname}</span>
       <span data-testid="settings-navigation-type">{navigationType}</span>
       <span data-testid="settings-workspace-count">{workspaces.length}</span>
-      <span data-testid="settings-personal-workspace">
-        {personalWorkspaceId ?? "none"}
-      </span>
     </>
   );
 }

@@ -127,6 +127,7 @@ import {
   SettingsDirtyProvider,
   useGuardedSettingsChange,
   useRegisterSettingsDirty,
+  useSettingsDirtyCheck,
 } from "./SettingsDirtyRegistry";
 import type { PolicyEditState } from "./SettingsPaneParts";
 import {
@@ -159,6 +160,7 @@ import {
   type WorkspaceScopeOption,
 } from "../../shared/components/WorkspaceScopePicker";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useCursorPage } from "../../shared/hooks/useCursorPage";
 import { writeTextToClipboard, selectText } from "../../shared/lib/clipboard";
 import { i18n, setLocale, translate } from "../../shared/i18n";
@@ -420,6 +422,7 @@ export function SettingsScreen() {
 
 function SettingsScreenBody() {
   const { t } = useTranslation("settings");
+  const hasUnsavedSettings = useSettingsDirtyCheck();
   const workspaceContext = useOptionalWorkspaceContext();
   const selectedWorkspaceId =
     workspaceContext?.selectedWorkspace?.id ?? "current-workspace";
@@ -652,6 +655,7 @@ function SettingsScreenBody() {
     error,
     reload: reloadPolicies,
     setData: setPolicies,
+    setError: setPoliciesError,
   } = useAsyncLoad<SettingsPolicies>(
     async () => {
       const workspaceId = await getCurrentWorkspaceId();
@@ -759,6 +763,48 @@ function SettingsScreenBody() {
       ),
     queryKey: `access-keys:${accessKeyFilter}:${accessKeySearch}`,
   });
+  const entryPolicyGenerationRef = useRef(0);
+  const policiesSnapshotRef = useRef(policies);
+  useEffect(() => {
+    policiesSnapshotRef.current = policies;
+  }, [policies]);
+  // Workspace is the Settings home; returning to it refreshes the shared data.
+  useScreenEntryRefresh("/settings", () => {
+    if (!hasUnsavedSettings()) {
+      const snapshot = policies;
+      const workspaceKey = selectedWorkspaceId;
+      const generation = ++entryPolicyGenerationRef.current;
+      const canApply = () =>
+        settingsMountedRef.current &&
+        generation === entryPolicyGenerationRef.current &&
+        workspaceKey === selectedWorkspaceKeyRef.current &&
+        policiesSnapshotRef.current === snapshot &&
+        !hasUnsavedSettings();
+      // Only this passive read preserves unsaved edits. Save-conflict recovery
+      // uses reloadPolicies and must adopt the server's current revision.
+      void getCurrentWorkspaceId()
+        .then((workspaceId) => {
+          if (!workspaceId) {
+            throw new SettingsLocalError(SETTINGS_LOCAL_ERROR.workspaceUnavailable);
+          }
+          return getSettingsPolicies(workspaceId);
+        })
+        .then((next) => {
+          if (canApply()) {
+            setPolicies(next);
+            setPoliciesError(null);
+          }
+        })
+        .catch((caught) => {
+          if (canApply()) {
+            setPoliciesError(errorMessage(caught));
+          }
+        });
+    }
+    // The key count also appears in the section navigation, including Workspace.
+    void accessKeyPages.reload();
+  }, { isHome: activeSection === "workspace" });
+
   const tokens = useMemo(
     () => accessKeyPages.page?.data ?? [],
     [accessKeyPages.page],
