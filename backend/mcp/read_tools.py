@@ -299,7 +299,6 @@ def list_my_workspaces(payload: dict, ctx: ToolCallContext) -> ListMyWorkspacesO
     session_factory = ctx.session_factory
     try:
         ListMyWorkspacesInput.model_validate(payload)
-        # The workspace list repairs a stale/null default to Personal.
         with session_factory.begin() as session:
             # D-01v2-f: PAT and OAuth actors alike see their credential's live
             # allowed set (``token_workspace_ids``) intersected with current

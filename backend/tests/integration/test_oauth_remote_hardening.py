@@ -2205,7 +2205,7 @@ def test_membership_loss_revokes_workspace_access_but_keeps_other_workspace_live
     from backend.models.oauth import OAuthConsent
     from backend.models.user import User
     from backend.models.workspace import Workspace, WorkspaceMembership
-    from backend.services.personal_workspace_service import ensure_personal_workspace
+    from backend.services.personal_workspace_service import create_personal_workspace
     from backend.services.workspace_membership_service import (
         WorkspaceMembershipService,
     )
@@ -2305,7 +2305,7 @@ def test_membership_loss_revokes_workspace_access_but_keeps_other_workspace_live
         )
         session.add(replacement_owner)
         session.flush()
-        ensure_personal_workspace(session, user=replacement_owner)
+        create_personal_workspace(session, user=replacement_owner)
         session.add(
             WorkspaceMembership(
                 user_id=replacement_owner.id,

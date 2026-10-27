@@ -3,14 +3,14 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
 from backend.domain.input_policy import InputPolicyError
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.user import User
-from backend.models.workspace import WorkspaceMembership
+from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.scripts.seed_remote_mcp_smoke import (
     format_env,
     seed_remote_mcp_smoke,
@@ -101,11 +101,11 @@ def test_seed_remote_mcp_smoke_outputs_usable_material(tmp_path):
     with session_factory() as session:
         alice = session.scalar(select(User).where(User.email == result.alice_email))
         assert alice is not None
-        assert alice.personal_workspace_id is not None
+        assert alice.default_workspace_id is not None
         assert (
             session.get(
                 WorkspaceMembership,
-                (alice.id, alice.personal_workspace_id),
+                (alice.id, alice.default_workspace_id),
             ).role
             == "owner"
         )
@@ -145,6 +145,17 @@ def test_seed_remote_mcp_smoke_is_rerunnable_on_same_database(tmp_path):
         credential_hasher=CredentialHasher(),
     )
     assert token_service.authenticate_token(second.pat_read).scopes == ("mcp:read",)
+    # A re-run updates existing users and never gives them another starter
+    # workspace; only account creation does.
+    with make_session_factory_from_settings(settings)() as session:
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(Workspace)
+                .where(Workspace.slug.like("personal-%"))
+            )
+            == 2
+        )
 
 
 def test_seed_remote_mcp_smoke_env_format_is_sourceable(tmp_path):

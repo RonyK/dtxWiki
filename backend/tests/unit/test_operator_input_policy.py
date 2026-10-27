@@ -21,7 +21,11 @@ from backend.schemas.read import WorkspaceCreateRequest
 from backend.services.api_token_service import resolve_catalog_app_association
 from backend.services.ops.input_maintenance import repair_input
 from backend.services.session_service import SessionService, SessionTokenCodec
-from backend.services.settings_service import _normalize_workspace_slug
+from backend.services.settings_service import (
+    SettingsPolicyUpdateRejected,
+    SettingsService,
+    _normalize_workspace_slug,
+)
 from backend.services.user_admin_service import UserAdminService
 from backend.services.workspace_write import (
     WorkspaceCreateConflictError,
@@ -120,14 +124,33 @@ def test_older_schema_audit_skips_missing_columns_instead_of_sqlite_string_liter
         engine.dispose()
 
 
-def test_explicit_slugs_reject_lowercase_expansion_and_generated_slugs_stay_bounded():
+def test_workspace_slug_writers_share_folding_bounds_and_personal_reservation():
     for normalize in (normalize_workspace_slug, _normalize_workspace_slug):
         assert normalize("Normal Workspace") == "normal-workspace"
+        assert normalize("José Strauß") == "jose-strauss"
+        # A character with no ASCII form still separates words.
+        assert normalize("Q1–Q2 Team·Alpha") == "q1-q2-team-alpha"
         assert normalize("a" * 80) == "a" * 80
-        for invalid in ("a" * 81, "İ" * 80, "nul\x00slug"):
+        for invalid in ("a" * 81, "ß" * 80, "nul\x00slug"):
             with pytest.raises(InputPolicyError):
                 normalize(invalid)
-    assert len(normalize_workspace_slug("İ" * 80, generated=True)) <= 80
+    assert len(normalize_workspace_slug("ß" * 80, generated=True)) <= 80
+
+    assert (
+        normalize_workspace_slug("Personal Notes", generated=True)
+        == "ws-personal-notes"
+    )
+    with pytest.raises(WorkspaceCreateConflictError, match="reserved"):
+        normalize_workspace_slug("Personal-Notes")
+    # The reservation is decided before the uniqueness probe, so neither call
+    # below needs a session: keeping the current slug skips the probe and a new
+    # reserved slug is refused whether or not it exists.
+    workspace = Workspace(slug="personal-owner")
+    SettingsService._update_workspace_field(None, workspace, "slug", "Personal-Owner")
+    with pytest.raises(SettingsPolicyUpdateRejected, match="reserved"):
+        SettingsService._update_workspace_field(
+            None, workspace, "slug", "personal-other"
+        )
 
 
 def test_blank_custom_labels_keep_generic_fallback_without_accepting_controls():
@@ -236,7 +259,7 @@ def test_postgres_unique_error_detection_requires_the_actual_constraint():
     for state, constraint, expected in (
         ("23505", "users_email_key", True),
         ("23514", "users_email_key", False),
-        ("23505", "uq_users_personal_workspace_id", False),
+        ("23505", "workspace_slug_key", False),
     ):
         for driver_error in (
             SimpleNamespace(args=({"C": state, "n": constraint},)),

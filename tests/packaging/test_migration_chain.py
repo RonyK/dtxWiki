@@ -30,7 +30,8 @@ INITIAL_REVISION = "bd62193d5cf6"
 # Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
 RELEASE_013_REVISION = "19db79d3e622"
-CURRENT_HEAD = "ef53a0a7061c"
+RELEASE_014_REVISION = "ef53a0a7061c"
+CURRENT_HEAD = "5c3395a75eb0"
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -87,14 +88,15 @@ def test_graph_has_one_release_revision_after_the_frozen_boundaries():
         INITIAL_REVISION: None,
         CORE_REVISION: INITIAL_REVISION,
         RELEASE_013_REVISION: CORE_REVISION,
-        CURRENT_HEAD: RELEASE_013_REVISION,
+        RELEASE_014_REVISION: RELEASE_013_REVISION,
+        CURRENT_HEAD: RELEASE_014_REVISION,
     }
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES
     assert manifest["schema_releases"]["0.1.2"]["head"] == CORE_REVISION
     assert manifest["schema_releases"]["0.1.3"]["head"] == RELEASE_013_REVISION
-    assert manifest["schema_releases"]["0.1.4"]["head"] == CURRENT_HEAD
+    assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"

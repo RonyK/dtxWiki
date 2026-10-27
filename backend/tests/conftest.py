@@ -448,11 +448,10 @@ def authenticate_test_client_in_workspace(
 ) -> str:
     """Authenticate and explicitly opt a legacy scenario into a workspace.
 
-    Product signup intentionally creates and selects only the user's Personal
-    workspace. Older integration scenarios that exercise the seeded Agent/MCP
-    roots must therefore grant their test user access to that seeded workspace
-    and select it explicitly instead of relying on the former signup side
-    effect.
+    Product signup creates and selects only the account's own starter
+    workspace. Scenarios that rely on fixtures seeded into another workspace
+    must therefore grant their test user access to it and select it
+    explicitly.
     """
 
     authenticate_test_client(client, email=email)

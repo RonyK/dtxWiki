@@ -9,7 +9,6 @@ from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import list_user_workspaces
 from backend.policy.trust_boundaries import actor_workspace_filter
-from backend.policy.workspace_resolution import repair_default_workspace_to_personal
 from backend.schemas.read import (
     GuidePayload,
     WorkspaceDetail,
@@ -176,17 +175,12 @@ class WorkspaceReadService:
         if actor_user_id is not None:
             total_membership_count = len(list_user_workspaces(session, actor_user_id))
             other_membership_count = max(total_membership_count - len(rows), 0)
-        user_default_id, personal_workspace_id = self._user_workspace_pointers(
-            session,
-            actor,
-        )
+        user_default_id = self._user_default_workspace_id(session, actor)
         current = self._resolve_current_workspace(
             rows=rows,
             user_default_id=user_default_id,
-            personal_workspace_id=personal_workspace_id,
         )
-        # default_workspace_id reflects the user's persisted landing pointer,
-        # either explicitly selected or repaired to a live Personal workspace.
+        # default_workspace_id reflects the user's persisted landing pointer.
         # It remains distinct from current_workspace_id, which can be an
         # unpersisted single-membership fallback. Expose the pointer only when
         # it is accessible to this actor (S2/C9).
@@ -194,18 +188,6 @@ class WorkspaceReadService:
             user_default_id
             if user_default_id is not None
             and any(workspace.id == user_default_id for workspace, _role in rows)
-            else None
-        )
-        # Same visibility rule as accessible_default_id: an OAuth actor
-        # credential-scoped to one workspace must not learn the id of a
-        # DIFFERENT workspace -- even just the Personal anchor's id, with no
-        # other metadata attached -- if that workspace fell outside `rows`.
-        accessible_personal_id = (
-            personal_workspace_id
-            if personal_workspace_id is not None
-            and any(
-                workspace.id == personal_workspace_id for workspace, _role in rows
-            )
             else None
         )
         workspace_ids = [workspace.id for workspace, _role in rows]
@@ -240,30 +222,25 @@ class WorkspaceReadService:
             ],
             current_workspace_id=current.id if current is not None else None,
             default_workspace_id=accessible_default_id,
-            personal_workspace_id=accessible_personal_id,
             other_membership_count=other_membership_count,
         )
 
     @staticmethod
-    def _user_workspace_pointers(
+    def _user_default_workspace_id(
         session: Session,
         actor=None,
-    ) -> tuple[UUID | None, UUID | None]:
+    ) -> UUID | None:
         user_id = getattr(actor, "user_id", None)
         if user_id is None:
-            return None, None
+            return None
         user = session.get(User, user_id)
-        if user is None:
-            return None, None
-        repair_default_workspace_to_personal(session=session, user=user)
-        return user.default_workspace_id, user.personal_workspace_id
+        return user.default_workspace_id if user is not None else None
 
     @staticmethod
     def _resolve_current_workspace(
         *,
         rows: list[tuple[Workspace, str | None]],
         user_default_id: UUID | None,
-        personal_workspace_id: UUID | None,
     ) -> Workspace | None:
         if not rows:
             return None
@@ -278,17 +255,6 @@ class WorkspaceReadService:
             )
             if user_default is not None:
                 return user_default
-        if personal_workspace_id is not None:
-            personal = next(
-                (
-                    workspace
-                    for workspace, _role in rows
-                    if workspace.id == personal_workspace_id
-                ),
-                None,
-            )
-            if personal is not None:
-                return personal
         # A sole visible workspace is unambiguous. Multiple rows without a live
         # user pointer require an explicit picker choice, including for
         # non-user actors; no installation-wide workspace is inferred.
