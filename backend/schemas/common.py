@@ -151,10 +151,16 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        including the earlier draft a candidate was written on. Clients may
 #        ignore these additive fields and keep using the existing target and
 #        diff_ref fields; no tool or input schema changed.
-#  17 -- what_changed adds unpublished when an undone first publication leaves
-#        no published version. Refresh the output contract and invalidate the
-#        page's cached publication by page_id; version_id is null. Existing
-#        visibility rules still apply, including draft visibility.
+#  17 -- what_changed reports each move of a page's published version
+#        (before -> after). It adds unpublished when an undone first
+#        publication leaves no published version: invalidate the page's cached
+#        publication by page_id; version_id is null. created now also covers
+#        a page published again after it was unpublished or archived, so
+#        treat created as an upsert. previous_version_id is the version
+#        published right before the entry, not the version's parent, and is
+#        set on updated, unpublished and archived entries. reason says why
+#        the version moved. Restoring an archived page is reported as created.
+#        Existing visibility rules still apply, including draft visibility.
 MCP_TOOL_CONTRACT_REVISION = 17
 ERROR_CODES = (
     "not_found",

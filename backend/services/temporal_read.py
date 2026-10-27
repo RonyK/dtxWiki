@@ -5,7 +5,8 @@ ChangeOperation rows: every path that makes a version live leaves an
 operation referencing ``context_page_version:<id>`` — REST direct writes
 (``create``/``update``, published at creation), MCP publishes (``publish``),
 and B-8 archives (``archive``). An undone approval leaves
-``publish_revert`` naming the version live again (no version: nothing is).
+``publish_revert`` naming the version live again (no version: nothing is);
+a revived archived page leaves ``unarchive`` naming its published version.
 The operation's ChangeSet.created_at is the publish instant — NOT
 ``version.created_at``, which is draft-creation time and mis-resolves drafts
 published late.
@@ -22,10 +23,17 @@ from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.repositories.workspace_scoped import (
+    select_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.utils.uuid import parse_uuid_or_none
 
 _PUBLISH_OPERATIONS = ("create", "update", "publish")
-_TIMELINE_OPERATIONS = (*_PUBLISH_OPERATIONS, "archive", "publish_revert")
+# Point the published head at the named version (or at nothing) without
+# being that version's publish instant.
+_REPOINT_OPERATIONS = ("publish_revert", "unarchive")
+_TIMELINE_OPERATIONS = (*_PUBLISH_OPERATIONS, "archive", *_REPOINT_OPERATIONS)
 _VERSION_REF_PREFIX = "context_page_version:"
 
 _PUBLISHED_STATUSES = {"published_snapshot", "superseded_snapshot"}
@@ -43,7 +51,7 @@ def _naive_utc(value: datetime) -> datetime:
 class TimelineEvent:
     page_id: UUID
     version_id: UUID | None
-    operation: str  # create | update | publish | archive | publish_revert
+    operation: str  # create | update | publish | archive | publish_revert | unarchive
     occurred_at: datetime
     change_set_id: UUID
     reason: str | None
@@ -133,62 +141,81 @@ def _is_publish_instant(
     return True
 
 
-def _pages_published_before(
+_UNMOVED = object()
+
+
+def _published_head_after(operation, version_id: UUID | None, draft_writes: set[UUID]):
+    """Where ``operation`` leaves the page's published head: a version id,
+    None when nothing is published, or ``_UNMOVED``.
+
+    An archived page is out of the published set even though its published
+    version pointer stays; a draft write moves nothing.
+    """
+    if operation.operation == "archive":
+        return None
+    if operation.operation in _REPOINT_OPERATIONS:
+        return version_id
+    if _is_publish_instant(operation, version_id, draft_writes):
+        return version_id
+    return _UNMOVED
+
+
+def _published_heads_at(
     session: Session,
+    workspace_id: UUID,
     page_ids: set[UUID],
     *,
-    before: datetime,
+    at: datetime,
     publish_refs: set[UUID],
-) -> set[UUID]:
-    """Bulk first-publish history check for one candidate-page batch."""
+) -> dict[UUID, UUID | None]:
+    """Each page's published head at ``at``, replayed in timeline order
+    (a page with no entry was never published)."""
     if not page_ids:
-        return set()
-    rows = session.execute(
-        select(ChangeOperation, ChangeSet)
-        .join(ChangeSet, ChangeOperation.change_set_id == ChangeSet.id)
-        .where(ChangeOperation.target_type == "context_page")
-        .where(ChangeOperation.target_id.in_(page_ids))
-        .where(ChangeOperation.operation.in_(_PUBLISH_OPERATIONS))
-        .where(ChangeSet.created_at <= before)
+        return {}
+    operations = session.scalars(
+        select_in_workspace(
+            ChangeOperation,
+            workspace_id=workspace_id,
+            criteria=[
+                ChangeOperation.target_type == "context_page",
+                ChangeOperation.target_id.in_(page_ids),
+                ChangeOperation.operation.in_(_TIMELINE_OPERATIONS),
+            ],
+        )
     ).all()
+    change_sets = (
+        {
+            change_set.id: change_set
+            for change_set in session.scalars(
+                select_in_workspace_by_ids(
+                    ChangeSet,
+                    workspace_id=workspace_id,
+                    resource_ids={op.change_set_id for op in operations},
+                )
+            )
+        }
+        if operations
+        else {}
+    )
+    # The same order what_changed reads its window in.
+    rows = sorted(
+        (
+            (operation, change_set)
+            for operation in operations
+            if (change_set := change_sets.get(operation.change_set_id)) is not None
+            and _naive_utc(change_set.created_at) <= at
+        ),
+        key=lambda row: (_naive_utc(row[1].created_at), row[1].id, row[0].id),
+    )
     draft_writes = _draft_write_version_ids(session, rows) | publish_refs
-    published: set[UUID] = set()
+    heads: dict[UUID, UUID | None] = {}
     for operation, _change_set in rows:
-        version_id = _version_id_from_ref(operation.diff_ref)
-        if _is_publish_instant(operation, version_id, draft_writes):
-            published.add(operation.target_id)
-    return published
-
-
-def _versions_published_before(
-    session: Session,
-    version_ids: set[UUID],
-    *,
-    before: datetime,
-) -> set[UUID]:
-    """Which of ``version_ids`` had a genuine publish instant at/before
-    ``before`` — used to suppress a later metadata-only re-touch of an
-    already-published version from surfacing as a fresh publish event."""
-    if not version_ids:
-        return set()
-    refs = [f"{_VERSION_REF_PREFIX}{version_id}" for version_id in version_ids]
-    rows = session.execute(
-        select(ChangeOperation, ChangeSet)
-        .join(ChangeSet, ChangeOperation.change_set_id == ChangeSet.id)
-        .where(ChangeOperation.target_type == "context_page")
-        .where(ChangeOperation.operation.in_(_PUBLISH_OPERATIONS))
-        .where(ChangeOperation.diff_ref.in_(refs))
-        .where(ChangeSet.created_at <= before)
-    ).all()
-    draft_writes = _draft_write_version_ids(session, rows)
-    published: set[UUID] = set()
-    for operation, _change_set in rows:
-        version_id = _version_id_from_ref(operation.diff_ref)
-        if version_id in version_ids and _is_publish_instant(
-            operation, version_id, draft_writes
-        ):
-            published.add(version_id)
-    return published
+        after = _published_head_after(
+            operation, _version_id_from_ref(operation.diff_ref), draft_writes
+        )
+        if after is not _UNMOVED:
+            heads[operation.target_id] = after
+    return heads
 
 
 def publish_timeline(
@@ -220,7 +247,7 @@ def publish_timeline(
     published_versions: set[UUID] = set()
     for operation, change_set in rows:
         version_id = _version_id_from_ref(operation.diff_ref)
-        if operation.operation in ("archive", "publish_revert"):
+        if operation.operation in ("archive", *_REPOINT_OPERATIONS):
             pass
         elif not _is_publish_instant(operation, version_id, draft_writes):
             continue
@@ -312,10 +339,17 @@ def what_changed(
 ) -> tuple[list[WhatChangedEntry], bool]:
     """Published-change delta since ``since`` (ascending), actor-visible.
 
-    created = the page's first publish event; archived rows surface the B-8
+    Each entry is one move of a page's published head, like a ref update
+    (before -> after): created when the page enters the published set (its
+    first publication, or publishing again after it was withdrawn or
+    archived), updated when the head moves to another version, unpublished
+    when an undone first publication leaves nothing published. previous_version_id
+    is the version published right before the entry, never the version's
+    parent; the reason says why the head moved. Archived rows surface the B-8
     cascade (the client's cache-invalidation signal — currently-archived
-    pages appear ONLY as archived entries). An undone first publication emits
-    unpublished for actors who can still see the draft. Returns (entries, has_more).
+    pages appear ONLY as archived entries) and keep naming the head at the
+    archive. An undone first publication emits unpublished for actors who
+    can still see the draft. Returns (entries, has_more).
     """
     from backend.services.context_visibility import visible_context_version_id
     from backend.services.entity_ref import context_concept_path
@@ -346,60 +380,37 @@ def what_changed(
     op_rows = [(operation, change_set) for operation, change_set, _page in rows]
     publish_refs = _publish_operation_version_ids(session, page_ids)
     draft_writes = _draft_write_version_ids(session, op_rows) | publish_refs
-    published_pages = _pages_published_before(
-        session, page_ids, before=naive_since, publish_refs=publish_refs
-    )
-    version_ids = {
-        version_id
-        for operation, _change_set, _page in rows
-        if (version_id := _version_id_from_ref(operation.diff_ref)) is not None
-    }
-    parent_by_version = (
-        dict(
-            session.execute(
-                select(
-                    ContextPageVersion.id,
-                    ContextPageVersion.parent_version_id,
-                ).where(ContextPageVersion.id.in_(version_ids))
-            ).all()
-        )
-        if version_ids
-        else {}
-    )
-    # Versions already published at/before ``since`` — a create/update naming
-    # one is a metadata-only re-touch, not a fresh publish, so it must not
-    # surface as an 'updated' delta with a misleading previous_version_id.
-    seen_versions = _versions_published_before(
-        session, version_ids, before=naive_since
+    heads = _published_heads_at(
+        session, workspace_id, page_ids, at=naive_since, publish_refs=publish_refs
     )
 
     entries: list[WhatChangedEntry] = []
     for operation, change_set, page in rows:
+        version_id = _version_id_from_ref(operation.diff_ref)
+        after = _published_head_after(operation, version_id, draft_writes)
+        if after is _UNMOVED:
+            continue
+        # The head moves before any filter below, so a hidden entry still
+        # sets what the page's next entry is compared with.
+        before = heads.get(page.id)
+        heads[page.id] = after
+        if operation.operation == "archive":
+            change_kind = "archived"
+        elif after == before:
+            # A metadata-only re-touch of the published version moves nothing.
+            continue
+        elif before is None:
+            change_kind = "created"
+        elif after is None:
+            change_kind = "unpublished"
+        else:
+            change_kind = "updated"
         # Visibility gates every entry: an archived draft-only page must
         # not surface its slug/title/reason to an actor who never saw it.
         if visible_context_version_id(page, actor)[0] is None:
             continue
         if page.lifecycle_status == "archived" and operation.operation != "archive":
             continue
-        version_id = _version_id_from_ref(operation.diff_ref)
-        if operation.operation == "archive":
-            change_kind = "archived"
-        elif operation.operation == "publish_revert":
-            # An undone approval makes the version it replaced live again. An
-            # undone first publication leaves no published version to name.
-            if version_id is None:
-                change_kind = "unpublished"
-            else:
-                seen_versions.add(version_id)
-                change_kind = "updated"
-        else:
-            if not _is_publish_instant(operation, version_id, draft_writes):
-                continue
-            if version_id in seen_versions and operation.operation != "publish":
-                continue
-            seen_versions.add(version_id)
-            change_kind = "updated" if page.id in published_pages else "created"
-            published_pages.add(page.id)
         entries.append(
             WhatChangedEntry(
                 concept_path=context_concept_path(page.slug),
@@ -407,13 +418,7 @@ def what_changed(
                 change_kind=change_kind,
                 page_id=page.id,
                 version_id=version_id,
-                previous_version_id=(
-                    parent_by_version.get(version_id)
-                    if change_kind == "updated"
-                    and version_id is not None
-                    and operation.operation != "publish_revert"
-                    else None
-                ),
+                previous_version_id=before,
                 changed_at=change_set.created_at,
                 reason=change_set.reason,
                 change_set_id=change_set.id,

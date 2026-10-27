@@ -139,10 +139,13 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
             since=published_at(session, page_id),
             actor=_actor(workspace.id, "owner"),
         )
-        assert [(e.change_kind, e.version_id) for e in entries] == [
-            ("updated", draft.draft_version_id),
-            ("updated", published.draft_version_id),
-            ("updated", draft.draft_version_id),
+        # Each entry names the version published right before it.
+        assert [
+            (e.change_kind, e.version_id, e.previous_version_id) for e in entries
+        ] == [
+            ("updated", draft.draft_version_id, published.draft_version_id),
+            ("updated", published.draft_version_id, draft.draft_version_id),
+            ("updated", draft.draft_version_id, published.draft_version_id),
         ]
 
         # Undoing a first publication withdraws the page again.
@@ -160,11 +163,25 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert not has_more and len(entries) == 1
         entry = WhatChangedEntryModel(**vars(entries[0]))
         assert (entry.change_kind, entry.page_id) == ("unpublished", first.page_id)
-        assert entry.version_id is entry.previous_version_id is None
+        assert (entry.version_id, entry.previous_version_id) == (
+            None,
+            first.draft_version_id,
+        )
         # The new delta must not disclose a draft-only page to ordinary readers.
         assert what_changed(
             session, workspace.id, since=since, actor=_actor(workspace.id, "viewer"),
         ) == ([], False)
+        # Publishing it again is a fresh entry into the published set.
+        _approve(session, workspace.id, first.review_item_id)
+        entries, _ = what_changed(
+            session, workspace.id, since=since, actor=_actor(workspace.id, "editor"),
+        )
+        assert [
+            (e.change_kind, e.version_id, e.previous_version_id) for e in entries
+        ] == [
+            ("unpublished", None, first.draft_version_id),
+            ("created", first.draft_version_id, None),
+        ]
 
 
 def _stale_finding(session, workspace_id, page_id):

@@ -84,6 +84,7 @@ from backend.services.context_lifecycle import (
     apply_context_publication,
     project_context_version,
     record_metadata_snapshot,
+    record_unarchive,
     rejected_draft_restart,
 )
 from backend.services.context_media_legacy_cutover import (
@@ -1518,6 +1519,10 @@ class PageService:
                 page.lifecycle_status = (
                     "published" if page.current_published_version_id else "draft"
                 )
+                if was_archived:
+                    record_unarchive(
+                        session, page=page, actor_kind=actor_kind, actor_id=actor_id
+                    )
             session.add(page)
             session.flush()
             if was_archived and actor_provenance not in AI_PROVENANCES:

@@ -12,11 +12,17 @@
   to `list_requested_changes` evidence, including the earlier draft a candidate
   was written on. Existing clients can ignore these additive fields and
   continue using the existing target and `diff_ref` fields.
-- MCP tool contract revision 17 adds `unpublished` to `what_changed` when an
-  undone first publication leaves no published version. Refresh the output
-  contract and invalidate the cached publication by `page_id`; `version_id`
-  is null. Draft visibility still applies, so readers without draft access
-  receive no unpublished-page metadata.
+- MCP tool contract revision 17 makes each `what_changed` entry one move of a
+  page's published version. It adds `unpublished` when an undone first
+  publication leaves no published version: invalidate the cached publication
+  by `page_id`; `version_id` is null. `created` also covers a page published
+  again after it was unpublished or archived, including restoring an archived
+  page, so treat it as an upsert. `previous_version_id` is the version
+  published right before the entry, not the version's parent, and is also set
+  on `unpublished` and `archived` entries. `reason` says why the version moved
+  (for example `review decision undone` or `page restored from archive`).
+  Draft visibility still applies, so readers without draft access receive no
+  unpublished-page metadata.
 - Approving a Context review publishes the changes up to that draft; rejecting
   one also rejects the later drafts written on it and returns the edit head to
   the draft below them. Earlier drafts and branched alternatives are untouched.

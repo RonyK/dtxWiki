@@ -516,6 +516,7 @@
         "additionalProperties": false,
         "properties": {
           "change_kind": {
+            "description": "created: the page entered the published set, including publishing again after it was unpublished or archived. updated: the published version changed. unpublished: an undone first publication left nothing published. archived: the page was archived.",
             "enum": [
               "created",
               "updated",
@@ -555,6 +556,7 @@
               }
             ],
             "default": null,
+            "description": "The version published right before this entry, not the version's parent; null when nothing was published.",
             "title": "Previous Version Id"
           },
           "reason": {
@@ -567,6 +569,7 @@
               }
             ],
             "default": null,
+            "description": "Why the published version moved, e.g. approved through Context review, review decision undone, page restored from archive.",
             "title": "Reason"
           },
           "title": {
@@ -584,6 +587,7 @@
               }
             ],
             "default": null,
+            "description": "The version published from this entry on; null for unpublished. For archived, the page's head when it was archived.",
             "title": "Version Id"
           }
         },

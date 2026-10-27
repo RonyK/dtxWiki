@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.base import utc_now
-from backend.models.change import ChangeOperation
+from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewItem
 from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
@@ -33,6 +33,7 @@ from backend.services.public_page_exposure import (
 from backend.services.read_errors import StaleContextDraftError
 from backend.utils.content_recency import normalize_content_recency
 from backend.utils.page_frontmatter import parse_page_frontmatter
+from backend.utils.uuid import parse_uuid_or_none
 
 CONTEXT_HISTORY_STATUSES = (
     "state_inconsistent",
@@ -438,6 +439,47 @@ def record_metadata_snapshot(
             operation=METADATA_SNAPSHOT_OPERATION,
             diff_summary=json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
             diff_ref=f"context_page_version:{version.id}",
+        )
+    )
+
+
+UNARCHIVE_REASON = "page restored from archive"
+
+
+def record_unarchive(
+    session: Session,
+    *,
+    page: ContextPage,
+    actor_kind: str,
+    actor_id: str,
+) -> None:
+    """Log that a revived archived page's published version is live again.
+
+    Reviving re-exposes the published head without publishing anything, so
+    without this the publish timeline (what_changed, as_of reads) would end
+    at the archive and never learn the page came back.
+    """
+
+    if page.current_published_version_id is None:
+        return
+    change_set = ChangeSet(
+        workspace_id=page.workspace_id,
+        reason=UNARCHIVE_REASON,
+        trigger_type="context_page_unarchive",
+        actor_type=actor_kind,
+        actor_id=parse_uuid_or_none(actor_id),
+        status="applied",
+    )
+    session.add(change_set)
+    session.flush()
+    session.add(
+        ChangeOperation(
+            workspace_id=page.workspace_id,
+            change_set_id=change_set.id,
+            target_type="context_page",
+            target_id=page.id,
+            operation="unarchive",
+            diff_ref=f"context_page_version:{page.current_published_version_id}",
         )
     )
 

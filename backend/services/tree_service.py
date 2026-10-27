@@ -686,6 +686,8 @@ def ensure_primary_tree_placement(
                 section=section,
                 default_parent_slug=default_parent_slug,
                 explicit_parent_id=parent_id,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
             )
         existing.title = title
         existing.slug = slug
@@ -1297,6 +1299,8 @@ def _revive_primary_node(
     section: str,
     default_parent_slug: str,
     explicit_parent_id: UUID | None,
+    actor_kind: str,
+    actor_id: str,
 ) -> None:
     """Bring an archived primary-placement node (and its target) back.
 
@@ -1308,6 +1312,7 @@ def _revive_primary_node(
     from backend.models.agent import AgentPage
     from backend.models.context import ContextPage, ContextPageVersion
     from backend.models.library import LibraryItem
+    from backend.services.context_lifecycle import record_unarchive
     from backend.services.indexing.fts5 import (
         sync_agent_page_doc_sources,
         sync_library_doc_sources,
@@ -1402,9 +1407,14 @@ def _revive_primary_node(
             resource_id=node.target_id,
         )
         if page is not None:
+            was_archived = page.lifecycle_status == "archived"
             page.lifecycle_status = (
                 "published" if page.current_published_version_id else "draft"
             )
+            if was_archived:
+                record_unarchive(
+                    session, page=page, actor_kind=actor_kind, actor_id=actor_id
+                )
             sync_page_projections(session, page=page)
     elif node.target_kind == "agent_page" and node.target_id is not None:
         agent_page = get_in_workspace(
