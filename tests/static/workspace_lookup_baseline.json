@@ -1859,6 +1859,7 @@
   "backend/services/workspace_write.py|WorkspaceWriteService._delete_seed_workspace|where|TreePolicy|8ce8da8492176542": 1,
   "backend/services/workspace_write.py|WorkspaceWriteService._delete_seed_workspace|where|UserFavorite|1a2c54134e8e25d9": 1,
   "backend/services/workspace_write.py|WorkspaceWriteService._delete_seed_workspace|where|WorkspaceCredentialGrant|c2abd610af152091": 1,
+  "backend/services/workspace_write.py|WorkspaceWriteService._delete_seed_workspace|where|WorkspaceInboxEntry|ee83311e33bd9def": 1,
   "backend/services/workspace_write.py|WorkspaceWriteService._delete_seed_workspace|where|WorkspaceTreeNode|cdc44d935f2c4c60": 1,
   "backend/services/workspace_write.py|WorkspaceWriteService._delete_seed_workspace|where|WorkspaceTreeNode|f30b8be22d2a799f": 1,
   "backend/services/workspace_write.py|WorkspaceWriteService._lock_media_delete_intent|select|WorkspaceMediaWriteIntent|fe41af39ba4593d4": 1,

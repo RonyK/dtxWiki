@@ -6,6 +6,7 @@ import {
   Command,
   FileText,
   FolderPlus,
+  Inbox,
   LayoutDashboard,
   Library,
   Languages,
@@ -86,6 +87,7 @@ type NavItemKey =
   | "lint"
   | "activity"
   | "search"
+  | "inbox"
   | "settings";
 type NavGroupKey = "knowledge" | "workflow" | "workspace";
 type ShellLabels = {
@@ -143,7 +145,10 @@ const SIDEBAR_NAV_GROUPS: Array<{ key: NavGroupKey; items: SidebarNavItem[] }> =
     },
     {
       key: "workspace",
-      items: [{ icon: Settings, key: "settings", to: "/settings" }],
+      items: [
+        { icon: Inbox, key: "inbox", to: "/inbox" },
+        { icon: Settings, key: "settings", to: "/settings" },
+      ],
     },
   ];
 
@@ -279,6 +284,7 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
       lint: t("nav.lint", { defaultValue: "Lint queue" }),
       activity: t("nav.activity", { defaultValue: "Activity" }),
       search: t("nav.search", { defaultValue: "Search" }),
+      inbox: t("nav.inbox", { defaultValue: "Inbox" }),
       settings: t("nav.settings", { defaultValue: "Settings" }),
     },
     searchFormAria: t("search.formAria", { defaultValue: "Workspace search" }),
@@ -579,6 +585,14 @@ export function Shell({ children }: ShellProps) {
                 title={t("topbar.searchTitle", { defaultValue: "Search" })}
               >
                 <Search size={16} aria-hidden="true" />
+              </NavLink>
+              <NavLink
+                aria-label={t("topbar.inbox", { defaultValue: "Inbox" })}
+                className="icon-button"
+                to="/inbox"
+                title={t("topbar.inbox", { defaultValue: "Inbox" })}
+              >
+                <Inbox size={16} aria-hidden="true" />
               </NavLink>
               <NavLink
                 aria-label={t("topbar.settings", { defaultValue: "Settings" })}

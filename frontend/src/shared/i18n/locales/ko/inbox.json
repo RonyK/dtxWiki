@@ -1,0 +1,41 @@
+{
+  "title": "수신함",
+  "description": "이 workspace와 내 계정으로 온 메시지입니다.",
+  "loading": "수신함 불러오는 중",
+  "loadMore": "더 보기",
+  "scope": {
+    "label": "수신함 범위",
+    "workspace": "현재 workspace",
+    "account": "계정"
+  },
+  "state": {
+    "label": "보기",
+    "all": "수신함",
+    "unread": "안 읽음",
+    "archived": "보관됨"
+  },
+  "status": {
+    "label": "현재 상태",
+    "overflow": "전체 {{total}}건 중 일부입니다. 나머지는 원래 화면에서 확인하세요."
+  },
+  "items": {
+    "label": "메시지"
+  },
+  "empty": {
+    "all": "메시지가 없습니다.",
+    "unread": "안 읽은 메시지가 없습니다.",
+    "archived": "보관한 메시지가 없습니다."
+  },
+  "item": {
+    "unknown": "이 버전에서 표시할 수 없는 메시지",
+    "untitled": "제목 없는 메시지",
+    "unread": "안 읽음",
+    "read": "읽음"
+  },
+  "actions": {
+    "markRead": "읽음으로 표시",
+    "markUnread": "안 읽음으로 표시",
+    "archive": "보관",
+    "unarchive": "수신함으로 되돌리기"
+  }
+}

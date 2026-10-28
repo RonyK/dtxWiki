@@ -368,6 +368,10 @@ class ServiceRegistry:
 
     settings: Settings | None = None
     lint_modules: tuple[LintModule, ...] = ()
+    # Overlay-supplied Inbox kinds and delivery listeners, added to the
+    # built-in ones before the Inbox service is first constructed.
+    inbox_kinds: tuple = ()
+    inbox_listeners: tuple = ()
     # Context media is workspace-owned data, so this holds a routing callable
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
@@ -992,6 +996,19 @@ class ServiceRegistry:
         from backend.services.lint.registry import LintRegistry
 
         return LintRegistry((*BUILTIN_LINT_MODULES, *self.lint_modules))
+
+    @cached_property
+    def inbox(self):
+        from backend.services.inbox import (
+            BUILTIN_INBOX_KINDS,
+            InboxRegistry,
+            InboxService,
+        )
+
+        return InboxService(
+            InboxRegistry((*BUILTIN_INBOX_KINDS, *self.inbox_kinds)),
+            self.inbox_listeners,
+        )
 
     @cached_property
     def lint(self):

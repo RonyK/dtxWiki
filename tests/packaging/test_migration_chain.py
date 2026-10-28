@@ -33,7 +33,9 @@ RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "ef53a0a7061c"
 PERSONAL_POINTER_REVISION = "5c3395a75eb0"
 EXTERNAL_LOGIN_REVISION = "da94025713de"
-CURRENT_HEAD = "333a67e22cd7"
+REVIEW_HISTORY_INDEX_REVISION = "333a67e22cd7"
+INBOX_REVISION = "175b9664724e"
+CURRENT_HEAD = INBOX_REVISION
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -93,8 +95,10 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         RELEASE_014_REVISION: RELEASE_013_REVISION,
         PERSONAL_POINTER_REVISION: RELEASE_014_REVISION,
         EXTERNAL_LOGIN_REVISION: PERSONAL_POINTER_REVISION,
-        CURRENT_HEAD: EXTERNAL_LOGIN_REVISION,
+        REVIEW_HISTORY_INDEX_REVISION: EXTERNAL_LOGIN_REVISION,
+        CURRENT_HEAD: REVIEW_HISTORY_INDEX_REVISION,
     }
+    assert Path(script.get_revision(INBOX_REVISION).path).parent.name == "v0_2"
 
     manifest = json.loads((MIGRATIONS_DIR.parent / "release_manifest.json").read_text())
     assert manifest["legacy_revision_aliases"] == LEGACY_REVISION_ALIASES

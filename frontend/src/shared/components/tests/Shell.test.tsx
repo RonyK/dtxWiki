@@ -52,7 +52,10 @@ const EXPECTED_SIDEBAR_NAV: Array<{
   },
   {
     group: "Workspace",
-    links: [["Settings", "/settings"]],
+    links: [
+      ["Inbox", "/inbox"],
+      ["Settings", "/settings"],
+    ],
   },
 ];
 
@@ -114,6 +117,10 @@ describe("Shell", () => {
     expect(
       screen.getAllByRole("link", { name: "Settings" })[0],
     ).toHaveAttribute("href", "/settings");
+    expect(screen.getAllByRole("link", { name: "Inbox" })[0]).toHaveAttribute(
+      "href",
+      "/inbox",
+    );
     expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
       "href",
       "/account",

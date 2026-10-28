@@ -18,6 +18,7 @@ from backend.api.auth_verification import router as auth_verification_router
 from backend.api.context_media import router as context_media_router
 from backend.api.context_pages import router as context_pages_router
 from backend.api.health import health_root_router
+from backend.api.inbox import router as inbox_router
 from backend.api.library_preview import router as library_preview_router
 from backend.api.library_semantic import router as library_semantic_router
 from backend.api.llms_txt import router as llms_txt_router
@@ -357,6 +358,7 @@ def create_app(
     app.include_router(capabilities_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
+    app.include_router(inbox_router, prefix="/api/v1")
     app.include_router(workspace_members_router, prefix="/api/v1")
     app.include_router(workspace_access_router, prefix="/api/v1")
     app.include_router(context_pages_router, prefix="/api/v1")

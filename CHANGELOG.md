@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Inbox (planned for 0.2.0)
+
+- Add the Inbox foundation. The top bar opens `/inbox`, which lists messages
+  addressed to the signed-in user in the current workspace or on the account,
+  with read, unread and archive marks. No message kinds are registered yet;
+  the changes that add them also define who receives what.
+- `GET /api/v1/workspaces/{workspace_id}/inbox` and `GET /api/v1/users/me/inbox`
+  list items; `POST …/marks` sets marks. A mark applies only to the revision the
+  client saw, so a late request cannot mark newer news as read.
+- New tables `workspace_inbox_entry` (workspace plane) and `account_inbox_entry`
+  (control plane) in revision `175b9664724e`. Downgrade drops them and their rows.
+
 ### Fixes
 
 - Show email sign-in before external providers. User search groups its controls

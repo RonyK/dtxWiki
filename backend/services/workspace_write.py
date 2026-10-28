@@ -49,6 +49,7 @@ from backend.models import (
     UserFavorite,
     Workspace,
     WorkspaceCredentialGrant,
+    WorkspaceInboxEntry,
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
     WorkspaceMembership,
@@ -539,6 +540,11 @@ class WorkspaceWriteService:
         )
         session.execute(
             delete(UserFavorite).where(UserFavorite.workspace_id == workspace_id)
+        )
+        session.execute(
+            delete(WorkspaceInboxEntry).where(
+                WorkspaceInboxEntry.workspace_id == workspace_id
+            )
         )
         session.execute(
             delete(WorkspaceTreeNode).where(

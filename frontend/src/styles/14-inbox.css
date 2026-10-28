@@ -1,0 +1,98 @@
+/* Inbox screen: scope/state controls and message rows. */
+
+.inbox-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.inbox-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.inbox-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.inbox-row:first-child {
+  border-top: 0;
+}
+
+.inbox-row-dot {
+  display: inline-flex;
+  color: var(--ink-faint);
+}
+
+.inbox-row.is-unread .inbox-row-dot {
+  color: var(--accent);
+}
+
+.inbox-row-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inbox-row-title {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.inbox-row.is-unread .inbox-row-title {
+  font-weight: 600;
+}
+
+.inbox-row-time {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.inbox-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.inbox-status {
+  margin-bottom: 16px;
+}
+
+.inbox-overflow {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .inbox-row {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+
+  .inbox-row-actions {
+    grid-column: 2;
+  }
+}
+
+.inbox-row-icon {
+  color: var(--ink-soft);
+}
+
+.inbox-row-summary {
+  color: var(--ink-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

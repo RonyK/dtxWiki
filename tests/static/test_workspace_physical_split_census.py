@@ -160,10 +160,10 @@ EXPECTED_ALL_NULLABLE_EDGES: frozenset[str] = frozenset(
 
 
 def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
-    """Pin the census edge-by-edge: 58 edges, 55 of 84 tables blocked.
+    """Pin the census edge-by-edge: 58 edges, 55 of 85 tables blocked.
 
     Measured here, not copied: ``workspace`` 55 edges / 55 blocked tables,
-    ``users`` 3 edges / 2 blocked tables, 29 of the 84 shard-resident tables
+    ``users`` 3 edges / 2 blocked tables, 30 of the 85 shard-resident tables
     insertable, 4 edges all-nullable. Adding, removing or re-pointing any
     cross-plane FK changes ``labels`` and fails this test, which is the point
     -- the inventory is not allowed to move without a reviewer seeing it.
@@ -190,6 +190,9 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     TreeRail personal favorites add one workspace-plane table without any
     cross-plane FK: 84 = 83 + 1. The blocked inventory stays at 55 tables /
     58 edges, while insertable tables increase from 28 to 29.
+
+    The per-user Inbox adds ``workspace_inbox_entry`` the same way (bare user
+    and workspace UUIDs, no cross-plane FK): 85 = 84 + 1, insertable 30 = 29 + 1.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -206,7 +209,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 84
+    assert len(resident) == 85
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -224,7 +227,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 55
-    assert len(resident) - len(blocked) == 29
+    assert len(resident) - len(blocked) == 30
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)
