@@ -658,7 +658,10 @@ export function AdminUserRecoverySection() {
               window.location.assign("/login?account=deletion-pending");
               return;
             }
-            setSuccessNotice(t("userDeletion.success", { email: deleteTarget.email, date: formatVersionTimestamp(purgeAfter) }));
+            setSuccessNotice(t("userDeletion.success", {
+              account: deleteTarget.email ?? (deleteTarget.display_name || deleteTarget.user_id),
+              date: formatVersionTimestamp(purgeAfter),
+            }));
             void loadUsers(submittedQuery, offset);
           }}
         />
@@ -806,7 +809,9 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
   // account, members or not; the administrator approves that list.
   const [approved, setApproved] = useState(false);
   const retentionDays = preview?.retention_days ?? null;
-  const emailConfirmed = target.email !== null && sameAccountEmail(confirmationEmail, target.email);
+  // The account email is typed to confirm; an account without one is
+  // confirmed by its id alone.
+  const emailConfirmed = target.email === null || sameAccountEmail(confirmationEmail, target.email);
   const needsApproval = (preview?.target_workspaces.length ?? 0) > 0;
   // The parent recreates this callback on every render; the effect below
   // must not reload the preview because of that.
@@ -871,7 +876,7 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
       if (requirePassword) await reauthenticate({ current_password: password });
       const result = await deleteUserAccount(
         target.user_id,
-        confirmationEmail,
+        target.email === null ? null : confirmationEmail,
         retentionDays,
         approvedDeletionWorkspaces(preview),
       );
@@ -900,7 +905,7 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
     <AccessibleDialog busy={busy} labelledBy="admin-user-deletion-title" onCancel={onClose}>
       <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
         <h2 id="admin-user-deletion-title">{t("userDeletion.confirmTitle")}</h2>
-        <p>{t("userDeletion.confirmDescription", { email: target.email })}</p>
+        <p>{t("userDeletion.confirmDescription", { account: target.email ?? (target.display_name || target.user_id) })}</p>
         {preview !== null ? <><StatusBanner tone="warning">{t("userDeletion.retention", { count: preview.retention_days })}</StatusBanner><UserDeletionImpact preview={preview} /></> : null}
         {preview !== null && needsApproval ? (
           <label className="checkbox-row" htmlFor="admin-user-deletion-approve">
@@ -912,7 +917,7 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
         {needsVerification ? <StatusBanner tone="info">{t("userDeletion.verifyToLoad")}</StatusBanner> : null}
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
         {error && canReload ? <button className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("userDeletion.reloadPolicy")}</button> : null}
-        {needsVerification ? null : (
+        {needsVerification || target.email === null ? null : (
           <label className="field-stack" htmlFor="admin-user-deletion-email"><span>{t("userDeletion.confirmEmail", { email: target.email })}</span>
             <input id="admin-user-deletion-email" autoComplete="off" disabled={busy} onChange={(event) => setConfirmationEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={confirmationEmail} />
           </label>

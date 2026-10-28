@@ -3898,11 +3898,8 @@ export interface components {
         AdminUserDeletionRequest: {
             /** Approved Workspaces */
             approved_workspaces: components["schemas"]["UserDeletionApprovedWorkspace"][];
-            /**
-             * Confirmation Email
-             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
-             */
-            confirmation_email: string;
+            /** Confirmation Email */
+            confirmation_email?: string | null;
             /** Expected Retention Days */
             expected_retention_days: number;
         };
@@ -9927,13 +9924,10 @@ export interface components {
         SelfUserDeletionRequest: {
             /** Approved Workspaces */
             approved_workspaces: components["schemas"]["UserDeletionApprovedWorkspace"][];
-            /**
-             * Confirmation Email
-             * @description One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.
-             */
-            confirmation_email: string;
+            /** Confirmation Email */
+            confirmation_email?: string | null;
             /** Current Password */
-            current_password: string;
+            current_password?: string | null;
             /** Expected Retention Days */
             expected_retention_days: number;
         };

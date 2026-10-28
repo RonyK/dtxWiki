@@ -507,7 +507,14 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
         headers={"Origin": ORIGIN},
     )
     assert confirmed.status_code == 200, confirmed.text
-    account_proof = client.cookies.get("dtxwiki_session_reauth_account")
+    account_proof = client.cookies.get(
+        "dtxwiki_session_reauth_account", path="/api/v1/auth"
+    )
+    # Self-withdrawal without a password accepts the same proof.
+    assert (
+        client.cookies.get("dtxwiki_session_reauth_account", path="/api/v1/users/me")
+        == account_proof
+    )
     assert client.get("/api/v1/auth/verification").json()["data"]["verified"] is True
     # The cookie path is not the scope boundary: copying an account proof
     # into both admin paths still cannot authorize an admin operation.
@@ -578,7 +585,10 @@ def test_sso_only_confirmation_policy_and_purpose_bound_email_proofs(
         == 200
     )
     # Purpose-specific confirmations coexist rather than overwriting each other.
-    assert client.cookies.get("dtxwiki_session_reauth_account") == account_proof
+    assert (
+        client.cookies.get("dtxwiki_session_reauth_account", path="/api/v1/auth")
+        == account_proof
+    )
     assert client.get("/api/v1/auth/verification").json()["data"]["verified"] is True
     assert (
         client.get("/api/v1/auth/verification", params={"scope": "admin"}).json()[

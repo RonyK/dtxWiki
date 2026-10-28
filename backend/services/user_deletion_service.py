@@ -426,18 +426,49 @@ class UserDeletionService:
             "blocking_workspaces": blocking,
         }
 
+    def _require_self_confirmation(
+        self,
+        user: User,
+        current_password: str | None,
+        verified_session_generation: int | None,
+    ) -> None:
+        # An account with a password confirms with it; one signed in only
+        # through an external provider needs a recent account verification.
+        if user.password_hash is not None:
+            if not self.credential_hasher.verify_password(
+                current_password or "", user.password_hash
+            ):
+                raise UserDeletionError(
+                    "the current password is incorrect",
+                    error_code="invalid_credentials",
+                    status_code=401,
+                )
+        elif verified_session_generation != user.session_generation:
+            raise UserDeletionError(
+                "recent account verification is required",
+                error_code="recent_reauthentication_required",
+                status_code=401,
+            )
+
     def request_deletion(
         self,
         *,
         user_id: UUID,
         actor_user_id: UUID,
-        confirmation_email: str,
+        confirmation_email: str | None = None,
         current_password: str | None = None,
         expected_retention_days: int | None = None,
         admin_request: bool = False,
         expected_actor_session_generation: int | None = None,
         approved_workspaces: list[dict] | None = None,
     ) -> dict:
+        """Hold ``user_id`` for deletion after its retention period.
+
+        ``expected_actor_session_generation`` is the session generation a
+        recent confirmation was verified against: the administrator's, or for
+        self-withdrawal from an account without a password, the account's own.
+        """
+
         with self.session_factory.begin() as session:
             _serialize_lifecycle(session)
             user, actor, owned, admin_ids, granted = self._lock_for_request(
@@ -462,8 +493,14 @@ class UserDeletionService:
                     error_code="invalid_credentials",
                     status_code=401,
                 )
+            # The account's email is typed to confirm; an account without one
+            # is confirmed by its id alone.
             try:
-                confirmed_email = normalize_email(confirmation_email)
+                confirmed_email = (
+                    None
+                    if confirmation_email is None
+                    else normalize_email(confirmation_email)
+                )
             except EmailPolicyError as exc:
                 raise UserDeletionError(
                     "confirmation email does not match the account",
@@ -476,13 +513,9 @@ class UserDeletionService:
                     error_code="user_deletion_email_mismatch",
                     status_code=422,
                 )
-            if not admin_request and not self.credential_hasher.verify_password(
-                current_password or "", user.password_hash
-            ):
-                raise UserDeletionError(
-                    "the current password is incorrect",
-                    error_code="invalid_credentials",
-                    status_code=401,
+            if not admin_request:
+                self._require_self_confirmation(
+                    user, current_password, expected_actor_session_generation
                 )
             if user.status == "deletion_pending":
                 return _record(user)

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -665,6 +666,85 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     assert not store.path_for_key(stored.storage_key).exists()
     recreated = users.add_user(email=target.email, password="replacement-password")
     assert isinstance(recreated.user_id, UUID) and recreated.user_id != target.user_id
+
+
+def test_accounts_without_password_or_email_confirm_deletion(page_service, tmp_path):
+    factory = page_service.session_factory
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        session_secret="user-deletion-integration-secret",
+        session_cookie_secure=False,
+        library_blob_root=str(tmp_path),
+    )
+    app = create_app(settings=settings, page_service=page_service)
+    admin_client = TestClient(app)
+    user_client = TestClient(app)
+    users = UserAdminService(factory, CredentialHasher())
+    admin = users.add_user(email="operator@example.com", password="admin-password")
+    external = users.add_user(email="external@example.com", password="external-pw")
+    other = users.add_user(email="other@example.com", password="other-password")
+    with factory.begin() as session:
+        grant_server_admin(session, admin.user_id)
+    for client, account, password in (
+        (admin_client, admin, "admin-password"),
+        (user_client, external, "external-pw"),
+    ):
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"email": account.email, "password": password},
+            ).status_code
+            == 200
+        )
+    # As if signed up through an external provider: no password, no email.
+    with factory.begin() as session:
+        for user_id in (external.user_id, other.user_id):
+            account = session.get(User, user_id)
+            account.password_hash = None
+            account.email = None
+
+    def approval(client, preview_path):
+        preview = client.get(preview_path).json()["data"]
+        return {
+            "expected_retention_days": preview["retention_days"],
+            "approved_workspaces": [
+                {
+                    "workspace_id": item["workspace_id"],
+                    "other_member_count": item["other_member_count"],
+                }
+                for item in preview["target_workspaces"]
+            ],
+        }
+
+    body = approval(user_client, "/api/v1/users/me/deletion-preview")
+    # Without a password, withdrawal needs a recent account verification, which
+    # an hour-old login no longer is.
+    sessions = app.state.session_service
+    primary = sessions.token_codec.verify_session(
+        user_client.cookies.get("dtxwiki_session")
+    )
+    later = primary.authenticated_at + timedelta(seconds=3600)
+    app.state.session_service = replace(
+        sessions, token_codec=replace(sessions.token_codec, now=lambda: later)
+    )
+    aged = user_client.request("DELETE", "/api/v1/users/me", json=body)
+    assert aged.status_code == 401, aged.text
+    assert aged.json()["error_code"] == "recent_reauthentication_required"
+    app.state.session_service = sessions
+    withdrawn = user_client.request("DELETE", "/api/v1/users/me", json=body)
+    assert withdrawn.status_code == 200, withdrawn.text
+    assert withdrawn.json()["data"]["status"] == "deletion_pending"
+
+    # An administrator deletes an account without an email by its id alone.
+    deleted = admin_client.request(
+        "DELETE",
+        f"/api/v1/admin/users/{other.user_id}",
+        json=approval(
+            admin_client, f"/api/v1/admin/users/{other.user_id}/deletion-preview"
+        ),
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["data"]["status"] == "deletion_pending"
 
 
 def _starter_workspace_id(session, user_id):

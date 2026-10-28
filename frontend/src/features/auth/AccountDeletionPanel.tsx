@@ -17,6 +17,7 @@ import {
 } from "../../shared/auth/identityPolicy";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { UserDeletionImpact } from "../../shared/components/UserDeletionImpact";
+import { IdentityVerificationPanel } from "./IdentityVerificationPanel";
 
 export function AccountDeletionPanel({ email, hasPassword = true }: {
   email: string | null;
@@ -29,6 +30,9 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
   const [preview, setPreview] = useState<UserDeletionPreview | null>(null);
   const [confirmationEmail, setConfirmationEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Without a password, a recent account verification confirms instead.
+  const [verified, setVerified] = useState(false);
+  const [verificationAttempt, setVerificationAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,10 +40,9 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
   const [canReload, setCanReload] = useState(false);
   const [policyAttempt, setPolicyAttempt] = useState(0);
   const retentionDays = preview?.retention_days ?? null;
-  const emailConfirmed = email !== null && sameAccountEmail(confirmationEmail, email);
-  // Withdrawal is confirmed with the account email and its password. An
-  // account signed in only through an external provider has neither yet.
-  const canConfirm = email !== null && hasPassword;
+  // The account email is typed to confirm; an account without one skips it.
+  const emailConfirmed = email === null || sameAccountEmail(confirmationEmail, email);
+  const credentialConfirmed = hasPassword ? password !== "" : verified;
   // Workspaces with other active members must be deleted (or given another
   // admin) in their own Settings first; withdrawal waits for a re-check.
   const blocked = (preview?.blocking_workspaces.length ?? 0) > 0;
@@ -65,22 +68,27 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || preview === null || retentionDays === null || blocked || !emailConfirmed) {
+    if (
+      busy || preview === null || retentionDays === null || blocked || !emailConfirmed
+      || !credentialConfirmed
+    ) {
       return;
     }
-    try {
-      validateAccountPassword(password);
-    } catch (caught) {
-      setError(t((caught as Error).message));
-      return;
+    if (hasPassword) {
+      try {
+        validateAccountPassword(password);
+      } catch (caught) {
+        setError(t((caught as Error).message));
+        return;
+      }
     }
     setBusy(true);
     setError(null);
     setCanReload(false);
     try {
       await withdrawAccount({
-        confirmation_email: confirmationEmail,
-        current_password: password,
+        confirmation_email: email === null ? undefined : confirmationEmail,
+        current_password: hasPassword ? password : undefined,
         expected_retention_days: retentionDays,
         approved_workspaces: approvedDeletionWorkspaces(preview),
       });
@@ -89,6 +97,10 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
       navigate("/login?account=deletion-pending", { replace: true });
     } catch (caught) {
       setPassword("");
+      if (caught instanceof ApiError && caught.body.error_code === "recent_reauthentication_required") {
+        setVerified(false);
+        setVerificationAttempt((value) => value + 1);
+      }
       const localized = caught instanceof ApiError
         ? t(`deletion.errors.${caught.body.error_code}`, { defaultValue: "" })
         : "";
@@ -110,6 +122,7 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
     setOpen(false);
     setConfirmationEmail("");
     setPassword("");
+    setVerified(false);
     setError(null);
   }
 
@@ -122,9 +135,7 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
         <h2 id="account-deletion-title">{t("deletion.title")}</h2>
       </div>
       <p className="account-panel-hint">{t("deletion.description")}</p>
-      {!canConfirm ? (
-        <p className="meta-line">{t("deletion.adminOnly")}</p>
-      ) : open ? (
+      {open ? (
         <form
           className="account-deletion-form"
           onSubmit={onSubmit}
@@ -155,33 +166,48 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
               type="button"
             >{t("deletion.reloadPolicy")}</button>
           ) : null}
-          <label className="field-stack" htmlFor="account-deletion-email">
-            <span>{t("deletion.confirmEmail", { email })}</span>
-            <input
-              id="account-deletion-email"
-              autoComplete="off"
-              disabled={busy}
-              onChange={(event) => setConfirmationEmail(event.target.value)}
-              onKeyDown={preventCompositionSubmit}
-              required
-              type="email"
-              value={confirmationEmail}
-            />
-          </label>
-          <label className="field-stack" htmlFor="account-deletion-password">
-            <span>{t("deletion.password")}</span>
-            <input
-              id="account-deletion-password"
-              autoComplete="current-password"
-              disabled={busy}
-              maxLength={128}
-              onChange={(event) => setPassword(event.target.value)}
-              onKeyDown={preventCompositionSubmit}
-              required
-              type="password"
-              value={password}
-            />
-          </label>
+          {email !== null ? (
+            <label className="field-stack" htmlFor="account-deletion-email">
+              <span>{t("deletion.confirmEmail", { email })}</span>
+              <input
+                id="account-deletion-email"
+                autoComplete="off"
+                disabled={busy}
+                onChange={(event) => setConfirmationEmail(event.target.value)}
+                onKeyDown={preventCompositionSubmit}
+                required
+                type="email"
+                value={confirmationEmail}
+              />
+            </label>
+          ) : null}
+          {hasPassword ? (
+            <label className="field-stack" htmlFor="account-deletion-password">
+              <span>{t("deletion.password")}</span>
+              <input
+                id="account-deletion-password"
+                autoComplete="current-password"
+                disabled={busy}
+                maxLength={128}
+                onChange={(event) => setPassword(event.target.value)}
+                onKeyDown={preventCompositionSubmit}
+                required
+                type="password"
+                value={password}
+              />
+            </label>
+          ) : (
+            <div className="field-stack">
+              <span>{t("deletion.verify")}</span>
+              {/* Its controls are plain buttons, so they never submit this form. */}
+              <IdentityVerificationPanel
+                key={verificationAttempt}
+                scope="account"
+                returnTo="/account"
+                onVerified={() => setVerified(true)}
+              />
+            </div>
+          )}
           <div className="account-actions">
             <button className="icon-button" disabled={busy} onClick={close} type="button">
               {t("deletion.cancel")}
@@ -189,7 +215,8 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
             <button
               className="icon-button danger-action"
               disabled={
-                busy || loading || retentionDays === null || blocked || !emailConfirmed || !password
+                busy || loading || retentionDays === null || blocked || !emailConfirmed
+                || !credentialConfirmed
               }
               type="submit"
             >{t(busy ? "deletion.submitting" : "deletion.submit")}</button>

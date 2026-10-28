@@ -1670,11 +1670,18 @@
             "type": "array"
           },
           "confirmation_email": {
-            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
-            "title": "Confirmation Email",
-            "type": "string",
-            "x-localPart-maxBytes": 64,
-            "x-normalized-maxBytes": 254
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Email"
           },
           "expected_retention_days": {
             "maximum": 36500.0,
@@ -1684,7 +1691,6 @@
           }
         },
         "required": [
-          "confirmation_email",
           "expected_retention_days",
           "approved_workspaces"
         ],
@@ -18322,17 +18328,31 @@
             "type": "array"
           },
           "confirmation_email": {
-            "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
-            "title": "Confirmation Email",
-            "type": "string",
-            "x-localPart-maxBytes": 64,
-            "x-normalized-maxBytes": 254
+            "anyOf": [
+              {
+                "description": "One email address, normalized before validating at most 254 UTF-8 bytes; local part at most 64 UTF-8 bytes.",
+                "type": "string",
+                "x-localPart-maxBytes": 64,
+                "x-normalized-maxBytes": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Email"
           },
           "current_password": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Current Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
           },
           "expected_retention_days": {
             "maximum": 36500.0,
@@ -18342,10 +18362,8 @@
           }
         },
         "required": [
-          "confirmation_email",
           "expected_retention_days",
-          "approved_workspaces",
-          "current_password"
+          "approved_workspaces"
         ],
         "title": "SelfUserDeletionRequest",
         "type": "object"
@@ -27161,7 +27179,8 @@
         "summary": "Delete My Account",
         "tags": [
           "users"
-        ]
+        ],
+        "x-dtxwiki-confirmation-scope": "account"
       }
     },
     "/api/v1/users/me/default-workspace": {

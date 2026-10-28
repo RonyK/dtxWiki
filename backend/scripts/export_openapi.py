@@ -61,7 +61,6 @@ FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS = {
 # using RestActorDep, so FastAPI cannot infer their actual security contract.
 OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
     ("GET", "/api/v1/users/me/deletion-preview"),
-    ("DELETE", "/api/v1/users/me"),
     ("GET", "/api/v1/admin/user-deletion-policy"),
     ("GET", "/api/v1/auth/verification"),
     ("POST", "/api/v1/auth/email-reauthentication/request"),
@@ -117,6 +116,8 @@ OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("POST", "/api/v1/auth/sso/{slug}/link"),
     ("DELETE", "/api/v1/auth/identities/{identity_id}"),
     ("POST", "/api/v1/auth/password/set"),
+    # Accounts without a password confirm their withdrawal this way.
+    ("DELETE", "/api/v1/users/me"),
 }
 
 OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {

@@ -79,8 +79,11 @@ export async function updateUserDeletionPolicy(retentionDays: number) {
 }
 
 export async function withdrawAccount(input: {
-  confirmation_email: string;
-  current_password: string;
+  // Typed account email; omitted for an account without one.
+  confirmation_email?: string;
+  // Required for an account with a password. Without one, a recent account
+  // verification confirms the withdrawal.
+  current_password?: string;
   expected_retention_days: number;
   approved_workspaces: UserDeletionApprovedWorkspace[];
 }) {
@@ -93,7 +96,8 @@ export async function withdrawAccount(input: {
 
 export async function deleteUserAccount(
   userId: string,
-  confirmationEmail: string,
+  // Typed account email; null for an account without one.
+  confirmationEmail: string | null,
   expectedRetentionDays: number,
   approvedWorkspaces: UserDeletionApprovedWorkspace[],
 ) {

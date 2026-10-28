@@ -7,7 +7,10 @@ import { setLocale } from "../../../shared/i18n";
 import { AccountDeletionPanel } from "../AccountDeletionPanel";
 
 const { signOut } = vi.hoisted(() => ({ signOut: vi.fn() }));
-vi.mock("../../../shared/auth/AuthContext", () => ({ useAuth: () => ({ signOut }) }));
+vi.mock("../../../shared/auth/AuthContext", () => ({
+  useAuth: () => ({ signOut }),
+  useOptionalAuth: () => null,
+}));
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -80,6 +83,46 @@ it("waits for shared workspaces and the confirmed retention period before withdr
     { confirmation_email: "User@Example.com", current_password: "current-password", expected_retention_days: 30, approved_workspaces: approved },
     { confirmation_email: "User@Example.com", current_password: "current-password", expected_retention_days: 0, approved_workspaces: approved },
   ]);
+});
+
+it("confirms an account without a password or email through recent verification", async () => {
+  let verified = true;
+  const requests: unknown[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = input.toString();
+    if (url.endsWith("/api/v1/users/me/deletion-preview")) {
+      return json({ data: { retention_days: 30, target_workspaces: [], blocking_workspaces: [] } });
+    }
+    if (url.includes("/api/v1/auth/verification?scope=account")) {
+      return json({
+        data: {
+          scope: "account", mode: verified ? "session" : "sso", verified,
+          reauthenticated_until: verified ? "2026-10-28T01:00:00Z" : null,
+          allowed_methods: ["sso"], providers: [],
+        },
+      });
+    }
+    if (url.endsWith("/api/v1/users/me") && init?.method === "DELETE") {
+      requests.push(JSON.parse(String(init.body)));
+      verified = false;
+      return json({ error_code: "recent_reauthentication_required", message: "expired", request_id: "test", warnings: [] }, 401);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const user = userEvent.setup();
+  render(<MemoryRouter><AccountDeletionPanel email={null} hasPassword={false} /></MemoryRouter>);
+  await user.click(screen.getByRole("button", { name: "Review account deletion" }));
+  expect(await screen.findByText("Your recent sign-in allows this action.")).toBeInTheDocument();
+  expect(screen.queryByLabelText(/to confirm/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Current password for account deletion")).not.toBeInTheDocument();
+  const submit = screen.getByRole("button", { name: "Confirm account deletion" });
+  await waitFor(() => expect(submit).toBeEnabled());
+  await user.click(submit);
+  // An expired confirmation asks for a new one before the next attempt.
+  expect(await screen.findByText("Your confirmation expired. Confirm it’s you again, then retry.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText("Your recent sign-in allows this action.")).not.toBeInTheDocument());
+  expect(submit).toBeDisabled();
+  expect(requests).toEqual([{ expected_retention_days: 30, approved_workspaces: [] }]);
 });
 
 function LocationProbe() {

@@ -81,8 +81,7 @@ export function AdminUserAccountRow({
       icon: <RotateCcw size={15} aria-hidden="true" />,
       onSelect: onRestore,
     });
-  } else if (user.email) {
-    // Deletion is confirmed by typing the account email.
+  } else {
     items.push({
       key: "delete",
       label: t("userDeletion.action"),

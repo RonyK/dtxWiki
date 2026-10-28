@@ -5,7 +5,9 @@
 - Users can delete their account, and server administrators can delete any
   account. Access ends immediately; the account is removed after a
   configurable retention period (default 30 days). Until cleanup starts, an
-  administrator can restore the account to its previous status.
+  administrator can restore the account to its previous status. Accounts
+  without a password confirm withdrawal with a recent sign-in or verification,
+  and the account email is typed to confirm only when the account has one.
 - Workspaces whose only admin is the departing account are held with it:
   closed to members and joins, then deleted with the account. Withdrawal waits
   until such a workspace with other active members is deleted or has another

@@ -2076,7 +2076,7 @@
   "userDeletion": {
     "action": "Delete account",
     "confirmTitle": "Delete this user account?",
-    "confirmDescription": "Access for {{email}} ends immediately after confirmation, including all sessions, API keys and OAuth access.",
+    "confirmDescription": "Access for {{account}} ends immediately after confirmation, including all sessions, API keys and OAuth access.",
     "retention_one": "Account data and the workspaces held with it are retained for {{count}} day, then deleted by the server worker. With 0 days they are eligible for the next cleanup.",
     "retention_other": "Account data and the workspaces held with it are retained for {{count}} days, then deleted by the server worker. With 0 days they are eligible for the next cleanup.",
     "sharedContent": "Documents, submitted drafts and review history in other workspaces remain; the author name is no longer shown after cleanup, and unsubmitted private edits are deleted. Until cleanup, the account can be restored from this list.",
@@ -2086,7 +2086,7 @@
     "submit": "Confirm account deletion",
     "submitting": "Deleting account…",
     "scheduled": "Deletion scheduled after {{date}}",
-    "success": "Account access revoked for {{email}}. Data cleanup is scheduled after {{date}}.",
+    "success": "Account access revoked for {{account}}. Data cleanup is scheduled after {{date}}.",
     "failed": "Could not request account deletion.",
     "reloadPolicy": "Reload deletion details",
     "policy": {

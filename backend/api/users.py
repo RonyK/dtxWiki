@@ -6,8 +6,11 @@ from backend.api.auth import (
     auth_error_response,
     clear_recent_reauthentication_cookie,
     clear_session_cookie,
+    current_session_token,
     current_session_user,
 )
+from backend.api.auth_cookies import account_reauthentication_cookie_name
+from backend.api.auth_dependencies import policy_for_request
 from backend.api.deps import DatabaseProviderDep, RestActorDep, SessionFactoryDep
 from backend.app.container import SINGLE_DATABASE_TOPOLOGY, declared_storage_topology
 from backend.app.errors import build_rest_error_response
@@ -109,12 +112,31 @@ def delete_my_account(
 ):
     try:
         user = current_session_user(request, session_service)
-        consume_auth_slot(client_ip=auth_client_ip(request), email=user.email)
+        consume_auth_slot(client_ip=auth_client_ip(request), user_id=user.user_id)
+        verified_generation = None
+        if request_body.current_password is None:
+            # Without a password, a recent account verification (a fresh
+            # login, SSO, or email) confirms the withdrawal instead.
+            verified_generation = (
+                policy_for_request(request, session_service)
+                .require(
+                    session_token=current_session_token(request),
+                    scope="account",
+                    proof_token=request.cookies.get(
+                        account_reauthentication_cookie_name(
+                            request.app.state.settings
+                        ),
+                        "",
+                    ),
+                )
+                .session_generation
+            )
         result = user_deletion_service(
             session_factory, database_provider
         ).request_deletion(
             user_id=user.user_id,
             actor_user_id=user.user_id,
+            expected_actor_session_generation=verified_generation,
             confirmation_email=request_body.confirmation_email,
             current_password=request_body.current_password,
             expected_retention_days=request_body.expected_retention_days,

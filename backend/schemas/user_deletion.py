@@ -40,7 +40,8 @@ class UserDeletionApprovedWorkspace(BaseModel):
 
 
 class AdminUserDeletionRequest(BaseModel):
-    confirmation_email: EmailInput
+    # The account's email, typed to confirm; omitted for an account without one.
+    confirmation_email: EmailInput | None = None
     expected_retention_days: int = Field(strict=True, ge=0, le=36500)
     # Exactly the target workspaces the preview showed; a mismatch is refused
     # so nothing is held that the confirming person did not see.
@@ -50,7 +51,9 @@ class AdminUserDeletionRequest(BaseModel):
 
 
 class SelfUserDeletionRequest(AdminUserDeletionRequest):
-    current_password: CurrentPasswordInput
+    # Required for an account with a password. An account without one confirms
+    # through recent account verification instead.
+    current_password: CurrentPasswordInput | None = None
 
 
 class UserDeletionData(BaseModel):
