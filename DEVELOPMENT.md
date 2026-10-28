@@ -289,6 +289,9 @@ Playwright browser E2E:
 ```bash
 npm run playwright:install
 npm run test:e2e
+# PR CI와 같은 project 분할. 아래 두 명령은 순서대로 실행합니다.
+npm run test:e2e -- --project=chromium
+npm run test:e2e -- --project=firefox --project=webkit
 # 단일 spec / 패턴 / headed
 npm run test:e2e -- tests/e2e/sprint4_oauth_integrations.spec.ts
 npm run test:e2e -- --grep "OAuth consent revoke"
@@ -307,6 +310,11 @@ DTXWIKI_E2E_PROFILE=exhaustive npm run test:e2e
 # evidence 가 필요할 때만 아래 스위치를 켭니다.
 DTXWIKI_E2E_EVIDENCE=1 npm run test:e2e -- kosweep.spec.ts
 ```
+
+같은 checkout 에서 두 project 구성을 병렬 실행할 때는 `DTXWIKI_BACKEND_PORT` 와
+`--output` 경로를 실행마다 다르게 지정합니다. 기본 `test-results` 는 각 실행이 시작할 때
+정리하므로 공유하면 다른 실행의 산출물이 삭제될 수 있습니다. HTML reporter 를 사용하는
+경우(`CI=true` 또는 `--reporter=html`)에는 `PLAYWRIGHT_HTML_OUTPUT_DIR` 도 각각 지정합니다.
 
 `npm run test:e2e` harness 가 `tests/e2e/prepare_backend_db.py` 로 전용 DB 환경을
 준비하므로 `npx playwright test` 직접 호출은 권장하지 않습니다. 임시/스크래치 spec 은

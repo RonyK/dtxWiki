@@ -165,8 +165,8 @@ export default defineConfig({
     // reset-password test contains the one-time token and the new password
     // (proved by driving context.tracing directly and grepping trace.trace and
     // trace.network). The HTML reporter copies traces and attachment bodies
-    // into playwright-report/data/, and both e2e jobs -- ci.yml's `e2e` and
-    // e2e-browsers.yml's exhaustive matrix -- upload that report `if: always()`
+    // into playwright-report/data/, and both e2e jobs -- ci.yml's `e2e` matrix
+    // and e2e-browsers.yml's `exhaustive` -- upload that report `if: always()`
     // for 14 days. (Named by job rather than by line: the line numbers this
     // comment first carried were already stale one commit later.) Each job
     // scrubs the report with scripts/redact_evidence.sh --dir first;
@@ -207,6 +207,10 @@ export default defineConfig({
     // popups -- and those carry a @cross-browser tag and still run everywhere.
     // DTXWIKI_E2E_PROFILE=exhaustive drops the filter and runs the whole suite
     // on all three, which is what the weekly workflow does.
+    //
+    // PR CI runs these projects in two legs that name them one by one (the
+    // `e2e` matrix in .github/workflows/ci.yml). A project added here also
+    // needs a leg there, or no pull request ever runs it.
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
