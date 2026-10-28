@@ -14,7 +14,7 @@
 - New tables `workspace_inbox_entry` (workspace plane) and `account_inbox_entry`
   (control plane) in revision `175b9664724e`. Downgrade drops them and their rows.
 
-### Fixes
+### Other changes
 
 - Users can delete their account, and server administrators can delete any
   account. Access ends immediately; the account is removed after a
