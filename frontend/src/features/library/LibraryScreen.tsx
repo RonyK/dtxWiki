@@ -53,6 +53,7 @@ import type {
 import {
   createTreeFolder,
   deleteTreeNode,
+  fetchTreeNodeIndexPreview,
   listTreeData,
   readTreeNode,
   moveTreeNode,
@@ -84,6 +85,8 @@ import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { TreeRail } from "../../shared/components/TreeRail";
+import { TreeIndexPreview } from "../../shared/components/TreeIndexPreview";
+import { isSemanticSectionRoot } from "../../shared/components/treeSectionRoot";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import {
@@ -1207,6 +1210,13 @@ export function LibraryScreen() {
           node.id === requestedTargetId || node.target_id === requestedTargetId,
       ) ?? null)
     : null;
+  const indexPreviewNode = selectedNode?.node_kind === "folder"
+    ? selectedNode
+    : !requestedTargetId
+      ? state.tree.find((node) =>
+          node.section === "library" && isSemanticSectionRoot(node, "Library"),
+        )
+      : null;
 
   function pickFiles(parentNodeId: string | null = null) {
     uploadParentNodeIdRef.current = parentNodeId;
@@ -1399,6 +1409,16 @@ export function LibraryScreen() {
               onCancel={cancelUpload}
               onRetry={retryUpload}
             />
+            {!selectedDetail && indexPreviewNode ? (
+              <TreeIndexPreview
+                key={`${state.workspaceId}:${indexPreviewNode.id}`}
+                loadIndexPreview={() =>
+                  fetchTreeNodeIndexPreview(state.workspaceId, indexPreviewNode.id)
+                }
+                nodeId={indexPreviewNode.id}
+                nodes={state.tree}
+              />
+            ) : null}
             {!selectedDetail ? (
               overviewItems.length === 0 ? (
                 <LibraryList

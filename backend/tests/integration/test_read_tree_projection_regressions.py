@@ -1480,7 +1480,7 @@ def test_index_preview_renders_agent_section_folder(page_service, session_factor
     # The UI links the same rows by browser route; refs stay in the text only.
     [entry] = data["entries"]
     assert entry["href"] == f"/workspaces/{workspace_id}/agent/pages/{agent_page_id}"
-    assert f"- dtxwiki://index/agent/{agent_page_id} " in data["markdown"]
+    assert f"](dtxwiki://index/agent/{agent_page_id})" in data["markdown"]
 
 
 # --- A-5 defensive scope: agent lane joins the visibility family ---------------

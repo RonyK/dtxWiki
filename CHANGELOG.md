@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Advance the MCP tool contract to revision 18. Index entries use
+  `[title](dtxwiki://index/<kind>/<id>) — summary`; pass the exact link
+  destination to the scoped read tool, and use read results' `link_markdown`
+  in answers. Clients on earlier revisions must refresh `tools/list` and
+  cached schemas. Index previews offer formatted and exact-source views;
+  titles navigate through matching server-provided workspace routes.
 - Address workspace screens and targets under `/workspaces/<workspace_id>/...`.
   Direct reads, edits, role checks, links, and workspace switching use the URL's
   workspace. Old target-bearing URLs cannot fall back to browser or account

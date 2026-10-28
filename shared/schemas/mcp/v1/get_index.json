@@ -28,7 +28,7 @@
           }
         ],
         "default": null,
-        "description": "Folder to descend into: pass a dtxwiki://index/folder/<id> ref from a line of the previous index unchanged, with the same workspace_id.",
+        "description": "Folder to descend into: pass the exact destination of a dtxwiki://index/folder/<id> Markdown link from the previous index, unchanged and with the same workspace_id.",
         "title": "Node"
       },
       "sections": {

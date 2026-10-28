@@ -211,7 +211,7 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
     )
     # The index carries a ref, not the answer link; read results carry that.
     ref = format_index_ref("context", written.id)
-    assert f"- {ref} MCP \\[Read\\] \\\\Context — Needle body" in index.index
+    assert f"- [MCP \\[Read\\] \\\\Context]({ref}) — Needle body" in index.index
     # Inputs the router normalizes keep the repair hint instead of a bare error.
     misrouted = dispatch(
         "read",
@@ -995,7 +995,7 @@ def test_read_concept_resolves_library_paths(
         actor=actor,
         page_service=page_service,
     )
-    assert f"- {format_index_ref('library', item_id)} A8 Source" in index.index
+    assert f"- [A8 Source]({format_index_ref('library', item_id)})" in index.index
 
 
 def test_read_concept_library_gates_return_not_found(page_service, actor):

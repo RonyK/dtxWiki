@@ -141,10 +141,19 @@
     "autoBadge": "자동 생성",
     "saveError": "폴더 요약을 저장하지 못했습니다.",
     "previewTitle": "인덱스 미리보기",
+    "previewMode": "인덱스 표시 방식",
+    "previewFormatted": "서식",
+    "previewSource": "원문",
+    "previewSourceLabel": "인덱스 원문",
+    "previewHint": "아래에서 에이전트용 인덱스 미리보기를 확인하세요.",
+    "previewSourceHint": "서버가 반환한 인덱스 원문입니다.",
+    "previewFormatFallback": "일부 참조를 안전하게 연결하지 못해 원문을 표시합니다.",
     "previewLoading": "불러오는 중…",
+    "previewUpdated": "인덱스를 갱신했습니다.",
     "previewError": "인덱스 미리보기를 불러오지 못했습니다.",
     "previewRefresh": "새로고침",
-    "previewOverflow": "…외 {{count}}개"
+    "previewOverflow": "…외 {{count}}개",
+    "previewEmpty": "인덱스 항목이 없습니다."
   },
   "favorite": {
     "add": "내 즐겨찾기에 추가",

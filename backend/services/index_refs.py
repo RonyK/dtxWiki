@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from string import punctuation
 from typing import Literal
 from uuid import UUID
 
@@ -20,10 +21,12 @@ _INDEX_REF = re.compile(
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
 )
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
-_MARKUP = re.compile(r"([\\\[\]<>])")
+_MARKDOWN_PUNCTUATION = frozenset(punctuation)
 PAGE_INPUT_REF_GUIDANCE = (
     "Index refs work only in read_concept (context/library) and get_index "
-    "(folder). Pass the page UUID or read_concept's target_id/stable_url."
+    "(folder). Extract the exact destination from the get_index Markdown "
+    "link. For other page tools, pass the page UUID or read_concept's "
+    "target_id/stable_url."
 )
 
 
@@ -56,15 +59,15 @@ def looks_like_index_ref(value: object) -> bool:
 
 
 def index_line(ref: str, title: str, *, suffix: str = "", summary: str = "") -> str:
-    """One index entry; the ref is always the first field of the line.
+    """One index entry with its scoped ref as the Markdown link destination.
 
-    Titles and summaries are untrusted text. Collapsing them to a single line
-    keeps them from starting a new entry, the fixed first field keeps any
-    ref-shaped text inside them from being read as the entry's ref, and
-    escaping link and HTML syntax keeps a Markdown consumer from rendering
-    them as a link or tag.
+    Titles and summaries are untrusted text. Keep them on one line and escape
+    all ASCII punctuation so Markdown syntax in authored content cannot create
+    another link or change the system-generated link destination.
     """
-    line = f"- {ref} {plain_text(title)}{suffix}"
+    if parse_index_ref(ref) is None:
+        raise ValueError("Index links require an exact system index ref")
+    line = f"- [{plain_text(title)}]({ref}){suffix}"
     summary = plain_text(summary)
     return f"{line} — {summary}" if summary else line
 
@@ -75,5 +78,8 @@ def one_line(text: str) -> str:
 
 
 def plain_text(text: str) -> str:
-    """One line with link and HTML syntax escaped, for Markdown consumers."""
-    return _MARKUP.sub(r"\\\1", one_line(text))
+    """One line with ASCII punctuation escaped for Markdown consumers."""
+    return "".join(
+        f"\\{character}" if character in _MARKDOWN_PUNCTUATION else character
+        for character in one_line(text)
+    )

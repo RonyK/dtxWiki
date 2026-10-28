@@ -793,7 +793,8 @@ def _parse_resource_uri(raw_uri: str) -> tuple[UUID, str, str | None]:
         # An index ref has no workspace; only tools with an explicit
         # workspace_id may read it.
         raise ValueError(
-            "index refs are not resources; pass them to get_index (folder) or "
+            "index refs are not resources; extract the exact destination from "
+            "a get_index Markdown link and pass it to get_index (folder) or "
             "read_concept (context/library) with the same workspace_id"
         )
     # Context-page URIs go through the shared resolver first (G0-2) so

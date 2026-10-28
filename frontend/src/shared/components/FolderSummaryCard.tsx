@@ -1,12 +1,11 @@
 import { codePointLength, inputTextError, textInputLimit } from "../lib/inputPolicy";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { FileText, Folder } from "lucide-react";
 
-import { AdvancedSection } from "./AdvancedSection";
 import { StatusPill } from "./StatusPill";
-import type { TreeIndexPreview, TreeNodePayload } from "../api/workspace";
+import { TreeIndexPreview } from "./TreeIndexPreview";
+import type { TreeIndexPreview as TreeIndexPreviewData, TreeNodePayload } from "../api/workspace";
 
 const NAV_SUMMARY_MAX = 160;
 
@@ -44,7 +43,7 @@ export interface FolderSummaryCardProps {
   canEdit?: boolean;
   onSaveNavSummary?: (navSummary: string | null) => Promise<void>;
   /** collapsible index preview: the rows agents read, linked for people. */
-  loadIndexPreview?: () => Promise<TreeIndexPreview>;
+  loadIndexPreview?: () => Promise<TreeIndexPreviewData>;
   footer?: React.ReactNode;
   /**
    * Optional totals for a caller that renders only one paginated child slice.
@@ -78,6 +77,9 @@ export function FolderSummaryCard({
   const folderCount = totalChildCounts?.folders ?? renderedFolderCount;
   const pageCount =
     totalChildCounts?.pages ?? children.length - renderedFolderCount;
+  const generatedFallback = Boolean(
+    !node.nav_summary && fallbackSummary && fallbackSummary === node.nav_summary_auto,
+  );
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(node.nav_summary ?? "");
@@ -88,44 +90,6 @@ export function FolderSummaryCard({
     setDraft(node.nav_summary ?? "");
     setSaveError(null);
   }, [node.id, node.nav_summary]);
-
-  // The preview belongs to the node it was opened for, so selecting another
-  // node closes it and hides an earlier node's rows without an effect.
-  const [openNodeId, setOpenNodeId] = useState<string | null>(null);
-  const previewOpen = openNodeId === node.id;
-  const [previewState, setPreviewState] = useState<{
-    nodeId: string;
-    data: TreeIndexPreview | null;
-    failed: boolean;
-  } | null>(null);
-  const [previewReload, setPreviewReload] = useState(0);
-  // Parent re-renders pass a fresh loadIndexPreview closure every time; read
-  // it through a ref so only opening, a tree change or an explicit refresh
-  // fetches. Each request is numbered and only the latest may apply.
-  const loadPreviewRef = useRef(loadIndexPreview);
-  useEffect(() => {
-    loadPreviewRef.current = loadIndexPreview;
-  });
-  const previewRequestRef = useRef(0);
-  useEffect(() => {
-    const load = loadPreviewRef.current;
-    if (!previewOpen || !load) return;
-    const request = ++previewRequestRef.current;
-    const nodeId = node.id;
-    load().then(
-      (data) => {
-        if (previewRequestRef.current === request) {
-          setPreviewState({ nodeId, data, failed: false });
-        }
-      },
-      () => {
-        if (previewRequestRef.current === request) {
-          setPreviewState({ nodeId, data: null, failed: true });
-        }
-      },
-    );
-  }, [previewOpen, node.id, nodes, previewReload]);
-  const preview = previewState?.nodeId === node.id ? previewState : null;
 
   const isFolder = node.node_kind === "folder";
   const submit = async () => {
@@ -223,10 +187,14 @@ export function FolderSummaryCard({
             t("folder.empty", { defaultValue: "This folder is empty." }))
           ) : fallbackSummary ? (
             <span className="folder-summary-fallback">
-              {fallbackSummary}{" "}
-              <span className="folder-summary-auto-badge">
-                {t("navSummary.autoBadge", { defaultValue: "auto" })}
-              </span>
+              {generatedFallback
+                ? t("navSummary.previewHint")
+                : fallbackSummary}{" "}
+              {!generatedFallback ? (
+                <span className="folder-summary-auto-badge">
+                  {t("navSummary.autoBadge", { defaultValue: "auto" })}
+                </span>
+              ) : null}
             </span>
           ) : (
             t("folder.description", {
@@ -247,60 +215,11 @@ export function FolderSummaryCard({
       )}
 
       {isFolder && loadIndexPreview ? (
-        <AdvancedSection
-          label={t("navSummary.previewTitle", {
-            defaultValue: "Index preview",
-          })}
-          onOpenChange={(open) => setOpenNodeId(open ? node.id : null)}
-          open={previewOpen}
-        >
-          {preview?.failed ? (
-            <p className="form-error">
-              {t("navSummary.previewError", {
-                defaultValue: "Could not load the index preview.",
-              })}
-            </p>
-          ) : !preview?.data ? (
-            <p className="folder-summary-fallback">
-              {t("navSummary.previewLoading", { defaultValue: "Loading…" })}
-            </p>
-          ) : (
-            <div className="folder-index-preview">
-              <ul>
-                {preview.data.entries.map((entry) => (
-                  <li key={`${entry.kind}:${entry.id}`}>
-                    {entry.href ? (
-                      <Link to={entry.href}>
-                        {entry.title}
-                        {entry.kind === "folder" ? "/" : ""}
-                      </Link>
-                    ) : (
-                      entry.title
-                    )}
-                    {entry.kind === "folder" ? ` (${entry.count ?? 0})` : null}
-                    {entry.draft ? <StatusPill compact status="draft" /> : null}
-                    {entry.summary ? ` — ${entry.summary}` : null}
-                  </li>
-                ))}
-              </ul>
-              {preview.data.overflow > 0 ? (
-                <p className="folder-summary-fallback">
-                  {t("navSummary.previewOverflow", {
-                    count: preview.data.overflow,
-                    defaultValue: "…and {{count}} more",
-                  })}
-                </p>
-              ) : null}
-            </div>
-          )}
-          <button
-            className="icon-button"
-            onClick={() => setPreviewReload((count) => count + 1)}
-            type="button"
-          >
-            {t("navSummary.previewRefresh", { defaultValue: "Refresh" })}
-          </button>
-        </AdvancedSection>
+        <TreeIndexPreview
+          loadIndexPreview={loadIndexPreview}
+          nodeId={node.id}
+          nodes={nodes}
+        />
       ) : null}
 
       <div className="folder-child-list">

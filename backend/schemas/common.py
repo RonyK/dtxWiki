@@ -155,7 +155,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        accept those refs unchanged, other page inputs reject them. get_index
 #        with node and Library read_concept results add stable_url and
 #        link_markdown. Refresh tool and result-schema caches.
-MCP_TOOL_CONTRACT_REVISION = 17
+#  18 -- get_index and ref-mode bundle entries use a Markdown link to the
+#        exact internal dtxwiki://index/<kind>/<id> ref, followed by summary.
+#        Ref grammar and tool inputs are unchanged. Refresh tool/schema caches.
+MCP_TOOL_CONTRACT_REVISION = 18
 ERROR_CODES = (
     "not_found",
     "stale_base_version",

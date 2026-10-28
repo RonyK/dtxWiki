@@ -96,7 +96,7 @@ class IndexEntry:
         if self.ref is None:
             return f"- {plain_text(self.title)}"
         if self.kind == "folder":
-            suffix = f"/ ({self.count or 0})"
+            suffix = f" ({self.count or 0})"
         else:
             suffix = " (draft)" if self.draft else ""
         return index_line(self.ref, self.title, suffix=suffix, summary=self.summary)

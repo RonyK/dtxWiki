@@ -1,4 +1,4 @@
-import { CircleHelp, CircleSlash, Copy } from "lucide-react";
+import { CircleHelp, CircleSlash, Copy, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -40,6 +40,8 @@ export function UnavailableReference({
   const panelId = `unavailable-reference-${id}`;
   const descriptionId = `unavailable-reference-description-${id}`;
   const headingId = `unavailable-reference-heading-${id}`;
+  const closeLabel = t("unavailableReference.close");
+  const copyLabel = t("unavailableReference.copy");
 
   useEffect(() => () => {
     if (hoverCloseTimerRef.current !== null) window.clearTimeout(hoverCloseTimerRef.current);
@@ -201,8 +203,19 @@ export function UnavailableReference({
         aria-modal="false"
         style={panelPosition ?? { visibility: "hidden" }}
       >
-        <span className="unavailable-reference__popover-heading" id={headingId}>
-          {infoExplanation}
+        <span className="unavailable-reference__popover-header">
+          <span className="unavailable-reference__popover-heading" id={headingId}>
+            {infoExplanation}
+          </span>
+          <button
+            aria-label={closeLabel}
+            className="unavailable-reference__close"
+            onClick={closeAndRestoreFocus}
+            title={closeLabel}
+            type="button"
+          >
+            <X aria-hidden="true" size={16} />
+          </button>
         </span>
         {!infoOnly ? (
           <span className="unavailable-reference__guidance">
@@ -210,25 +223,29 @@ export function UnavailableReference({
           </span>
         ) : null}
         {reference && !infoOnly ? (
-          <>
-            <code className="unavailable-reference__source" ref={referenceRef}>
+          <span className="unavailable-reference__source-row">
+            <code
+              aria-label={reference}
+              className="unavailable-reference__source"
+              ref={referenceRef}
+              role="region"
+              tabIndex={0 /* eslint-disable-line jsx-a11y/no-noninteractive-tabindex -- Keyboard access to the complete horizontally scrollable locator. */}
+              title={reference}
+            >
               {reference}
             </code>
-            <button className="unavailable-reference__action" onClick={() => void copyReference()} type="button">
+            <button
+              aria-label={copyLabel}
+              className="unavailable-reference__action"
+              onClick={() => void copyReference()}
+              title={copyLabel}
+              type="button"
+            >
               <Copy aria-hidden="true" size={14} />
-              <span>{t("unavailableReference.copy")}</span>
             </button>
-          </>
+          </span>
         ) : null}
         {copyStatus ? <span className="unavailable-reference__status" role="status">{copyStatus}</span> : null}
-        <button
-          aria-label={t("unavailableReference.close")}
-          className="unavailable-reference__close"
-          onClick={closeAndRestoreFocus}
-          type="button"
-        >
-          {t("unavailableReference.close")}
-        </button>
       </span>
     </span>
   );

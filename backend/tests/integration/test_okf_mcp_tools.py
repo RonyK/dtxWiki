@@ -93,6 +93,7 @@ def test_get_index_tool_filters_drafts_by_role(session_factory):
     wsid = _default_workspace_id(session_factory)
     with session_factory.begin() as session:
         pub_id = session.scalar(select(ContextPage.id).where(ContextPage.slug == "pub"))
+        wip_id = session.scalar(select(ContextPage.id).where(ContextPage.slug == "wip"))
         item = LibraryItem(
             workspace_id=wsid,
             connector_type="manual_upload",
@@ -110,9 +111,9 @@ def test_get_index_tool_filters_drafts_by_role(session_factory):
 
     pub_ref = format_index_ref("context", pub_id)
     assert editor.envelope.result_status == "succeeded"
-    assert f"- {pub_ref} Pub" in editor.index
-    assert "Wip (draft)" in editor.index  # editor sees the draft-only concept
-    assert f"- {pub_ref} Pub" in viewer.index
+    assert f"- [Pub]({pub_ref})" in editor.index
+    assert f"- [Wip]({format_index_ref('context', wip_id)}) (draft)" in editor.index
+    assert f"- [Pub]({pub_ref})" in viewer.index
     assert "Wip" not in viewer.index  # viewer does not
 
     # Each emitted ref, passed back unchanged with the same workspace, reads
@@ -121,7 +122,7 @@ def test_get_index_tool_filters_drafts_by_role(session_factory):
     page = read_concept({"workspace_id": str(wsid), "path": pub_ref}, viewer_ctx)
     assert (page.target_id, page.stable_url) == (pub_id, f"/p/{wsid}/{pub_id}")
     library_ref = format_index_ref("library", item_id)
-    assert f"- {library_ref} Source" in viewer.index
+    assert f"- [Source]({library_ref})" in viewer.index
     source = read_concept({"workspace_id": str(wsid), "path": library_ref}, viewer_ctx)
     source_url = f"/workspaces/{wsid}/library/items/{item_id}"
     assert source.link_markdown == f"[Source]({source_url})"

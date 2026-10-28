@@ -192,7 +192,7 @@ def test_small_workspace_stays_flat(session_factory, page_service):
     # flat mode: full catalog sections, no routing folder rows
     assert "## Context" in index
     assert "dtxwiki://index/folder/" not in index
-    assert f"- {format_index_ref('context', page.id)} Flat Page" in index
+    assert f"- [Flat Page]({format_index_ref('context', page.id)})" in index
     assert "/context/flat-page.md" not in index
 
 
@@ -203,9 +203,9 @@ def test_large_workspace_routes_and_descends(large_workspace):
         root_index = build_workspace_index(
             session, workspace_id, actor=None, workspace_slug="default"
         )
-        # routing root: folder line with subtree count; its ref is the first field
+        # routing root: folder Markdown destination and visible subtree count
         folder_ref = re.search(
-            r"^- (dtxwiki://index/folder/[0-9a-f-]{36}) Payments/ \(60\)",
+            r"^- \[Payments\]\((dtxwiki://index/folder/[0-9a-f-]{36})\) \(60\)",
             root_index,
             re.MULTILINE,
         )
@@ -239,17 +239,17 @@ def test_large_workspace_routes_and_descends(large_workspace):
         assert node_index == legacy_node_index
         assert "knowledge index (Payments/)" in node_index
         # 60 children -> exactly 50 entries + "…and 10 more"
-        assert node_index.count("- dtxwiki://index/context/") == 50
+        assert node_index.count("](dtxwiki://index/context/") == 50
         assert "…and 10 more" in node_index
         # entries carry write-time nav descriptions
-        assert "body paragraph." in node_index
+        assert "body paragraph\\." in node_index
         page = session.scalar(
             select(ContextPage).where(
                 ContextPage.workspace_id == workspace_id,
                 ContextPage.slug == "pay-000",
             )
         )
-        assert f"- {format_index_ref('context', page.id)} Payment Doc 000 — " in (
+        assert f"- [Payment Doc 000]({format_index_ref('context', page.id)}) — " in (
             node_index
         )
         # A ref of another kind never selects a folder.
@@ -261,7 +261,7 @@ def test_large_workspace_routes_and_descends(large_workspace):
                 workspace_slug="default",
                 node=format_index_ref("context", page.id),
             )
-        assert "](" not in node_index
+        assert "/workspaces/" not in node_index
 
 
 def test_stored_nav_summary_beats_heuristic(large_workspace_clone):

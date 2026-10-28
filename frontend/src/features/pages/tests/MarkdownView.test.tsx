@@ -590,7 +590,16 @@ describe("MarkdownView", () => {
     const unavailableDialog = screen.getByRole("dialog");
     expect(unavailableDialog).toHaveTextContent("This item may be missing or unavailable to your current account.");
     expect(unavailableDialog).toHaveTextContent("/context/missing.md");
-    expect(within(unavailableDialog).getByRole("button", { name: "Copy authored reference" })).toBeInTheDocument();
+    const copyReference = within(unavailableDialog).getByRole("button", {
+      name: "Copy authored reference",
+    });
+    expect(copyReference).toHaveAttribute("title", "Copy authored reference");
+    expect(copyReference.textContent).toBe("");
+    const closeExplanation = within(unavailableDialog).getByRole("button", {
+      name: "Close explanation",
+    });
+    expect(closeExplanation).toHaveAttribute("title", "Close explanation");
+    expect(closeExplanation.textContent).toBe("");
     await user.keyboard("{Escape}");
     expect(missing).toHaveAttribute("aria-expanded", "false");
     expect(document.activeElement).toBe(missing);

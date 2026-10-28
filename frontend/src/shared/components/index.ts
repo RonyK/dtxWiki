@@ -50,6 +50,7 @@ export * from "./Spinner";
 export * from "./StatusBanner";
 export * from "./StatusPill";
 export * from "./TabbedInspector";
+export * from "./TreeIndexPreview";
 export * from "./TreeNodeActionDialogs";
 export * from "./TreeNodeContextMenu";
 export * from "./TreePickerDropdown";

@@ -186,8 +186,9 @@ class GetIndexInput(MCPConversationInput):
         default=None,
         max_length=512,
         description=(
-            "Folder to descend into: pass a dtxwiki://index/folder/<id> ref from "
-            "a line of the previous index unchanged, with the same workspace_id."
+            "Folder to descend into: pass the exact destination of a "
+            "dtxwiki://index/folder/<id> Markdown link from the previous index, "
+            "unchanged and with the same workspace_id."
         ),
     )
 
@@ -219,8 +220,9 @@ class ReadConceptInput(MCPConversationInput):
         min_length=1,
         max_length=512,
         description=(
-            "A dtxwiki://index/context/<id> or dtxwiki://index/library/<id> ref "
-            "from get_index, unchanged; or a Context page UUID or stable_url; "
+            "The exact destination of a dtxwiki://index/context/<id> or "
+            "dtxwiki://index/library/<id> Markdown link from get_index, "
+            "unchanged; or a Context page UUID or stable_url; "
             "Library reads also accept /library/<id>.md."
         ),
     )
@@ -232,8 +234,9 @@ class ReadConceptInput(MCPConversationInput):
             ref = parse_index_ref(value)
             if ref is None or ref.kind not in {"context", "library"}:
                 raise ValueError(
-                    "read_concept accepts dtxwiki://index/context/<id> and "
-                    "dtxwiki://index/library/<id> refs unchanged; pass folder "
+                    "read_concept accepts the exact destination of "
+                    "dtxwiki://index/context/<id> and dtxwiki://index/library/<id> "
+                    "Markdown links unchanged; pass folder "
                     "refs to get_index.node."
                 )
         elif isinstance(value, str) and value.startswith("/library/"):

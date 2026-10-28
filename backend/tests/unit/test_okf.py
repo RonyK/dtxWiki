@@ -222,9 +222,12 @@ def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
             workspace_slug="default",
         )
 
-    pub_line = f"- {format_index_ref('context', pub.id)} Published"
+    pub_line = f"- [Published]({format_index_ref('context', pub.id)})"
     assert pub_line in editor_index
-    assert f"- {format_index_ref('context', draft.id)} Draftive (draft)" in editor_index
+    assert (
+        f"- [Draftive]({format_index_ref('context', draft.id)}) (draft)"
+        in editor_index
+    )
     # Viewer sees the published concept but not the draft-only one.
     assert pub_line in viewer_index
     assert str(draft.id) not in viewer_index
@@ -329,4 +332,7 @@ def test_draft_capable_actor_reads_draft_head_over_published(session_factory):
 
     assert editor_version.body_md == "Draft body."
     assert viewer_version.body_md == "Published body."
-    assert f"- {format_index_ref('context', page.id)} Dual Head (draft)" in editor_index
+    assert (
+        f"- [Dual Head]({format_index_ref('context', page.id)}) (draft)"
+        in editor_index
+    )
