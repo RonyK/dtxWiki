@@ -2552,6 +2552,41 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   align-content: start;
 }
 
+.account-deletion-panel {
+  grid-column: 1 / -1;
+}
+
+.account-deletion-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.account-deletion-form {
+  display: grid;
+  gap: 12px;
+}
+
+.user-deletion-workspaces ul,
+.admin-user-held-workspaces ul,
+.admin-held-members {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.user-deletion-workspaces li,
+.admin-user-held-workspaces li,
+.admin-held-members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .account-panel-hint {
   margin: 0;
   color: var(--ink-soft);

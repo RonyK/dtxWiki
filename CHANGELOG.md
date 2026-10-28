@@ -16,6 +16,22 @@
 
 ### Fixes
 
+- Users can delete their account, and server administrators can delete any
+  account. Access ends immediately; the account is removed after a
+  configurable retention period (default 30 days). Until cleanup starts, an
+  administrator can restore the account to its previous status. Accounts
+  without a password confirm withdrawal with a recent sign-in or verification,
+  and the account email is typed to confirm only when the account has one.
+- Workspaces whose only admin is the departing account are held with it:
+  closed to members and joins, then deleted with the account. Withdrawal waits
+  until such a workspace with other active members is deleted or has another
+  admin; an administrator deleting an account approves every workspace left
+  without an admin, and can keep one by appointing an active member as admin.
+  Changes routed to an inactive recipient go to the workspace owners. Existing
+  claim lifetimes are unchanged.
+- Account cleanup preserves documents, submitted drafts, attachments, and
+  conversation history in other workspaces, and deletes unsubmitted private
+  edits.
 - Show email sign-in before external providers. User search groups its controls
   and continuous account rows in one Settings panel, with ID copying beneath the
   email and recovery in an account menu. Workspace members

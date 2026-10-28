@@ -72,9 +72,9 @@ def list_workspace_member_candidates(
             limit=limit,
         )
     except WorkspaceMembershipNotFoundError as exc:
-        return no_store_response(_membership_error(exc, 404))
+        return no_store_response(membership_error_response(exc, 404))
     except WorkspaceMembershipForbiddenError as exc:
-        return no_store_response(_membership_error(exc, 403))
+        return no_store_response(membership_error_response(exc, 403))
     return {
         "data": {
             "enabled": result.enabled,
@@ -123,17 +123,17 @@ def list_workspace_members(
             cursor=cursor,
         )
     except WorkspaceMembershipNotFoundError as exc:
-        return _membership_error(exc, 404)
+        return membership_error_response(exc, 404)
     except WorkspaceMembershipForbiddenError as exc:
-        return _membership_error(exc, 403)
+        return membership_error_response(exc, 403)
     except WorkspaceMembershipValidationError as exc:
-        return _membership_error(exc, 422)
+        return membership_error_response(exc, 422)
     except WorkspaceMemberCursorInvalidError as exc:
-        return _membership_error(exc, 422)
+        return membership_error_response(exc, 422)
     return {
         "data": {
             "items": [
-                _member_payload(member, actor_user_id=actor.user_id)
+                member_payload(member, actor_user_id=actor.user_id)
                 for member in page.items
             ],
             "total": page.total,
@@ -172,9 +172,9 @@ def add_workspace_member(
             confirm_first_share=request_body.confirm_first_share,
         )
     except WorkspaceMembershipNotFoundError as exc:
-        return _membership_error(exc, 404)
+        return membership_error_response(exc, 404)
     except WorkspaceMembershipForbiddenError as exc:
-        return _membership_error(exc, 403)
+        return membership_error_response(exc, 403)
     except EmailInputPolicyError as exc:
         return build_rest_error_response(
             error_code=exc.error_code, message=str(exc), status_code=422
@@ -186,11 +186,11 @@ def add_workspace_member(
             status_code=404,
         )
     except WorkspaceMembershipConflictError as exc:
-        return _membership_error(exc, 409)
+        return membership_error_response(exc, 409)
     except WorkspaceMembershipValidationError as exc:
-        return _membership_error(exc, 422)
+        return membership_error_response(exc, 422)
     response.status_code = 201 if result.created else 200
-    return {"data": _mutation_payload(result, actor_user_id=actor.user_id)}
+    return {"data": mutation_payload(result, actor_user_id=actor.user_id)}
 
 
 @router.patch(
@@ -215,14 +215,14 @@ def update_workspace_member_role(
             role=request_body.role,
         )
     except WorkspaceMembershipNotFoundError as exc:
-        return _membership_error(exc, 404)
+        return membership_error_response(exc, 404)
     except WorkspaceMembershipForbiddenError as exc:
-        return _membership_error(exc, 403)
+        return membership_error_response(exc, 403)
     except WorkspaceMembershipConflictError as exc:
-        return _membership_error(exc, 409)
+        return membership_error_response(exc, 409)
     except WorkspaceMembershipValidationError as exc:
-        return _membership_error(exc, 422)
-    return {"data": _mutation_payload(result, actor_user_id=actor.user_id)}
+        return membership_error_response(exc, 422)
+    return {"data": mutation_payload(result, actor_user_id=actor.user_id)}
 
 
 @router.delete(
@@ -245,11 +245,11 @@ def remove_workspace_member(
             target_user_id=user_id,
         )
     except WorkspaceMembershipNotFoundError as exc:
-        return _membership_error(exc, 404)
+        return membership_error_response(exc, 404)
     except WorkspaceMembershipForbiddenError as exc:
-        return _membership_error(exc, 403)
+        return membership_error_response(exc, 403)
     except WorkspaceMembershipConflictError as exc:
-        return _membership_error(exc, 409)
+        return membership_error_response(exc, 409)
     return {
         "data": {
             "removed_user_id": result.removed_user_id,
@@ -261,7 +261,7 @@ def remove_workspace_member(
     }
 
 
-def _member_payload(
+def member_payload(
     member: WorkspaceMemberView,
     *,
     actor_user_id: UUID,
@@ -277,13 +277,13 @@ def _member_payload(
     }
 
 
-def _mutation_payload(
+def mutation_payload(
     result: WorkspaceMemberMutation,
     *,
     actor_user_id: UUID,
 ) -> dict:
     return {
-        "member": _member_payload(result.member, actor_user_id=actor_user_id),
+        "member": member_payload(result.member, actor_user_id=actor_user_id),
         "created": result.created,
         "first_share": result.first_share,
         "first_share_warning_code": (
@@ -293,7 +293,7 @@ def _mutation_payload(
     }
 
 
-def _membership_error(exc: Exception, status_code: int):
+def membership_error_response(exc: Exception, status_code: int):
     return build_rest_error_response(
         error_code=getattr(exc, "error_code", "workspace_membership_error"),
         message=str(exc),

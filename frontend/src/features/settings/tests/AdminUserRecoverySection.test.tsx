@@ -30,6 +30,119 @@ describe("AdminUserRecoverySection", () => {
     setLocale("en", { persist: false });
   });
 
+  it("requires the target email and fresh admin verification before scheduling or restoring deletion", async () => {
+    const mutations: string[] = [];
+    let deleted = false;
+    let previewRequests = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/auth/capabilities`) return jsonResponse(authCapabilities());
+      if (url === `${BASE}/api/v1/auth/reauthenticate`) {
+        mutations.push("reauthenticate");
+        return jsonResponse(reauthResponse());
+      }
+      if (url === `${BASE}/api/v1/admin/users/${USER_ID}/deletion-preview`) {
+        previewRequests += 1;
+        // Verification expired while the search results stayed on screen.
+        if (previewRequests === 1) {
+          return jsonResponse({ error_code: "recent_reauthentication_required", message: "verify again", request_id: "test", warnings: [] }, 401);
+        }
+        return jsonResponse({
+          data: {
+            retention_days: 30,
+            target_workspaces: [
+              { workspace_id: "ws-personal", title: "Alex notes", other_member_count: 0 },
+              { workspace_id: "ws-team", title: "Team handbook", other_member_count: 3 },
+            ],
+            blocking_workspaces: [],
+          },
+        });
+      }
+      if (url === `${BASE}/api/v1/admin/workspaces/ws-team/members?limit=100`) {
+        return jsonResponse({
+          data: {
+            items: [{ user_id: "member-1", email: "sam@example.com", display_name: "Sam Lee", status: "active", role: "editor" }],
+          },
+        });
+      }
+      if (url === `${BASE}/api/v1/admin/workspaces/ws-team/members/member-1` && init?.method === "PATCH") {
+        mutations.push("appoint");
+        expect(JSON.parse(String(init.body))).toEqual({ role: "owner" });
+        return jsonResponse({ data: {} });
+      }
+      if (url.startsWith(`${BASE}/api/v1/admin/users?`)) {
+        const response = userSearchResponse(true);
+        if (deleted) {
+          Object.assign(response.data.items[0], {
+            status: "deletion_pending",
+            purge_after: "2026-11-26T00:00:00Z",
+            deletion_failure_count: 2,
+            deletion_last_error: "user_deletion_blob_purge_failed",
+            workspaces: [
+              { workspace_id: "ws-team", slug: "team", title: "Team handbook", role: "owner", deletion_held: true },
+            ],
+          });
+        }
+        return jsonResponse(response);
+      }
+      if (url === `${BASE}/api/v1/admin/users/${USER_ID}/deletion-restore` && init?.method === "POST") {
+        mutations.push("restore");
+        deleted = false;
+        return jsonResponse({ data: { user_id: USER_ID, status: "active" } });
+      }
+      if (url === `${BASE}/api/v1/admin/users/${USER_ID}` && init?.method === "DELETE") {
+        mutations.push("delete");
+        expect(JSON.parse(String(init.body))).toEqual({
+          confirmation_email: "alex@example.com",
+          expected_retention_days: 30,
+          approved_workspaces: [
+            { workspace_id: "ws-personal", other_member_count: 0 },
+            { workspace_id: "ws-team", other_member_count: 3 },
+          ],
+        });
+        deleted = true;
+        return jsonResponse({ data: { user_id: USER_ID, status: "deletion_pending", requested_at: "2026-10-27T00:00:00Z", purge_after: "2026-11-26T00:00:00Z", retention_days: 30 } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const user = userEvent.setup();
+    render(<AdminUserRecoverySection />);
+    await searchForUser(user, "alex@example.com");
+    await chooseAccountAction(user, "Delete account");
+    const dialog = await screen.findByRole("dialog", { name: "Delete this user account?" });
+    const scoped = within(dialog);
+    expect(await scoped.findByText(/recent verification expired/)).toBeInTheDocument();
+    await user.type(scoped.getByLabelText("Your current password"), "admin-current-password");
+    await user.click(scoped.getByRole("button", { name: "Verify and load details" }));
+    expect(await scoped.findByText(/retained for 30 days/)).toBeInTheDocument();
+    await user.clear(scoped.getByLabelText("Your current password"));
+    expect(scoped.getByText("Team handbook (3 other members)")).toBeInTheDocument();
+    await user.type(scoped.getByLabelText("Your current password"), "admin-current-password");
+    await user.type(scoped.getByLabelText("Type alex@example.com to confirm"), "alex@example.com");
+    // Workspaces left without an admin are deleted with the account only once
+    // the administrator approves them.
+    expect(scoped.getByRole("button", { name: "Confirm account deletion" })).toBeDisabled();
+    await user.click(scoped.getByLabelText(/Delete these 2 workspaces with the account/));
+    await user.click(scoped.getByRole("button", { name: "Confirm account deletion" }));
+    expect(await screen.findByText("Deletion pending")).toBeInTheDocument();
+    expect(screen.getByText("Cleanup failed: user_deletion_blob_purge_failed (2 attempts)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Appoint an admin" }));
+    const heldDialog = within(await screen.findByRole("dialog", { name: "Keep “Team handbook”" }));
+    await user.click(await heldDialog.findByRole("button", { name: "Make admin" }));
+    expect(await screen.findByText("“Team handbook” has a new admin and is no longer deleted with the account.")).toBeInTheDocument();
+    await openAccountMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Delete account" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Restore account" }));
+    const restoreDialog = within(await screen.findByRole("dialog", { name: "Restore this account?" }));
+    await user.type(restoreDialog.getByLabelText("Your current password"), "admin-current-password");
+    await user.click(restoreDialog.getByRole("button", { name: "Restore account" }));
+    expect(await screen.findByText("Account restored for alex@example.com.")).toBeInTheDocument();
+    await openAccountMenu(user);
+    expect(await screen.findByRole("menuitem", { name: "Delete account" })).toBeEnabled();
+    expect(mutations).toEqual(["reauthenticate", "reauthenticate", "reauthenticate", "delete", "appoint", "reauthenticate", "restore"]);
+    expect(fetchMock.mock.calls.some(([input, init]) => input.toString().endsWith("/password-reset") && init?.method === "POST")).toBe(false);
+  });
+
   it("shows shared progress only while checking server recovery availability", async () => {
     let rejectCapabilities!: (reason: Error) => void;
     const pendingCapabilities = new Promise<Response>((_resolve, reject) => {

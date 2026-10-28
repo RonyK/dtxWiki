@@ -57,6 +57,7 @@
     "requester": "To requester",
     "chat_owner": "To chat owner",
     "workspace_editors": "To editors",
+    "workspace_owners": "To workspace owners (original recipient inactive)",
     "claimed": "Claimed"
   },
   "rail": {

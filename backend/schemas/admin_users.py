@@ -17,6 +17,8 @@ class AdminUserWorkspaceData(BaseModel):
     slug: str
     title: str
     role: Literal["viewer", "editor", "owner"]
+    # Held with this user's pending deletion; appoint an admin to keep it.
+    deletion_held: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +55,10 @@ class AdminUserData(BaseModel):
     display_name: str
     status: str
     email_verified_at: datetime | None = None
+    deletion_requested_at: datetime | None = None
+    purge_after: datetime | None = None
+    deletion_failure_count: int | None = None
+    deletion_last_error: str | None = None
     workspaces: list[AdminUserWorkspaceData]
     identities: list[AdminUserIdentityData]
 

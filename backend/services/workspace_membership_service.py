@@ -19,6 +19,7 @@ from backend.domain.input_policy import (
 from backend.models.auth_identity import UserIdentity
 from backend.models.base import utc_now
 from backend.models.normalized_keys import normalize_search_key
+from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.models.workspace_join import WorkspaceJoinRequest
@@ -299,6 +300,7 @@ class WorkspaceMembershipService:
         query: str | None = None,
         role: str | None = None,
         cursor: str | None = None,
+        server_admin: bool = False,
     ) -> WorkspaceMemberPage:
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
@@ -328,7 +330,13 @@ class WorkspaceMembershipService:
                 workspace_id=workspace_id,
                 workspace_slug=workspace_slug,
             )
-            self._require_owner(session, workspace.id, actor_user_id)
+            self._require_manager(
+                session,
+                workspace,
+                actor_user_id,
+                server_admin=server_admin,
+                for_update=False,
+            )
             predicates = [WorkspaceMembership.workspace_id == workspace.id]
             if normalized_role is not None:
                 predicates.append(WorkspaceMembership.role == normalized_role)
@@ -448,6 +456,7 @@ class WorkspaceMembershipService:
         confirm_first_share: bool = False,
         workspace_id: UUID | None = None,
         workspace_slug: str | None = None,
+        server_admin: bool = False,
     ) -> WorkspaceMemberMutation:
         selector = _target_user_selector(email=email, user_id=user_id)
         normalized_role = _normalize_requested_role(role)
@@ -458,7 +467,9 @@ class WorkspaceMembershipService:
                 workspace_slug=workspace_slug,
                 for_update=True,
             )
-            self._require_owner(session, workspace.id, actor_user_id)
+            self._require_manager(
+                session, workspace, actor_user_id, server_admin=server_admin
+            )
             user = session.scalar(select(User).where(selector).with_for_update())
             if user is None:
                 raise InvalidCredentialsError("user not found")
@@ -530,6 +541,7 @@ class WorkspaceMembershipService:
         workspace_id: UUID,
         target_user_id: UUID,
         role: str,
+        server_admin: bool = False,
     ) -> WorkspaceMemberMutation:
         normalized_role = _normalize_requested_role(role)
         with self.session_factory.begin() as session:
@@ -538,7 +550,9 @@ class WorkspaceMembershipService:
                 workspace_id=workspace_id,
                 for_update=True,
             )
-            self._require_owner(session, workspace.id, actor_user_id)
+            self._require_manager(
+                session, workspace, actor_user_id, server_admin=server_admin
+            )
             target, membership = self._require_member(
                 session, workspace.id, target_user_id, for_update=True
             )
@@ -734,6 +748,42 @@ class WorkspaceMembershipService:
             raise WorkspaceMembershipNotFoundError("workspace not found")
         return workspace
 
+    def _require_manager(
+        self,
+        session: Session,
+        workspace: Workspace,
+        actor_user_id: UUID | None,
+        *,
+        server_admin: bool,
+        for_update: bool = True,
+    ) -> None:
+        if not server_admin:
+            self._require_owner(session, workspace.id, actor_user_id)
+            return
+        # A server administrator manages only a workspace held for an
+        # account's deletion, to appoint the admin that reopens it. Ordinary
+        # workspaces stay owner-managed. Users, then grants, after the
+        # workspace row -- the order account deletion and recovery use.
+        actor_query = select(User).where(User.id == actor_user_id)
+        grant_query = select(ServerAdmin.user_id).where(
+            ServerAdmin.user_id == actor_user_id
+        )
+        if for_update:
+            actor_query = actor_query.with_for_update()
+            grant_query = grant_query.with_for_update()
+        actor = session.scalar(actor_query) if actor_user_id is not None else None
+        granted = session.scalar(grant_query) if actor is not None else None
+        if actor is None or actor.status != "active" or granted is None:
+            raise WorkspaceMembershipForbiddenError(
+                "an active server administrator is required",
+                error_code="server_admin_required",
+            )
+        if workspace.account_deletion_user_id is None:
+            raise WorkspaceMembershipConflictError(
+                "only a workspace held for account deletion is managed here",
+                error_code="workspace_not_deletion_pending",
+            )
+
     def _require_owner(
         self,
         session: Session,
@@ -903,6 +953,12 @@ class WorkspaceMembershipService:
             .limit(1)
         )
         workspace.owner_user_id = owner_id
+        if workspace.account_deletion_user_id is not None and owner_id is not None:
+            # Every path that leaves an active admin ends here, so this is
+            # where a workspace held for account deletion is reopened.
+            owner = session.get(User, owner_id)
+            if owner is not None and owner.status == "active":
+                workspace.account_deletion_user_id = None
         session.flush()
 
     @staticmethod

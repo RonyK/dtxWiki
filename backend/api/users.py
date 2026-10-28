@@ -1,11 +1,33 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 
-from backend.api.deps import RestActorDep, SessionFactoryDep
+from backend.api.auth import (
+    SessionServiceDep,
+    auth_client_ip,
+    auth_error_response,
+    clear_recent_reauthentication_cookie,
+    clear_session_cookie,
+    current_session_token,
+    current_session_user,
+)
+from backend.api.auth_cookies import account_reauthentication_cookie_name
+from backend.api.auth_dependencies import policy_for_request
+from backend.api.deps import DatabaseProviderDep, RestActorDep, SessionFactoryDep
+from backend.app.container import SINGLE_DATABASE_TOPOLOGY, declared_storage_topology
 from backend.app.errors import build_rest_error_response
 from backend.schemas.common import RESTErrorBody
 from backend.schemas.user import (
     DefaultWorkspaceUpdateRequest,
     DefaultWorkspaceUpdateResponse,
+)
+from backend.schemas.user_deletion import (
+    SelfUserDeletionRequest,
+    UserDeletionPreviewResponse,
+    UserDeletionResponse,
+)
+from backend.services.session_service import SessionServiceError, consume_auth_slot
+from backend.services.user_deletion_service import (
+    UserDeletionError,
+    UserDeletionService,
 )
 from backend.services.workspace_write import (
     DefaultWorkspaceMembershipMissingError,
@@ -22,6 +44,114 @@ REST_ERROR_RESPONSES = {
     409: {"model": RESTErrorBody},
     422: {"model": RESTErrorBody},
 }
+USER_DELETION_ERROR_RESPONSES = {
+    **REST_ERROR_RESPONSES,
+    429: {"model": RESTErrorBody},
+    503: {"model": RESTErrorBody},
+}
+
+
+def user_deletion_service(session_factory, database_provider) -> UserDeletionService:
+    # Account cleanup crosses identity and workspace tables in one transaction.
+    # A future physically split provider must supply its own orchestration.
+    if declared_storage_topology(database_provider) != SINGLE_DATABASE_TOPOLOGY:
+        raise UserDeletionError(
+            "Account deletion is unavailable for this storage topology.",
+            error_code="user_deletion_unavailable",
+            status_code=503,
+        )
+    return UserDeletionService(session_factory=session_factory)
+
+
+def user_deletion_error_response(exc: UserDeletionError):
+    return build_rest_error_response(
+        error_code=exc.error_code,
+        message=str(exc),
+        status_code=exc.status_code,
+        extra=exc.details,
+    )
+
+
+@router.get(
+    "/me/deletion-preview",
+    response_model=UserDeletionPreviewResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def my_deletion_preview(
+    request: Request,
+    response: Response,
+    session_service: SessionServiceDep,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+):
+    try:
+        user = current_session_user(request, session_service)
+        preview = user_deletion_service(
+            session_factory, database_provider
+        ).deletion_preview(user_id=user.user_id)
+    except SessionServiceError as exc:
+        return auth_error_response(exc)
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": preview}
+
+
+@router.delete(
+    "/me",
+    response_model=UserDeletionResponse,
+    responses=USER_DELETION_ERROR_RESPONSES,
+)
+def delete_my_account(
+    request_body: SelfUserDeletionRequest,
+    request: Request,
+    response: Response,
+    session_service: SessionServiceDep,
+    session_factory: SessionFactoryDep,
+    database_provider: DatabaseProviderDep,
+):
+    try:
+        user = current_session_user(request, session_service)
+        consume_auth_slot(client_ip=auth_client_ip(request), user_id=user.user_id)
+        verified_generation = None
+        if request_body.current_password is None:
+            # Without a password, a recent account verification (a fresh
+            # login, SSO, or email) confirms the withdrawal instead.
+            verified_generation = (
+                policy_for_request(request, session_service)
+                .require(
+                    session_token=current_session_token(request),
+                    scope="account",
+                    proof_token=request.cookies.get(
+                        account_reauthentication_cookie_name(
+                            request.app.state.settings
+                        ),
+                        "",
+                    ),
+                )
+                .session_generation
+            )
+        result = user_deletion_service(
+            session_factory, database_provider
+        ).request_deletion(
+            user_id=user.user_id,
+            actor_user_id=user.user_id,
+            expected_actor_session_generation=verified_generation,
+            confirmation_email=request_body.confirmation_email,
+            current_password=request_body.current_password,
+            expected_retention_days=request_body.expected_retention_days,
+            approved_workspaces=[
+                item.model_dump() for item in request_body.approved_workspaces
+            ],
+        )
+    except SessionServiceError as exc:
+        return auth_error_response(exc)
+    except UserDeletionError as exc:
+        return user_deletion_error_response(exc)
+    clear_session_cookie(response, request.app.state.settings, request)
+    clear_recent_reauthentication_cookie(response, request.app.state.settings, request)
+    response.headers["Cache-Control"] = "no-store"
+    return {"data": result}
 
 
 @router.patch(

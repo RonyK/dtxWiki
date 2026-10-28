@@ -60,6 +60,8 @@ FASTAPI_DEFAULT_HTTP_RESPONSE_DESCRIPTIONS = {
 # These handlers authenticate by reading the session cookie directly instead of
 # using RestActorDep, so FastAPI cannot infer their actual security contract.
 OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
+    ("GET", "/api/v1/users/me/deletion-preview"),
+    ("GET", "/api/v1/admin/user-deletion-policy"),
     ("GET", "/api/v1/auth/verification"),
     ("POST", "/api/v1/auth/email-reauthentication/request"),
     ("GET", "/api/v1/auth/identities"),
@@ -95,6 +97,13 @@ OPENAPI_SESSION_COOKIE_ROUTES: set[RouteKey] = {
 }
 
 OPENAPI_RECENT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
+    ("PATCH", "/api/v1/admin/user-deletion-policy"),
+    ("DELETE", "/api/v1/admin/users/{user_id}"),
+    ("GET", "/api/v1/admin/users/{user_id}/deletion-preview"),
+    ("POST", "/api/v1/admin/users/{user_id}/deletion-restore"),
+    ("GET", "/api/v1/admin/workspaces/{workspace_id}/members"),
+    ("POST", "/api/v1/admin/workspaces/{workspace_id}/members"),
+    ("PATCH", "/api/v1/admin/workspaces/{workspace_id}/members/{user_id}"),
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users/{user_id}/password-reset"),
     ("POST", "/api/v1/admin/users/{user_id}/identities/rebind"),
@@ -107,6 +116,8 @@ OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("POST", "/api/v1/auth/sso/{slug}/link"),
     ("DELETE", "/api/v1/auth/identities/{identity_id}"),
     ("POST", "/api/v1/auth/password/set"),
+    # Accounts without a password confirm their withdrawal this way.
+    ("DELETE", "/api/v1/users/me"),
 }
 
 OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {

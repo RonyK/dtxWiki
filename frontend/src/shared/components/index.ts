@@ -54,6 +54,7 @@ export * from "./TreeNodeActionDialogs";
 export * from "./TreeNodeContextMenu";
 export * from "./TreePickerDropdown";
 export * from "./TreeRail";
+export * from "./UserDeletionImpact";
 export * from "./useTreeRowTooltip";
 export * from "./WorkspaceLayout";
 export * from "./WorkspacePanelChrome";

@@ -1,8 +1,12 @@
-import { Copy, FileText, Link2, Mail } from "lucide-react";
+import { Copy, FileText, Link2, Mail, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AdminPasswordResetDelivery, AdminUser } from "../../shared/api/adminUsers";
+import type {
+  AdminPasswordResetDelivery,
+  AdminUser,
+  AdminUserWorkspace,
+} from "../../shared/api/adminUsers";
 import { ActionMenu, type ActionMenuItem } from "../../shared/components/ActionMenu";
 import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
 import { StatusPill } from "../../shared/components/StatusPill";
@@ -14,18 +18,32 @@ type RecoveryAvailability = {
   linkReady: boolean;
 };
 
-export function AdminUserAccountRow({ user, recovery, onDetails, onRebind, onRecover }: {
+export function AdminUserAccountRow({
+  user,
+  recovery,
+  onDetails,
+  onRebind,
+  onRecover,
+  onDelete,
+  onRestore,
+  onManageHeld,
+}: {
   user: AdminUser;
   recovery: RecoveryAvailability;
   onDetails: () => void;
   onRebind: () => void;
   onRecover: (delivery: AdminPasswordResetDelivery) => void;
+  onDelete: () => void;
+  onRestore: () => void;
+  onManageHeld: (workspace: AdminUserWorkspace) => void;
 }) {
   const { t } = useTranslation("settings");
   const [copyStatus, setCopyStatus] = useState("");
   const headingId = useId();
   const name = user.display_name || user.email || user.user_id;
   const active = user.status === "active";
+  const pending = user.status === "deletion_pending";
+  const held = user.workspaces.filter((workspace) => workspace.deletion_held);
   const items: ActionMenuItem[] = [{
     key: "details",
     label: t("userRecovery.accountCard.details"),
@@ -56,6 +74,22 @@ export function AdminUserAccountRow({ user, recovery, onDetails, onRebind, onRec
     });
   }
 
+  if (pending) {
+    items.push({
+      key: "restore",
+      label: t("userDeletion.restore"),
+      icon: <RotateCcw size={15} aria-hidden="true" />,
+      onSelect: onRestore,
+    });
+  } else {
+    items.push({
+      key: "delete",
+      label: t("userDeletion.action"),
+      icon: <Trash2 size={15} aria-hidden="true" />,
+      onSelect: onDelete,
+    });
+  }
+
   async function copyUserId() {
     const copied = await writeTextToClipboard(user.user_id);
     setCopyStatus(t(copied
@@ -68,7 +102,10 @@ export function AdminUserAccountRow({ user, recovery, onDetails, onRebind, onRec
       <div className="admin-account-profile">
         <header className="admin-account-heading">
           <h4 id={headingId}>{name}</h4>
-          <StatusPill compact label={t(`userRecovery.status.${active ? "active" : "inactive"}`)} status={user.status} tone={active ? "ok" : "muted"} />
+          <StatusPill compact
+            label={pending ? t("userDeletion.pending") : t(`userRecovery.status.${active ? "active" : "inactive"}`)}
+            status={user.status}
+            tone={active ? "ok" : pending ? "warn" : "muted"} />
         </header>
         <div className="admin-account-email">
           <span>{user.email ?? t("userRecovery.accountCard.noEmail")}</span>
@@ -104,6 +141,28 @@ export function AdminUserAccountRow({ user, recovery, onDetails, onRebind, onRec
             </span>
           )) : t("userRecovery.noWorkspaces")}</dd>
         </div>
+        {pending && user.purge_after ? <div>
+          <dt>{t("userDeletion.scheduledLabel")}</dt>
+          <dd>{t("userDeletion.scheduled", { date: formatVersionTimestamp(user.purge_after) })}</dd>
+        </div> : null}
+        {pending && user.deletion_failure_count ? <div>
+          <dt><ShieldAlert size={13} aria-hidden="true" /> {t("userDeletion.cleanupFailedLabel")}</dt>
+          <dd>{t("userDeletion.cleanupFailed", {
+            count: user.deletion_failure_count,
+            code: user.deletion_last_error ?? "",
+          })}</dd>
+        </div> : null}
+        {pending && held.length ? <div className="admin-user-held-workspaces">
+          <dt>{t("userDeletion.heldWorkspaces")}</dt>
+          <dd><ul>{held.map((workspace) => (
+            <li key={workspace.workspace_id}>
+              <span>{workspace.title}</span>
+              <button className="icon-button" onClick={() => onManageHeld(workspace)} type="button">
+                {t("userDeletion.manageHeld")}
+              </button>
+            </li>
+          ))}</ul></dd>
+        </div> : null}
       </dl>
       <ActionMenu label={t("userRecovery.accountCard.actions", { name })} items={items} />
     </article>

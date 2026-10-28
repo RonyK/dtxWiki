@@ -1,7 +1,7 @@
 """Add per-user Inbox entries for workspaces and accounts.
 
 Revision ID: 175b9664724e
-Revises: 333a67e22cd7
+Revises: eb86fdacb1bb
 Create Date: 2026-10-28 14:23:11.150546
 
 What this adds
@@ -33,7 +33,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "175b9664724e"
-down_revision = "333a67e22cd7"
+down_revision = "eb86fdacb1bb"
 branch_labels = None
 depends_on = None
 

@@ -21,6 +21,8 @@ class AdminUserWorkspace:
     slug: str
     title: str
     role: str
+    # Held with this user's pending account deletion.
+    deletion_held: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,9 @@ class AdminUserRecoveryService:
                                 slug=workspace.slug,
                                 title=workspace.title,
                                 role=membership.role,
+                                deletion_held=(
+                                    workspace.account_deletion_user_id == user.id
+                                ),
                             )
                             for membership, workspace in memberships
                         ],
